@@ -3788,119 +3788,530 @@ if __name__ == "__main__":
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q51</span>Agent 的"记忆"分哪几种？<span class="qa-tag base">基础</span></div>
                 <div class="qa-a">
-                    <ul>
-                        <li><strong>短期记忆 (Working Memory)</strong>：单次会话上下文，存于 prompt 历史中。</li>
-                        <li><strong>长期记忆 (Long-term)</strong>：跨会话信息，存于向量库 / KV / RDB。</li>
-                        <li><strong>程序性记忆 (Procedural)</strong>：技能、工具调用模板、流程片段。</li>
-                        <li><strong>语义记忆 (Semantic)</strong>：事实性知识（用户偏好、领域概念）。</li>
-                        <li><strong>情景记忆 (Episodic)</strong>：过往经历（曾经做过什么、什么时候做的）。</li>
-                    </ul>
+                    <p>类比认知科学，Agent 记忆分<strong>"按时长"</strong>和<strong>"按内容"</strong>两组分类。两个分类正交，不要混淆。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">两种分类视角</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="记忆分类">
+                            <!-- 时长轴 -->
+                            <g transform="translate(20,20)">
+                                <text x="0" y="0" font-size="12" font-weight="700" fill="#67e8f9">按时长</text>
+                                <rect x="0" y="20" width="320" height="50" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="14" y="40" font-size="11" font-weight="700" fill="#67e8f9">Working Memory · 短期</text>
+                                <text x="14" y="56" font-size="10" class="label-muted">单次会话上下文（prompt 内）</text>
+
+                                <rect x="0" y="80" width="320" height="50" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="14" y="100" font-size="11" font-weight="700" fill="#c4b5fd">Long-term · 长期</text>
+                                <text x="14" y="116" font-size="10" class="label-muted">跨会话（向量库 / KV / RDB）</text>
+                            </g>
+
+                            <!-- 内容轴 -->
+                            <g transform="translate(380,20)">
+                                <text x="0" y="0" font-size="12" font-weight="700" fill="#86efac">按内容</text>
+                                <rect x="0" y="20" width="320" height="40" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="14" y="38" font-size="11" font-weight="700" fill="#86efac">Semantic · 语义</text>
+                                <text x="14" y="53" font-size="9" class="label-muted">事实性知识 / 用户偏好</text>
+
+                                <rect x="0" y="70" width="320" height="40" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="14" y="88" font-size="11" font-weight="700" fill="#fcd34d">Episodic · 情景</text>
+                                <text x="14" y="103" font-size="9" class="label-muted">"什么时候做了什么"</text>
+
+                                <rect x="0" y="120" width="320" height="40" rx="6" fill="rgba(59,130,246,.08)" stroke="rgba(59,130,246,.5)" stroke-width="1.5"/>
+                                <text x="14" y="138" font-size="11" font-weight="700" fill="#93c5fd">Procedural · 程序性</text>
+                                <text x="14" y="153" font-size="9" class="label-muted">技能 / 工具模板 / SOP</text>
+                            </g>
+
+                            <!-- 关系示意 -->
+                            <g transform="translate(20,200)">
+                                <rect x="0" y="0" width="680" height="60" rx="8" fill="rgba(245,158,11,.05)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="340" y="22" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">两个维度正交：长期 × 内容 = 6 种细分</text>
+                                <text x="340" y="42" text-anchor="middle" font-size="10" fill="#cbd5e1">长期语义 = 用户偏好 · 长期情景 = 历史会话日志 · 长期程序性 = 流程模板库</text>
+                            </g>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q52</span>怎么实现一个最小可用的对话记忆？<span class="qa-tag base">基础</span></div>
                 <div class="qa-a">
-                    <ol>
-                        <li>每轮对话以 (user, assistant) 对存进 Redis / Postgres，附 session_id + ts。</li>
-                        <li>每次发请求前取最近 N 轮拼进 messages。</li>
-                        <li>历史超过阈值时调用 summarize_chain 压缩老内容，新内容滚动追加。</li>
-                        <li>持久化时带索引（session_id, ts），方便回放与排错。</li>
-                    </ol>
+                    <p>最小可用 = <strong>滚动窗口 + 阈值摘要 + 持久化</strong>。50 行代码足够。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">最小记忆链路</div>
+                        <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="最小记忆">
+                            <!-- 一轮对话 -->
+                            <g transform="translate(20,20)">
+                                <rect x="0" y="0" width="100" height="40" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="50" y="24" text-anchor="middle" font-size="11" fill="#86efac">User input</text>
+                            </g>
+                            <line x1="120" y1="40" x2="160" y2="40" class="stroke-green" stroke-width="1.5" marker-end="url(#a52)"/>
+                            <g transform="translate(160,20)">
+                                <rect x="0" y="0" width="120" height="40" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="60" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">取最近 N 轮</text>
+                                <text x="60" y="34" text-anchor="middle" font-size="9" class="label-muted">Redis / PG</text>
+                            </g>
+                            <line x1="280" y1="40" x2="320" y2="40" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a52)"/>
+                            <g transform="translate(320,20)">
+                                <rect x="0" y="0" width="140" height="40" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="70" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">LLM 调用</text>
+                                <text x="70" y="34" text-anchor="middle" font-size="9" class="label-muted">messages = [sum, ...recent]</text>
+                            </g>
+                            <line x1="460" y1="40" x2="500" y2="40" class="stroke-purple" stroke-width="1.5" marker-end="url(#a52)"/>
+                            <g transform="translate(500,20)">
+                                <rect x="0" y="0" width="200" height="40" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="100" y="20" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">写回 (session_id, ts)</text>
+                                <text x="100" y="34" text-anchor="middle" font-size="9" class="label-muted">追加新一轮</text>
+                            </g>
+
+                            <!-- 触发摘要 -->
+                            <g transform="translate(160,100)">
+                                <rect x="0" y="0" width="540" height="80" rx="8" fill="rgba(245,158,11,.05)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="14" y="22" font-size="12" font-weight="700" fill="#fcd34d">触发条件：历史 token &gt; 阈值</text>
+                                <text x="14" y="42" font-size="11" fill="#cbd5e1">→ 调用 summarize_chain 把<strong>超出窗口的老内容</strong>压成摘要</text>
+                                <text x="14" y="58" font-size="11" fill="#cbd5e1">→ 摘要存进 session.summary 字段；新内容继续滚动追加</text>
+                                <text x="14" y="74" font-size="10" class="label-muted">索引必备：(session_id, ts) · 方便回放与排错</text>
+                            </g>
+                            <defs><marker id="a52" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <pre><code class="language-python">def chat(user_input, session_id):
+    history = redis.lrange(f"sess:{session_id}", -20, -1)  # 取最近 N 轮
+    summary = redis.get(f"sess:{session_id}:summary") or ""
+    messages = [{"role":"system","content": SYSTEM}, {"role":"system","content": summary},
+                *history, {"role":"user","content": user_input}]
+    reply = llm.chat(messages)
+    redis.rpush(f"sess:{session_id}", json.dumps({"u":user_input, "a":reply}))
+    if count_tokens(history) &gt; 8000:                   # 超阈值 → 压缩
+        new_summary = llm.summarize(history[:-10])
+        redis.set(f"sess:{session_id}:summary", new_summary)
+        redis.ltrim(f"sess:{session_id}", -10, -1)
+    return reply</code></pre>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q53</span>长期记忆怎么写入？什么时候写、写什么？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p>不要"什么都存"，否则信噪比骤降。常见策略：</p>
-                    <ul>
-                        <li><strong>显式触发</strong>：模型在 tool 列表里有 memorize(content) 工具，由 LLM 决定何时记。</li>
-                        <li><strong>规则触发</strong>：用户主动说"记住…"、或检测到偏好/事实陈述。</li>
-                        <li><strong>会话末摘要</strong>：每次结束自动生成"关键事实 + 偏好 + 待办"。</li>
-                    </ul>
-                    <p>存什么：偏好、事实、长期目标、失败教训、流程模板。<strong>别存</strong>原始对话（量大且噪音多）、临时上下文、敏感信息。</p>
+                    <p>"什么都存"是新手最大坑——信噪比骤降，召回时混杂大量垃圾。<strong>"按价值过滤"</strong>是核心原则。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">写入策略矩阵：何时写 / 写什么</div>
+                        <div class="swimlane">
+                            <div class="lane good">
+                                <h5>✓ 应该存</h5>
+                                <ul>
+                                    <li><strong>偏好</strong>：用户习惯、口味、沟通风格</li>
+                                    <li><strong>事实</strong>：用户身份 / 业务实体</li>
+                                    <li><strong>长期目标</strong>：项目、KPI、deadline</li>
+                                    <li><strong>失败教训</strong>：上次为什么错了</li>
+                                    <li><strong>流程模板</strong>：可复用的工作流</li>
+                                </ul>
+                            </div>
+                            <div class="lane bad">
+                                <h5>✗ 不要存</h5>
+                                <ul>
+                                    <li>原始对话（量大噪音多）</li>
+                                    <li>临时上下文（解决完即过时）</li>
+                                    <li>PII / 敏感信息（合规风险）</li>
+                                    <li>已经在 KB 里的公共知识</li>
+                                    <li>模型输出的废话 / 客套</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="diagram">
+                        <div class="diagram-title">三种触发时机</div>
+                        <svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg" aria-label="写入触发">
+                            <g transform="translate(20,30)">
+                                <rect x="0" y="0" width="200" height="80" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">① 显式工具触发</text>
+                                <text x="100" y="42" text-anchor="middle" font-size="10" class="label-muted">tool: memorize(content)</text>
+                                <text x="100" y="58" text-anchor="middle" font-size="10" class="label-muted">LLM 自主决定</text>
+                                <text x="100" y="74" text-anchor="middle" font-size="9" fill="#86efac">最灵活</text>
+                            </g>
+                            <g transform="translate(240,30)">
+                                <rect x="0" y="0" width="200" height="80" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">② 规则触发</text>
+                                <text x="100" y="42" text-anchor="middle" font-size="10" class="label-muted">"记住…" / 关键词</text>
+                                <text x="100" y="58" text-anchor="middle" font-size="10" class="label-muted">偏好检测分类器</text>
+                                <text x="100" y="74" text-anchor="middle" font-size="9" fill="#86efac">最稳定</text>
+                            </g>
+                            <g transform="translate(460,30)">
+                                <rect x="0" y="0" width="200" height="80" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">③ 会话末摘要</text>
+                                <text x="100" y="42" text-anchor="middle" font-size="10" class="label-muted">结束时 LLM 总结</text>
+                                <text x="100" y="58" text-anchor="middle" font-size="10" class="label-muted">事实 + 偏好 + 待办</text>
+                                <text x="100" y="74" text-anchor="middle" font-size="9" fill="#86efac">最稳产出</text>
+                            </g>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q54</span>长期记忆怎么读取？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p>常用召回 + 排序两步：</p>
-                    <ul>
-                        <li><strong>召回</strong>：embedding 检索 + 标签过滤（user_id、类型、时间窗）。</li>
-                        <li><strong>排序</strong>：综合时间衰减、相关性、重要性（importance_score）。MemGPT/Letta 用 LLM 给每条记忆打分。</li>
-                    </ul>
-                    <p>读取时机：每轮前置 retrieve，或工具触发式 retrieve_memory。</p>
+                    <p>"召回 + 排序"两步走，类似 RAG。<strong>新鲜度 / 相关性 / 重要性</strong> 三者加权排序。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">读取链路 + 排序公式</div>
+                        <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg" aria-label="记忆读取">
+                            <g transform="translate(20,20)">
+                                <rect x="0" y="0" width="100" height="36" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="50" y="22" text-anchor="middle" font-size="11" fill="#86efac">本轮 query</text>
+                            </g>
+                            <line x1="120" y1="38" x2="150" y2="38" class="stroke-green" stroke-width="1.5" marker-end="url(#a54)"/>
+                            <g transform="translate(150,20)">
+                                <rect x="0" y="0" width="140" height="36" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="70" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">① 召回</text>
+                                <text x="70" y="30" text-anchor="middle" font-size="9" class="label-muted">embedding + 标签过滤</text>
+                            </g>
+                            <line x1="290" y1="38" x2="320" y2="38" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a54)"/>
+                            <g transform="translate(320,20)">
+                                <rect x="0" y="0" width="160" height="36" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="80" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">② 排序</text>
+                                <text x="80" y="30" text-anchor="middle" font-size="9" class="label-muted">综合分数</text>
+                            </g>
+                            <line x1="480" y1="38" x2="510" y2="38" class="stroke-purple" stroke-width="1.5" marker-end="url(#a54)"/>
+                            <g transform="translate(510,20)">
+                                <rect x="0" y="0" width="180" height="36" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="90" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">③ 注入 prompt</text>
+                                <text x="90" y="30" text-anchor="middle" font-size="9" class="label-muted">top-K 条</text>
+                            </g>
+
+                            <!-- 公式 -->
+                            <g transform="translate(80,90)">
+                                <rect x="0" y="0" width="560" height="60" rx="8" fill="rgba(245,158,11,.05)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="280" y="22" text-anchor="middle" font-size="13" fill="#fcd34d" font-weight="700">score = α · relevance + β · recency + γ · importance</text>
+                                <text x="280" y="44" text-anchor="middle" font-size="10" class="label-muted">α≈0.5（相关性）· β≈0.2（时间衰减 e^(-t/τ)）· γ≈0.3（LLM 打分 1-5）</text>
+                            </g>
+
+                            <!-- 读取时机 -->
+                            <g transform="translate(80,170)">
+                                <rect x="0" y="0" width="280" height="55" rx="6" class="fill-cyan stroke-cyan" stroke-width="1"/>
+                                <text x="140" y="22" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">前置 retrieve</text>
+                                <text x="140" y="40" text-anchor="middle" font-size="10" class="label-muted">每轮自动召回 → 拼进 prompt</text>
+                            </g>
+                            <g transform="translate(380,170)">
+                                <rect x="0" y="0" width="280" height="55" rx="6" class="fill-purple stroke-purple" stroke-width="1"/>
+                                <text x="140" y="22" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">工具触发</text>
+                                <text x="140" y="40" text-anchor="middle" font-size="10" class="label-muted">tool: retrieve_memory(q) 按需</text>
+                            </g>
+                            <defs><marker id="a54" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q55</span>MemGPT / Letta 的核心思想是什么？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>MemGPT 把 LLM 当作<strong>操作系统</strong>，上下文窗口是"主存"，外部存储是"硬盘"。Agent 自己用工具读写两层存储——主动 paging in/out 数据，从而突破上下文限制。</p>
-                    <p>关键 API：core memory、recall memory、archival memory；模型通过 send_message、core_memory_append、archival_memory_insert/search 操作。</p>
+                    <p>把 LLM 当<strong>操作系统</strong>：<strong>上下文 = 主存，外部存储 = 硬盘</strong>。Agent 自己用工具 paging in/out 数据，从而突破上下文限制。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">MemGPT 三层记忆类比 OS</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="MemGPT">
+                            <!-- 三层 -->
+                            <g transform="translate(60,30)">
+                                <rect x="0" y="0" width="160" height="80" rx="10" class="fill-green stroke-green" stroke-width="2"/>
+                                <text x="80" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#86efac">Core Memory</text>
+                                <text x="80" y="40" text-anchor="middle" font-size="10" class="label-muted">≈ CPU 寄存器</text>
+                                <text x="80" y="56" text-anchor="middle" font-size="10" class="label-muted">persona + user</text>
+                                <text x="80" y="72" text-anchor="middle" font-size="9" fill="#86efac">永远在 prompt 里</text>
+                            </g>
+                            <g transform="translate(280,30)">
+                                <rect x="0" y="0" width="160" height="80" rx="10" class="fill-cyan stroke-cyan" stroke-width="2"/>
+                                <text x="80" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">Recall Memory</text>
+                                <text x="80" y="40" text-anchor="middle" font-size="10" class="label-muted">≈ 内存 / 主存</text>
+                                <text x="80" y="56" text-anchor="middle" font-size="10" class="label-muted">近期对话历史</text>
+                                <text x="80" y="72" text-anchor="middle" font-size="9" fill="#67e8f9">按需 paging in</text>
+                            </g>
+                            <g transform="translate(500,30)">
+                                <rect x="0" y="0" width="160" height="80" rx="10" class="fill-purple stroke-purple" stroke-width="2"/>
+                                <text x="80" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">Archival Memory</text>
+                                <text x="80" y="40" text-anchor="middle" font-size="10" class="label-muted">≈ 硬盘 / SSD</text>
+                                <text x="80" y="56" text-anchor="middle" font-size="10" class="label-muted">向量库长期事实</text>
+                                <text x="80" y="72" text-anchor="middle" font-size="9" fill="#c4b5fd">archival_search()</text>
+                            </g>
+                            <line x1="220" y1="70" x2="280" y2="70" class="stroke-cyan" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a55)"/>
+                            <line x1="440" y1="70" x2="500" y2="70" class="stroke-purple" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a55)"/>
+
+                            <!-- LLM 中央 -->
+                            <g transform="translate(280,140)">
+                                <rect x="0" y="0" width="160" height="50" rx="10" class="fill-orange stroke-orange" stroke-width="2"/>
+                                <text x="80" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">LLM (CPU)</text>
+                                <text x="80" y="38" text-anchor="middle" font-size="10" class="label-muted">通过工具调度记忆</text>
+                            </g>
+                            <line x1="140" y1="110" x2="280" y2="160" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+                            <line x1="360" y1="110" x2="360" y2="140" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+                            <line x1="580" y1="110" x2="440" y2="160" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+
+                            <!-- 工具 API -->
+                            <g transform="translate(80,220)">
+                                <rect x="0" y="0" width="560" height="50" rx="8" fill="rgba(59,130,246,.05)" stroke="rgba(59,130,246,.3)"/>
+                                <text x="14" y="22" font-size="11" font-weight="700" fill="#93c5fd">关键工具 API</text>
+                                <text x="14" y="40" font-size="10" fill="#cbd5e1">core_memory_append() · recall_memory_search() · archival_memory_insert() · archival_memory_search()</text>
+                            </g>
+                            <defs><marker id="a55" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        Letta 是 MemGPT 团队的<strong>商业化产品</strong>，把 MemGPT 思想做成"agent server"。提供 REST API、UI、多 Agent，2026 年是长程对话场景的主流选择之一。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q56</span>怎么避免记忆"越积越脏"？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <ul>
-                        <li><strong>定期合并</strong>：把同主题的多条记忆 LLM 合并为一条规范化条目。</li>
-                        <li><strong>过期淘汰</strong>：低频访问 + 老旧 + 重要性低的自动归档/删除。</li>
-                        <li><strong>冲突解决</strong>：新写入时检查与旧记忆冲突，触发覆盖/合并/标注矛盾。</li>
-                        <li><strong>分桶隔离</strong>：按用户、Workspace、Skill 分库，避免互相污染。</li>
-                    </ul>
+                    <p>"<strong>记忆熵增</strong>"是长期 Agent 的天敌：重复 / 冲突 / 过期 / 跨域污染。需要主动维护。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">记忆生命周期：写入 → 维护 → 淘汰</div>
+                        <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg" aria-label="记忆维护">
+                            <!-- 四步 -->
+                            <g transform="translate(20,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#86efac">① 定期合并</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">同主题多条</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="10" class="label-muted">→ LLM 合并为 1 条</text>
+                            </g>
+                            <line x1="170" y1="70" x2="200" y2="70" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a56)"/>
+                            <g transform="translate(200,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">② 冲突解决</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">新 vs 旧</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="10" class="label-muted">覆盖 / 合并 / 标矛盾</text>
+                            </g>
+                            <line x1="350" y1="70" x2="380" y2="70" class="stroke-orange" stroke-width="1.5" marker-end="url(#a56)"/>
+                            <g transform="translate(380,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">③ 过期淘汰</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">低频 + 老 + 不重要</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="10" class="label-muted">归档 / 删除</text>
+                            </g>
+                            <line x1="530" y1="70" x2="560" y2="70" class="stroke-purple" stroke-width="1.5" marker-end="url(#a56)"/>
+                            <g transform="translate(560,40)">
+                                <rect x="0" y="0" width="140" height="60" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="70" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">④ 分桶隔离</text>
+                                <text x="70" y="40" text-anchor="middle" font-size="10" class="label-muted">user / workspace</text>
+                                <text x="70" y="54" text-anchor="middle" font-size="10" class="label-muted">/ skill 分库</text>
+                            </g>
+
+                            <!-- 衰减曲线 -->
+                            <g transform="translate(40,150)">
+                                <text x="0" y="0" font-size="11" font-weight="700" fill="#cbd5e1">过期淘汰公式</text>
+                                <text x="0" y="20" font-size="11" fill="#cbd5e1">
+                                    keep = importance &gt; 0.5 <tspan fill="#94a3b8">·</tspan>
+                                    OR last_access &lt; 7d <tspan fill="#94a3b8">·</tspan>
+                                    OR access_count &gt; 3
+                                </text>
+                                <text x="0" y="40" font-size="10" class="label-muted">否则进归档区 30 天，仍无访问则删</text>
+                            </g>
+
+                            <defs><marker id="a56" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q57</span>对话历史的"摘要 + 检索"双轨制怎么落地？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p>典型架构：</p>
-                    <ul>
-                        <li><strong>摘要轨</strong>：每 N 轮把超出窗口的历史压成 summary，存于 session.summary 字段，与最近 N 轮拼进 prompt。</li>
-                        <li><strong>检索轨</strong>：所有历史按消息粒度 embedding 入库，每次按当前 query 检索 top-k 拼进 prompt。</li>
-                    </ul>
-                    <p>两者结合可兼顾"宏观连贯"与"精准引用"。</p>
+                    <p>双轨制 = <strong>摘要保宏观连贯 + 检索保精准引用</strong>。两者并行注入 prompt，相互补强。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">摘要轨 + 检索轨 并行架构</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="双轨记忆">
+                            <!-- 原始历史 -->
+                            <rect x="260" y="10" width="200" height="36" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                            <text x="360" y="32" text-anchor="middle" font-size="11" fill="#86efac">原始对话历史</text>
+
+                            <!-- 双轨 -->
+                            <line x1="310" y1="46" x2="180" y2="80" class="stroke-green" stroke-width="1.5" marker-end="url(#a57)"/>
+                            <line x1="410" y1="46" x2="540" y2="80" class="stroke-green" stroke-width="1.5" marker-end="url(#a57)"/>
+
+                            <!-- 摘要轨 -->
+                            <g transform="translate(30,80)">
+                                <rect x="0" y="0" width="300" height="120" rx="8" fill="rgba(245,158,11,.05)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="150" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">摘要轨</text>
+                                <rect x="20" y="40" width="120" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="80" y="55" text-anchor="middle" font-size="9" fill="#fcd34d">每 N 轮 → LLM</text>
+                                <line x1="140" y1="51" x2="160" y2="51" class="stroke-orange" stroke-width="1" marker-end="url(#a57)"/>
+                                <rect x="160" y="40" width="120" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="220" y="55" text-anchor="middle" font-size="9" fill="#fcd34d">session.summary</text>
+                                <text x="150" y="85" text-anchor="middle" font-size="10" fill="#cbd5e1">"我们在 2 月讨论了 X 方案，</text>
+                                <text x="150" y="100" text-anchor="middle" font-size="10" fill="#cbd5e1">3 月切到 Y，待办 Z..."</text>
+                            </g>
+
+                            <!-- 检索轨 -->
+                            <g transform="translate(390,80)">
+                                <rect x="0" y="0" width="300" height="120" rx="8" fill="rgba(6,182,212,.05)" stroke="rgba(6,182,212,.3)"/>
+                                <text x="150" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">检索轨</text>
+                                <rect x="20" y="40" width="120" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="80" y="55" text-anchor="middle" font-size="9" fill="#67e8f9">消息级 embedding</text>
+                                <line x1="140" y1="51" x2="160" y2="51" class="stroke-cyan" stroke-width="1" marker-end="url(#a57)"/>
+                                <rect x="160" y="40" width="120" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="220" y="55" text-anchor="middle" font-size="9" fill="#67e8f9">vector DB</text>
+                                <text x="150" y="85" text-anchor="middle" font-size="10" fill="#cbd5e1">本轮 query → 检索 top-k</text>
+                                <text x="150" y="100" text-anchor="middle" font-size="10" fill="#cbd5e1">"用户在 2/15 说过：..."</text>
+                            </g>
+
+                            <!-- 注入 prompt -->
+                            <line x1="180" y1="200" x2="320" y2="240" class="stroke-orange" stroke-width="1.5" marker-end="url(#a57)"/>
+                            <line x1="540" y1="200" x2="400" y2="240" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a57)"/>
+                            <rect x="260" y="240" width="200" height="36" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                            <text x="360" y="262" text-anchor="middle" font-size="11" fill="#c4b5fd">合并注入 prompt</text>
+
+                            <defs><marker id="a57" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q58</span>多用户场景下记忆隔离怎么做？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>必须做的三件事：</p>
-                    <ul>
-                        <li><strong>tenant_id / user_id 强制过滤</strong>：所有检索/写入都带身份维度，向量库内置 payload 过滤。</li>
-                        <li><strong>命名空间隔离</strong>：collection / namespace 物理切分，敏感行业（医疗/金融）建议独立实例。</li>
-                        <li><strong>权限边界审计</strong>：每条记忆查询写审计日志，必要时做单元测试防越权。</li>
-                    </ul>
+                    <p>多租户场景<strong>"记忆串了"</strong>=数据安全事故。必须从代码层强制隔离，不能依赖 prompt 自觉。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">三级隔离防线</div>
+                        <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="多租户隔离">
+                            <g transform="translate(30,30)">
+                                <rect x="0" y="0" width="200" height="160" rx="10" fill="rgba(34,197,94,.06)" stroke="rgba(34,197,94,.3)"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#86efac">① 字段过滤</text>
+                                <text x="100" y="44" text-anchor="middle" font-size="11" fill="#cbd5e1">所有 read/write</text>
+                                <text x="100" y="62" text-anchor="middle" font-size="11" fill="#cbd5e1">带 tenant_id / user_id</text>
+                                <text x="100" y="92" text-anchor="middle" font-size="10" class="label-muted">向量库 payload 过滤</text>
+                                <text x="100" y="108" text-anchor="middle" font-size="10" class="label-muted">where user_id = ?</text>
+                                <text x="100" y="138" text-anchor="middle" font-size="11" font-weight="700" fill="#86efac">必须代码强制</text>
+                            </g>
+                            <line x1="230" y1="110" x2="260" y2="110" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a58)"/>
+                            <g transform="translate(260,30)">
+                                <rect x="0" y="0" width="200" height="160" rx="10" fill="rgba(6,182,212,.06)" stroke="rgba(6,182,212,.3)"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#67e8f9">② 命名空间</text>
+                                <text x="100" y="44" text-anchor="middle" font-size="11" fill="#cbd5e1">collection / namespace</text>
+                                <text x="100" y="62" text-anchor="middle" font-size="11" fill="#cbd5e1">物理切分</text>
+                                <text x="100" y="92" text-anchor="middle" font-size="10" class="label-muted">memory_{tenant_id}</text>
+                                <text x="100" y="108" text-anchor="middle" font-size="10" class="label-muted">独立索引</text>
+                                <text x="100" y="138" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">医疗/金融用独立实例</text>
+                            </g>
+                            <line x1="460" y1="110" x2="490" y2="110" class="stroke-purple" stroke-width="1.5" marker-end="url(#a58)"/>
+                            <g transform="translate(490,30)">
+                                <rect x="0" y="0" width="200" height="160" rx="10" fill="rgba(139,92,246,.06)" stroke="rgba(139,92,246,.3)"/>
+                                <text x="100" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">③ 审计 + 单测</text>
+                                <text x="100" y="44" text-anchor="middle" font-size="11" fill="#cbd5e1">每次 query 写日志</text>
+                                <text x="100" y="62" text-anchor="middle" font-size="11" fill="#cbd5e1">(who, what, when)</text>
+                                <text x="100" y="92" text-anchor="middle" font-size="10" class="label-muted">越权检测单元测试</text>
+                                <text x="100" y="108" text-anchor="middle" font-size="10" class="label-muted">test_user_a_cannot_see_b</text>
+                                <text x="100" y="138" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">合规审计可查</text>
+                            </g>
+                            <defs><marker id="a58" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        <strong>千万不要</strong>把"记忆只属于用户 A"写在 prompt 里求模型遵守——一旦 prompt injection，模型会泄露其他用户记忆。<strong>必须在数据访问层物理隔离。</strong>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q59</span>知识图谱式记忆（KG Memory）与向量记忆怎么选？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>互补关系：</p>
-                    <ul>
-                        <li><strong>向量</strong>：擅长模糊语义、便宜、易扩展；不擅长精确多跳关系。</li>
-                        <li><strong>KG</strong>：擅长实体关系、推理路径可解释；构建/维护成本高。</li>
-                    </ul>
-                    <p>实战建议：以向量为主存、KG 处理"实体关系密集"的子集（GraphRAG、LightRAG）。Microsoft GraphRAG 与 Neo4j + LangChain 已有成熟方案。</p>
+                    <p>不是 OR，是 AND。<strong>向量擅长模糊语义，KG 擅长精确关系</strong>。生产用法是"向量主存 + KG 处理实体关系子集"。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">向量 vs KG · 同一份知识两种表示</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="向量 vs KG">
+                            <!-- 向量 -->
+                            <g transform="translate(20,20)">
+                                <rect x="0" y="0" width="320" height="240" rx="10" fill="rgba(6,182,212,.05)" stroke="rgba(6,182,212,.3)"/>
+                                <text x="160" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#67e8f9">向量记忆</text>
+                                <text x="160" y="42" text-anchor="middle" font-size="10" class="label-muted">"乔布斯创立了苹果"</text>
+                                <g transform="translate(20,60)">
+                                    <circle cx="40"  cy="40" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="80"  cy="60" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="120" cy="30" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="160" cy="55" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="200" cy="40" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="240" cy="65" r="6" fill="rgba(6,182,212,.5)"/>
+                                    <circle cx="100" cy="100" r="8" class="fill-cyan stroke-cyan" stroke-width="2"/>
+                                    <text x="100" y="120" text-anchor="middle" font-size="9" fill="#67e8f9">语义点</text>
+                                </g>
+                                <text x="14" y="200" font-size="10" fill="#86efac">✓ 模糊语义 / 便宜 / 易扩展</text>
+                                <text x="14" y="220" font-size="10" fill="#fca5a5">✗ 多跳关系弱 / 不可解释</text>
+                            </g>
+                            <!-- KG -->
+                            <g transform="translate(380,20)">
+                                <rect x="0" y="0" width="320" height="240" rx="10" fill="rgba(139,92,246,.05)" stroke="rgba(139,92,246,.3)"/>
+                                <text x="160" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">知识图谱（KG）</text>
+                                <g transform="translate(60,60)">
+                                    <circle cx="40"  cy="50" r="22" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                    <text x="40" y="54" text-anchor="middle" font-size="9" fill="#c4b5fd">乔布斯</text>
+                                    <circle cx="200" cy="50" r="22" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                    <text x="200" y="54" text-anchor="middle" font-size="9" fill="#c4b5fd">苹果</text>
+                                    <line x1="62" y1="50" x2="178" y2="50" class="stroke-purple" stroke-width="1.5" marker-end="url(#a59)"/>
+                                    <text x="120" y="42" text-anchor="middle" font-size="9" fill="#fcd34d">创立</text>
+                                    <circle cx="120" cy="120" r="22" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                    <text x="120" y="124" text-anchor="middle" font-size="9" fill="#c4b5fd">M1 芯片</text>
+                                    <line x1="200" y1="72" x2="135" y2="105" class="stroke-purple" stroke-width="1.5" marker-end="url(#a59)"/>
+                                    <text x="180" y="100" font-size="9" fill="#fcd34d">发布</text>
+                                </g>
+                                <text x="14" y="220" font-size="10" fill="#86efac">✓ 精确多跳 / 可解释</text>
+                                <text x="14" y="240" font-size="10" fill="#fca5a5">✗ 构建成本高</text>
+                            </g>
+                            <defs><marker id="a59" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#c4b5fd"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        2026 年主流方案：<strong>GraphRAG (Microsoft) / LightRAG / Neo4j + LangChain</strong>。先用 LLM 抽取实体 + 关系建图，查询时图遍历 + 向量召回并行融合。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q60</span>怎么评测 Memory 的好坏？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>建议三类指标：</p>
-                    <ul>
-                        <li><strong>召回</strong>：标注集中的关键事实是否被检出 (Recall@K)。</li>
-                        <li><strong>使用</strong>：召回的记忆是否被模型在回答里真正引用（attribution）。</li>
-                        <li><strong>陈旧度</strong>：被引用的记忆是否仍然有效（未被更新事实推翻）。</li>
-                    </ul>
-                    <p>业务侧：复购率、长期任务成功率、用户对"它记得我"的满意度评分。</p>
+                    <p>"<strong>三类技术指标 + 业务指标</strong>"。仅看召回率会漏掉关键问题——召回了但模型没用、用了但已过时。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">Memory 评测三维 + 业务侧验证</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Memory 评测">
+                            <!-- 三技术指标 -->
+                            <g transform="translate(20,20)">
+                                <rect x="0" y="0" width="220" height="110" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">① 召回 Recall</text>
+                                <text x="110" y="46" text-anchor="middle" font-size="10" class="label-muted">标注集中关键事实</text>
+                                <text x="110" y="62" text-anchor="middle" font-size="10" class="label-muted">是否被检出 Recall@K</text>
+                                <text x="110" y="92" text-anchor="middle" font-size="11" fill="#86efac" font-weight="700">最容易测</text>
+                            </g>
+                            <g transform="translate(250,20)">
+                                <rect x="0" y="0" width="220" height="110" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">② 使用 Attribution</text>
+                                <text x="110" y="46" text-anchor="middle" font-size="10" class="label-muted">召回的记忆</text>
+                                <text x="110" y="62" text-anchor="middle" font-size="10" class="label-muted">是否被回答真正引用</text>
+                                <text x="110" y="92" text-anchor="middle" font-size="11" fill="#fcd34d" font-weight="700">最易被忽视</text>
+                            </g>
+                            <g transform="translate(480,20)">
+                                <rect x="0" y="0" width="220" height="110" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">③ 陈旧度 Staleness</text>
+                                <text x="110" y="46" text-anchor="middle" font-size="10" class="label-muted">被引用的记忆</text>
+                                <text x="110" y="62" text-anchor="middle" font-size="10" class="label-muted">是否被新事实推翻</text>
+                                <text x="110" y="92" text-anchor="middle" font-size="11" fill="#fca5a5" font-weight="700">合规风险</text>
+                            </g>
+
+                            <!-- 业务 -->
+                            <g transform="translate(20,160)">
+                                <rect x="0" y="0" width="680" height="90" rx="10" fill="rgba(34,197,94,.05)" stroke="rgba(34,197,94,.3)"/>
+                                <text x="14" y="22" font-size="13" font-weight="700" fill="#86efac">业务侧</text>
+                                <text x="14" y="44" font-size="11" fill="#cbd5e1">• 复购率 / 留存率：体现"它记得我，我愿意再来"</text>
+                                <text x="14" y="62" font-size="11" fill="#cbd5e1">• 长期任务成功率：跨会话目标是否被正确推进</text>
+                                <text x="14" y="80" font-size="11" fill="#cbd5e1">• 用户满意度评分：直接问"它对你的了解准确吗？"</text>
+                            </g>
+                        </svg>
+                    </div>
                 </div>
             </div>
         </section>
