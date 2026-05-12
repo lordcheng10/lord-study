@@ -1956,124 +1956,643 @@
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q21</span>什么是 ReAct？写一个最小可运行的 ReAct Prompt。<span class="qa-tag base">基础</span><span class="qa-tag hot">高频</span></div>
                 <div class="qa-a">
-                    <p>ReAct = <strong>Reasoning + Acting</strong>，让模型在 Thought / Action / Observation 三种 token 之间交替。</p>
+                    <p><strong>ReAct = Reasoning + Acting</strong>。模型在 <span class="pill">Thought</span><span class="pill cyan">Action</span><span class="pill orange">Observation</span> 三种 token 之间交替，把"决策过程"显式化为可被代码解析的 token 流。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">ReAct 一轮完整 trace（"巴黎天气"示例）</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="ReAct trace">
+                            <!-- 用户问题 -->
+                            <g transform="translate(20,15)">
+                                <rect x="0" y="0" width="700" height="30" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="10" y="20" font-size="11" fill="#67e8f9">User: 巴黎今天天气怎么样？要不要带伞？</text>
+                            </g>
+
+                            <!-- Step 1: Thought -->
+                            <g transform="translate(20,55)">
+                                <rect x="0" y="0" width="200" height="40" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="10" y="18" font-size="11" font-weight="700" fill="#c4b5fd">Thought (think)</text>
+                                <text x="10" y="33" font-size="10" class="label-muted">我需要先查天气</text>
+                            </g>
+                            <line x1="220" y1="75" x2="250" y2="75" class="stroke-purple" stroke-width="1.5" marker-end="url(#a21)"/>
+                            <g transform="translate(250,55)">
+                                <rect x="0" y="0" width="220" height="40" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="10" y="18" font-size="11" font-weight="700" fill="#fcd34d">Action (do)</text>
+                                <text x="10" y="33" font-size="10" class="label-muted">get_weather("Paris")</text>
+                            </g>
+                            <line x1="470" y1="75" x2="500" y2="75" class="stroke-orange" stroke-width="1.5" marker-end="url(#a21)"/>
+                            <g transform="translate(500,55)">
+                                <rect x="0" y="0" width="220" height="40" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="10" y="18" font-size="11" font-weight="700" fill="#86efac">Observation (see)</text>
+                                <text x="10" y="33" font-size="10" class="label-muted">{"temp":18,"rain":"yes"}</text>
+                            </g>
+                            <!-- 回到下一步 -->
+                            <path d="M 610 95 Q 610 120 110 120 Q 110 120 110 135" fill="none" class="stroke-green" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#a21)"/>
+
+                            <!-- Step 2: Thought (final) -->
+                            <g transform="translate(20,135)">
+                                <rect x="0" y="0" width="200" height="40" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="10" y="18" font-size="11" font-weight="700" fill="#c4b5fd">Thought</text>
+                                <text x="10" y="33" font-size="10" class="label-muted">下雨 → 建议带伞</text>
+                            </g>
+                            <line x1="220" y1="155" x2="250" y2="155" class="stroke-purple" stroke-width="1.5" marker-end="url(#a21)"/>
+                            <g transform="translate(250,135)">
+                                <rect x="0" y="0" width="470" height="40" rx="6" fill="rgba(239,68,68,.1)" stroke="rgba(239,68,68,.5)" stroke-width="2"/>
+                                <text x="10" y="18" font-size="11" font-weight="700" fill="#fca5a5">Final Answer</text>
+                                <text x="10" y="33" font-size="10" class="label-muted">巴黎 18 ℃ 有雨，建议带伞。</text>
+                            </g>
+
+                            <!-- 工程拦截层 -->
+                            <g transform="translate(20,200)">
+                                <rect x="0" y="0" width="700" height="60" rx="8" fill="rgba(6,182,212,.04)" stroke="rgba(6,182,212,.3)" stroke-dasharray="4 3"/>
+                                <text x="14" y="22" font-size="12" font-weight="700" fill="#67e8f9">代码层做什么</text>
+                                <text x="14" y="42" font-size="10" fill="#cbd5e1">① 解析 Action 行 → 调用真实工具　② 把 Observation 拼回 prompt　③ 检测 Final Answer 退出循环</text>
+                                <text x="14" y="56" font-size="10" fill="#cbd5e1">④ max_iterations / max_tokens / 去重哈希等限制由代码强制</text>
+                            </g>
+
+                            <defs><marker id="a21" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
                     <pre><code class="language-text">You can use the following tools:
 - search(query): web search
-- calc(expr): math
-Use the format:
-Thought: ...
-Action: tool_name(arg)
-Observation: ...
-... (repeat)
-Thought: I now know the answer.
+- calc(expr):    math
+
+Use this format:
+Thought:  ... what to do next
+Action:   tool_name(arg)
+Observation: &lt;tool result&gt;
+... (repeat Thought / Action / Observation)
+Thought:  I now know the answer.
 Final Answer: ...</code></pre>
-                    <p>本质上是把"决策过程"显式化为可解析的 token 流，便于工程上拦截 Action 真正执行工具。</p>
+
+                    <div class="cheat">
+                        ReAct 是 2022 年提出的、至今最稳定的"显式推理 + 工具调用"范式。OpenAI/Anthropic 的 Function Calling = ReAct 的<strong>结构化版本</strong>（Action 用 JSON 而非自由文本，更可靠）。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q22</span>ReAct 与 Plan-and-Execute 的区别？各自适用什么场景？<span class="qa-tag">进阶</span><span class="qa-tag hot">高频</span></div>
                 <div class="qa-a">
-                    <ul>
-                        <li><strong>ReAct</strong>：每一步都"边想边做"，决策灵活但 token 消耗高、错一步可能滚雪球。适合<strong>不可预测、需探索</strong>的任务（开放问答、研究）。</li>
-                        <li><strong>Plan-and-Execute</strong>：先一次性出完整计划，再逐步执行。适合<strong>结构稳定</strong>的任务（数据处理流水线、长篇报告生成），节省 token、便于并行。</li>
-                    </ul>
-                    <p>实际生产经常用<strong>混合模式</strong>：Plan 出大纲，每个子任务内部跑小 ReAct。</p>
+                    <p>核心差别：<strong>"步步为营 vs 一次画图"</strong>。前者灵活高 token，后者高效但僵化。混合模式（Plan 出大纲 + 子任务跑 ReAct）是生产首选。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">ReAct · Plan-Execute · Hybrid</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="ReAct vs Plan">
+                            <!-- ReAct -->
+                            <g transform="translate(10,10)">
+                                <rect x="0" y="0" width="220" height="260" rx="10" fill="rgba(139,92,246,.04)" stroke="rgba(139,92,246,.3)"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">ReAct · 边想边做</text>
+                                <g transform="translate(20,40)">
+                                    <rect x="0" y="0" width="40" height="22" rx="3" class="fill-purple stroke-purple" stroke-width="1"/><text x="20" y="16" text-anchor="middle" font-size="9" fill="#c4b5fd">T₁</text>
+                                    <rect x="50" y="0" width="40" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="70" y="16" text-anchor="middle" font-size="9" fill="#fcd34d">A₁</text>
+                                    <rect x="100" y="0" width="40" height="22" rx="3" class="fill-green stroke-green" stroke-width="1"/><text x="120" y="16" text-anchor="middle" font-size="9" fill="#86efac">O₁</text>
+                                </g>
+                                <g transform="translate(20,68)">
+                                    <rect x="0" y="0" width="40" height="22" rx="3" class="fill-purple stroke-purple" stroke-width="1"/><text x="20" y="16" text-anchor="middle" font-size="9" fill="#c4b5fd">T₂</text>
+                                    <rect x="50" y="0" width="40" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="70" y="16" text-anchor="middle" font-size="9" fill="#fcd34d">A₂</text>
+                                    <rect x="100" y="0" width="40" height="22" rx="3" class="fill-green stroke-green" stroke-width="1"/><text x="120" y="16" text-anchor="middle" font-size="9" fill="#86efac">O₂</text>
+                                </g>
+                                <g transform="translate(20,96)">
+                                    <rect x="0" y="0" width="40" height="22" rx="3" class="fill-purple stroke-purple" stroke-width="1"/><text x="20" y="16" text-anchor="middle" font-size="9" fill="#c4b5fd">T₃</text>
+                                    <rect x="50" y="0" width="40" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="70" y="16" text-anchor="middle" font-size="9" fill="#fcd34d">A₃</text>
+                                    <rect x="100" y="0" width="40" height="22" rx="3" fill="rgba(239,68,68,.2)" stroke="rgba(239,68,68,.5)"/><text x="120" y="16" text-anchor="middle" font-size="9" fill="#fca5a5">err</text>
+                                </g>
+                                <g transform="translate(20,124)">
+                                    <rect x="0" y="0" width="40" height="22" rx="3" class="fill-purple stroke-purple" stroke-width="1"/><text x="20" y="16" text-anchor="middle" font-size="9" fill="#c4b5fd">T₄</text>
+                                    <rect x="50" y="0" width="40" height="22" rx="3" class="fill-orange stroke-orange" stroke-width="1"/><text x="70" y="16" text-anchor="middle" font-size="9" fill="#fcd34d">A₄</text>
+                                    <rect x="100" y="0" width="40" height="22" rx="3" class="fill-green stroke-green" stroke-width="1"/><text x="120" y="16" text-anchor="middle" font-size="9" fill="#86efac">O₄</text>
+                                </g>
+                                <text x="110" y="180" text-anchor="middle" font-size="10" fill="#86efac">✓ 决策灵活 · 自纠错</text>
+                                <text x="110" y="200" text-anchor="middle" font-size="10" fill="#fca5a5">✗ token 高 · 错一步雪崩</text>
+                                <text x="110" y="240" text-anchor="middle" font-size="10" class="label-muted">适合：研究 / 开放探索 / 客服</text>
+                            </g>
+
+                            <!-- Plan-Execute -->
+                            <g transform="translate(250,10)">
+                                <rect x="0" y="0" width="220" height="260" rx="10" fill="rgba(34,197,94,.04)" stroke="rgba(34,197,94,.3)"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#86efac">Plan-and-Execute · 先画图</text>
+                                <rect x="20" y="40" width="180" height="40" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="110" y="58" text-anchor="middle" font-size="11" fill="#c4b5fd">① Plan: A→B→C→D</text>
+                                <text x="110" y="72" text-anchor="middle" font-size="9" class="label-muted">一次性出完整计划</text>
+                                <g transform="translate(20,95)">
+                                    <rect x="0" y="0" width="40" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="20" y="16" text-anchor="middle" font-size="9" fill="#67e8f9">A</text>
+                                    <rect x="46" y="0" width="40" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="66" y="16" text-anchor="middle" font-size="9" fill="#67e8f9">B</text>
+                                    <rect x="92" y="0" width="40" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="112" y="16" text-anchor="middle" font-size="9" fill="#67e8f9">C</text>
+                                    <rect x="138" y="0" width="40" height="22" rx="3" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="158" y="16" text-anchor="middle" font-size="9" fill="#67e8f9">D</text>
+                                </g>
+                                <text x="110" y="145" text-anchor="middle" font-size="10" fill="#86efac">✓ token 省 · 可并行</text>
+                                <text x="110" y="165" text-anchor="middle" font-size="10" fill="#fca5a5">✗ 错估前提 · 计划僵化</text>
+                                <text x="110" y="200" text-anchor="middle" font-size="10" class="label-muted">适合：流水线 / 报告生成 / ETL</text>
+                            </g>
+
+                            <!-- Hybrid -->
+                            <g transform="translate(490,10)">
+                                <rect x="0" y="0" width="220" height="260" rx="10" fill="rgba(245,158,11,.04)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="110" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#fcd34d">Hybrid · 推荐</text>
+                                <rect x="20" y="40" width="180" height="32" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="110" y="60" text-anchor="middle" font-size="11" fill="#c4b5fd">Plan (大纲) ABC</text>
+                                <line x1="110" y1="72" x2="110" y2="90" class="stroke-purple" stroke-width="1.5" marker-end="url(#a22)"/>
+
+                                <g transform="translate(20,95)">
+                                    <rect x="0"  y="0" width="55" height="50" rx="6" class="fill-orange stroke-orange" stroke-width="1"/>
+                                    <text x="27" y="20" text-anchor="middle" font-size="10" fill="#fcd34d">A</text>
+                                    <text x="27" y="36" text-anchor="middle" font-size="8" fill="#94a3b8">↻ReAct</text>
+                                    <rect x="62" y="0" width="55" height="50" rx="6" class="fill-orange stroke-orange" stroke-width="1"/>
+                                    <text x="89" y="20" text-anchor="middle" font-size="10" fill="#fcd34d">B</text>
+                                    <text x="89" y="36" text-anchor="middle" font-size="8" fill="#94a3b8">↻ReAct</text>
+                                    <rect x="124" y="0" width="55" height="50" rx="6" class="fill-orange stroke-orange" stroke-width="1"/>
+                                    <text x="151" y="20" text-anchor="middle" font-size="10" fill="#fcd34d">C</text>
+                                    <text x="151" y="36" text-anchor="middle" font-size="8" fill="#94a3b8">↻ReAct</text>
+                                </g>
+                                <text x="110" y="180" text-anchor="middle" font-size="10" fill="#86efac">✓ 大局稳 + 局部灵</text>
+                                <text x="110" y="210" text-anchor="middle" font-size="10" class="label-muted">代表：Claude Code · MetaGPT</text>
+                                <text x="110" y="225" text-anchor="middle" font-size="10" class="label-muted">LangGraph + Subagent</text>
+                            </g>
+                            <defs><marker id="a22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q23</span>什么是 Reflection / Reflexion？怎么用它提升效果？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p><strong>Reflection</strong>：让模型对自己的输出做 Critique 再 Revise（一次自我审查）。</p>
-                    <p><strong>Reflexion</strong>：在 Reflection 之上加 <strong>记忆</strong>——把失败教训写进 memory，下一轮可用。原论文在 HumanEval、HotpotQA 等任务上提升 10-20%。</p>
-                    <p>代价：每条任务 2-3x token；通常用于<strong>高价值、可离线</strong>的任务（论文写作、代码生成），不适合低延迟在线场景。</p>
+                    <p>"<strong>让模型自我审查</strong>"。Reflection = 单次审查；Reflexion = 把失败教训写进<strong>记忆</strong>，跨轮可用。原论文在 HumanEval、HotpotQA 提升 10-20%。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">Reflection vs Reflexion</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Reflection vs Reflexion">
+                            <!-- Reflection -->
+                            <g transform="translate(20,20)">
+                                <rect x="0" y="0" width="320" height="240" rx="10" fill="rgba(139,92,246,.04)" stroke="rgba(139,92,246,.3)"/>
+                                <text x="160" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">Reflection · 单次自审</text>
+                                <rect x="40" y="50" width="80" height="40" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="80" y="74" text-anchor="middle" font-size="11" fill="#67e8f9">Draft</text>
+                                <line x1="120" y1="70" x2="180" y2="70" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a23)"/>
+                                <rect x="180" y="50" width="100" height="40" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="230" y="74" text-anchor="middle" font-size="11" fill="#fcd34d">Critique</text>
+                                <path d="M 230 90 Q 160 130 80 90" fill="none" class="stroke-orange" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a23)"/>
+                                <text x="160" y="130" text-anchor="middle" font-size="10" fill="#94a3b8">↑ 让模型挑自己输出的毛病</text>
+
+                                <rect x="40" y="160" width="80" height="40" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="80" y="184" text-anchor="middle" font-size="11" fill="#86efac">Revise</text>
+                                <line x1="120" y1="180" x2="180" y2="180" class="stroke-green" stroke-width="1.5" marker-end="url(#a23)"/>
+                                <rect x="180" y="160" width="100" height="40" rx="6" fill="rgba(239,68,68,.1)" stroke="rgba(239,68,68,.4)" stroke-width="1.5"/>
+                                <text x="230" y="184" text-anchor="middle" font-size="11" fill="#fca5a5">Final</text>
+
+                                <text x="160" y="225" text-anchor="middle" font-size="10" class="label-muted">代价 ~2x token · 单条任务有效</text>
+                            </g>
+
+                            <!-- Reflexion -->
+                            <g transform="translate(380,20)">
+                                <rect x="0" y="0" width="320" height="240" rx="10" fill="rgba(245,158,11,.04)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="160" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#fcd34d">Reflexion · 带记忆</text>
+                                <rect x="40" y="50" width="80" height="40" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="80" y="74" text-anchor="middle" font-size="11" fill="#67e8f9">尝试 t</text>
+                                <line x1="120" y1="70" x2="180" y2="70" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a23)"/>
+                                <rect x="180" y="50" width="100" height="40" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="230" y="74" text-anchor="middle" font-size="11" fill="#fcd34d">评估失败</text>
+
+                                <line x1="230" y1="90" x2="230" y2="120" class="stroke-orange" stroke-width="1.5" marker-end="url(#a23)"/>
+                                <rect x="160" y="120" width="140" height="36" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="230" y="142" text-anchor="middle" font-size="11" fill="#c4b5fd">写入 Memory</text>
+                                <text x="230" y="155" text-anchor="middle" font-size="9" class="label-muted">"这次因为 X 失败"</text>
+
+                                <path d="M 160 138 Q 80 138 80 100" fill="none" class="stroke-purple" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a23)"/>
+                                <text x="100" y="160" font-size="9" fill="#c4b5fd">下一轮读取</text>
+
+                                <rect x="40" y="180" width="240" height="36" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="160" y="202" text-anchor="middle" font-size="11" fill="#86efac">尝试 t+1（带教训）→ ✓</text>
+
+                                <text x="160" y="232" text-anchor="middle" font-size="10" class="label-muted">代价 2-3x · 跨轮持续提升</text>
+                            </g>
+                            <defs><marker id="a23" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        通常用于<strong>高价值、可离线</strong>的任务：代码生成、论文写作、复杂报告。<strong>不适合低延迟在线场景</strong>——延迟会乘 2-3 倍。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q24</span>Tree of Thoughts（ToT）和 Graph of Thoughts（GoT）是什么？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p><strong>ToT</strong>：把推理过程展开成树，每一步生成多个候选 thought，借助 BFS/DFS + 评分函数挑最优分支。适合需要"搜索可能性"的任务（24 点、Crossword）。</p>
-                    <p><strong>GoT</strong>：把节点之间允许合并、回溯，形成 DAG/Graph，比 ToT 表达力更强。</p>
-                    <p>工程缺点：token 成本爆炸，需要好的剪枝；生产里多被 <strong>Best-of-N + Self-Consistency + LLM-as-Judge</strong> 的轻量替代方案取代。</p>
+                    <p>把"线性 CoT"升维成<strong>"搜索树/图"</strong>：每一步生成多个候选，按评分剪枝。表达力强但 token 爆炸。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">CoT → ToT → GoT 的演化</div>
+                        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" aria-label="ToT/GoT">
+                            <!-- CoT -->
+                            <g transform="translate(20,30)">
+                                <text x="100" y="0" text-anchor="middle" font-size="13" font-weight="700" fill="#67e8f9">CoT · 线性</text>
+                                <circle cx="30"  cy="30" r="16" class="fill-cyan stroke-cyan" stroke-width="1.5"/><text x="30" y="34" text-anchor="middle" font-size="10" fill="#67e8f9">1</text>
+                                <circle cx="80"  cy="30" r="16" class="fill-cyan stroke-cyan" stroke-width="1.5"/><text x="80" y="34" text-anchor="middle" font-size="10" fill="#67e8f9">2</text>
+                                <circle cx="130" cy="30" r="16" class="fill-cyan stroke-cyan" stroke-width="1.5"/><text x="130" y="34" text-anchor="middle" font-size="10" fill="#67e8f9">3</text>
+                                <circle cx="180" cy="30" r="16" class="fill-green stroke-green" stroke-width="1.5"/><text x="180" y="34" text-anchor="middle" font-size="10" fill="#86efac">A</text>
+                                <line x1="46"  y1="30" x2="64" y2="30" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a24)"/>
+                                <line x1="96"  y1="30" x2="114" y2="30" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a24)"/>
+                                <line x1="146" y1="30" x2="164" y2="30" class="stroke-green" stroke-width="1.5" marker-end="url(#a24)"/>
+                                <text x="100" y="80" text-anchor="middle" font-size="10" class="label-muted">一条路径</text>
+                            </g>
+
+                            <!-- ToT -->
+                            <g transform="translate(240,10)">
+                                <text x="100" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#fcd34d">ToT · 树搜索</text>
+                                <circle cx="100" cy="50" r="16" class="fill-orange stroke-orange" stroke-width="1.5"/><text x="100" y="54" text-anchor="middle" font-size="10" fill="#fcd34d">root</text>
+                                <circle cx="40" cy="110" r="14" class="fill-orange stroke-orange" stroke-width="1"/><text x="40" y="114" text-anchor="middle" font-size="9" fill="#fcd34d">A</text>
+                                <circle cx="100" cy="110" r="14" class="fill-orange stroke-orange" stroke-width="1.5"/><text x="100" y="114" text-anchor="middle" font-size="9" fill="#fcd34d">B</text>
+                                <circle cx="160" cy="110" r="14" class="fill-orange stroke-orange" stroke-width="1"/><text x="160" y="114" text-anchor="middle" font-size="9" fill="#fcd34d">C</text>
+                                <line x1="100" y1="66" x2="40"  y2="96" class="stroke-orange" stroke-width="1"/>
+                                <line x1="100" y1="66" x2="100" y2="96" class="stroke-orange" stroke-width="2"/>
+                                <line x1="100" y1="66" x2="160" y2="96" class="stroke-orange" stroke-width="1"/>
+
+                                <circle cx="70" cy="170" r="12" fill="rgba(239,68,68,.15)" stroke="rgba(239,68,68,.4)"/><text x="70" y="174" text-anchor="middle" font-size="9" fill="#fca5a5">✗</text>
+                                <circle cx="130" cy="170" r="12" class="fill-green stroke-green" stroke-width="1.5"/><text x="130" y="174" text-anchor="middle" font-size="9" fill="#86efac">✓</text>
+                                <line x1="100" y1="124" x2="70"  y2="158" class="stroke-orange" stroke-width="1"/>
+                                <line x1="100" y1="124" x2="130" y2="158" class="stroke-orange" stroke-width="2"/>
+
+                                <text x="100" y="210" text-anchor="middle" font-size="10" class="label-muted">BFS/DFS + 评分剪枝</text>
+                                <text x="100" y="226" text-anchor="middle" font-size="9" fill="#fca5a5">N 倍 token</text>
+                            </g>
+
+                            <!-- GoT -->
+                            <g transform="translate(490,10)">
+                                <text x="110" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">GoT · 图结构</text>
+                                <circle cx="50"  cy="60" r="14" class="fill-purple stroke-purple" stroke-width="1.5"/><text x="50" y="64" text-anchor="middle" font-size="9" fill="#c4b5fd">A</text>
+                                <circle cx="170" cy="60" r="14" class="fill-purple stroke-purple" stroke-width="1.5"/><text x="170" y="64" text-anchor="middle" font-size="9" fill="#c4b5fd">B</text>
+                                <circle cx="110" cy="120" r="14" class="fill-purple stroke-purple" stroke-width="1.5"/><text x="110" y="124" text-anchor="middle" font-size="9" fill="#c4b5fd">M</text>
+                                <line x1="60"  y1="68" x2="100" y2="112" class="stroke-purple" stroke-width="1"/>
+                                <line x1="160" y1="68" x2="120" y2="112" class="stroke-purple" stroke-width="1"/>
+                                <line x1="50"  y1="74" x2="50" y2="120" class="stroke-purple" stroke-width="1"/>
+                                <circle cx="50" cy="135" r="14" class="fill-purple stroke-purple" stroke-width="1.5"/><text x="50" y="139" text-anchor="middle" font-size="9" fill="#c4b5fd">A'</text>
+                                <path d="M 110 134 Q 50 160 50 150" fill="none" class="stroke-purple" stroke-width="1" stroke-dasharray="3 3"/>
+                                <circle cx="110" cy="190" r="14" class="fill-green stroke-green" stroke-width="1.5"/><text x="110" y="194" text-anchor="middle" font-size="9" fill="#86efac">✓</text>
+                                <line x1="110" y1="134" x2="110" y2="176" class="stroke-purple" stroke-width="1"/>
+                                <text x="110" y="225" text-anchor="middle" font-size="10" class="label-muted">允许合并 / 回溯</text>
+                            </g>
+                            <defs><marker id="a24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        生产中很少直接上 ToT/GoT，<strong>token 爆炸</strong>是硬伤。轻量替代：<strong>Best-of-N + Self-Consistency + LLM-as-Judge</strong>——效果接近，成本可控。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q25</span>什么是 Self-Consistency？和 Best-of-N 有什么关系？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p><strong>Self-Consistency</strong>：同一 prompt 高温度采样 N 次得到不同推理路径，对最终答案多数投票。本质是<strong>蒙特卡罗化的 CoT</strong>，在数学题上能提升 10%+。</p>
-                    <p><strong>Best-of-N</strong>：采样 N 次后用<strong>评分器</strong>（reward model 或 LLM judge）挑最高分。更通用，无需"答案可投票"。</p>
-                    <p>关系：Self-Consistency 是 Best-of-N 的特例（评分=频次）。生产环境推荐 Best-of-N + 评分器，因为多数业务输出不是单一答案。</p>
+                    <p>两者都属于"<strong>多次采样 + 选最优</strong>"家族。Self-Consistency 用<strong>投票</strong>，Best-of-N 用<strong>评分器</strong>——前者是后者的特例。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">同一 prompt × N 次采样 → 不同聚合策略</div>
+                        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" aria-label="Self-Consistency vs Best-of-N">
+                            <!-- 输入 -->
+                            <rect x="280" y="10" width="160" height="36" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                            <text x="360" y="32" text-anchor="middle" font-size="11" fill="#c4b5fd">同一 Prompt (temp=0.7)</text>
+
+                            <!-- 5 次采样 -->
+                            <g>
+                                <line x1="360" y1="46" x2="80" y2="80" class="stroke-purple" stroke-width="1" stroke-dasharray="2 2"/>
+                                <line x1="360" y1="46" x2="220" y2="80" class="stroke-purple" stroke-width="1" stroke-dasharray="2 2"/>
+                                <line x1="360" y1="46" x2="360" y2="80" class="stroke-purple" stroke-width="1" stroke-dasharray="2 2"/>
+                                <line x1="360" y1="46" x2="500" y2="80" class="stroke-purple" stroke-width="1" stroke-dasharray="2 2"/>
+                                <line x1="360" y1="46" x2="640" y2="80" class="stroke-purple" stroke-width="1" stroke-dasharray="2 2"/>
+                                <rect x="40"  y="80" width="80" height="34" rx="6" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="80"  y="100" text-anchor="middle" font-size="10" fill="#67e8f9">答: 42</text>
+                                <rect x="180" y="80" width="80" height="34" rx="6" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="220" y="100" text-anchor="middle" font-size="10" fill="#67e8f9">答: 42</text>
+                                <rect x="320" y="80" width="80" height="34" rx="6" class="fill-orange stroke-orange" stroke-width="1"/><text x="360" y="100" text-anchor="middle" font-size="10" fill="#fcd34d">答: 41</text>
+                                <rect x="460" y="80" width="80" height="34" rx="6" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="500" y="100" text-anchor="middle" font-size="10" fill="#67e8f9">答: 42</text>
+                                <rect x="600" y="80" width="80" height="34" rx="6" class="fill-orange stroke-orange" stroke-width="1"/><text x="640" y="100" text-anchor="middle" font-size="10" fill="#fcd34d">答: 43</text>
+                            </g>
+
+                            <!-- 左：Self-Consistency 投票 -->
+                            <g transform="translate(20,140)">
+                                <rect x="0" y="0" width="335" height="110" rx="8" fill="rgba(34,197,94,.06)" stroke="rgba(34,197,94,.3)"/>
+                                <text x="14" y="22" font-size="12" font-weight="700" fill="#86efac">Self-Consistency · 多数投票</text>
+                                <g transform="translate(20,35)">
+                                    <rect x="0"  y="0" width="60" height="20" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="30" y="14" text-anchor="middle" font-size="9" fill="#67e8f9">42 ×3</text>
+                                    <rect x="65" y="0" width="40" height="20" class="fill-orange stroke-orange" stroke-width="1"/><text x="85" y="14" text-anchor="middle" font-size="9" fill="#fcd34d">41 ×1</text>
+                                    <rect x="110" y="0" width="40" height="20" class="fill-orange stroke-orange" stroke-width="1"/><text x="130" y="14" text-anchor="middle" font-size="9" fill="#fcd34d">43 ×1</text>
+                                </g>
+                                <text x="14" y="78" font-size="11" fill="#cbd5e1">→ 选 42（频次最高）</text>
+                                <text x="14" y="96" font-size="10" class="label-muted">前提：答案离散可统计</text>
+                            </g>
+
+                            <!-- 右：Best-of-N 评分 -->
+                            <g transform="translate(365,140)">
+                                <rect x="0" y="0" width="335" height="110" rx="8" fill="rgba(245,158,11,.06)" stroke="rgba(245,158,11,.3)"/>
+                                <text x="14" y="22" font-size="12" font-weight="700" fill="#fcd34d">Best-of-N · 评分器</text>
+                                <g transform="translate(20,32)">
+                                    <rect x="0"   y="0" width="50" height="18" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="25"  y="12" text-anchor="middle" font-size="9" fill="#67e8f9">0.81</text>
+                                    <rect x="55"  y="0" width="50" height="18" class="fill-cyan stroke-cyan" stroke-width="1"/><text x="80"  y="12" text-anchor="middle" font-size="9" fill="#67e8f9">0.78</text>
+                                    <rect x="110" y="0" width="50" height="18" class="fill-orange stroke-orange" stroke-width="1"/><text x="135" y="12" text-anchor="middle" font-size="9" fill="#fcd34d">0.52</text>
+                                    <rect x="165" y="0" width="50" height="18" fill="rgba(34,197,94,.4)" stroke="#22c55e"/><text x="190" y="12" text-anchor="middle" font-size="9" fill="#86efac">0.94 ★</text>
+                                    <rect x="220" y="0" width="50" height="18" class="fill-orange stroke-orange" stroke-width="1"/><text x="245" y="12" text-anchor="middle" font-size="9" fill="#fcd34d">0.41</text>
+                                </g>
+                                <text x="14" y="78" font-size="11" fill="#cbd5e1">→ 选 0.94 的样本（reward model / LLM Judge）</text>
+                                <text x="14" y="96" font-size="10" class="label-muted">通用 · 适合自由文本输出</text>
+                            </g>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        关系：Self-Consistency 是 Best-of-N 的特例（评分函数 = 频次）。生产里多数业务输出不是单一答案，<strong>Best-of-N + LLM-as-Judge</strong> 更通用。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q26</span>什么是 Hierarchical / 分层 Agent？什么场景必须用？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>分层 Agent = 高层 Planner（决定要做什么）+ 低层 Executor（决定怎么做）。任务超过 10+ 子步骤、跨多个领域时必须分层，否则上下文爆炸 + Plan 漂移。</p>
-                    <p>典型实现：</p>
-                    <ul>
-                        <li>顶层 Agent：负责需求理解 + 路由 + 验收。</li>
-                        <li>子 Agent / Worker：每个负责一个垂直领域，独立工具集与 Prompt。</li>
-                        <li>共享状态：通过 KV / Postgres 显式传递。</li>
-                    </ul>
-                    <p>代表实现：MetaGPT、Claude Code 的 SubAgent、AutoGen GroupChat。</p>
+                    <p>"<strong>大脑分层</strong>"——高层 Planner 决定<em>做什么</em>，低层 Executor 决定<em>怎么做</em>。任务超过 10+ 子步骤、跨多领域时必须分层，否则上下文爆炸 + Plan 漂移。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">分层架构（Lead + Workers + 独立上下文）</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="Hierarchical Agent">
+                            <!-- Lead -->
+                            <rect x="280" y="20" width="160" height="50" rx="10" class="fill-purple stroke-purple" stroke-width="2"/>
+                            <text x="360" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#c4b5fd">Lead Agent</text>
+                            <text x="360" y="58" text-anchor="middle" font-size="10" class="label-muted">理解 / 路由 / 验收</text>
+
+                            <!-- Workers -->
+                            <line x1="320" y1="70" x2="120" y2="110" class="stroke-purple" stroke-width="1.5" marker-end="url(#a26)"/>
+                            <line x1="360" y1="70" x2="360" y2="110" class="stroke-purple" stroke-width="1.5" marker-end="url(#a26)"/>
+                            <line x1="400" y1="70" x2="600" y2="110" class="stroke-purple" stroke-width="1.5" marker-end="url(#a26)"/>
+
+                            <g transform="translate(50,110)">
+                                <rect x="0" y="0" width="140" height="50" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="70" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">Research</text>
+                                <text x="70" y="38" text-anchor="middle" font-size="9" class="label-muted">search/scrape</text>
+                            </g>
+                            <g transform="translate(290,110)">
+                                <rect x="0" y="0" width="140" height="50" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="70" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">Code</text>
+                                <text x="70" y="38" text-anchor="middle" font-size="9" class="label-muted">edit/run</text>
+                            </g>
+                            <g transform="translate(530,110)">
+                                <rect x="0" y="0" width="140" height="50" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="70" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">Write</text>
+                                <text x="70" y="38" text-anchor="middle" font-size="9" class="label-muted">draft/edit</text>
+                            </g>
+
+                            <!-- 独立上下文 -->
+                            <rect x="40" y="170" width="160" height="30" rx="6" fill="rgba(6,182,212,.05)" stroke="rgba(6,182,212,.3)" stroke-dasharray="3 3"/>
+                            <text x="120" y="190" text-anchor="middle" font-size="10" fill="#67e8f9">独立工具/Prompt/上下文</text>
+                            <rect x="280" y="170" width="160" height="30" rx="6" fill="rgba(6,182,212,.05)" stroke="rgba(6,182,212,.3)" stroke-dasharray="3 3"/>
+                            <text x="360" y="190" text-anchor="middle" font-size="10" fill="#67e8f9">独立工具/Prompt/上下文</text>
+                            <rect x="520" y="170" width="160" height="30" rx="6" fill="rgba(6,182,212,.05)" stroke="rgba(6,182,212,.3)" stroke-dasharray="3 3"/>
+                            <text x="600" y="190" text-anchor="middle" font-size="10" fill="#67e8f9">独立工具/Prompt/上下文</text>
+
+                            <!-- 共享状态 -->
+                            <rect x="100" y="220" width="520" height="40" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                            <text x="360" y="244" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">共享状态（Postgres / KV / LangGraph State）</text>
+                            <line x1="120" y1="200" x2="120" y2="220" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+                            <line x1="360" y1="200" x2="360" y2="220" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+                            <line x1="600" y1="200" x2="600" y2="220" class="stroke-orange" stroke-width="1" stroke-dasharray="3 3"/>
+
+                            <defs><marker id="a26" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="compare-grid">
+                        <div class="compare-card green"><h5>✓ 必须分层的信号</h5>
+                            <ul>
+                                <li>子任务 &gt; 10 步</li>
+                                <li>跨多个领域 / 工具集</li>
+                                <li>不同子任务对模型/思考预算需求不同</li>
+                                <li>单 Agent 上下文已超 128k</li>
+                            </ul>
+                        </div>
+                        <div class="compare-card red"><h5>✗ 不要分层</h5>
+                            <ul>
+                                <li>子任务 &lt; 3 步</li>
+                                <li>子任务高度相似（一个 Worker 能干）</li>
+                                <li>对延迟极敏感（分层多一跳）</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="cheat">
+                        代表实现：<strong>MetaGPT</strong>（角色化 SOP）、<strong>Claude Code SubAgent</strong>（按需派生）、<strong>AutoGen GroupChat</strong>（讨论型）、<strong>LangGraph + Send API</strong>（Map-Reduce 风格）。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q27</span>什么是 Chain-of-Verification（CoVe）？<span class="qa-tag">进阶</span></div>
                 <div class="qa-a">
-                    <p>Meta 提出的事实校验范式：模型先给出答案，再生成"我应该验证的问题"，逐个回答这些验证问题，最后基于验证结果修订答案。在事实型问答上可显著减少幻觉。</p>
-                    <p>工程上可与 RAG 结合：每个验证问题触发一次检索，把检索结果作为校验依据。</p>
+                    <p>Meta 提出的<strong>事实校验范式</strong>：模型先答 → 自己出验证问题 → 逐题查证 → 修订答案。在事实型问答上能显著降幻觉。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">CoVe 四步流程</div>
+                        <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" aria-label="CoVe">
+                            <!-- 1 -->
+                            <g transform="translate(20,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#67e8f9">① 初答</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">"乔布斯生于 1956"</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="9" fill="#fca5a5">（可能错）</text>
+                            </g>
+                            <line x1="170" y1="70" x2="200" y2="70" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a27)"/>
+                            <!-- 2 -->
+                            <g transform="translate(200,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">② 出验证题</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">"乔布斯生年?"</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="10" class="label-muted">"工作公司?"</text>
+                            </g>
+                            <line x1="350" y1="70" x2="380" y2="70" class="stroke-purple" stroke-width="1.5" marker-end="url(#a27)"/>
+                            <!-- 3 -->
+                            <g transform="translate(380,40)">
+                                <rect x="0" y="0" width="150" height="60" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="75" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#fcd34d">③ 逐题查证</text>
+                                <text x="75" y="40" text-anchor="middle" font-size="10" class="label-muted">独立 LLM 调用</text>
+                                <text x="75" y="54" text-anchor="middle" font-size="9" fill="#86efac">+ RAG 检索</text>
+                            </g>
+                            <line x1="530" y1="70" x2="560" y2="70" class="stroke-orange" stroke-width="1.5" marker-end="url(#a27)"/>
+                            <!-- 4 -->
+                            <g transform="translate(560,40)">
+                                <rect x="0" y="0" width="140" height="60" rx="8" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="70" y="22" text-anchor="middle" font-size="12" font-weight="700" fill="#86efac">④ 修订</text>
+                                <text x="70" y="40" text-anchor="middle" font-size="10" class="label-muted">"1955-02-24"</text>
+                                <text x="70" y="54" text-anchor="middle" font-size="9" fill="#86efac">✓ 修正完成</text>
+                            </g>
+
+                            <text x="360" y="150" text-anchor="middle" font-size="11" class="label-muted">关键：每个验证问题<strong>独立调用</strong>，避免上下文污染</text>
+                            <text x="360" y="172" text-anchor="middle" font-size="11" class="label-muted">+ RAG 注入权威来源 → 最大化降幻觉效果</text>
+
+                            <defs><marker id="a27" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        与 RAG 天然契合：每个验证题触发一次检索，把检索结果作为校验依据。代价：4× token 延迟，<strong>只用于高价值事实型问答</strong>。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q28</span>怎么判断模型该"思考"还是"直答"？如何控制 thinking 预算？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>主流推理模型（GPT-5 thinking、Claude 4.x extended thinking、Qwen3-thinking、DeepSeek-R1）支持显式"思考"token，可控参数：</p>
-                    <ul>
-                        <li><strong>thinking_budget_tokens</strong>：最多花多少 token 思考，超出强制收尾。</li>
-                        <li><strong>thinking_level</strong>：minimal / low / medium / high。</li>
-                    </ul>
-                    <p>实践经验：</p>
-                    <ul>
-                        <li>简单事实问答：thinking=off，省钱。</li>
-                        <li>规划 / 工具选择：medium 即可。</li>
-                        <li>代码生成 / 数学推理：high，但要设上限避免长尾爆炸。</li>
-                        <li>Agent 主循环里，每一步是否思考可由 Router 单独决定。</li>
-                    </ul>
+                    <p>2026 年主流模型（GPT-5 thinking / Claude 4.x extended thinking / Qwen3-thinking / DeepSeek-R1）都支持<strong>显式思考</strong>。关键不是"开 vs 关"，而是<strong>"按任务难度调档"</strong>。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">Thinking 预算分档（按任务难度选）</div>
+                        <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg" aria-label="Thinking budget">
+                            <!-- 横向阶梯 -->
+                            <g>
+                                <rect x="20" y="100" width="120" height="40" rx="6" class="fill-green stroke-green" stroke-width="1.5"/>
+                                <text x="80" y="118" text-anchor="middle" font-size="11" font-weight="700" fill="#86efac">off / minimal</text>
+                                <text x="80" y="132" text-anchor="middle" font-size="9" class="label-muted">~ 0 token</text>
+                                <rect x="160" y="80" width="120" height="60" rx="6" class="fill-cyan stroke-cyan" stroke-width="1.5"/>
+                                <text x="220" y="100" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">low</text>
+                                <text x="220" y="116" text-anchor="middle" font-size="9" class="label-muted">~ 1k token</text>
+                                <rect x="300" y="60" width="120" height="80" rx="6" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                                <text x="360" y="80" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">medium</text>
+                                <text x="360" y="96" text-anchor="middle" font-size="9" class="label-muted">~ 4k token</text>
+                                <rect x="440" y="40" width="120" height="100" rx="6" class="fill-purple stroke-purple" stroke-width="1.5"/>
+                                <text x="500" y="60" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">high</text>
+                                <text x="500" y="76" text-anchor="middle" font-size="9" class="label-muted">~ 16k token</text>
+                                <rect x="580" y="20" width="120" height="120" rx="6" fill="rgba(239,68,68,.1)" stroke="rgba(239,68,68,.5)" stroke-width="1.5"/>
+                                <text x="640" y="40" text-anchor="middle" font-size="11" font-weight="700" fill="#fca5a5">max (开放)</text>
+                                <text x="640" y="56" text-anchor="middle" font-size="9" class="label-muted">⚠ 长尾爆炸</text>
+                            </g>
+                            <!-- 场景标签 -->
+                            <text x="80" y="160" text-anchor="middle" font-size="10" class="label-muted">事实问答</text>
+                            <text x="80" y="172" text-anchor="middle" font-size="10" class="label-muted">分类 / 路由</text>
+                            <text x="220" y="160" text-anchor="middle" font-size="10" class="label-muted">工具选择</text>
+                            <text x="220" y="172" text-anchor="middle" font-size="10" class="label-muted">短答案</text>
+                            <text x="360" y="160" text-anchor="middle" font-size="10" class="label-muted">规划拆解</text>
+                            <text x="360" y="172" text-anchor="middle" font-size="10" class="label-muted">摘要 / 改写</text>
+                            <text x="500" y="160" text-anchor="middle" font-size="10" class="label-muted">代码生成</text>
+                            <text x="500" y="172" text-anchor="middle" font-size="10" class="label-muted">数学推理</text>
+                            <text x="640" y="160" text-anchor="middle" font-size="10" class="label-muted">研究 / SWE</text>
+                            <text x="640" y="172" text-anchor="middle" font-size="10" class="label-muted">长链推导</text>
+
+                            <text x="360" y="210" text-anchor="middle" font-size="11" fill="#cbd5e1">建议：始终设 <code>thinking_budget_tokens</code> 硬上限，防长尾</text>
+                        </svg>
+                    </div>
+
+                    <div class="cheat">
+                        Agent 主循环里，<strong>每一步是否思考可由 Router 单独决定</strong>——比如 LangGraph 的 <code>thinking_router</code> 节点。简单步骤直答省钱，复杂步骤开 high 提质。
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q29</span>怎么处理"模型不会规划长任务"的问题？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>四个杠杆：</p>
-                    <ol>
-                        <li><strong>外部 Plan 持久化</strong>：把 plan 显式存到 state，每一步只读相关子任务，避免全局漂移。</li>
-                        <li><strong>子目标分解</strong>：先让模型输出 milestones，每个 milestone 再触发子 Agent。</li>
-                        <li><strong>失败回退</strong>：每个 step 完成时自检，未达成则触发 replan。</li>
-                        <li><strong>人在环</strong>：长任务关键节点暂停等用户确认，避免无限漂移。</li>
-                    </ol>
+                    <p>"长任务规划漂移"的本质是：模型记不住自己最初的目标。解法是把<strong>规划从模型脑里搬到外部 state</strong>。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">四个抗漂移杠杆</div>
+                        <div class="compare-grid">
+                            <div class="compare-card"><h5>① 外部 Plan 持久化</h5>
+                                <p>把 plan 写进 Postgres / LangGraph State，每步只读相关子任务条目，避免上下文里全局漂移。</p>
+                            </div>
+                            <div class="compare-card cyan"><h5>② 子目标分解</h5>
+                                <p>模型先出 <strong>milestones</strong>（M1/M2/M3），每个 milestone 再触发子 Agent，缩小作用域。</p>
+                            </div>
+                            <div class="compare-card orange"><h5>③ 失败回退 + Replan</h5>
+                                <p>每步完成自检；未达成 → 触发 replan 节点（LangGraph 条件边），不让错误传染。</p>
+                            </div>
+                            <div class="compare-card green"><h5>④ Human-in-the-loop</h5>
+                                <p>关键节点（金额、删除、外发邮件）暂停 → 等用户确认 → 恢复执行。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="diagram">
+                        <div class="diagram-title">长任务执行状态机示意</div>
+                        <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg" aria-label="长任务状态机">
+                            <rect x="20"  y="80" width="100" height="40" rx="8" class="fill-purple stroke-purple" stroke-width="1.5"/><text x="70" y="104" text-anchor="middle" font-size="11" fill="#c4b5fd">Plan</text>
+                            <line x1="120" y1="100" x2="150" y2="100" class="stroke-purple" stroke-width="1.5" marker-end="url(#a29)"/>
+                            <rect x="150" y="80" width="100" height="40" rx="8" class="fill-cyan stroke-cyan" stroke-width="1.5"/><text x="200" y="104" text-anchor="middle" font-size="11" fill="#67e8f9">Execute</text>
+                            <line x1="250" y1="100" x2="280" y2="100" class="stroke-cyan" stroke-width="1.5" marker-end="url(#a29)"/>
+                            <polygon points="280,100 310,80 340,100 310,120" class="fill-orange stroke-orange" stroke-width="1.5"/>
+                            <text x="310" y="104" text-anchor="middle" font-size="10" fill="#fcd34d">ok?</text>
+
+                            <line x1="340" y1="100" x2="380" y2="100" class="stroke-orange" stroke-width="1.5" marker-end="url(#a29)"/>
+                            <text x="355" y="92" font-size="9" fill="#86efac">✓</text>
+                            <rect x="380" y="80" width="120" height="40" rx="8" class="fill-orange stroke-orange" stroke-width="1.5"/><text x="440" y="104" text-anchor="middle" font-size="11" fill="#fcd34d">Verify Milestone</text>
+
+                            <line x1="500" y1="100" x2="540" y2="100" class="stroke-orange" stroke-width="1.5" marker-end="url(#a29)"/>
+                            <rect x="540" y="80" width="80" height="40" rx="8" class="fill-green stroke-green" stroke-width="1.5"/><text x="580" y="104" text-anchor="middle" font-size="11" fill="#86efac">Next</text>
+
+                            <line x1="620" y1="100" x2="670" y2="100" class="stroke-green" stroke-width="1.5" stroke-dasharray="3 3"/>
+                            <line x1="670" y1="100" x2="670" y2="40" class="stroke-green" stroke-width="1.5" stroke-dasharray="3 3"/>
+                            <line x1="670" y1="40" x2="200" y2="40" class="stroke-green" stroke-width="1.5" stroke-dasharray="3 3"/>
+                            <line x1="200" y1="40" x2="200" y2="80" class="stroke-green" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a29)"/>
+
+                            <!-- Fail -->
+                            <line x1="310" y1="120" x2="310" y2="160" class="stroke-red" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a29)"/>
+                            <text x="318" y="135" font-size="9" fill="#fca5a5">✗</text>
+                            <rect x="250" y="160" width="120" height="32" rx="6" fill="rgba(239,68,68,.1)" stroke="rgba(239,68,68,.5)"/>
+                            <text x="310" y="180" text-anchor="middle" font-size="10" fill="#fca5a5">Replan / HITL</text>
+                            <path d="M 250 176 Q 70 176 70 120" fill="none" class="stroke-red" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a29)"/>
+
+                            <defs><marker id="a29" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div class="qa-card">
                 <div class="qa-q"><span class="qa-num">Q30</span>如何评测一个规划模块的好坏？<span class="qa-tag adv">高阶</span></div>
                 <div class="qa-a">
-                    <p>多维评测，避免单看"是否解决"：</p>
-                    <ul>
-                        <li><strong>任务完成率（Task Success Rate）</strong>：终态是否正确。</li>
-                        <li><strong>步数效率</strong>：达成目标用的 step / token，越少越好。</li>
-                        <li><strong>恢复能力</strong>：注入失败时能否自纠正。</li>
-                        <li><strong>Plan 一致性</strong>：是否在执行中偏离初始计划。</li>
-                        <li><strong>工具调用准确率</strong>：选择 + 参数正确率。</li>
-                    </ul>
-                    <p>可使用 AgentBench / GAIA / WebArena / SWE-bench 作为基准。</p>
+                    <p>规划评测是<strong>多维向量</strong>，不能只看"是否解决"。下面 5 个维度组成一个雷达图就是规划质量画像。</p>
+
+                    <div class="diagram">
+                        <div class="diagram-title">规划质量五维雷达</div>
+                        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" aria-label="规划评测雷达">
+                            <!-- 雷达背景 -->
+                            <g transform="translate(180,140)">
+                                <polygon points="0,-100 95,-31 59,81 -59,81 -95,-31" fill="none" stroke="#475569" stroke-width="1"/>
+                                <polygon points="0,-75 71,-23 44,61 -44,61 -71,-23" fill="none" stroke="#475569" stroke-width="0.5"/>
+                                <polygon points="0,-50 47,-15 29,40 -29,40 -47,-15" fill="none" stroke="#475569" stroke-width="0.5"/>
+                                <polygon points="0,-25 24,-8 15,20 -15,20 -24,-8" fill="none" stroke="#475569" stroke-width="0.5"/>
+                                <!-- 标签 -->
+                                <text x="0" y="-110" text-anchor="middle" font-size="11" fill="#86efac">完成率</text>
+                                <text x="110" y="-31" text-anchor="middle" font-size="11" fill="#67e8f9">步数效率</text>
+                                <text x="75" y="98" text-anchor="middle" font-size="11" fill="#fcd34d">恢复能力</text>
+                                <text x="-75" y="98" text-anchor="middle" font-size="11" fill="#c4b5fd">Plan 一致性</text>
+                                <text x="-110" y="-31" text-anchor="middle" font-size="11" fill="#fca5a5">工具准确率</text>
+                                <!-- 实际数据 -->
+                                <polygon points="0,-85 75,-25 35,55 -45,60 -82,-27" fill="rgba(139,92,246,.2)" stroke="#8b5cf6" stroke-width="2"/>
+                                <circle cx="0" cy="-85" r="3" fill="#86efac"/>
+                                <circle cx="75" cy="-25" r="3" fill="#67e8f9"/>
+                                <circle cx="35" cy="55" r="3" fill="#fcd34d"/>
+                                <circle cx="-45" cy="60" r="3" fill="#c4b5fd"/>
+                                <circle cx="-82" cy="-27" r="3" fill="#fca5a5"/>
+                            </g>
+
+                            <!-- 维度说明 -->
+                            <g transform="translate(370,30)">
+                                <text x="0" y="0" font-size="12" font-weight="700" fill="#86efac">① 任务完成率 (Task Success Rate)</text>
+                                <text x="0" y="16" font-size="10" fill="#cbd5e1">终态是否正确 · 业务最关心</text>
+
+                                <text x="0" y="40" font-size="12" font-weight="700" fill="#67e8f9">② 步数 / Token 效率</text>
+                                <text x="0" y="56" font-size="10" fill="#cbd5e1">同任务用多少 step / token，越少越好</text>
+
+                                <text x="0" y="80" font-size="12" font-weight="700" fill="#fcd34d">③ 恢复能力 (Robustness)</text>
+                                <text x="0" y="96" font-size="10" fill="#cbd5e1">注入失败 / 超时后能否自纠正</text>
+
+                                <text x="0" y="120" font-size="12" font-weight="700" fill="#c4b5fd">④ Plan 一致性</text>
+                                <text x="0" y="136" font-size="10" fill="#cbd5e1">执行过程是否偏离初始计划</text>
+
+                                <text x="0" y="160" font-size="12" font-weight="700" fill="#fca5a5">⑤ 工具调用准确率</text>
+                                <text x="0" y="176" font-size="10" fill="#cbd5e1">选错工具 / 参数错位的比例</text>
+
+                                <text x="0" y="210" font-size="11" font-weight="700" fill="#c4b5fd">公开基准：</text>
+                                <text x="0" y="226" font-size="10" fill="#cbd5e1">AgentBench / GAIA / WebArena / SWE-bench</text>
+                                <text x="0" y="242" font-size="10" fill="#cbd5e1">τ-bench / OSWorld / AppWorld</text>
+                            </g>
+                        </svg>
+                    </div>
                 </div>
             </div>
         </section>
