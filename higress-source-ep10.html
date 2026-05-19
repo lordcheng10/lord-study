@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 10 期 · MCP / 证书 / hgctl / 收官 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">10</div>
+            <h2>第 10 期</h2>
+            <p class="version">MCP / 证书 / hgctl / 收官 · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · MCP 协议概念</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · McpServer CRD</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · mcp-router 插件</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · mcp-server 内建</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · pkg/ingress/mcp 协议</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 证书 pkg/cert 概览</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · CertManager</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · ACME HTTP-01 server</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 证书存储 Secret</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · 续签调度</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · hgctl 命令树</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · hgctl install</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · hgctl plugin</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · 可观测：metrics</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · 可观测：tracing</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · 可观测：access log</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · e2e 测试体系</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · 性能调优建议</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · 贡献者路线</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 200 讲学完之后</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep09.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 10 期 / 共 10 期 · 收官</span>
+            <h1 class="part-title">MCP / 证书 / hgctl / 收官</h1>
+            <p class="part-desc">补齐周边能力——MCP Server 托管、自动证书、命令行工具、可观测、测试与性能调优，最后给出后续学习与贡献的路线建议。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>MCP 协议概念</h1></div>
+        <div class="card"><p>Model Context Protocol（MCP）由 Anthropic 提出，定义"<strong>工具 / 资源</strong>"对 LLM 的统一暴露方式。Higress 把网关变成 MCP 中枢：客户端连接到 Higress，背后任意 MCP Server。</p>
+        <p>注意：代码中还有另一个 mcp 指 <em>Mesh Configuration Protocol</em>（Istio 老协议），别混淆。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：MCP 与 OpenAPI Function Calling 关系？答：互补，前者偏服务端协议，后者偏调用语义。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>McpServer CRD</h1></div>
+        <div class="card"><pre><code class="language-yaml">apiVersion: networking.higress.io/v1
+kind: McpServer
+metadata: { name: amap, namespace: higress-system }
+spec:
+  type: external          # 或 internal
+  domain: mcp.example.com
+  port: 443
+  toolsDescription: "..."  # LLM 可读的工具说明</code></pre>
+        <p>Higress 据此把这个 MCP Server 暴露到上游 Cluster，并由 mcp-router 插件路由请求。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：toolsDescription 给谁看？答：LLM 客户端与 ai-agent 插件。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>mcp-router 插件</h1></div>
+        <div class="card"><p><code>extensions/mcp-router/</code> 解析 JSON-RPC 请求里的 method（如 <code>tools/call</code>），根据 params 与配置选择目标 MCP Server upstream。它扮演的角色类似"<strong>反向代理路由器</strong>"，让多个 MCP Server 共享一个入口。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：method 维度路由如何与 host 路由配合？答：通常 host 选业务线，method 选具体 Server。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>mcp-server 内建</h1></div>
+        <div class="card"><p><code>plugins/wasm-go/mcp-servers/</code> 内置了若干官方 MCP Server 实现：高德地图、GitHub、Notion 等。它们以 Wasm 形态跑在 Envoy 内，不需要独立部署。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：内建 vs 外部 MCP Server 选择？答：简单 + 高频选内建；复杂 + 状态化选外部。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>pkg/ingress/mcp 协议</h1></div>
+        <div class="card"><p>这里的 <code>mcp</code> 是 Istio 的 Mesh Configuration Protocol。Higress 用它把配置推给"外部 Pilot"（如已存在的 Istiod），适合多 Pilot 共存的复杂场景。<strong>大多数自部署 Higress 不会用到</strong>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：什么时候才用得着？答：在已有 Istio 集群里只挂 Higress 控制面。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>证书 pkg/cert 概览</h1></div>
+        <div class="card"><pre><code class="language-bash">pkg/cert/
+  certmgr.go     # 对外 CertManager
+  config.go      # ACME 配置
+  controller.go  # Ingress / Secret 监听
+  server.go      # ACME HTTP-01 挑战 server
+  storage.go     # 证书持久化
+  ingress.go     # 与 Ingress 绑定
+  secret.go      # 写 Secret
+  util.go        # 工具</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 Cert 也要单独一个 controller？答：与 Ingress 控制器解耦，按需启用。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>CertManager</h1></div>
+        <div class="card"><p><code>certmgr.go</code> 维护 ACME account / 已签发证书列表，调度续签 goroutine。被 <code>bootstrap.initAutomaticHttps</code> 拉起。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：CertManager 重启后状态怎么恢复？答：从 ConfigMap / Secret 反推。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>ACME HTTP-01 server</h1></div>
+        <div class="card"><p><code>server.go</code> 启动一个 HTTP server 监听 80 端口的 <code>/.well-known/acme-challenge/</code>，把 token 返回给 CA。完成验证后 CA 返回证书。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：80 端口被 Envoy 占用，Higress 怎么解决？答：通过 EnvoyFilter 把该路径路由回 controller pod。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>证书存储 Secret</h1></div>
+        <div class="card"><p>签发完证书写入名为 <code>{domain}-tls</code> 的 Secret，Higress Gateway 通过 SDS 加载。私钥仅在 Secret + Envoy 内存中，不落盘到任何业务容器。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：手动 Secret 与自动 Secret 共存时谁优先？答：通常手动优先，自动只填充缺失。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>续签调度</h1></div>
+        <div class="card"><p>过期前 30 天触发续签；失败按指数退避重试；续签后写新 Secret 触发 SDS。证书更替 Envoy 不丢连接，热加载。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：长连接 keepalive 与证书更替谁赢？答：旧连接继续用旧证书，新连接使用新证书。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>hgctl 命令树</h1></div>
+        <div class="card"><pre><code class="language-bash">hgctl
+├── install     # 装 Higress (基于 Helm)
+├── uninstall
+├── upgrade
+├── plugin      # 插件管理：list/install/test
+├── profile     # 安装 profile
+├── version
+├── docs        # 启动本地文档站
+└── debug       # 调试工具</code></pre>
+        <p>位于 <code>hgctl/</code>，~20k 行 Go。是运维与开发的瑞士军刀。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：与 kubectl 关系？答：hgctl 包了 helm + 自定义动作，比 kubectl 高层。</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>hgctl install</h1></div>
+        <div class="card"><p>命令实现走的是 <code>helm SDK</code>：渲染 <code>helm/</code> 下的 chart → 调 K8s API 创建。支持 <code>--set</code> 与 profile（default / ai / local 等）。源代码可看 <code>hgctl/cmd/install.go</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：profile 与 values.yaml 关系？答：profile 是一组预设 values。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>hgctl plugin</h1></div>
+        <div class="card"><p>插件开发链：</p>
+        <ul><li><code>hgctl plugin build</code>：调 TinyGo 编译。</li>
+        <li><code>hgctl plugin test</code>：本地起 Envoy 跑 .wasm。</li>
+        <li><code>hgctl plugin install</code>：构造 WasmPlugin YAML 一键 apply。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：本地测试 Envoy 镜像哪里来？答：hgctl 用 docker 拉对应 tag。</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>可观测：metrics</h1></div>
+        <div class="card"><p>控制面用 Istio 默认的 Prometheus 指标 + grpc_prometheus。数据面 Envoy 的 stats 走 envoy admin / Prometheus。Higress 在 ConfigMap 里可控制是否打开 detailed metrics（按 host / route 维度）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：High-cardinality 指标怎么避免爆 Prometheus？答：sampling / labels drop。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>可观测：tracing</h1></div>
+        <div class="card"><p>支持 OTLP / Zipkin / SkyWalking。配置在 ConfigMap <code>higress-config</code> 的 <code>tracing</code> 字段。控制面只下发配置，trace 数据从 Envoy 直接打到 collector，控制面不在数据路径。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：trace 采样率怎么配？答：mesh.defaultConfig.tracing.sampling。</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>可观测：access log</h1></div>
+        <div class="card"><p>Higress 默认 JSON access log，关键字段含 cluster / route_name / response_code / upstream_host / x-request-id。AI 流量额外有 model / tokens 字段（来自 ai-statistics 插件）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：如何把 access log 推给 SLS / Loki？答：filebeat / fluent-bit 标准做法。</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>e2e 测试体系</h1></div>
+        <div class="card"><pre><code class="language-bash">test/e2e/      # Higress 自研端到端
+test/gateway/  # Gateway API conformance</code></pre>
+        <p>e2e 起 kind 集群，安装 Higress，部署样例服务，发请求断言。新功能 PR 通常要求附带 e2e。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：本地跑 e2e 需要什么？答：docker + kind + make e2e。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>性能调优建议</h1></div>
+        <div class="card"><ul>
+        <li>控制面：调大 DebounceAfter（10ms→100ms），减少 push 风暴。</li>
+        <li>数据面：合理设置 worker 数 = CPU 核数；开 H2/H3。</li>
+        <li>Wasm：避免大对象 allocation；HttpCall 并发数控制。</li>
+        <li>多注册中心：尽量减少 watcher 数；用增量协议（Nacos2）。</li>
+        </ul></div>
+        <div class="card warn-card"><strong>思考</strong>：插件 CPU 占比高时如何归因？答：Envoy stats 里的 wasm.cpu.ns 指标。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>贡献者路线</h1></div>
+        <div class="card"><ol>
+        <li>从修一个 <code>annotations/*_test.go</code> 失败用例或文档错别字开始。</li>
+        <li>给 ai-proxy 加一个新模型 provider（参考 deepseek.go）。</li>
+        <li>给 IngressConfig 新增一个 annotation 支持。</li>
+        <li>写一个 Wasm 插件解决团队真实问题，提交到 extensions/ 收纳。</li>
+        <li>关注 release-notes 与 issue 走向，参与设计讨论。</li>
+        </ol></div>
+        <div class="card warn-card"><strong>思考</strong>：开源贡献最难的是什么？答：保持 review 沟通节奏，不是写代码。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>200 讲学完之后</h1></div>
+        <div class="card highlight-card"><h3>你现在应该能回答</h3>
+        <ol>
+        <li>一条 Ingress YAML 怎么变成 Envoy 配置（控制面）。</li>
+        <li>一个 AI 请求怎么经过 Higress 到达 LLM 并返回（数据面）。</li>
+        <li>怎么扩展注解 / 注册中心 / Wasm 插件 / LLM Provider（开发）。</li>
+        <li>怎么定位线上配置不生效（运维）。</li>
+        </ol></div>
+        <div class="card">
+        <h3>下一步</h3>
+        <ul>
+        <li>动手：开一个 PR。</li>
+        <li>阅读：把 <code>release-notes/</code> 按时间倒序读一遍，看项目方向。</li>
+        <li>分享：把这 10 期内容内化成自己的文档，输出比输入更检验掌握。</li>
+        </ul></div>
+        <div class="card warn-card"><strong>感谢一路读完 10 期 200 讲</strong>。Higress 是一个仍在快速演进的项目，把"<em>核心架构稳定 / 周边能力快速迭代</em>"作为它的脾气，遇到代码细节与本系列不一致时以仓库当前状态为准，思想仍然适用。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

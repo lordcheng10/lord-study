@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 05 期 · IngressConfig 翻译核心 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">05</div>
+            <h2>第 05 期</h2>
+            <p class="version">IngressConfig 翻译核心 · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 文件定位与全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · IngressConfig 字段速读</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · NewIngressConfig 构造</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 实现 ConfigStore 伪装</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · RegisterEventHandler</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · List 主分发</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · listFromIngressControllers</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · createWrapperConfigs</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · convertGateways</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · convertVirtualService</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · convertDestinationRule</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · convertServiceEntry</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · convertEnvoyFilter</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · convertWasmPlugin</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · applyCanaryIngresses</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · applyAppRoot / Redirect</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · Http2Rpc 合成</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · BasicAuth EnvoyFilter</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · ProxyEnvoyFilters</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 缓存与 HasSynced</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep04.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep06.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 05 期 / 共 10 期</span>
+            <h1 class="part-title">IngressConfig 翻译核心</h1>
+            <p class="part-desc">深入 <code>pkg/ingress/config/ingress_config.go</code>（2085 行）——Higress 控制面最复杂的文件。读完这期你能解释一条 Ingress 是怎么变成 VirtualService + DR + EnvoyFilter 的。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>文件定位与全景</h1></div>
+        <div class="card"><p><code>pkg/ingress/config/ingress_config.go</code>，2085 行。它的角色是<strong>实现 Istio <code>model.ConfigStoreController</code> 接口</strong>，把 Pilot 想要的 VirtualService / DR / EnvoyFilter 等资源动态合成出来。</p>
+        <pre><code class="language-bash">grep '^func ' pkg/ingress/config/ingress_config.go | head -40
+# 30+ 个方法，主要分四组：构造、ConfigStore 接口、convert*、apply*</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么这种"<em>合成型 ConfigStore</em>"模式比"提前写 VirtualService 到 etcd"更好？提示：用户体验 + 实时性。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>IngressConfig 字段速读</h1></div>
+        <div class="card"><pre><code class="language-go">type IngressConfig struct {
+    remoteIngressControllers map[string]common.IngressController
+    mcpbridgeController      mcpbridge.McpBridgeController
+    wasmPluginController     wasmplugin.WasmPluginController
+    http2rpcController       http2rpc.Http2RpcController
+    annotationHandler        annotations.AnnotationHandler
+    eventHandlers            map[config.GroupVersionKind]istiomodel.EventHandler
+    cachedConfig             map[config.GroupVersionKind][]config.Config
+    ...
+}</code></pre>
+        <p>字段两类：① 各 controller 引用（拿原始数据），② 缓存与回调（喂给 Pilot）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：cachedConfig 与 Pilot 自带 PushContext 的关系？答：互补，IngressConfig 缓存合成结果，PushContext 是 Pilot 全局快照。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>NewIngressConfig 构造</h1></div>
+        <div class="card"><p>第 187 行的 NewIngressConfig 是入口：</p>
+        <ol><li>创建主集群的 IngressController（v1 / v1beta1 / gateway / kingress）；</li>
+        <li>初始化 McpBridge / WasmPlugin / Http2Rpc Controller；</li>
+        <li>构造 AnnotationHandler；</li>
+        <li>把所有 controller 注册回调，事件经 normalize 后调用 <code>refreshAndPushXds</code>。</li></ol></div>
+        <div class="card warn-card"><strong>思考</strong>：构造函数是否要等所有 informer cache synced？答：不需要，由调用方 waitForCacheSync 控制。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>实现 ConfigStore 伪装</h1></div>
+        <div class="card"><p>Pilot 看不到 IngressConfig 是合成的，因为它实现了 <code>model.ConfigStoreController</code>：</p>
+<pre><code class="language-go">func (m *IngressConfig) Schemas() collection.Schemas { return m.schemas }
+func (m *IngressConfig) Get(gvk, name, ns) *config.Config { ... }
+func (m *IngressConfig) List(gvk, ns) []config.Config { ... }
+func (m *IngressConfig) Run(stop &lt;-chan struct{}) { ... }
+func (m *IngressConfig) HasSynced() bool { ... }</code></pre>
+        <p>对 Pilot 而言它就是一个普通 store，只是不允许 Create/Update/Delete。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Schemas() 返回哪些 GVK？提示：VirtualService / DestinationRule / Gateway / ServiceEntry / EnvoyFilter / extensions.WasmPlugin。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>RegisterEventHandler</h1></div>
+        <div class="card"><p>238 行的 RegisterEventHandler 把 Pilot 注册的回调存到 <code>eventHandlers</code>。当内部 informer 触发变更，IngressConfig 调对应回调通知 Pilot：</p>
+<pre><code class="language-go">if h, ok := m.eventHandlers[gvk.VirtualService]; ok {
+    h(prev, curr, model.EventUpdate)
+}</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：通知前要不要先比较 prev/curr 来去重？答：尽量比对，避免无意义推送。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>List 主分发（286 行）</h1></div>
+        <div class="card"><pre><code class="language-go">func (m *IngressConfig) List(typ config.GroupVersionKind, ns string) []config.Config {
+    switch typ {
+    case gvk.VirtualService:     return m.virtualServices(ns)
+    case gvk.DestinationRule:    return m.destinationRules(ns)
+    case gvk.Gateway:            return m.gateways(ns)
+    case gvk.ServiceEntry:       return m.serviceEntries(ns)
+    case gvk.EnvoyFilter:        return m.envoyFilters(ns)
+    case gvk.WasmPlugin:         return m.wasmPlugins(ns)
+    }
+    return nil
+}</code></pre>
+        <p>这是整个文件的中央枢纽——按资源类型分发到对应 convert* 函数。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：每次 List 都重算开销大吗？提示：有 cachedConfig，仅在事件触发时重算。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>listFromIngressControllers</h1></div>
+        <div class="card"><p>322 行。聚合多集群 IngressController 的原始 Ingress，过滤掉错误的、不属于 Higress 的，按 namespace 切分返回。这是 convert 系列的"数据来源"统一入口。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：listFromGatewayControllers 与它的区别？答：source CRD 不同（Gateway API），合成逻辑可复用大部分。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>createWrapperConfigs</h1></div>
+        <div class="card"><p>385 行。把 Ingress 列表逐条调用 <code>annotationHandler.Parse</code>，得到带注解解析结果的 <code>WrapperConfig</code>。这是"原始 K8s 对象 → 内部 IR"的转换点，下游所有 convert* 操作的是 WrapperConfig 不再是原生 Ingress。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：把"解析"与"应用"两阶段分开有什么好处？答：清晰 + 错误隔离。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>convertGateways</h1></div>
+        <div class="card"><p>431 行。每条 Ingress 的 <code>spec.tls</code> + 默认 80/443 监听被合并为 Istio Gateway 资源，按 host 分组。这是 LDS 生成的源头：Gateway 字段直接影响 listener。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：多条 Ingress 共享同一 host + TLS 时怎么合并？</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>convertVirtualService（483 行）</h1></div>
+        <div class="card"><p>整个文件的<strong>明星方法</strong>。约 150 行：</p>
+        <ol><li>把每条 rule + path 转 HTTPRoute；</li>
+        <li>调用 <code>annotationHandler.ApplyRoute</code> 把注解填入 HTTPRoute；</li>
+        <li>处理 canary（applyCanaryIngresses）；</li>
+        <li>处理 AppRoot / InternalActiveRedirect；</li>
+        <li>同 host 多 VS 合并去重。</li></ol>
+        <p>RDS 的 99% 路由细节都来自这里。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：HTTPRoute 数组顺序有意义吗？答：有，Envoy 按顺序匹配，第一条命中即止。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>convertDestinationRule（773 行）</h1></div>
+        <div class="card"><p>DR 生成关注点：</p>
+        <ul><li>从注解读 lb / timeout / retry / mirror。</li>
+        <li>处理 upstreamtls（mTLS、SNI）。</li>
+        <li>处理 subset（灰度版本切流）。</li></ul>
+        <p>DR 决定 CDS 与 cluster.transport_socket 的细节。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：同名 cluster 的 DR 合并冲突时怎么处理？</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>convertServiceEntry（738 行）</h1></div>
+        <div class="card"><p>当 backend 指向集群外（如 nacos://my-svc）时，要写一份 ServiceEntry 让 Pilot 知道这个外部服务。registry 拉来的实例最终也会以 ServiceEntry 形式注入。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：ServiceEntry 与 K8s Service 优先级谁高？</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>convertEnvoyFilter（628 行）</h1></div>
+        <div class="card"><p>这是 Higress 的"<strong>逃生通道</strong>"：注解里 Higress 还没原生支持的能力，全靠合成 EnvoyFilter patch listener / route / cluster 的 typed_config。比如 BasicAuth、Http2Rpc、Header 透传等。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：EnvoyFilter 写多了会拖慢 Pilot 吗？答：会，因为 Pilot 每次 push 都要 merge patch。</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>convertWasmPlugin（714 行）</h1></div>
+        <div class="card"><p>把 Higress WasmPlugin CRD 转成 Istio <code>extensions.WasmPlugin</code>。两者 group 不同但内容兼容：Higress 增加了 <code>matchRules</code>（按 host/path 覆盖配置）、<code>imagePullPolicy</code> 等字段，convertIstioWasmPlugin 负责降级处理。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：matchRules 如何落到 Envoy？答：转成多份 EnvoyFilter patch。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>applyCanaryIngresses（1432 行）</h1></div>
+        <div class="card"><p>K8s 社区的 Ingress canary 语义（同 host 多 Ingress + canary 注解）在这里实现。流程：</p>
+        <ol><li>找到 canary 候选 Ingress；</li>
+        <li>按 weight / header / cookie 匹配规则合并到主 Ingress 的 HTTPRoute；</li>
+        <li>normalizeWeightedCluster 归一化权重。</li></ol></div>
+        <div class="card warn-card"><strong>思考</strong>：weight + header 同时指定时优先级？答：header 优先匹配，未命中再走 weight。</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>applyAppRoot / Redirect</h1></div>
+        <div class="card"><p>位于 912 / 940 行：</p>
+        <ul><li><strong>applyAppRoot</strong>：注解 <code>app-root</code> 指定子路径时，把 / 重定向到 /sub。</li>
+        <li><strong>applyInternalActiveRedirect</strong>：Higress 扩展的"网关内部重定向"，比 302 更高效。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：内部重定向相比 302 的区别？答：客户端无感知，性能更好。</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>Http2Rpc 合成（1452 行）</h1></div>
+        <div class="card"><p><code>constructHttp2RpcEnvoyFilter</code>：把 Http2Rpc CRD 翻译成 EnvoyFilter，注入 Dubbo 协议转换器。<code>constructHttp2RpcMethods</code> 生成方法白名单的 google.protobuf.Struct。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Dubbo 接口反射调用代价高吗？答：是，通常前端用 Higress 做协议转换 + Triple/Dubbo3。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>BasicAuth EnvoyFilter（1648 行）</h1></div>
+        <div class="card"><p><code>constructBasicAuthEnvoyFilter</code> 把 basic-auth 注解里的用户名密码渲染成 envoy.filters.http.basic_auth typed_config。注意密码不能写明文，需要 Secret 引用 + base64。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么不用 ext-authz？答：basic auth 简单场景，本地匹配性能更好。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>ProxyEnvoyFilters（1731 行）</h1></div>
+        <div class="card"><p><code>constructProxyEnvoyFilters</code> 处理"全局 proxy 设置"：每个上游服务可能有自己的 connection pool / outlier detection / tracing 覆写。Higress 把这些合成成一组 EnvoyFilter 一次性推下去。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：服务级 vs 路由级 EnvoyFilter 该选哪种？</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>缓存与 HasSynced（1877+ 行）</h1></div>
+        <div class="card"><p>Run/HasSynced/GetIngressRoutes/GetIngressDomains 等方法是给 Pilot 与控制面其它组件用的辅助 API。HasSynced 返回所有底层 controller 都 HasSynced 的 AND 结果——只有都准备好了 Pilot 才开始 push。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你已经能在 2085 行里"按需跳读"。下期我们把 annotations/ 30+ 文件展开来看。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 09 期 · AI 网关插件家族 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">09</div>
+            <h2>第 09 期</h2>
+            <p class="version">AI 网关插件家族 · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · AI 网关流水线</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ai-proxy 目录</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Provider 接口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · OpenAI 协议归一化</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · qwen 通义</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · claude 适配</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · gemini 适配</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · azure / openai</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · SSE 流式</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · ai-token-ratelimit</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · ai-quota</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · ai-cache 精确与语义</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · ai-rag</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · ai-history 上下文</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · ai-intent 意图</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · ai-security-guard</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · ai-statistics</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · ai-load-balancer</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · ai-search / ai-agent</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 新增一个 LLM Provider</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep08.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep10.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 09 期 / 共 10 期</span>
+            <h1 class="part-title">AI 网关插件家族</h1>
+            <p class="part-desc">解剖 <code>plugins/wasm-go/extensions/ai-*</code> 一整个家族，20 讲覆盖从协议归一化 (ai-proxy) 到治理 (rate-limit / cache / RAG / security) 的完整能力栈。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>AI 网关流水线</h1></div>
+        <div class="card"><pre><code class="language-bash">Client (OpenAI 协议)
+  ↓
+ai-security-guard  内容合规
+  ↓
+jwt-auth / key-auth
+  ↓
+ai-intent         意图识别 → 路由分流
+  ↓
+ai-token-ratelimit / ai-quota
+  ↓
+ai-cache          (命中即返回)
+  ↓
+ai-rag            注入上下文
+  ↓
+ai-history        历史会话
+  ↓
+ai-prompt-template / decorator
+  ↓
+ai-proxy          协议转换 → 转发到 LLM
+  ↓
+ai-statistics     记账</code></pre>
+        <p>20 多个 AI 相关插件按 phase + priority 组成流水线。Higress 默认提供 ai-* phase 推荐顺序。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：缓存放在 RAG 之前还是之后？答：之前命中率高（无 RAG 注入差异），之后内容更安全（带上下文匹配）。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>ai-proxy 目录</h1></div>
+        <div class="card"><pre><code class="language-bash">extensions/ai-proxy/
+  main.go             # 注册 SetCtx
+  config.go           # ProviderConfig schema
+  provider/
+    provider.go       # ★ Provider 接口 + 工厂
+    openai.go         # 直通
+    azure.go
+    qwen.go
+    deepseek.go
+    moonshot.go
+    claude.go
+    gemini.go
+    cohere.go
+    ollama.go
+    ...20+ 个</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么把每家 LLM 独立成文件？答：协议差异大，分离便于维护。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>Provider 接口</h1></div>
+        <div class="card"><pre><code class="language-go">type Provider interface {
+    GetProviderType() string
+    OnRequestHeaders(ctx, apiName, log) error
+    OnRequestBody(ctx, apiName, body, log) (types.Action, error)
+    OnResponseHeaders(ctx, apiName, log) (types.Action, error)
+    OnStreamingResponseBody(ctx, apiName, chunk, isLast, log) ([]byte, error)
+    OnResponseBody(ctx, apiName, body, log) (types.Action, error)
+}</code></pre>
+        <p>"<strong>4 个生命周期 + Streaming 钩子</strong>" 是适配 LLM 协议的统一抽象。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：apiName 用来干嘛？答：区分 /chat/completions vs /embeddings vs /moderations。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>OpenAI 协议归一化</h1></div>
+        <div class="card"><p>所有 Provider 对外都用 OpenAI 协议入参。<code>openai.go</code> 是恒等转换（直接转发）。其它 Provider 在 <code>OnRequestBody</code> 阶段读取 OpenAI request → 改写为对应厂商 schema；响应阶段反向。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么选 OpenAI 协议作 lingua franca？答：生态最大、客户端最多。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>qwen 通义</h1></div>
+        <div class="card"><p><code>provider/qwen.go</code>：</p>
+        <ul><li>请求映射：<code>messages</code> → <code>input.messages</code>；<code>model</code> → DashScope 模型名。</li>
+        <li>响应映射：<code>output.text</code> → <code>choices[].message.content</code>；<code>usage</code> 字段名稍异。</li>
+        <li>支持流式：每个 SSE chunk 改写后转发。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：rerank / 多模态接口如何兼容 OpenAI？提示：路径差异由 apiName 路由。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>claude 适配</h1></div>
+        <div class="card"><p><code>provider/claude.go</code> 处理 Anthropic 协议：</p>
+        <ul><li>system 消息 → 顶层 <code>system</code> 字段（不在 messages 数组）。</li>
+        <li>stop_reason 映射回 OpenAI 的 finish_reason。</li>
+        <li>Tool use 协议差异较大，需要特别处理。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Claude 流式事件类型更细（message_start / content_block_delta / ...），怎么合并成 OpenAI delta？</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>gemini 适配</h1></div>
+        <div class="card"><p><code>provider/gemini.go</code>：</p>
+        <ul><li>路径：<code>/v1beta/models/{model}:generateContent</code>。</li>
+        <li>messages → <code>contents</code> 数组，role 名 "user/model"。</li>
+        <li>generationConfig 字段映射 temperature / topP。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Gemini system instruction 字段叫什么？</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>azure / openai</h1></div>
+        <div class="card"><p>Azure OpenAI 与官方 OpenAI 协议几乎一致，差异：</p>
+        <ul><li>URL 路径含 deployment：<code>/openai/deployments/{deployment}/chat/completions</code>。</li>
+        <li>认证用 <code>api-key</code> header 不是 <code>Authorization</code>。</li>
+        <li>API version query 参数。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：同一插件配置同时多 Provider 时怎么路由？答：spec 里多个 provider entry + 客户端通过 model 字段触发。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>SSE 流式</h1></div>
+        <div class="card"><p>OnStreamingResponseBody 每来一段 chunk 调用一次。注意：</p>
+        <ul><li><code>isLastChunk</code> 决定是否要 flush 内部 buffer。</li>
+        <li>多个 chunk 可能跨 SSE 事件边界，要重新拼装。</li>
+        <li>Higress 提供 <code>EventStreamParser</code> 工具帮助按事件划分。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：流式途中报错怎么返给客户端？答：发一条 <code>data: {"error": ...}</code> 后关流。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>ai-token-ratelimit</h1></div>
+        <div class="card"><p><code>extensions/ai-token-ratelimit</code>：按 token 数量限流（不是按 QPS）。请求阶段先用 tokenizer 估算 prompt token，响应阶段把 usage.total_tokens 扣账，超阈值即下次拒绝。后端依赖 Redis。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：tokenizer 怎么塞进 Wasm？答：要么内置 BPE 表，要么外呼 token 计算服务。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>ai-quota</h1></div>
+        <div class="card"><p>面向多租户：按用户 / 团队 / API key 设置月度配额。与 ai-token-ratelimit 的区别：粒度（用户）+ 时间窗（月）+ 持久化（Redis hash）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：超额时优雅降级 vs 直接拒绝怎么选？</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>ai-cache 精确与语义</h1></div>
+        <div class="card"><p>支持两种缓存：</p>
+        <ul><li><strong>精确缓存</strong>：以 messages 字面做 key，最简单。</li>
+        <li><strong>语义缓存</strong>：调 embedding API → 向量化 → 相似度查询（向量库）。</li></ul>
+        <p>命中时直接 SendHttpResponse 返回缓存，跳过 ai-proxy。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：流式响应能缓存吗？答：可，缓存完整聚合后的内容。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>ai-rag</h1></div>
+        <div class="card"><p>把请求的 query 发给向量库（Aliyun DashVector / Milvus / 阿里云搜索等），把召回的 chunks 注入到 messages 的 system 字段或 user 之前。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：RAG 注入多少条 chunks？怎么权衡 token 与召回率？</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>ai-history 上下文</h1></div>
+        <div class="card"><p>把历史会话从 Redis / 持久化层拉出来，自动拼到 messages 前面，让无状态客户端拥有有状态会话能力。session_id 通常通过 header / cookie 传入。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：上下文太长怎么截断？提示：保留 system + 最近 N 轮 + 摘要。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>ai-intent 意图</h1></div>
+        <div class="card"><p>用一个小模型分类用户意图（购票 / 投诉 / 闲聊），根据结果改写 model 字段或 route 名，分流到不同 Provider。这是"AI 路由"。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：分类失败时兜底策略？</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>ai-security-guard</h1></div>
+        <div class="card"><p>把请求 / 响应内容送到内容合规服务（阿里云绿网 / 自研敏感词），命中即拦截。两阶段：请求拦敏感问题，响应拦敏感答案。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：流式响应的合规怎么做？答：边截边合规，按句校验。</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>ai-statistics</h1></div>
+        <div class="card"><p>埋点：记录每次调用的 model / tokens / 耗时 / cache hit 等。Higress 把它落到 access log 字段，可由 Promtail / Loki / SLS 消费。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：埋点放最后一个 phase 的好处？答：能看到所有插件影响后的最终结果。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>ai-load-balancer</h1></div>
+        <div class="card"><p>对多 Provider / 多 API key 做智能负载：</p>
+        <ul><li>按健康度（失败率）熔断。</li>
+        <li>按延迟选择最快。</li>
+        <li>按 quota 剩余分配。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：跨 Provider LB 与 Envoy Cluster LB 关系？答：插件层做模型/key 选择，Cluster LB 做 upstream IP 选择。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>ai-search / ai-agent</h1></div>
+        <div class="card"><p>更高层能力：</p>
+        <ul><li><strong>ai-search</strong>：让 LLM 调用搜索引擎补全实时信息。</li>
+        <li><strong>ai-agent</strong>：把 function calling 与外部工具串成 Agent flow，可在网关层完成简单 Agent。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：把 Agent 放网关层而不是应用层的好处？答：复用治理（限流/缓存），多团队共享。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>新增一个 LLM Provider</h1></div>
+        <div class="card"><p>步骤：</p>
+        <ol><li>在 <code>provider/</code> 新建 <code>my.go</code>，实现 Provider 接口。</li>
+        <li>在 <code>provider.go</code> 的工厂 switch 加 case <code>"my"</code>。</li>
+        <li>在 <code>config.go</code> 加该 provider 的字段。</li>
+        <li>写单测：构造 OpenAI request → 调 OnRequestBody → 校验改写后的 body。</li>
+        <li>build → 替换 ai-proxy 镜像。</li></ol>
+        <p>整个过程不需要触碰控制面任何代码。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你已经能扩展任何新 LLM。下一期我们收尾——MCP / 证书 / hgctl / 学习路线回顾。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 07 期 · 服务发现与 McpBridge — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">07</div>
+            <h2>第 07 期</h2>
+            <p class="version">服务发现与 McpBridge · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要做服务来源</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · McpBridge CRD</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · McpBridgeController 薄壳</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · registry/ 总览</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Watcher 接口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · reconcile 协调器</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · memory.ServiceRegistry</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · nacos/ v1</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · nacos/v2</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · nacos/address</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · nacos/mcpserver</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · zookeeper Dubbo</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · consul</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · eureka</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · direct 静态</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · proxy 代理模式</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · 健康检查与 IsHealthy</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · 服务元数据合并</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · ServiceEntry 注入</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 写一个新注册中心适配</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep06.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep08.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 07 期 / 共 10 期</span>
+            <h1 class="part-title">服务发现与 McpBridge</h1>
+            <p class="part-desc">Higress 区别于纯 K8s Ingress 最关键的能力——把 Nacos / ZK / Consul / Eureka 等注册中心的服务注入网关。本期 20 讲拆解 <code>registry/</code> 各实现。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>为什么要做服务来源</h1></div>
+        <div class="card"><p>大型企业中，服务往往同时存在于多种注册中心：K8s Service + Nacos（Spring Cloud / Dubbo） + ZK（老 Dubbo） + 自建。Higress 一统这些来源，让 Ingress 可路由到任何 host，无需自己写 ServiceEntry。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：如果只用 K8s Service 行不行？答：行，但企业混合架构时不够。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>McpBridge CRD</h1></div>
+        <div class="card"><pre><code class="language-yaml">apiVersion: networking.higress.io/v1
+kind: McpBridge
+metadata: { name: default, namespace: higress-system }
+spec:
+  registries:
+    - name: nacos1
+      type: nacos2
+      domain: nacos.example.com
+      port: 8848
+      nacosNamespaceId: public
+      nacosGroups: [DEFAULT_GROUP]
+    - name: zk1
+      type: zookeeper
+      domain: zk.example.com
+      port: 2181
+      zkServicesPath: [/dubbo]</code></pre>
+        <p>一个 namespace 通常只有一份 default McpBridge，名称固定。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么是单例？答：避免冲突，简化语义。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>McpBridgeController 薄壳</h1></div>
+        <div class="card"><p>49 行的控制器：监听 McpBridge 资源 → 把整个 <code>spec</code> 交给 IngressConfig 的 <code>AddOrUpdateMcpBridge</code> → IngressConfig 把它交给 <code>registry/reconcile</code>。Controller 自己不做协议解析。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 controller 这么薄？答：协议实现独立，便于测试 + 扩展。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>registry/ 总览</h1></div>
+        <div class="card"><pre><code class="language-bash">registry/
+  watcher.go          # 统一接口
+  auth_option.go      # 鉴权选项
+  mcp_model.go        # 服务模型
+  memory/             # 内存 ServiceRegistry
+  reconcile/          # 协调器
+  nacos/{,v2,address,mcpserver}
+  zookeeper/、consul/、eureka/{,client}
+  direct/             # 静态配置
+  proxy/              # 代理模式</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 nacos/v2 单独包？答：Nacos 2.x SDK 不兼容 1.x，API 大改。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>Watcher 接口</h1></div>
+        <div class="card"><pre><code class="language-go">type Watcher interface {
+    Run()
+    Stop()
+    IsHealthy() bool
+    GetRegistryType() string
+    ReadyHandler(func(bool))
+    AppendServiceUpdateHandler(func(*v1.ServiceEntry, model.Event))
+}</code></pre>
+        <p>每种注册中心都要实现这套接口。统一把"<strong>服务变更 → Istio ServiceEntry</strong>"作为输出，下游无需关心具体协议。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么用 ServiceEntry 而不是自定义模型？答：复用 Istio Push 链路。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>reconcile 协调器</h1></div>
+        <div class="card"><p><code>registry/reconcile/</code> 是真正的"<strong>大脑</strong>"：</p>
+        <ol><li>对比新旧 McpBridge.spec.registries；</li>
+        <li>需要新增的 → 工厂创建 Watcher 并 Run；</li>
+        <li>需要删除的 → Watcher.Stop；</li>
+        <li>变更（域名 / 端口）→ Stop 后重建。</li></ol>
+        <p>所有 Watcher 共享同一份 memory.ServiceRegistry。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：reconcile 频率高时会不会抖？提示：变更比对 + key 唯一性。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>memory.ServiceRegistry</h1></div>
+        <div class="card"><p>实现 Istio <code>serviceregistry.Instance</code> 接口的内存版本：所有注册中心来的 ServiceEntry 都注入这里。Pilot 通过 aggregate.Controller 从中读出 endpoints 推 EDS。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：memory 版崩溃后数据丢吗？答：丢，重启时 watcher 会重新拉一份。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>nacos/ v1</h1></div>
+        <div class="card"><p><code>registry/nacos/watcher.go</code> 适配 Nacos 1.x SDK。流程：登录 → SubscribeService → 收到 Instance 列表 → 转成 ServiceEntry → emit。Higress 维护 namespaceId × group 维度的订阅。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Nacos 1.x 推送方式？答：UDP push + 长轮询 fallback。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>nacos/v2</h1></div>
+        <div class="card"><p><code>registry/nacos/v2/</code> 适配 Nacos 2.x gRPC 协议。性能优于 1.x，但 SDK API 不同。Higress 通过 type=<code>nacos2</code> 区分。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：能不能直接升 2.x 客户端兼容 1.x server？答：不能，需要服务端也升级。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>nacos/address</h1></div>
+        <div class="card"><p><code>registry/nacos/address/</code> 处理 Nacos 中存的"地址类型"配置（非服务实例，而是单纯的 ip:port 列表）。这是阿里内部常见用法，开源后保留。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：地址 vs 实例 主要差异？答：实例有健康检查 + 元数据。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>nacos/mcpserver</h1></div>
+        <div class="card"><p>Higress 把 Nacos 配置中心当作 MCP Server 注册表：通过监听 Nacos 配置发现 MCP Server 实例。代码在 <code>registry/nacos/mcpserver/</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 MCP 实例不放普通 service 而要单独抽？答：携带 MCP 元数据（工具/资源列表）。</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>zookeeper Dubbo</h1></div>
+        <div class="card"><p><code>registry/zookeeper/watcher.go</code>：</p>
+        <ul><li>连接 ZK，监听 <code>/dubbo/{interfaceName}/providers/</code> 路径。</li>
+        <li>子节点是 URL（dubbo://ip:port/...?param=...），解析后转 ServiceEntry。</li>
+        <li>支持 Triple/Dubbo 协议。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Dubbo URL 里的方法签名是否要落到 ServiceEntry？答：通过 Http2Rpc CRD 单独承载。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>consul</h1></div>
+        <div class="card"><p><code>registry/consul/watcher.go</code> 调 Consul HTTP API，watch <code>/v1/health/service/{name}</code> 拿健康实例。一个 watcher 一个 service。dc / token / namespace 通过 spec.consulDataCenter 等字段传入。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Consul long-poll vs Watch event 怎么选？</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>eureka</h1></div>
+        <div class="card"><p><code>registry/eureka/{client,watcher}</code>。Eureka 没有 watch 接口，只能定时 fetch /eureka/apps/。Higress 用 30s 定时 + delta API 优化。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Eureka pull 模型对延迟敏感的场景合适吗？答：不太合适，建议迁 Nacos。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>direct 静态</h1></div>
+        <div class="card"><p><code>registry/direct/</code> 提供"静态服务"能力：直接在 McpBridge 里写一份 ip:port 列表，不依赖外部注册中心。适合简单场景或调试。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：直接写 ServiceEntry 跟 direct registry 区别？答：direct 走统一 reconcile 管控，运维一致。</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>proxy 代理模式</h1></div>
+        <div class="card"><p><code>registry/proxy/</code> 把请求转发到外部 HTTP 注册中心代理（如自研服务发现）。这是兜底机制：协议不在标准列表里也能接。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：proxy 模式对延迟有什么影响？</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>健康检查与 IsHealthy</h1></div>
+        <div class="card"><p>每个 Watcher 都要实现 <code>IsHealthy()</code>。控制面 <code>/registry/status</code> 端点会列出所有 watcher 状态，运维直接查。健康判定通常是"最后一次成功拉取距今 &lt; 阈值"。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：某个注册中心挂了对其它流量有影响吗？答：互不影响。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>服务元数据合并</h1></div>
+        <div class="card"><p>不同注册中心同名服务时，memory.ServiceRegistry 按 <code>name + namespace + clusterId</code> 去重。Endpoint 列表合并（按 ip:port 唯一）。这避免重复实例导致权重失衡。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：同 host 跨多个 watcher 的版本元数据如何保留？提示：labels merge。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>ServiceEntry 注入</h1></div>
+        <div class="card"><p>最终所有 watcher 把变更 emit 给 reconcile，reconcile 调用 memory.ServiceRegistry 的 UpdateService API，触发 PushContext 重建，进而 EDS / CDS 重推。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：实例增删频繁时怎么避免 push 风暴？答：debounce + delta EDS。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>写一个新注册中心适配</h1></div>
+        <div class="card"><p>步骤：</p>
+        <ol><li>在 <code>registry/</code> 下新建包 <code>myreg/</code>。</li>
+        <li>实现 <code>Watcher</code> 接口。</li>
+        <li>在 reconcile 工厂注册 type → 构造函数。</li>
+        <li>在 McpBridge CRD types 加 type 枚举。</li>
+        <li>写单测，参考 <code>registry/nacos/watcher_test.go</code>。</li></ol></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你已经能给 Higress 接入任意新注册中心。下一期我们切到 Wasm 插件，看真正运行在 Envoy 内的代码。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

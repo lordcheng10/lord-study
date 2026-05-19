@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 08 期 · WasmPlugin 与 wasm-go SDK — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">08</div>
+            <h2>第 08 期</h2>
+            <p class="version">WasmPlugin 与 wasm-go SDK · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Wasm 在网关里干嘛</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · proxy-wasm ABI</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · WasmPlugin CRD 字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · phase 与 priority</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · matchRules 路由覆盖</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 加载链路全图</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · OCI image 拉取</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · plugins/wasm-go 目录</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · proxy-wasm-go-sdk 基础</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · wrapper 抽象层</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · SetCtx 注册回调</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · 配置解析 ParseConfig</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · 请求处理回调链</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · HttpCall 异步外呼</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · RedisCall</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · SharedData 共享状态</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · TinyGo 编译</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · hello-world 插件</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · 本地调试与单测</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 发布到 OCI 仓库</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep07.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep09.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 08 期 / 共 10 期</span>
+            <h1 class="part-title">WasmPlugin 与 wasm-go SDK</h1>
+            <p class="part-desc">这是 Higress 扩展能力的核心载体。20 讲覆盖从 CRD 字段到 Envoy 沙箱加载，再到 wasm-go SDK 的所有关键点，让你能写出工程级 Wasm 插件。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>Wasm 在网关里干嘛</h1></div>
+        <div class="card"><p>Wasm 让我们用任意语言写"挂载在 Envoy 上的中间件"，并具备：</p>
+        <ul><li><strong>沙箱隔离</strong>：插件崩溃不影响主进程。</li>
+        <li><strong>热更新</strong>：换 .wasm 镜像即生效，无需重启。</li>
+        <li><strong>跨语言</strong>：Go / Rust / C++ / AssemblyScript 都能产出 .wasm。</li>
+        <li><strong>性能</strong>：编译执行，比 Lua 快。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Wasm 不是万能，它的局限？提示：内存上限、CPU 单线程、无 OS 系统调用。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>proxy-wasm ABI</h1></div>
+        <div class="card"><p>proxy-wasm 是 Envoy / Istio 社区定义的标准 ABI：定义 Wasm 模块与 Host 通信的函数列表（如 <code>proxy_on_request_headers</code>、<code>proxy_send_http_response</code>）。Higress 的 Envoy 与 plugins 都遵循它。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：proxy-wasm 与 WASI 关系？答：互补，proxy-wasm 偏代理域，WASI 偏 OS 抽象。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>WasmPlugin CRD 字段</h1></div>
+        <div class="card"><pre><code class="language-yaml">apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata: { name: my-plugin, namespace: higress-system }
+spec:
+  url: oci://reg.example.com/wasm/my-plugin:v1
+  imagePullPolicy: Always
+  phase: AUTHN
+  priority: 100
+  defaultConfig: { key: value }
+  matchRules:
+    - domain: ["example.com"]
+      ingress: ["foo"]
+      config: { key: override }</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：matchRules 是 Higress 扩展，相比 Istio 原生 selector 强在哪？答：按 domain+ingress 精细化覆盖。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>phase 与 priority</h1></div>
+        <div class="card"><p>phase 枚举：AUTHN / AUTHZ / STATS / UNSPECIFIED。同 phase 内按 priority 降序执行。这决定了 Wasm filter 在 HTTP filter chain 的位置：AUTHN 最早，STATS 最晚。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：ai-cache 应该放 AUTHZ 之前还是之后？提示：先鉴权再查缓存最稳。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>matchRules 路由覆盖</h1></div>
+        <div class="card"><p>同一插件可对不同 host / ingress 使用不同配置。IngressConfig 把每条 matchRule 渲染成单独的 EnvoyFilter patch route，让 Envoy 在每条 route 上 attach 不同 plugin config。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：matchRules 太多会爆 EnvoyFilter 数量吗？答：会，注意控制规模。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>加载链路全图</h1></div>
+        <div class="card"><pre><code class="language-bash">用户 kubectl apply WasmPlugin
+  → wasmplugin Controller (Informer)
+  → IngressConfig.AddOrUpdateWasmPlugin
+  → convertWasmPlugin → 输出 Istio extensions.WasmPlugin + EnvoyFilter
+  → Pilot xDS push
+  → Envoy 收到 LDS/EnvoyFilter
+  → Envoy Wasm Filter 从 url 拉镜像
+  → V8 / WAVM 加载 .wasm
+  → 处理 HTTP 请求</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：镜像首次拉取慢会阻塞流量吗？答：可配置 fail_open / fail_close 模式。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>OCI image 拉取</h1></div>
+        <div class="card"><p>Envoy 支持 <code>oci://</code> / <code>http://</code> / <code>file://</code> 三种 URL：</p>
+        <ul><li>OCI：使用 manifest + blob，支持私有 registry（imagePullSecret）。</li>
+        <li>HTTP：直接 GET .wasm 字节。</li>
+        <li>file：本地路径，开发测试用。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Wasm 镜像比 Docker 镜像通常小几个数量级，原因？提示：纯字节码。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>plugins/wasm-go 目录</h1></div>
+        <div class="card"><pre><code class="language-bash">plugins/wasm-go/
+  pkg/                # 由 mcp 组成的内部库（关键是 wrapper）
+  extensions/         # ★ 56 个 官方插件
+  mcp-servers/        # 内建 MCP Server 实现
+  examples/           # 示例
+  Dockerfile{,Builder}
+  Makefile</code></pre>
+        <p><strong>wrapper</strong> 是 Higress 自研的"上层 SDK"，在 proxy-wasm-go-sdk 之上提供易用 API。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么把 wrapper 独立？答：屏蔽 ABI 复杂度，让插件作者只关心业务。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>proxy-wasm-go-sdk 基础</h1></div>
+        <div class="card"><p>上游 <code>github.com/tetratelabs/proxy-wasm-go-sdk</code> 提供：</p>
+        <ul><li><code>types.Context</code>：插件根上下文。</li>
+        <li><code>types.HttpContext</code>：每个请求一个实例。</li>
+        <li><code>proxywasm.*</code>：ABI 包装函数（AddHttpRequestHeader 等）。</li></ul>
+        <p>直接用它写插件是可以的，但样板代码多。Higress 在外面再封一层。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 Wasm 插件每个请求要新建 HttpContext？答：隔离请求状态。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>wrapper 抽象层</h1></div>
+        <div class="card"><p>位于 <code>plugins/wasm-go/pkg/wrapper/</code>。提供：</p>
+        <ul><li>统一回调接口（OnHttpRequestHeaders / Body / OnHttpResponseHeaders / Body）。</li>
+        <li>自动 JSON / gjson 配置解析。</li>
+        <li>HttpCall / RedisCall 异步外呼封装。</li>
+        <li>Log 工具。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：抽象多了会损失什么？答：极限性能与灵活性，但绝大多数场景够用。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>SetCtx 注册回调</h1></div>
+        <div class="card"><pre><code class="language-go">func main() {
+    wrapper.SetCtx(
+        "my-plugin",
+        wrapper.ParseConfig(parseConfig),
+        wrapper.ProcessRequestHeaders(onHttpRequestHeaders),
+        wrapper.ProcessRequestBody(onHttpRequestBody),
+        wrapper.ProcessResponseHeaders(onHttpResponseHeaders),
+        wrapper.ProcessResponseBody(onHttpResponseBody),
+    )
+}</code></pre>
+        <p>每个 Option 都是可选的，按需注册。wrapper 内部把它们桥接到 proxy-wasm 的 ABI 回调。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：只注册 ResponseBody，请求阶段会被处理吗？答：不会，性能更优。</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>配置解析 ParseConfig</h1></div>
+        <div class="card"><pre><code class="language-go">type MyConfig struct {
+    APIKey string `json:"apiKey"`
+    Limit  int    `json:"limit"`
+}
+func parseConfig(json gjson.Result, c *MyConfig, log wrapper.Log) error {
+    c.APIKey = json.Get("apiKey").String()
+    c.Limit  = int(json.Get("limit").Int())
+    if c.APIKey == "" { return errors.New("apiKey required") }
+    return nil
+}</code></pre>
+        <p>失败时插件不加载，避免错配上线。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：用 gjson 而不直接 json.Unmarshal 的原因？答：体积小、TinyGo 兼容好。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>请求处理回调链</h1></div>
+        <div class="card"><pre><code class="language-go">func onHttpRequestHeaders(ctx wrapper.HttpContext, c MyConfig, log wrapper.Log) types.Action {
+    if proxywasm.GetHttpRequestHeader("x-api-key") != c.APIKey {
+        proxywasm.SendHttpResponse(401, nil, []byte("unauthorized"), -1)
+        return types.ActionPause
+    }
+    return types.ActionContinue
+}</code></pre>
+        <p>返回 <code>ActionContinue</code> / <code>ActionPause</code> 控制是否继续处理。Pause 后必须主动 Resume 否则永远卡住。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：什么时候用 Pause？答：等待异步结果（HttpCall）时。</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>HttpCall 异步外呼</h1></div>
+        <div class="card"><pre><code class="language-go">client := wrapper.NewClusterClient(wrapper.FQDNCluster{
+    FQDN: "auth.svc.cluster.local", Host: "auth", Port: 80,
+})
+client.Get("/check?token=xxx", nil,
+    func(status int, headers http.Header, body []byte) {
+        if status != 200 { /* deny */ }
+        proxywasm.ResumeHttpRequest()
+    }, 5000)
+return types.ActionPause</code></pre>
+        <p>异步：返回 Pause，回调里 Resume。Envoy 走标准 Cluster 转发，享受 LB / 健康检查。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Cluster 怎么来？答：DestinationRule 自动或自定义 EnvoyFilter 创建。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>RedisCall</h1></div>
+        <div class="card"><p>wrapper 也封装了 Redis：用于 ai-cache、rate-limit 这类需要分布式状态的插件。底层走 Envoy 的 redis_proxy filter cluster。</p>
+        <pre><code class="language-go">redis := wrapper.NewRedisClusterClient("redis-cache")
+redis.Get("key", func(resp resp.Value) { ... })</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：直连 Redis vs 走 Envoy redis filter 的优劣？</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>SharedData 共享状态</h1></div>
+        <div class="card"><p>同一 Worker 内多个 HttpContext 通过 <code>proxywasm.GetSharedData / SetSharedData</code> 共享 KV（CAS 语义）。注意：跨 Worker 不共享，跨节点更不共享，需要 Redis 兜底。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：本地令牌桶用 SharedData 就够吗？答：单 Worker OK；多 Worker 计数会偏低。</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>TinyGo 编译</h1></div>
+        <div class="card"><p>Go 标准编译器输出 .wasm 太大（带运行时），插件作者都用 <strong>TinyGo</strong>：</p>
+<pre><code class="language-bash">tinygo build -o my-plugin.wasm -scheduler=none -target=wasi ./main.go</code></pre>
+        <p><code>-scheduler=none</code> 让插件单线程，符合 proxy-wasm 假设。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：TinyGo 不支持哪些 Go 特性？答：reflect 不全、cgo 受限、goroutine 受限。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>hello-world 插件</h1></div>
+        <div class="card"><p><code>plugins/wasm-go/extensions/hello-world/</code> 是最小完整示例。代码不到 40 行：</p>
+<pre><code class="language-go">func main() { wrapper.SetCtx("hello-world", wrapper.ProcessRequestHeaders(headers)) }
+func headers(ctx wrapper.HttpContext, c struct{}, log wrapper.Log) types.Action {
+    proxywasm.AddHttpRequestHeader("hello", "world")
+    return types.ActionContinue
+}</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：把它跑起来你需要哪几步？答：build → 推 OCI → apply WasmPlugin → curl 验证。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>本地调试与单测</h1></div>
+        <div class="card"><p>wrapper 提供了 <code>HttpContext</code> 的 mock：</p>
+<pre><code class="language-go">func TestHeaders(t *testing.T) {
+    ctx := wrapper.NewMockContext()
+    ctx.SetReqHeader("x-api-key", "secret")
+    action := headers(ctx, cfg, log)
+    require.Equal(t, types.ActionContinue, action)
+}</code></pre>
+        <p>插件作者可以离线写 unit test，CI 跑 <code>go test</code> 即可。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：单测覆盖到 HttpCall 吗？答：mock 客户端可注入。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>发布到 OCI 仓库</h1></div>
+        <div class="card"><pre><code class="language-bash">make build-wasm PLUGIN=hello-world
+docker build -t my/hello-world:v1 \
+  -f plugins/wasm-go/Dockerfile \
+  --build-arg PLUGIN=hello-world .
+docker push my/hello-world:v1</code></pre>
+        <p>然后在 WasmPlugin <code>url: oci://my/hello-world:v1</code> 即可。Higress 也提供 <code>Dockerfile</code> 把多个插件批量打成镜像。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你已经能从零写、调、发一个 Higress Wasm 插件。下一期我们看官方 AI 网关插件家族。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

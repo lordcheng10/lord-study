@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 06 期 · Annotation 解析器深度 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">06</div>
+            <h2>第 06 期</h2>
+            <p class="version">Annotation 解析器深度 · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · annotations/ 目录</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · interface.go 两接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · annotations.go 入口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · parser.go 工具</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · canary 灰度</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · cors</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · rewrite</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · redirect</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · timeout</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · retry</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · mirror</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · header_control</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · ip_access_control</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · local_rate_limit</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · loadbalance</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · auth (jwt/basic/key)</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · upstream/downstream TLS</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · destination 转写</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · http2rpc / mcpserver</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 扩展新注解</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep05.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep07.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 06 期 / 共 10 期</span>
+            <h1 class="part-title">Annotation 解析器深度</h1>
+            <p class="part-desc">把 <code>pkg/ingress/kube/annotations/</code> 的 24 个文件按主题拆开讲清楚。读完你能"加一个新注解"——这是给 Higress 添新功能最常见的姿势。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>annotations/ 目录</h1></div>
+        <div class="card"><pre><code class="language-bash">annotations/
+  annotations.go      # 入口：聚合所有 Parser
+  interface.go        # 接口定义
+  parser.go、util.go  # 工具
+  auth.go             # 鉴权类（basic/key/jwt 聚合）
+  canary.go、cors.go、rewrite.go、redirect.go、timeout.go、
+  retry.go、mirror.go、header_control.go、ip_access_control.go、
+  local_rate_limit.go、loadbalance.go、match.go、ignore_case.go、
+  default_backend.go、destination.go、downstreamtls.go、upstreamtls.go、
+  http2rpc.go、mcpserver.go
+</code></pre>
+        <p>24 个文件，按"<strong>一个能力一个文件</strong>"组织。注解前缀统一为 <code>higress.io/</code> 或 <code>nginx.ingress.kubernetes.io/</code>（兼容 Nginx Ingress）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：兼容 Nginx 前缀的好处是什么？答：迁移成本低。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>interface.go 两接口</h1></div>
+        <div class="card"><pre><code class="language-go">type AnnotationsParser interface {
+    Parse(annotations Annotations, config *Ingress, globalContext *GlobalContext) error
+}
+
+type AnnotationHandler interface {
+    Parse(meta metav1.ObjectMeta) (*Ingress, error)
+    ApplyRoute(route *networking.HTTPRoute, ingress *Ingress)
+    ApplyCluster(cluster *networking.DestinationRule, ingress *Ingress)
+    ApplyGateway(gw *networking.Gateway, ingress *Ingress)
+}</code></pre>
+        <p><strong>两阶段</strong>：Parser 把字符串注解读到 Ingress IR；Applier 把 IR 字段写入 Istio 资源。这样每个能力只关心自己的字段，互不干扰。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 Apply 分 Route/Cluster/Gateway 三个？答：注解目标资源不同，分发更清晰。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>annotations.go 入口</h1></div>
+        <div class="card"><p>它实例化一份 <code>AnnotationHandler</code>，内部维护 Parser 列表（按字段名一一对应）。Parse 流程：循环 parser.Parse() 把所有注解填到一个 Ingress 结构体。ApplyXxx 时再调每个 Parser 的同名 Apply 方法。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Parser 失败时整个 Ingress 是否要拒绝？答：通常仅记录错误，继续解析其它注解，避免单点导致全停。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>parser.go 工具</h1></div>
+        <div class="card"><p>通用工具：解析整数 / 布尔 / 字符串列表 / 时长。每个具体 parser 调用它从 <code>Annotations</code> map 里取值，简化错误处理。</p>
+<pre><code class="language-go">val, err := parseIntAnnotation(annotations, "rate-limit-qps")
+duration, err := parseDuration(annotations, "timeout")
+list := parseStringList(annotations, "ip-whitelist")</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：注解的类型校验放在 admission webhook 还是 controller？Higress 是后者，权衡是什么？</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>canary 灰度</h1></div>
+        <div class="card"><p>注解：<code>higress.io/canary</code>、<code>canary-weight</code>、<code>canary-by-header</code>、<code>canary-by-cookie</code>。Parser 读取后存到 <code>Ingress.Canary</code> 字段。Apply 阶段配合 <code>applyCanaryIngresses</code> 改写 HTTPRoute 的 <code>route[]</code> + <code>match.headers</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：weight + header 并用时如何排序？答：header/cookie 匹配路由先生成，未命中的请求再按权重分流。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>cors</h1></div>
+        <div class="card"><p>注解：<code>cors-allow-origins</code>、<code>cors-allow-methods</code>、<code>cors-allow-headers</code>、<code>cors-max-age</code>。ApplyRoute 把它转成 <code>HTTPRoute.CorsPolicy</code>。Higress 与 Nginx Ingress 字段一一对应，迁移成本低。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：通配 <code>*</code> 与具体 origin 列表谁更安全？</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>rewrite</h1></div>
+        <div class="card"><p>注解：<code>rewrite-target</code>、<code>upstream-vhost</code>。Apply 阶段写入 <code>HTTPRewrite.URI / Authority</code>，让 Envoy 在路由后改写 URL。注意：rewrite 与 redirect 区别——前者改后端请求，客户端无感；后者返回 3xx。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：rewrite-target 支持正则替换吗？答：支持，依赖 Envoy <code>pattern_match</code>。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>redirect</h1></div>
+        <div class="card"><p>注解：<code>permanent-redirect</code>、<code>permanent-redirect-code</code>、<code>temporal-redirect</code>。直接返回 301/302/307/308。还支持 HTTPS 强制重定向 <code>ssl-redirect</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：ssl-redirect 在 listener 哪一层做？答：通过 VirtualService 的 HTTPRoute.Redirect。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>timeout</h1></div>
+        <div class="card"><p>注解：<code>proxy-connect-timeout</code>、<code>proxy-read-timeout</code>、<code>proxy-send-timeout</code>、<code>request-timeout</code>。Apply 分别落到 HTTPRoute.Timeout（请求级）和 DestinationRule.ConnectionPool（连接级）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：read 与 send 在 Envoy 里对应哪两个超时？提示：idle / response timeout。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>retry</h1></div>
+        <div class="card"><p>注解：<code>proxy-next-upstream-tries</code>、<code>proxy-next-upstream</code>（条件）。Apply 写到 <code>HTTPRoute.Retries</code>。Higress 默认对 5xx / connect-failure / refused-stream 自动重试。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：POST 请求要不要 retry？答：默认不重试，避免重复副作用。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>mirror</h1></div>
+        <div class="card"><p>注解：<code>mirror-target-service</code>、<code>mirror-percentage</code>。流量复制到镜像服务，但响应丢弃。常用于灰度验证。Apply 落 <code>HTTPRoute.Mirror</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：mirror 流量是否计入 upstream 限流？</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>header_control</h1></div>
+        <div class="card"><p>统一支持请求/响应方向上的 Add/Remove/Set。Apply 落到 HTTPRoute.Headers。注意 Envoy 对 header 名大小写不敏感、值大小写敏感。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：怎么删除 hop-by-hop header 比如 Connection？</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>ip_access_control</h1></div>
+        <div class="card"><p>注解：<code>whitelist-source-range</code>、<code>denylist-source-range</code>。Apply 走 EnvoyFilter（不是 HTTPRoute，因为 Istio 原生 VS 不支持 IP ACL），patch listener 加 <code>envoy.filters.http.rbac</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：客户端真实 IP 怎么拿？提示：x-forwarded-for + 配置 trust hop。</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>local_rate_limit</h1></div>
+        <div class="card"><p>注解：<code>route-limit-rps</code>、<code>route-limit-burst</code>。本地 token bucket，无需 Redis，写到 EnvoyFilter <code>envoy.filters.http.local_ratelimit</code>。</p>
+        <p>分布式限流另见 <code>cluster-key-rate-limit</code> 插件（第 09 期）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：本地限流与集群级限流何时该用哪个？</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>loadbalance</h1></div>
+        <div class="card"><p>注解：<code>load-balance</code>（roundrobin/leastrequest/random/maglev/ringhash），ApplyCluster 写到 DestinationRule.TrafficPolicy.LoadBalancer。Higress 还扩展了"按 header 哈希一致性"用于 AI Provider 粘性会话。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Maglev 与 RingHash 区别？答：内存结构与一致性强度不同。</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>auth (jwt/basic/key)</h1></div>
+        <div class="card"><p><code>auth.go</code> 聚合多种鉴权：</p>
+        <ul><li><strong>basic-auth</strong>：Higress 原生支持，IngressConfig 合成 EnvoyFilter。</li>
+        <li><strong>key-auth / jwt-auth</strong>：通过 WasmPlugin 注解 <code>auth-enabled</code> 关联。</li>
+        <li><strong>ext-auth</strong>：调外部 authz service。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：注解和 WasmPlugin CRD 谁优先？</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>upstream/downstream TLS</h1></div>
+        <div class="card"><p><code>downstreamtls.go</code> 处理客户端到 Higress 的 TLS（证书引用、最小 TLS 版本、SNI）；<code>upstreamtls.go</code> 处理 Higress 到 upstream 的 mTLS（CA / cert / SNI / 验证模式）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：upstream mTLS 证书放哪里？提示：Secret + DestinationRule.ClientTLSSettings。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>destination 转写</h1></div>
+        <div class="card"><p><code>destination.go</code>：注解 <code>destination</code> 可把 backend 重写到任意 host（含 Nacos 服务、外部 FQDN）。这是 Higress 让"<em>Ingress 直连任意服务</em>"的核心扩展。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：destination 与 backend.service.name 矛盾时谁赢？答：destination 注解优先。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>http2rpc / mcpserver</h1></div>
+        <div class="card"><p>这两个注解把 Ingress 路由"绑定到"对应 CRD：</p>
+        <ul><li><code>higress.io/http2rpc: my-h2r</code> → 关联 Http2Rpc CRD，触发 Dubbo 协议转换。</li>
+        <li><code>higress.io/mcp-server-config-name: ...</code> → 关联 McpServer CRD，转发到 MCP Server。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：注解 + CRD 比纯注解 / 纯 CRD 的好处？答：声明位置贴近路由，但结构化数据放 CRD。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>扩展新注解</h1></div>
+        <div class="card"><p>5 步走：</p>
+        <ol><li>在 <code>annotations/</code> 新建 <code>myfeat.go</code>，定义 MyFeatConfig 字段。</li>
+        <li>实现 <code>AnnotationsParser</code> 与 Apply 方法。</li>
+        <li>在 <code>annotations.go</code> 注册到 parser 列表。</li>
+        <li>在 <code>WrapperConfig.Ingress</code> 增加字段引用。</li>
+        <li>选择落到 Route / Cluster / Gateway 还是 EnvoyFilter，补 Apply 调用。</li></ol>
+        <p>整套过程不需要触碰 IngressConfig 主流程，符合"<strong>开闭原则</strong>"。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你可以从今天起给 Higress 加新注解。下一期我们换主题：注册中心与 McpBridge。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
