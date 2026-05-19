@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Higress 源码学习 20 讲 — 从入口到 AI 网关核心实现</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">HG</div>
+            <h2>Higress 源码 20 讲</h2>
+            <p class="version">Go · Envoy · Istio · Wasm</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">第一阶段：宏观认知</li>
+            <li><a href="#ep01" class="nav-link active" data-section="ep01">第 01 讲 · 项目画像与代码量</a></li>
+            <li><a href="#ep02" class="nav-link" data-section="ep02">第 02 讲 · 仓库结构总览</a></li>
+            <li><a href="#ep03" class="nav-link" data-section="ep03">第 03 讲 · Higress 与 Istio 的血缘</a></li>
+            <li><a href="#ep04" class="nav-link" data-section="ep04">第 04 讲 · 数据面 Envoy 与 xDS</a></li>
+
+            <li class="nav-group-title">第二阶段：控制面入口</li>
+            <li><a href="#ep05" class="nav-link" data-section="ep05">第 05 讲 · main.go 启动入口</a></li>
+            <li><a href="#ep06" class="nav-link" data-section="ep06">第 06 讲 · Cobra 命令体系</a></li>
+            <li><a href="#ep07" class="nav-link" data-section="ep07">第 07 讲 · Server 初始化全景</a></li>
+            <li><a href="#ep08" class="nav-link" data-section="ep08">第 08 讲 · K8s Client 封装</a></li>
+
+            <li class="nav-group-title">第三阶段：Ingress 翻译核心</li>
+            <li><a href="#ep09" class="nav-link" data-section="ep09">第 09 讲 · Ingress Controller 模型</a></li>
+            <li><a href="#ep10" class="nav-link" data-section="ep10">第 10 讲 · IngressConfig 主转换器</a></li>
+            <li><a href="#ep11" class="nav-link" data-section="ep11">第 11 讲 · Annotation 解析器框架</a></li>
+            <li><a href="#ep12" class="nav-link" data-section="ep12">第 12 讲 · Translation 翻译层</a></li>
+
+            <li class="nav-group-title">第四阶段：服务发现</li>
+            <li><a href="#ep13" class="nav-link" data-section="ep13">第 13 讲 · McpBridge 与 registry</a></li>
+            <li><a href="#ep14" class="nav-link" data-section="ep14">第 14 讲 · Nacos / ZK / Consul 接入</a></li>
+
+            <li class="nav-group-title">第五阶段：插件与 AI</li>
+            <li><a href="#ep15" class="nav-link" data-section="ep15">第 15 讲 · WasmPlugin CRD 加载链路</a></li>
+            <li><a href="#ep16" class="nav-link" data-section="ep16">第 16 讲 · wasm-go SDK 设计</a></li>
+            <li><a href="#ep17" class="nav-link" data-section="ep17">第 17 讲 · ai-proxy 多模型代理</a></li>
+            <li><a href="#ep18" class="nav-link" data-section="ep18">第 18 讲 · MCP Server 托管</a></li>
+
+            <li class="nav-group-title">第六阶段：周边与收官</li>
+            <li><a href="#ep19" class="nav-link" data-section="ep19">第 19 讲 · 证书管理 pkg/cert</a></li>
+            <li><a href="#ep20" class="nav-link" data-section="ep20">第 20 讲 · 学习路线复盘</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-tutorial.html" class="nav-link" style="color:var(--accent-green);">&larr; Higress 使用教程</a></li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客主页</a></li>
+        </ul>
+    </nav>
+
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+
+        <div class="part-header">
+            <span class="part-label">源码学习 · 20 讲</span>
+            <h1 class="part-title">Higress 源码学习路线</h1>
+            <p class="part-desc">从 main.go 一行到 AI 网关核心实现，20 讲由浅入深贯穿 Higress 控制面、数据面与 Wasm 插件的全部关键代码路径。每讲都附源码定位、关键代码片段与思考题，建议配合 <code>/Users/bitmart/work/codes/github/higress</code> 边读边练。</p>
+        </div>
+
+        <!-- ============ 学习路线总图 ============ -->
+        <section class="section">
+            <div class="card highlight-card">
+                <h3>20 讲学习路线一览</h3>
+                <table>
+                    <thead><tr><th>阶段</th><th>讲次</th><th>主题</th><th>难度</th></tr></thead>
+                    <tbody>
+                        <tr><td rowspan="4"><strong>宏观认知</strong></td><td>01</td><td>项目画像与代码量</td><td>★</td></tr>
+                        <tr><td>02</td><td>仓库结构总览</td><td>★</td></tr>
+                        <tr><td>03</td><td>Higress 与 Istio 的血缘</td><td>★★</td></tr>
+                        <tr><td>04</td><td>数据面 Envoy 与 xDS</td><td>★★</td></tr>
+                        <tr><td rowspan="4"><strong>控制面入口</strong></td><td>05</td><td>main.go 启动入口</td><td>★</td></tr>
+                        <tr><td>06</td><td>Cobra 命令体系</td><td>★★</td></tr>
+                        <tr><td>07</td><td>Server 初始化全景</td><td>★★★</td></tr>
+                        <tr><td>08</td><td>K8s Client 封装</td><td>★★</td></tr>
+                        <tr><td rowspan="4"><strong>Ingress 翻译核心</strong></td><td>09</td><td>Ingress Controller 模型</td><td>★★★</td></tr>
+                        <tr><td>10</td><td>IngressConfig 主转换器</td><td>★★★★</td></tr>
+                        <tr><td>11</td><td>Annotation 解析器框架</td><td>★★★</td></tr>
+                        <tr><td>12</td><td>Translation 翻译层</td><td>★★★</td></tr>
+                        <tr><td rowspan="2"><strong>服务发现</strong></td><td>13</td><td>McpBridge 与 registry</td><td>★★★</td></tr>
+                        <tr><td>14</td><td>Nacos / ZK / Consul 接入</td><td>★★★</td></tr>
+                        <tr><td rowspan="4"><strong>插件与 AI</strong></td><td>15</td><td>WasmPlugin CRD 加载链路</td><td>★★★★</td></tr>
+                        <tr><td>16</td><td>wasm-go SDK 设计</td><td>★★★</td></tr>
+                        <tr><td>17</td><td>ai-proxy 多模型代理</td><td>★★★★</td></tr>
+                        <tr><td>18</td><td>MCP Server 托管</td><td>★★★★</td></tr>
+                        <tr><td rowspan="2"><strong>周边与收官</strong></td><td>19</td><td>证书管理 pkg/cert</td><td>★★</td></tr>
+                        <tr><td>20</td><td>学习路线复盘</td><td>★</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ===================== 第 01 讲 ===================== -->
+        <section id="ep01" class="section">
+            <div class="section-header">
+                <span class="section-number">01</span>
+                <h1>项目画像与代码量</h1>
+            </div>
+
+            <div class="card">
+                <h3>定位</h3>
+                <p>Higress 是阿里开源的 <strong>云原生 AI 网关</strong>，以 Istio + Envoy 为底座，原生支持 Ingress / Gateway API / MCP / Wasm 插件，目标是把"南北向流量网关 + AI 网关 + 微服务网关"三合一。仓库位于 <code>github.com/alibaba/higress</code>，主仓库当前主分支版本 <code>v2.x</code>。</p>
+            </div>
+
+            <div class="card">
+                <h3>技术画像</h3>
+                <table>
+                    <thead><tr><th>属性</th><th>值</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>语言</strong></td><td>Go（控制面 / SDK）+ C++（Envoy）+ Rust / AssemblyScript / Go（Wasm 插件）</td></tr>
+                        <tr><td><strong>核心依赖</strong></td><td>istio.io/istio（Pilot 子集）、envoyproxy/go-control-plane、k8s.io/client-go、proxy-wasm-go-sdk</td></tr>
+                        <tr><td><strong>构建</strong></td><td>Makefile + Makefile.core.mk（沿用 Istio 的 build common 体系）</td></tr>
+                        <tr><td><strong>部署形态</strong></td><td>Helm chart (<code>helm/</code>) + Docker (<code>docker/</code>) + 单机 all-in-one</td></tr>
+                        <tr><td><strong>测试</strong></td><td>单元测试 (*_test.go) + e2e 测试 (<code>test/e2e</code>) + gateway conformance (<code>test/gateway</code>)</td></tr>
+                        <tr><td><strong>插件生态</strong></td><td><code>plugins/wasm-go/extensions</code> 下 60+ 官方插件，含 ai-proxy / ai-cache / ai-rag / mcp-router 等</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>关键 LOC（粗略）</h3>
+<pre><code class="language-bash"># 控制面核心
+pkg/                ~ 35,000 行 Go
+  ingress/config/ingress_config.go   2,085 行  ← 翻译大脑
+  bootstrap/server.go                  546 行  ← 启动主线
+# 数据面胶水
+envoy/             go-control-plane 适配
+istio/             裁剪过的 Istio pilot 代码（vendored）
+# 插件 SDK 与扩展
+plugins/wasm-go/   ~ 200,000 行 Go（含 60+ 插件 + SDK）
+# CLI 工具
+hgctl/             ~ 20,000 行 Go</code></pre>
+            </div>
+
+            <div class="card warn-card">
+                <h3>读源前 3 个核心问题</h3>
+                <ol>
+                    <li>Higress 跟 Istio 是什么关系？为什么仓库里有 <code>istio/</code> 子目录？</li>
+                    <li>一条 K8s Ingress YAML 是怎么变成 Envoy 配置下发到 sidecar 的？</li>
+                    <li>ai-proxy 这种"AI 网关能力"到底是写在 Envoy 里还是 Wasm 插件里？</li>
+                </ol>
+                <p>这 3 个问题贯穿后 19 讲，建议读完每讲都回头看自己能否回答得更具体。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 02 讲 ===================== -->
+        <section id="ep02" class="section">
+            <div class="section-header">
+                <span class="section-number">02</span>
+                <h1>仓库结构总览</h1>
+            </div>
+
+            <div class="card">
+                <h3>顶层目录</h3>
+<pre><code class="language-bash">higress/
+├── cmd/higress/main.go        # 控制面唯一入口（仅 32 行）
+├── pkg/                       # 控制面核心 Go 代码
+│   ├── bootstrap/             # Server 启动 / xDS 初始化
+│   ├── cert/                  # 自动证书管理 (ACME / 自签)
+│   ├── cmd/                   # Cobra root command
+│   ├── common/、config/       # 公共常量与环境变量
+│   ├── ingress/               # ★ Ingress → Envoy 翻译核心
+│   │   ├── config/            # IngressConfig 主转换器
+│   │   ├── translation/       # 翻译入口
+│   │   ├── kube/              # 各 CRD 控制器
+│   │   │   ├── annotations/   # 注解解析器（30+）
+│   │   │   ├── ingress/、ingressv1/  # Ingress 资源监听
+│   │   │   ├── mcpbridge/     # 服务来源 CRD
+│   │   │   ├── mcpserver/     # MCP Server CRD
+│   │   │   ├── wasmplugin/    # WasmPlugin CRD
+│   │   │   └── gateway/、kingress/   # Gateway API / Knative
+│   │   └── mcp/               # 配置下发 MCP（Mesh Config Protocol）
+│   └── kube/                  # K8s client wrapper
+├── registry/                  # ★ 注册中心适配层
+│   ├── nacos/、consul/、zookeeper/、eureka/、direct/
+│   ├── reconcile/             # 服务变更协调器
+│   └── memory/                # 内存 Service Registry
+├── istio/                     # vendored 裁剪版 Istio Pilot
+├── envoy/                     # Envoy 自定义构建材料 + go-control-plane 适配
+├── plugins/                   # ★ Wasm 插件
+│   ├── wasm-go/{pkg,extensions,mcp-servers}
+│   ├── wasm-rust/、wasm-cpp/、wasm-assemblyscript/
+│   └── golang-filter/         # Envoy Go Filter（非 Wasm）
+├── api/                       # CRD Schema（OpenAPI）
+├── client/                    # K8s code-generated client
+├── helm/                      # Helm chart
+├── hgctl/                     # 命令行工具
+├── docker/、samples/、test/   # 镜像 / 示例 / 测试
+└── docs/                      # 中英文文档</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>三个最重要的目录</h3>
+                <div class="feature-grid">
+                    <div class="feature-item">
+                        <div class="feature-icon" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">P</div>
+                        <h4>pkg/ingress</h4>
+                        <p>K8s 资源 → Istio 配置的翻译大脑。理解这里就理解了控制面 80% 的逻辑。</p>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-icon" style="background:linear-gradient(135deg,#8b5cf6,#06b6d4);">R</div>
+                        <h4>registry/</h4>
+                        <p>除 K8s Service 之外的多注册中心服务发现（Nacos / ZK 等），是 Higress 区别于纯 K8s Ingress 的关键。</p>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-icon" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">W</div>
+                        <h4>plugins/wasm-go</h4>
+                        <p>所有"AI 网关能力"的真正实现位置。SDK 在 <code>pkg/</code>，60+ 插件在 <code>extensions/</code>。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>读源建议路径</h3>
+                <p>横向 → 纵向。先读懂第 05～07 讲的<strong>启动主线</strong>，再纵深第 10 讲 <code>ingress_config.go</code>，最后按需要选读 registry / wasm / cert 等专题。不要一上来就读 <code>plugins/wasm-go/extensions/ai-proxy</code>，否则会被业务细节淹没。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 03 讲 ===================== -->
+        <section id="ep03" class="section">
+            <div class="section-header">
+                <span class="section-number">03</span>
+                <h1>Higress 与 Istio 的血缘</h1>
+            </div>
+
+            <div class="card">
+                <h3>Higress 是"瘦身魔改版"的 Istiod</h3>
+                <p>Higress 控制面本质是一个改造过的 <strong>Istio Pilot</strong>：去掉 mTLS、CA、Sidecar Injector 等不必要模块，专心做 xDS 配置生成。它通过 <strong>vendoring（内嵌依赖）</strong>的方式把 Istio 关键代码拷贝到 <code>istio/</code> 目录，再用 <code>go.mod</code> 的 <code>replace</code> 指令重定向。</p>
+            </div>
+
+            <div class="card">
+                <h3>证据 1：bootstrap 大量 import istio</h3>
+<pre><code class="language-go">// pkg/bootstrap/server.go
+import (
+    "istio.io/istio/pilot/pkg/config/aggregate"
+    "istio.io/istio/pilot/pkg/model"
+    "istio.io/istio/pilot/pkg/server"
+    kubecontroller "istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
+    "istio.io/istio/pilot/pkg/xds"            // ← Istio 的 xDS 服务端，直接复用
+    ...
+)</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>证据 2：go.mod replace 指向本地 istio/</h3>
+                <p>查看根目录 <code>go.mod</code>，会看到大量类似 <code>replace istio.io/istio =&gt; ./istio/istio</code> 的指令，意思是"虽然 import 路径写的是 istio.io/istio，但实际编译用我本地裁剪过的副本"。这让 Higress 可以小步快跑地修改 Pilot 而不必等上游合并。</p>
+            </div>
+
+            <div class="card">
+                <h3>三方分工示意</h3>
+<pre><code class="language-bash">┌─────────────────────────────────────────────────────────────┐
+│                    Higress 控制面 (this repo)               │
+│  pkg/ingress  →  生成 VirtualService / DestinationRule …    │
+│         │                                                   │
+│         ▼                                                   │
+│  istio/istio (vendored Pilot)                               │
+│  ├─ pilot/pkg/config         配置聚合                       │
+│  ├─ pilot/pkg/xds            ADS gRPC server                │
+│  └─ pilot/pkg/model          ServiceRegistry / Push 模型     │
+│         │   gRPC ADS                                        │
+│         ▼                                                   │
+│  Envoy 数据面 (envoy/)  ←─── 加载 Wasm plugin (plugins/)    │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+            </div>
+
+            <div class="card warn-card">
+                <h3>对阅读者的影响</h3>
+                <ul>
+                    <li>读源时<strong>遇到 <code>istio.io/istio/...</code> import 不要跳走</strong>，IDE 会跳到 <code>./istio/istio/...</code> 本地副本。</li>
+                    <li>不需要先看完整本 Istio 源码——Higress 用到的核心 5 个包：<code>pilot/pkg/{config,xds,model,server,serviceregistry}</code>。</li>
+                    <li>Higress 自己定义的 CRD（Ingress 注解扩展、McpBridge、WasmPlugin）通过自己的 ConfigStore 注入到 Pilot Push 流程里。</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- ===================== 第 04 讲 ===================== -->
+        <section id="ep04" class="section">
+            <div class="section-header">
+                <span class="section-number">04</span>
+                <h1>数据面 Envoy 与 xDS</h1>
+            </div>
+
+            <div class="card">
+                <h3>数据面长什么样</h3>
+                <p>Higress 数据面是一个 <strong>定制化 Envoy</strong>：基于上游 Envoy，加入了几个自研 HTTP Filter 与扩展（部分写在 <code>envoy/envoy</code> 子模块、部分编译进官方镜像）。运行时它通过 gRPC 连到控制面，按 ADS (Aggregated Discovery Service) 增量拉取配置。</p>
+            </div>
+
+            <div class="card">
+                <h3>xDS 资源四件套</h3>
+                <table>
+                    <thead><tr><th>资源</th><th>对应 K8s 概念</th><th>由谁生成</th></tr></thead>
+                    <tbody>
+                        <tr><td>LDS · Listener</td><td>HTTPS:443 / HTTP:80 监听</td><td>Gateway / Listener 配置</td></tr>
+                        <tr><td>RDS · Route</td><td>Ingress rules + 注解</td><td>VirtualService（由 IngressConfig 翻译）</td></tr>
+                        <tr><td>CDS · Cluster</td><td>K8s Service / 注册中心服务</td><td>DestinationRule + ServiceEntry</td></tr>
+                        <tr><td>EDS · Endpoint</td><td>Pod IP 列表</td><td>kube ServiceRegistry / registry/*</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>配置下发链路</h3>
+<pre><code class="language-bash">K8s API Server      Nacos / ZK / Consul
+      │                     │
+      ▼                     ▼
+ kube Informer        registry/*.watcher
+      │                     │
+      └────────┬────────────┘
+               ▼
+  pkg/ingress/config.IngressConfig     ← 这是核心翻译器
+               │ (生成 VirtualService / DestinationRule / EnvoyFilter)
+               ▼
+  istio pilot ConfigStoreCache
+               │
+               ▼
+  pilot/pkg/xds Server （ADS gRPC）
+               │
+               ▼
+        Envoy 数据面</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>Envoy 侧的特殊扩展</h3>
+                <ul>
+                    <li><strong>Wasm HTTP Filter</strong>：标准上游能力，用来加载 <code>plugins/wasm-go/extensions/*</code> 编译出的 .wasm。</li>
+                    <li><strong>Higress 自研 Go Filter</strong>：<code>plugins/golang-filter</code>，走 Envoy Go Extension 路线（非 Wasm，性能更好但需重编 Envoy）。</li>
+                    <li><strong>External Processing / ext-authz</strong>：标准 Envoy filter，被 <code>ext-auth</code> 插件复用。</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- ===================== 第 05 讲 ===================== -->
+        <section id="ep05" class="section">
+            <div class="section-header">
+                <span class="section-number">05</span>
+                <h1>main.go 启动入口</h1>
+            </div>
+
+            <div class="card">
+                <h3>整个 main.go 只有 32 行</h3>
+<pre><code class="language-go">// cmd/higress/main.go
+package main
+
+import (
+    "fmt"
+    "os"
+
+    "istio.io/pkg/log"
+    "github.com/alibaba/higress/v2/pkg/cmd"
+)
+
+func main() {
+    log.EnableKlogWithCobra()
+    if err := cmd.GetRootCommand().Execute(); err != nil {
+        _, _ = fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
+}</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>三个关键点</h3>
+                <ol>
+                    <li><strong><code>log.EnableKlogWithCobra()</code></strong>：把 K8s 客户端的 klog 接入 Istio 的日志库 + Cobra 的 flag 系统，从而 <code>--log_output_level=debug</code> 这类 flag 能透传到 client-go。</li>
+                    <li><strong><code>cmd.GetRootCommand()</code></strong>：所有真正逻辑都在 <code>pkg/cmd</code>，main 只是一个 thin shell——这是 Go 项目的常见做法（参考 kubectl / istioctl）。</li>
+                    <li><strong>错误返回 → 退出码</strong>：标准 12-factor 实践，所有 fatal 错误统一从 Execute() 冒泡。</li>
+                </ol>
+            </div>
+
+            <div class="card warn-card">
+                <h3>思考题</h3>
+                <p>为什么 main.go 不直接 import <code>pkg/bootstrap</code>？把启动逻辑放进 <code>pkg/cmd</code> 而不是 main 包带来了哪些好处？（提示：可测试性 / 多子命令复用）</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 06 讲 ===================== -->
+        <section id="ep06" class="section">
+            <div class="section-header">
+                <span class="section-number">06</span>
+                <h1>Cobra 命令体系</h1>
+            </div>
+
+            <div class="card">
+                <h3>命令树</h3>
+                <p>查看 <code>pkg/cmd</code>，根命令下挂了若干子命令（不同版本略有差异）：</p>
+<pre><code class="language-bash">higress
+├── serve            # 启动控制面 (主用)
+├── version          # 输出版本信息
+└── ...              # debug / completion 等</code></pre>
+                <p>真正驱动控制面运行的是 <code>higress serve</code>，它的 <code>RunE</code> 最终调用 <code>bootstrap.NewServer(args).Start(stop)</code>。</p>
+            </div>
+
+            <div class="card">
+                <h3>flag 设计哲学</h3>
+                <p>Higress 沿用了 Istio Pilot 的 ServerArgs 结构体：把所有可配置项收敛到几个 Options 结构体里（<code>XdsOptions</code>、<code>RegistryOptions</code> 等），命令层只负责把 Cobra flag 写到这些结构体里。这种<strong>"参数对象模式"</strong> 让 server 包可被库式调用（也方便单元测试）。</p>
+<pre><code class="language-go">type ServerArgs struct {
+    XdsOptions      XdsOptions
+    RegistryOptions RegistryOptions
+    KeepaliveOptions *keepalive.Options
+    HTTPAddr        string
+    GRPCAddr        string
+    Namespace       string
+    GatewaySelectorKey   string
+    GatewaySelectorValue string
+    // ...
+}</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>读源动作</h3>
+                <ol>
+                    <li>在 IDE 里搜 <code>GetRootCommand()</code>，向下读 3 层。</li>
+                    <li>找到 <code>serve</code> 子命令的 <code>RunE</code>，定位到 <code>bootstrap.NewServer</code>。</li>
+                    <li>记住 <code>ServerArgs</code> 的字段——后面 Server 初始化都围绕它展开。</li>
+                </ol>
+            </div>
+        </section>
+
+        <!-- ===================== 第 07 讲 ===================== -->
+        <section id="ep07" class="section">
+            <div class="section-header">
+                <span class="section-number">07</span>
+                <h1>Server 初始化全景（pkg/bootstrap/server.go）</h1>
+            </div>
+
+            <div class="card">
+                <h3>主线 6 步（NewServer / Start）</h3>
+                <ol>
+                    <li><strong>kube client 初始化</strong>：基于 in-cluster 或 kubeconfig 创建 <code>istiokube.Client</code>。</li>
+                    <li><strong>Mesh Config Watcher</strong>：复用 Istio 的 meshwatcher，监听 mesh config 变化。</li>
+                    <li><strong>ConfigController 聚合</strong>：用 <code>configaggregate</code> 把多个 ConfigStore（K8s CRD + Ingress + WasmPlugin + McpBridge）合并成一个。</li>
+                    <li><strong>ServiceRegistry 聚合</strong>：<code>aggregate.Controller</code> + kube + registry/* 多注册中心。</li>
+                    <li><strong>Discovery Server（xDS）</strong>：构造 <code>xds.NewDiscoveryServer</code>，注册到 gRPC server。</li>
+                    <li><strong>启动一组 goroutine</strong>：HTTP debug、gRPC ADS、Cert manager、Ingress translator 等。</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h3>关键代码定位</h3>
+<pre><code class="language-go">// pkg/bootstrap/server.go
+type Server struct {
+    server.Instance              // 复用 Istio server.Instance 做 lifecycle
+    XDSServer       *xds.DiscoveryServer
+    kubeClient      kube.Client
+    environment     *model.Environment
+    configController model.ConfigStoreController
+    serviceEntryController serviceregistry.Instance
+    // ...
+}
+
+func NewServer(args *ServerArgs) (*Server, error) {
+    s := &Server{...}
+    if err := s.initKubeClient(args); err != nil { return nil, err }
+    if err := s.initConfigController(args); err != nil { return nil, err }
+    if err := s.initRegistryEventHandlers(args); err != nil { return nil, err }
+    if err := s.initDiscoveryService(args); err != nil { return nil, err }
+    if err := s.initCertManager(args); err != nil { return nil, err }
+    // ...
+    return s, nil
+}</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>初学者的阅读顺序</h3>
+                <ul>
+                    <li>先看 <code>NewServer</code> 的整体骨架（约 80 行），把每个 init 函数当黑盒。</li>
+                    <li>再展开 <code>initConfigController</code>——这是 Higress 自己的 IngressConfig 注入点（第 10 讲）。</li>
+                    <li>最后看 <code>Start(stop)</code> 怎么把所有 controller 拉起来：<code>s.server.RunComponent</code>。</li>
+                </ul>
+            </div>
+
+            <div class="card warn-card">
+                <h3>易踩坑</h3>
+                <p>不要被 <code>krt</code>（Kubernetes Resource Tracker）相关 import 吓到——这是 Istio 1.20+ 引入的新式 Informer 框架。Higress 部分代码已用 krt，部分仍是老式 Informer，混用时要看具体 controller。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 08 讲 ===================== -->
+        <section id="ep08" class="section">
+            <div class="section-header">
+                <span class="section-number">08</span>
+                <h1>K8s Client 封装（pkg/kube/client.go）</h1>
+            </div>
+
+            <div class="card">
+                <h3>为什么要再封装一层</h3>
+                <p>Higress 的客户端需要同时访问：</p>
+                <ul>
+                    <li>原生资源（Service、Endpoints、Ingress、Secret、ConfigMap）</li>
+                    <li>Knative <code>kingress</code></li>
+                    <li>Higress 自定义 CRD：<code>McpBridge</code>、<code>WasmPlugin</code>、<code>Http2Rpc</code>、<code>McpServer</code> 等</li>
+                    <li>Istio CRD：<code>VirtualService</code>、<code>DestinationRule</code>、<code>EnvoyFilter</code></li>
+                </ul>
+                <p>所以 <code>pkg/kube/client.go</code> 在 <code>istiokube.Client</code> 之上又包了一层，统一管理多 CRD 客户端。</p>
+            </div>
+
+            <div class="card">
+                <h3>client/ 目录</h3>
+                <p>所有 Higress 自定义 CRD 的 typed client / lister / informer 都通过 <strong>code-generator</strong> 自动生成在 <code>client/</code> 目录下，规范跟 K8s 官方一样：</p>
+<pre><code class="language-bash">client/
+├── clientset/versioned/        # typed clientset
+├── informers/externalversions/ # SharedInformer 工厂
+└── listers/                    # 各资源 Lister</code></pre>
+                <p>这些代码是<strong>不需要读的</strong>，会用 <code>NewForConfig</code> / <code>NewSharedInformerFactory</code> 即可。</p>
+            </div>
+
+            <div class="card">
+                <h3>读源建议</h3>
+                <p>记住一句话：<strong>"controller 拿数据 → 走 Lister，监听变化 → 走 Informer.AddEventHandler"</strong>。这是后面所有 ingress / wasmplugin / mcpbridge controller 的统一姿势。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 09 讲 ===================== -->
+        <section id="ep09" class="section">
+            <div class="section-header">
+                <span class="section-number">09</span>
+                <h1>Ingress Controller 模型</h1>
+            </div>
+
+            <div class="card">
+                <h3>多版本兼容</h3>
+                <p><code>pkg/ingress/kube/</code> 下针对不同 K8s Ingress 版本各有一个 controller：</p>
+                <ul>
+                    <li><code>ingress/</code>：<code>extensions/v1beta1</code>（老集群兼容）</li>
+                    <li><code>ingressv1/</code>：<code>networking.k8s.io/v1</code>（主流）</li>
+                    <li><code>kingress/</code>：Knative Ingress</li>
+                    <li><code>gateway/</code>：Gateway API（HTTPRoute 等）</li>
+                </ul>
+                <p>它们对外暴露统一的 <code>common.IngressController</code> 接口（见 <code>kube/common</code>），上层翻译器对接口编程。</p>
+            </div>
+
+            <div class="card">
+                <h3>典型 controller 骨架</h3>
+<pre><code class="language-go">type controller struct {
+    informer cache.SharedIndexInformer
+    lister   networkinglister.IngressLister
+    queue    workqueue.RateLimitingInterface
+    handlers []common.IngressHandler   // 上游回调
+}
+
+func (c *controller) Run(stop &lt;-chan struct{}) {
+    go c.informer.Run(stop)
+    if !cache.WaitForCacheSync(stop, c.informer.HasSynced) { return }
+    wait.Until(c.worker, time.Second, stop)
+}
+
+func (c *controller) worker() {
+    for c.processNextItem() {}
+}</code></pre>
+                <p>标准的 K8s Controller "Informer + Workqueue + Reconcile" 三件套，没有惊喜。重点是 <strong>handlers</strong> 列表——IngressConfig 会注册回调，把 K8s 资源事件转成内部翻译动作。</p>
+            </div>
+
+            <div class="card">
+                <h3>多集群支持</h3>
+                <p>Higress 支持 multi-cluster：每个集群一个 controller 实例，由 <code>common.AggregateController</code> 聚合。这就是为什么很多接口签名里都有 <code>clusterId</code> 这个参数。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 10 讲 ===================== -->
+        <section id="ep10" class="section">
+            <div class="section-header">
+                <span class="section-number">10</span>
+                <h1>IngressConfig 主转换器（2085 行）</h1>
+            </div>
+
+            <div class="card highlight-card">
+                <h3>位置与定位</h3>
+                <p><code>pkg/ingress/config/ingress_config.go</code>，Higress 控制面<strong>最复杂的一个文件</strong>，2000 多行。它实现了 Istio 的 <code>model.ConfigStoreController</code> 接口，对外伪装成一个普通的 ConfigStore：Pilot 想要 VirtualService，它就当场基于 Ingress + 注解 + 注册中心数据合成一份。</p>
+            </div>
+
+            <div class="card">
+                <h3>核心方法</h3>
+<pre><code class="language-go">// 简化后的接口
+type IngressConfig struct {
+    remoteIngressControllers map[string]common.IngressController
+    mcpbridgeController       mcpbridge.McpBridgeController
+    wasmPluginController      wasmplugin.WasmPluginController
+    http2rpcController        http2rpc.Http2RpcController
+    annotationHandler         annotations.AnnotationHandler
+    namespace                 string
+    // ...
+}
+
+func (m *IngressConfig) List(typ config.GroupVersionKind, namespace string)
+    ([]config.Config, error)
+
+func (m *IngressConfig) RegisterEventHandler(
+    kind config.GroupVersionKind,
+    handler model.EventHandler)</code></pre>
+                <p>当 Pilot xDS 推送时，会调用 <code>List(VirtualService)</code>、<code>List(DestinationRule)</code>、<code>List(EnvoyFilter)</code>。IngressConfig 在这三个回调里<strong>实时合成</strong>结果。</p>
+            </div>
+
+            <div class="card">
+                <h3>合成 VirtualService 的关键步骤</h3>
+                <ol>
+                    <li>遍历所有 IngressController 拿到 IngressV1 列表。</li>
+                    <li>对每条 Ingress：
+                        <ul>
+                            <li>调用 <code>annotationHandler.Parse(ingress)</code> 解析注解 → 得到 <code>Ingress.Annotations</code> 对象。</li>
+                            <li>对每条 rule + path 生成一条 HTTPRoute。</li>
+                            <li>把注解里的灰度 / 重写 / 限流 / CORS 等转成 HTTPRoute 字段或额外的 EnvoyFilter。</li>
+                        </ul>
+                    </li>
+                    <li>按 host 合并多条 Ingress 生成的 HTTPRoute → 一份完整 VirtualService。</li>
+                    <li>把结果缓存，并通过 <code>EventHandler</code> 通知 xDS 触发 Push。</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h3>设计精髓</h3>
+                <p>这种"<strong>把 K8s 资源动态翻译成 Istio API</strong>"的做法，避免了让用户手写 VirtualService，又复用了整套 Istio Pilot 推送链路——这是 Higress 架构上最聪明的一步。</p>
+            </div>
+
+            <div class="card warn-card">
+                <h3>阅读建议</h3>
+                <ul>
+                    <li>不要顺序读完，按需要按方法读：<code>List</code> → 找到 case 分支 → 跳到对应合成函数。</li>
+                    <li>结合 <code>ingress_config_test.go</code> 里的 case 输入输出对照理解最快。</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- ===================== 第 11 讲 ===================== -->
+        <section id="ep11" class="section">
+            <div class="section-header">
+                <span class="section-number">11</span>
+                <h1>Annotation 解析器框架</h1>
+            </div>
+
+            <div class="card">
+                <h3>30+ 注解，统一接口</h3>
+                <p>位于 <code>pkg/ingress/kube/annotations/</code>，每个能力（canary、cors、ip 黑白名单、限流、重写、JWT、负载均衡、destination …）一个文件，都实现 <code>interface.go</code> 里的 <code>Parser</code> 与 <code>Handler</code> 接口。</p>
+<pre><code class="language-go">// 简化
+type AnnotationsParser interface {
+    Parse(annotations Annotations, config *Ingress, globalContext *GlobalContext) error
+}
+
+type Annotations map[string]string
+
+// 中心入口
+type AnnotationHandler interface {
+    Parse(meta metav1.ObjectMeta) (*Ingress, error)
+    ApplyRoute(route *networking.HTTPRoute, ingress *Ingress)
+    ApplyCluster(cluster *networking.DestinationRule, ingress *Ingress)
+    ApplyGateway(gw *networking.Gateway, ingress *Ingress)
+}</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>责任链 + 访问者</h3>
+                <p>核心数据结构是 <code>Ingress</code>（解析结果聚合体），各 Parser 把自己的字段填进去；之后调用 Apply 系列把内容写入对应的 Istio 资源。<strong>"Parser 写入 / Applier 输出"</strong> 两阶段，清晰隔离了"读注解"和"产配置"。</p>
+            </div>
+
+            <div class="card">
+                <h3>典型例子：canary</h3>
+                <p><code>annotations/canary.go</code> 解析 <code>higress.io/canary</code>、<code>canary-weight</code>、<code>canary-by-header</code> 等注解；最后由 ApplyRoute 把它转成 <code>HTTPRoute.Route[*].Weight</code> 或 <code>Match.Headers</code>。</p>
+            </div>
+
+            <div class="card">
+                <h3>扩展思路</h3>
+                <p>若要支持一个新注解，只需：<br>① 新建 <code>annotations/myfeat.go</code> 实现 Parser；<br>② 在 <code>annotations.go</code> 的注册列表中添加；<br>③ 决定它影响 Route / Cluster / Gateway 中的哪一个，在对应 Apply 处补一行。<br>整个扩展过程不需要碰 IngressConfig。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 12 讲 ===================== -->
+        <section id="ep12" class="section">
+            <div class="section-header">
+                <span class="section-number">12</span>
+                <h1>Translation 翻译层</h1>
+            </div>
+
+            <div class="card">
+                <h3>极简的胶水</h3>
+                <p><code>pkg/ingress/translation/translation.go</code> 只有 200 行左右，作用是"<strong>把 IngressConfig + McpBridge + WasmPlugin + ServiceRegistry 串成 ConfigStore 暴露给 Pilot</strong>"。它是 <code>bootstrap.initConfigController</code> 阶段唯一需要看的文件。</p>
+            </div>
+
+            <div class="card">
+                <h3>关键代码</h3>
+<pre><code class="language-go">func NewIngressTranslation(
+    kubeClient kube.Client,
+    xdsUpdater model.XDSUpdater,
+    namespace string,
+    clusterId string,
+    options common.Options,
+) *IngressTranslation {
+    return &IngressTranslation{
+        ingressConfig: config.NewIngressConfig(...),
+        // ...
+    }
+}
+
+func (t *IngressTranslation) Run(stop &lt;-chan struct{}) {
+    t.ingressConfig.Run(stop)
+}</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>它在 Server 里的位置</h3>
+                <p>看 <code>server.go</code> 的 <code>initConfigController</code>：会把 <code>IngressTranslation</code> 加到 <code>configaggregate.MakeCache(...)</code> 的列表里，与上游 Istio 的 CRD ConfigStore 一起被 Pilot 当作普通来源消费。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 13 讲 ===================== -->
+        <section id="ep13" class="section">
+            <div class="section-header">
+                <span class="section-number">13</span>
+                <h1>McpBridge 与 registry/</h1>
+            </div>
+
+            <div class="card">
+                <h3>McpBridge 是什么</h3>
+                <p>K8s Ingress 默认只能路由到 K8s Service。但企业里大量服务注册在 Nacos / ZK / Consul / Eureka 上。<strong>McpBridge</strong> 是 Higress 自定义的 CRD，描述"<em>从某个注册中心拉服务，注入到 ServiceRegistry</em>"。一个集群通常只有一个 McpBridge 单例（namespace 内）。</p>
+            </div>
+
+            <div class="card">
+                <h3>CRD 示例</h3>
+<pre><code class="language-yaml">apiVersion: networking.higress.io/v1
+kind: McpBridge
+metadata:
+  name: default
+  namespace: higress-system
+spec:
+  registries:
+    - name: my-nacos
+      type: nacos2
+      domain: nacos.example.com
+      port: 8848
+      nacosNamespaceId: public
+      nacosGroups: [DEFAULT_GROUP]</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>代码路径</h3>
+<pre><code class="language-bash">pkg/ingress/kube/mcpbridge/controller.go    # 监听 McpBridge CRD
+registry/                                   # 真正的协议实现
+├── reconcile/                              # ★ 总协调器
+├── memory/                                 # 内存版 ServiceRegistry
+├── nacos/、consul/、zookeeper/、eureka/、direct/</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>工作流</h3>
+                <ol>
+                    <li>McpBridge controller 监听 CRD 变更。</li>
+                    <li>把 <code>spec.registries</code> 列表交给 <code>registry/reconcile</code>。</li>
+                    <li>Reconcile 对每个 registry 创建/销毁对应 watcher（Nacos / ZK / …）。</li>
+                    <li>各 watcher 拉到的服务实例写入共享的 <code>memory.ServiceRegistry</code>。</li>
+                    <li>这个 ServiceRegistry 被注册到 bootstrap 的 <code>aggregate.Controller</code>，最终通过 EDS 推给 Envoy。</li>
+                </ol>
+            </div>
+        </section>
+
+        <!-- ===================== 第 14 讲 ===================== -->
+        <section id="ep14" class="section">
+            <div class="section-header">
+                <span class="section-number">14</span>
+                <h1>Nacos / ZK / Consul 接入</h1>
+            </div>
+
+            <div class="card">
+                <h3>统一接口：Watcher</h3>
+                <p><code>registry/watcher.go</code> 定义了所有注册中心适配器的统一接口：</p>
+<pre><code class="language-go">type Watcher interface {
+    Run()
+    Stop()
+    IsHealthy() bool
+    GetRegistryType() string
+    ReadyHandler(func(bool))
+    AppendServiceUpdateHandler(func(*v1.ServiceEntry, model.Event))
+}</code></pre>
+                <p>每种实现都把"<strong>注册中心事件 → Istio ServiceEntry</strong>"作为统一输出，这样上游不关心后端是 Nacos 还是 ZK。</p>
+            </div>
+
+            <div class="card">
+                <h3>Nacos 实现要点</h3>
+                <ul>
+                    <li><code>registry/nacos/</code> 同时支持 Nacos 1.x / 2.x（两套 SDK）。</li>
+                    <li>核心动作：登录 → 订阅 Service / Instance 变更 → 把 instance list 组装成 <code>ServiceEntry.Spec.Endpoints</code>。</li>
+                    <li>关注 namespace、group、cluster 的多维度过滤。</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>ZK 实现要点</h3>
+                <ul>
+                    <li>位于 <code>registry/zookeeper/</code>，主要适配 Dubbo 的路径协议（如 <code>/dubbo/{serviceName}/providers/{url}</code>）。</li>
+                    <li>需要把 Dubbo URL 解析成 host:port + metadata，然后写入 ServiceEntry。</li>
+                </ul>
+            </div>
+
+            <div class="card warn-card">
+                <h3>扩展提示</h3>
+                <p>想新增一种注册中心：在 <code>registry/</code> 下新建包，实现 <code>Watcher</code>，并在 <code>reconcile/</code> 工厂里注册即可，不必触碰任何 ingress 代码。这是<strong>"开闭原则"</strong>的典型应用。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 15 讲 ===================== -->
+        <section id="ep15" class="section">
+            <div class="section-header">
+                <span class="section-number">15</span>
+                <h1>WasmPlugin CRD 加载链路</h1>
+            </div>
+
+            <div class="card">
+                <h3>从 YAML 到 Envoy</h3>
+                <p>Higress 的 WasmPlugin CRD 设计借鉴并扩展了 Istio 同名 CRD。完整链路：</p>
+<pre><code class="language-bash">用户 kubectl apply 一份 WasmPlugin YAML
+            │
+            ▼
+pkg/ingress/kube/wasmplugin/controller.go   # Informer 监听
+            │
+            ▼
+pkg/ingress/config/ingress_config.go        # 合并到 EnvoyFilter / WasmPlugin 输出
+            │
+            ▼
+istio pilot xds  →  ADS 推到 Envoy
+            │
+            ▼
+Envoy HTTP Wasm Filter 加载 .wasm 镜像 (OCI / HTTP / local)
+            │
+            ▼
+ai-proxy / ai-cache / ... 真正执行业务逻辑</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>关键字段</h3>
+                <table>
+                    <thead><tr><th>字段</th><th>含义</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>spec.url</code></td><td>.wasm 镜像地址（支持 oci:// / http:// / file://）</td></tr>
+                        <tr><td><code>spec.imagePullSecret</code></td><td>OCI 拉取凭证</td></tr>
+                        <tr><td><code>spec.phase</code></td><td>插入位置：AUTHN / AUTHZ / STATS / UNSPECIFIED</td></tr>
+                        <tr><td><code>spec.priority</code></td><td>同 phase 内的执行顺序</td></tr>
+                        <tr><td><code>spec.defaultConfig</code></td><td>插件全局配置</td></tr>
+                        <tr><td><code>spec.matchRules</code></td><td>按域名 / 路由覆盖配置（Higress 扩展）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>动态加载</h3>
+                <p>Envoy 端会异步从 <code>url</code> 拉取 .wasm，拉到后用 <strong>proxy-wasm ABI</strong> 加载。运行时插件被沙箱化在 V8/WAVM 里，崩溃不影响 Envoy 主进程——这就是 Wasm 相对 native filter 的最大价值。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 16 讲 ===================== -->
+        <section id="ep16" class="section">
+            <div class="section-header">
+                <span class="section-number">16</span>
+                <h1>wasm-go SDK 设计</h1>
+            </div>
+
+            <div class="card">
+                <h3>分层</h3>
+                <p>开发一个 Higress Wasm 插件，依赖的 SDK 分两层：</p>
+                <ul>
+                    <li><strong>下层：proxy-wasm-go-sdk</strong>（上游 tetratelabs 维护），实现 proxy-wasm ABI。</li>
+                    <li><strong>上层：plugins/wasm-go/pkg/wrapper</strong>（Higress 自己写），把生命周期抽象成 <code>OnHttpRequestHeaders / OnHttpRequestBody / OnHttpResponseHeaders / OnHttpResponseBody</code> 等高层回调，并自带 JSON / gjson 配置解析。</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>典型插件骨架</h3>
+<pre><code class="language-go">type MyConfig struct {
+    Key string `json:"key"`
+}
+
+func main() {
+    wrapper.SetCtx(
+        "my-plugin",
+        wrapper.ParseConfig(parseConfig),
+        wrapper.ProcessRequestHeaders(onHttpRequestHeaders),
+    )
+}
+
+func parseConfig(json gjson.Result, config *MyConfig, log wrapper.Log) error {
+    config.Key = json.Get("key").String()
+    return nil
+}
+
+func onHttpRequestHeaders(ctx wrapper.HttpContext, config MyConfig, log wrapper.Log) types.Action {
+    proxywasm.AddHttpRequestHeader("x-my-plugin", config.Key)
+    return types.ActionContinue
+}</code></pre>
+                <p>极简：插件作者只需关心配置 schema + 回调函数。SDK 完成所有与 Envoy 的 ABI 交互。</p>
+            </div>
+
+            <div class="card">
+                <h3>调用第三方服务的能力</h3>
+                <p>SDK 提供 <code>wrapper.HttpCall / wrapper.RedisCall</code> 等异步外呼接口（Envoy 通过 Cluster 转发），这让插件可以做 ext-auth、ai-rag 等需要回查后端的业务，而不阻塞主请求线程。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 17 讲 ===================== -->
+        <section id="ep17" class="section">
+            <div class="section-header">
+                <span class="section-number">17</span>
+                <h1>ai-proxy 多模型代理</h1>
+            </div>
+
+            <div class="card">
+                <h3>定位</h3>
+                <p><code>plugins/wasm-go/extensions/ai-proxy</code> 是 Higress AI 网关最核心的插件：把任意 LLM 的"原生 API"统一抽象成 <strong>OpenAI 兼容协议</strong>对外暴露；对内根据 provider 类型转发到对应大模型供应商（OpenAI / Azure / 通义千问 / 文心 / Claude / DeepSeek / Gemini / Moonshot …）。</p>
+            </div>
+
+            <div class="card">
+                <h3>目录结构</h3>
+<pre><code class="language-bash">extensions/ai-proxy/
+├── main.go                # 注册插件回调
+├── config.go              # provider 配置 schema
+├── provider/              # 各厂商适配器
+│   ├── provider.go        # 接口定义 + 工厂
+│   ├── openai.go
+│   ├── azure.go
+│   ├── qwen.go
+│   ├── claude.go
+│   ├── gemini.go
+│   ├── deepseek.go
+│   └── ...
+└── README.md</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>核心接口</h3>
+<pre><code class="language-go">type Provider interface {
+    GetProviderType() string
+    OnRequestHeaders(ctx, apiName, log) error
+    OnRequestBody(ctx, apiName, body, log) (types.Action, error)
+    OnResponseHeaders(ctx, apiName, log) (types.Action, error)
+    OnStreamingResponseBody(ctx, apiName, chunk, isLastChunk, log) ([]byte, error)
+    OnResponseBody(ctx, apiName, body, log) (types.Action, error)
+}</code></pre>
+                <p>每个厂商一个 provider 实现，负责：① 改写 path / host（路由到对应 upstream Cluster）；② 转换请求体（OpenAI schema → 厂商 schema）；③ 转换响应体（含 SSE 流式）；④ 处理 token 计数、错误归一化。</p>
+            </div>
+
+            <div class="card">
+                <h3>典型流</h3>
+                <ol>
+                    <li>客户端发 <code>POST /v1/chat/completions</code>（OpenAI 协议）。</li>
+                    <li>ai-proxy 在 <code>OnRequestHeaders</code> 阶段根据 model 字段或显式 provider 选择 Provider 实例。</li>
+                    <li><code>OnRequestBody</code> 把请求体改写成目标厂商需要的格式，并通过 <code>proxywasm.SetRouteName</code> / 改写 cluster 让 Envoy 转发到正确 upstream。</li>
+                    <li>响应回来后再反向转换成 OpenAI SSE 格式。</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h3>与其它 AI 插件协同</h3>
+                <p>ai-proxy 只做协议转换。配合：</p>
+                <ul>
+                    <li><code>ai-token-ratelimit</code>：按 token 限流</li>
+                    <li><code>ai-cache</code>：语义/精确缓存</li>
+                    <li><code>ai-rag</code>：召回 + 注入上下文</li>
+                    <li><code>ai-security-guard</code>：内容安全审核</li>
+                </ul>
+                <p>这些插件通过 <code>spec.phase</code> 与 <code>priority</code> 串成一条 AI 处理流水线，相互独立、可独立启用。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 18 讲 ===================== -->
+        <section id="ep18" class="section">
+            <div class="section-header">
+                <span class="section-number">18</span>
+                <h1>MCP Server 托管</h1>
+            </div>
+
+            <div class="card">
+                <h3>背景</h3>
+                <p>Model Context Protocol（MCP）由 Anthropic 推出，定义了一套"工具/资源"对 LLM 暴露的协议。Higress 把 MCP Server 当作一等公民：用户可以在网关里直接挂载 MCP Server，让任意 LLM 客户端通过 Higress 调用工具。</p>
+            </div>
+
+            <div class="card">
+                <h3>双线实现</h3>
+                <table>
+                    <thead><tr><th>位置</th><th>用途</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>pkg/ingress/kube/mcpserver/</code></td><td>K8s 侧 CRD 控制器，监听 <code>McpServer</code> 资源</td></tr>
+                        <tr><td><code>pkg/ingress/mcp/</code></td><td>MCP（Mesh Config Protocol，<em>注意名字撞车</em>）配置下发</td></tr>
+                        <tr><td><code>plugins/wasm-go/extensions/mcp-router</code></td><td>Wasm 插件，请求级路由到对应 MCP Server</td></tr>
+                        <tr><td><code>plugins/wasm-go/mcp-servers/</code></td><td>内建 MCP Server 实现（高德 / Notion / GitHub 等）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>请求链路</h3>
+<pre><code class="language-bash">LLM Client (SSE)
+   │
+   ▼
+Higress Envoy  ← mcp-router(Wasm) 解析 jsonrpc method/params
+                 → 选择目标 MCP Server upstream
+   │
+   ▼
+mcp-server (Wasm) 或外部 MCP server 服务
+   │
+   ▼
+后端工具（数据库 / API / 内部服务）</code></pre>
+            </div>
+
+            <div class="card">
+                <h3>读源建议</h3>
+                <p>MCP 这部分迭代最快，<strong>以 <code>plugins/wasm-go/mcp-servers/</code> 下的具体实现为锚点反推 SDK 抽象</strong> 是最快的方式，不要先啃协议规范。</p>
+            </div>
+        </section>
+
+        <!-- ===================== 第 19 讲 ===================== -->
+        <section id="ep19" class="section">
+            <div class="section-header">
+                <span class="section-number">19</span>
+                <h1>证书管理 pkg/cert</h1>
+            </div>
+
+            <div class="card">
+                <h3>能力</h3>
+                <ul>
+                    <li>自签 CA：测试场景一键签发。</li>
+                    <li>ACME（Let's Encrypt）：基于 HTTP-01 自动签发与续签。</li>
+                    <li>Secret 存储：证书最终落到 K8s Secret（被 Envoy SDS / Istio 引用）。</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>主要文件</h3>
+                <table>
+                    <thead><tr><th>文件</th><th>职责</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>certmgr.go</code></td><td>对外的 CertManager，调度续签</td></tr>
+                        <tr><td><code>config.go</code></td><td>ACME / 自签配置 schema</td></tr>
+                        <tr><td><code>controller.go</code></td><td>监听 Ingress / Secret 变化，触发签发</td></tr>
+                        <tr><td><code>server.go</code></td><td>ACME HTTP-01 挑战 server</td></tr>
+                        <tr><td><code>storage.go</code></td><td>证书持久化到 ConfigMap / Secret</td></tr>
+                        <tr><td><code>ingress.go</code></td><td>把证书 binding 注入到 Ingress / Gateway</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>触发链路</h3>
+                <ol>
+                    <li>用户写 Ingress 时指定 host。</li>
+                    <li>CertController 检测到该 host 没有对应 Secret。</li>
+                    <li>CertManager 起 ACME flow：注册账号 → 申请 order → HTTP-01 挑战 server.go 响应 token → 拿到证书 → 写入 Secret。</li>
+                    <li>Higress Gateway 通过 SDS 加载该 Secret，自动启用 HTTPS。</li>
+                </ol>
+            </div>
+        </section>
+
+        <!-- ===================== 第 20 讲 ===================== -->
+        <section id="ep20" class="section">
+            <div class="section-header">
+                <span class="section-number">20</span>
+                <h1>学习路线复盘</h1>
+            </div>
+
+            <div class="card highlight-card">
+                <h3>回答开篇 3 问</h3>
+                <ol>
+                    <li><strong>Higress 与 Istio 的关系</strong>：Higress 是基于 Istio Pilot 的"瘦身魔改版"，通过 vendoring + replace 让自己拥有完全控制权，专注于 Ingress / Gateway / AI 网关场景。</li>
+                    <li><strong>一条 Ingress 怎么变 Envoy 配置</strong>：Ingress Informer → IngressConfig（含 Annotation 解析、注册中心数据合并）→ 合成 Istio VirtualService / DestinationRule / EnvoyFilter → 被 Pilot ConfigStoreCache 消费 → xDS ADS 推到 Envoy。</li>
+                    <li><strong>AI 网关能力的位置</strong>：核心写在 <code>plugins/wasm-go/extensions/ai-*</code>，全部以 Wasm 插件形态挂在 Envoy HTTP Filter 链路上；控制面只负责 WasmPlugin CRD 的下发与配置覆盖。</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h3>分阶段复习清单</h3>
+                <table>
+                    <thead><tr><th>能力</th><th>对应讲次</th><th>验证方法</th></tr></thead>
+                    <tbody>
+                        <tr><td>读懂启动流程</td><td>05–07</td><td>能在白板画 NewServer 6 步</td></tr>
+                        <tr><td>读懂翻译核心</td><td>10–12</td><td>能解释 List(VirtualService) 内部做了什么</td></tr>
+                        <tr><td>读懂注解</td><td>11</td><td>能给 Higress 加一个新注解</td></tr>
+                        <tr><td>读懂服务发现</td><td>13–14</td><td>能新增一种注册中心适配</td></tr>
+                        <tr><td>读懂 Wasm</td><td>15–16</td><td>能用 wasm-go SDK 写一个 hello-world 插件</td></tr>
+                        <tr><td>读懂 AI 网关</td><td>17–18</td><td>能解释 ai-proxy 如何把 OpenAI 协议翻成通义千问</td></tr>
+                        <tr><td>读懂证书</td><td>19</td><td>能解释一次自动 ACME 续签的完整链路</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>下一步可以做什么</h3>
+                <ul>
+                    <li>动手提一个 PR：从修一个 <code>annotations/*_test.go</code> 失败用例开始最容易。</li>
+                    <li>给 ai-proxy 加一个新模型 provider（参考已有的 deepseek.go / moonshot.go）。</li>
+                    <li>写一个自定义 Wasm 插件：例如对接公司内部 Header 注入或风控系统。</li>
+                    <li>研读 e2e 测试 <code>test/e2e</code> 的搭建方式，理解 Higress 是怎么自我验证端到端行为的。</li>
+                </ul>
+            </div>
+
+            <div class="card warn-card">
+                <h3>关于版本</h3>
+                <p>本系列以 v2.x 主线为基准。Higress 演进很快——AI / MCP 模块尤甚——以后阅读时请以仓库当前 README + release-notes/ 为准，本文中的行号与目录可能微调，但<strong>大结构（控制面 → IngressConfig → Pilot xDS → Envoy + Wasm）极稳定，多年不会变</strong>。</p>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) {
+                toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            }
+            const setActive = (id) => {
+                links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            };
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => {
+                    if (e.isIntersecting) setActive(e.target.id);
+                });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
