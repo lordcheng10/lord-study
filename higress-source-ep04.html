@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 04 期 · K8s 资源监听与 Controller — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">04</div>
+            <h2>第 04 期</h2>
+            <p class="version">K8s 资源监听与 Controller · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Informer 三件套</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · pkg/kube/client.go</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · client/ codegen 产物</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · common.IngressController 接口</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ingressv1 控制器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ingress (v1beta1)</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · kingress Knative</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · gateway (Gateway API)</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · McpBridgeController</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · WasmPluginController</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · Http2RpcController</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · McpServerController</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · Secret Controller</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · ConfigMap 全局配置</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · workqueue 与重试</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · EventHandler 注册</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · AggregateController</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · 多集群 clusterId</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · 资源版本与 ResyncPeriod</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 写一个最小 controller</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep03.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep05.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 04 期 / 共 10 期</span>
+            <h1 class="part-title">K8s 资源监听与 Controller</h1>
+            <p class="part-desc">Higress 控制面本质是一组 K8s Controller。本期把所有 controller 的统一范式与各自差异讲透。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>Informer 三件套</h1></div>
+        <div class="card"><p>Informer = SharedIndexInformer + Lister + EventHandler，K8s 的"<strong>List-Watch + 本地缓存</strong>"标准范式。Higress 所有 controller 都是这套范式的实例化。</p>
+<pre><code class="language-go">informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+    AddFunc:    func(obj interface{}) { queue.Add(key(obj)) },
+    UpdateFunc: func(old, new interface{}) { queue.Add(key(new)) },
+    DeleteFunc: func(obj interface{}) { queue.Add(key(obj)) },
+})</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么不直接处理事件而要走 queue？答：去重、串行化、限速、重试。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>pkg/kube/client.go</h1></div>
+        <div class="card"><p>Higress 在 Istio 的 <code>istiokube.Client</code> 之上再包了一层 <code>higresskube.Client</code>，把自定义 CRD 客户端塞进来，对外暴露统一的 multi-typed client。所有 controller 都接收同一个 client 实例。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：单 client 多 informer 怎么避免相互争抢 watch？提示：每个 GVR 一个 informer，由 SharedInformerFactory 管理。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>client/ codegen 产物</h1></div>
+        <div class="card"><p><code>client/</code> 目录由 <code>k8s.io/code-generator</code> 自动生成 typed clientset / lister / informer。Higress 写 CRD <code>types.go</code> + 跑 <code>make gen</code>，剩下都是生成代码。<strong>不需要读这些文件</strong>，只要会调用即可：</p>
+        <pre><code class="language-go">cs, _ := versioned.NewForConfig(cfg)
+list, _ := cs.NetworkingV1().McpBridges("ns").List(ctx, ...)</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：CRD 改字段后忘 <code>make gen</code> 会怎样？</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>common.IngressController 接口</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/common/controller.go</code> 定义了 Higress 自己的 controller 抽象：</p>
+<pre><code class="language-go">type IngressController interface {
+    Run(stop &lt;-chan struct{})
+    HasSynced() bool
+    ListAll() []common.WrapperConfig
+    GetIngress(ns, name string) *networkingv1.Ingress
+    AddEventHandler(handler IngressHandler)
+    ...
+}</code></pre>
+        <p>这是 IngressConfig 与各版本 controller 解耦的关键。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：WrapperConfig 是什么？答：把 Ingress + 集群标识 + 注解解析结果包一层的中间表示。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>ingressv1 控制器</h1></div>
+        <div class="card"><p>位于 <code>pkg/ingress/kube/ingressv1/</code>。监听 <code>networking.k8s.io/v1</code> Ingress 资源（K8s 1.19+ 主流形态）。它过滤 <code>spec.ingressClassName</code> 是否匹配 Higress 的 ingress class。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：默认 ingress class 名是什么？答：<code>higress</code>，可通过 ConfigMap 配置。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>ingress (v1beta1)</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/ingress/</code> 是 Old API 兼容。<code>extensions/v1beta1.Ingress</code> 在 K8s 1.22 已删除，但很多老集群仍在跑。Higress 保留这条线，让升级路径平滑。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：v1 与 v1beta1 字段差异主要在哪？提示：pathType、backend.service.name 等。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>kingress Knative</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/kingress/</code> 监听 Knative 的 <code>networking.internal.knative.dev/v1alpha1.Ingress</code>。这让 Higress 可以替换 Knative 默认的 Kourier/Istio 网关。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Knative Ingress 与原生 Ingress 的字段差异是什么？答：含 tag、percent、splits 等灰度概念。</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>gateway (Gateway API)</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/gateway/</code> 处理 <code>gateway.networking.k8s.io</code> 下的 Gateway / HTTPRoute / TCPRoute / TLSRoute。这是未来主流路径，Ingress 注解的"标准化继任者"。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Gateway API 比 Ingress + 注解强在哪？答：原生支持 listener / route 分离、跨 namespace 引用。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>McpBridgeController</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/mcpbridge/controller.go</code> 只有 49 行——它就是个薄壳：监听 McpBridge CRD，把事件回调给 IngressConfig 的 <code>AddOrUpdateMcpBridge</code> / <code>DeleteMcpBridge</code>。真正的"协调多注册中心"逻辑在 <code>registry/reconcile</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：把 controller 做薄、reconcile 做厚带来什么好处？</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>WasmPluginController</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/wasmplugin/controller.go</code> 同样很薄：监听 Higress 自定义的 <code>extensions.higress.io/v1alpha1.WasmPlugin</code>，把事件回给 IngressConfig 的 <code>AddOrUpdateWasmPlugin</code>。最终由 IngressConfig 把它合并到 Istio <code>extensions.WasmPlugin</code> 与 EnvoyFilter。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Higress 与 Istio WasmPlugin CRD 名一样但 group 不同，为何这么设计？提示：扩展字段需要。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>Http2RpcController</h1></div>
+        <div class="card"><p>Http2Rpc 是 Higress 的"HTTP→Dubbo 转换"CRD，配合 <code>http2rpc</code> 注解和 EnvoyFilter 可以让前端 HTTP 直接调 Dubbo 接口。Controller 同样薄壳，关键转换在 IngressConfig 的 <code>constructHttp2RpcEnvoyFilter</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Dubbo 方法元数据怎么传给 Envoy？答：通过 EnvoyFilter.patch 把 method map 注入 typed_config。</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>McpServerController</h1></div>
+        <div class="card"><p>负责监听 <code>McpServer</code> CRD —— 描述外部 MCP Server 的接入信息。事件转发到 IngressConfig 与 <code>pkg/ingress/mcp</code>（注意：这里 "mcp" 是 Mesh Config Protocol，不是 Model Context Protocol，名字撞车）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：怎么区分代码中两个 mcp？提示：上下文 + 引入路径。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>Secret Controller</h1></div>
+        <div class="card"><p><code>pkg/ingress/config/secret_config_mgr.go</code> 实现 Secret 监听：TLS 证书变了要触发对应 Gateway/Listener 的 push。Higress 还监听特殊 Secret（例如 ai-proxy 用的 API key Secret）。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Secret 变更后 Envoy 多久能看到新证书？提示：SDS 推送+热加载，毫秒级。</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>ConfigMap 全局配置</h1></div>
+        <div class="card"><p><code>pkg/ingress/kube/configmap/</code> 监听全局 ConfigMap（默认 <code>higress-config</code>），里面塞 gzip / tracing / global mcpServer 等设置。Controller 把变化广播给依赖它的子模块。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么不全用 CRD？提示：一些全局开关历史上就是 ConfigMap，迁移成本与运维习惯。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>workqueue 与重试</h1></div>
+        <div class="card"><p>所有 controller 都用 <code>workqueue.NewRateLimitingQueue</code>：失败 requeue 时按指数退避。这是 K8s controller 写法的事实标准，Higress 没有偏离。</p>
+<pre><code class="language-go">if err := c.reconcile(key); err != nil {
+    c.queue.AddRateLimited(key); return
+}
+c.queue.Forget(key)</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：永远失败的 key 会被无限重试吗？怎么避免？</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>EventHandler 注册</h1></div>
+        <div class="card"><p>IngressConfig 提供 <code>RegisterEventHandler(kind, fn)</code>：让 Pilot 注册回调，当 controller 检测变更时 Higress 调 <code>fn</code> 通知 Pilot 重推。这是控制面与 controller 的"<strong>反向调用</strong>"通道。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Pilot 收到通知后会立刻推送吗？答：进 debounce 队列。</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>AggregateController</h1></div>
+        <div class="card"><p>Higress 支持多集群：每个集群一个 IngressController 实例，外层用 <code>common.AggregateController</code> 聚合，对 IngressConfig 暴露统一接口。多集群下 <code>WrapperConfig</code> 里会带 clusterId 区分。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：多个集群有同名 Ingress 时谁优先？</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>多集群 clusterId</h1></div>
+        <div class="card"><p>clusterId 是 Istio MultiCluster 抽象的关键。Higress 沿用此设计：每个 client 携带 clusterId，Service / Endpoint / Config 命名时都带 clusterId 前缀避免冲突。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：单集群默认 clusterId 是什么？答：<code>Kubernetes</code> 或环境变量指定。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>资源版本与 ResyncPeriod</h1></div>
+        <div class="card"><p>Higress informer 配置 ResyncPeriod=0（不周期 resync），完全靠事件驱动。这避免 large cluster 下的 list-watch 风暴。一旦丢事件会通过 K8s watch reconnect 自动追回。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：ResyncPeriod 设大或设 0 各有什么风险？</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>写一个最小 controller</h1></div>
+        <div class="card"><p>以 McpBridge 为模板，新增一个 controller 的最小步骤：</p>
+        <ol><li>在 <code>api/networking/v1/</code> 定义 CRD types。</li>
+        <li><code>make gen</code> 生成 client/lister/informer。</li>
+        <li>新建 <code>pkg/ingress/kube/myfeat/controller.go</code>，模仿 mcpbridge controller。</li>
+        <li>在 IngressConfig 的 NewIngressConfig 里启动它，并注册回调。</li>
+        <li>在 List 或 convert* 里把数据消费成 Istio 配置。</li></ol></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你掌握了 Higress 所有 controller 的统一范式。下一期我们解剖最复杂的那个文件——<code>ingress_config.go</code>。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 03 期 · Istio Pilot 复用与 xDS — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">03</div>
+            <h2>第 03 期</h2>
+            <p class="version">Istio Pilot 复用与 xDS · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Pilot 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · vendored Istio 目录</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ConfigStore 模型</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ServiceRegistry 模型</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · PushContext</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Environment 容器</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · DiscoveryServer 入口</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · ADS gRPC stream</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 推送队列与 debounce</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · LDS 生成</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · RDS 生成</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · CDS 生成</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · EDS 生成与增量</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · SDS 与证书</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · Aggregate 聚合器</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · krt 新式 Informer</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · Higress 注入点</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · 推送一次的全流程</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · 调试 syncz/configz</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 与上游 Istio 差异</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep02.html" class="nav-link">&larr; 上一期</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep04.html" class="nav-link" style="color:var(--accent-green);">下一期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 03 期 / 共 10 期</span>
+            <h1 class="part-title">Istio Pilot 复用与 xDS</h1>
+            <p class="part-desc">看清 Higress 与 Istio 的接缝。20 讲覆盖 ConfigStore / ServiceRegistry / PushContext / DiscoveryServer 与 LDS/RDS/CDS/EDS/SDS 的关键代码路径。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>Pilot 是什么</h1></div>
+        <div class="card"><p>Pilot 是 Istio 控制面里负责"<strong>生成并下发 Envoy 配置</strong>"的组件。其核心抽象：</p>
+        <ul><li><strong>ConfigStore</strong>：拿到 VirtualService、DestinationRule、Gateway 等 CRD。</li>
+        <li><strong>ServiceRegistry</strong>：拿到 Service 与 Endpoint。</li>
+        <li><strong>PushContext</strong>：把以上两者快照成"可推送的视图"。</li>
+        <li><strong>DiscoveryServer</strong>：ADS gRPC 服务端，对每个 Envoy 连接维护 stream。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：Higress 把 Pilot 当库用，自己只生成 Config，意味着不需要重写哪部分？答：xDS / Push / Stream 全免。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>vendored Istio 目录</h1></div>
+        <div class="card"><p>仓库根目录 <code>istio/istio</code>、<code>istio/api</code>、<code>istio/client-go</code>、<code>istio/proxy</code> 分别对应 Istio 的几个仓库。Higress 通过 <code>go.mod replace</code> 把 import 重定向到这里。这意味着：</p>
+        <ul><li>升级 Istio 版本 = git 替换 <code>istio/</code> 内容。</li>
+        <li>所有 patch 都"hot"，无需 fork。</li>
+        <li>Higress 可以保留 Istio 老 API 兼容性。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：如何在 PR 中评审一个跨 Higress + Istio 的修改？</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>ConfigStore 模型</h1></div>
+        <div class="card"><pre><code class="language-go">type ConfigStore interface {
+    Schemas() collection.Schemas
+    Get(typ config.GroupVersionKind, name, ns string) *config.Config
+    List(typ config.GroupVersionKind, ns string) []config.Config
+    Create/Update/Delete(config.Config) (string, error)
+}</code></pre>
+        <p>这是 Pilot 的"配置数据库"接口。Higress 不仅有真实 K8s CRD store，还有<strong>动态合成的 IngressConfig</strong>——后者也实现这个接口，让 Pilot 误以为有真实 VirtualService。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：合成对象用什么字段做 namespace/name？提示：通常以 Ingress 名 + cluster 前缀拼出。</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>ServiceRegistry 模型</h1></div>
+        <div class="card"><pre><code class="language-go">type ServiceDiscovery interface {
+    Services() []*model.Service
+    InstancesByPort(svc *model.Service, port int) []*model.ServiceInstance
+    GetProxyServiceTargets(node *model.Proxy) []model.ServiceTarget
+    NetworkGateways() []model.NetworkGateway
+    MCSServices() []model.MCSServiceInfo
+}</code></pre>
+        <p>Pilot 用这个接口拿 endpoint。Higress 通过 <code>registry/memory.ServiceRegistry</code> 把 Nacos/ZK/Consul 来的实例统一注入。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：实例频繁变更（如金丝雀）通过哪条接口推回 Pilot？</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>PushContext</h1></div>
+        <div class="card"><p>PushContext 是"<strong>一次推送的不可变快照</strong>"：从 ConfigStore + ServiceRegistry 拉取当前所有数据，构建好按命名空间/服务的索引，方便 generator 高效查询。每次配置变更后会重建 PushContext，老的快照仍可被进行中的推送使用。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么用快照而不是直接读 live data？答：一致性 + 并发安全。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>Environment 容器</h1></div>
+        <div class="card"><pre><code class="language-go">type Environment struct {
+    ConfigStore
+    ServiceDiscovery
+    Mesh        *meshconfig.MeshConfig
+    PushContext *PushContext
+    ...
+}</code></pre>
+        <p>这是 Higress 跟 Pilot 沟通的"<strong>核心对象</strong>"，<code>bootstrap.NewServer</code> 一旦填好它，剩下全是 Istio 的事。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：如果你想在 Environment 上挂一个自定义字段（如 ai 配额），怎么做？提示：通常通过 PushContext.Plugins 扩展。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>DiscoveryServer 入口</h1></div>
+        <div class="card"><pre><code class="language-go">xdsServer := xds.NewDiscoveryServer(env, plugins, ...)
+xdsServer.Register(grpcServer)</code></pre>
+        <p>DiscoveryServer 内含：</p>
+        <ul><li><code>pushChannel</code>：推送任务队列</li>
+        <li><code>clients</code>：当前连接的 Envoy 列表（按 ADS）</li>
+        <li><code>generators</code>：按 TypeURL 分发的资源生成器</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：单控制面能挂多少个 Envoy 连接？瓶颈在哪？</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>ADS gRPC stream</h1></div>
+        <div class="card"><p>每个 Envoy 启动后通过 <code>StreamAggregatedResources</code> 建立一条双向流，发 <code>DiscoveryRequest</code>，接 <code>DiscoveryResponse</code>。Pilot 在 <code>ads.go</code> 维护 stream state：已 ack 的 nonce、订阅的资源列表。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Envoy 怎么告诉控制面"配置生效失败"？答：DiscoveryRequest.ErrorDetail。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>推送队列与 debounce</h1></div>
+        <div class="card"><p>多个事件短时间内到达时，Pilot 用 <strong>debounce</strong> 合并：<code>DebounceAfter</code> 默认 100ms，最长 <code>DebounceMax</code> 10s。Higress 通过 <code>XdsOptions.DebounceAfter/Max</code> 透传修改。</p>
+        <p>合并后形成一次 PushContext 重建 + 多 client 并行推送。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：把 debounce 调得太短/太长各有什么风险？</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>LDS 生成</h1></div>
+        <div class="card"><p>LDS 把 Gateway / Sidecar 的 listener 渲染成 Envoy Listener。Higress 主要使用 Istio 的 <code>configgen.BuildListeners</code>。Wasm 插件通过 EnvoyFilter 嵌入到 listener 的 HTTP Filter Chain。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么 WasmPlugin 不会触发 LDS 全量重推？答：phase + 增量替换 typed_config。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>RDS 生成</h1></div>
+        <div class="card"><p>RDS 由 VirtualService 决定。Higress 大量工作就是合成 VirtualService，因此 RDS 是受 Ingress 改动影响最大的资源类型。Pilot 会按 listener route_config_name 分包 RDS 单独推送。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：100 万条 Ingress 时 RDS 大小会爆炸吗？答：会，按 host 分片 + RDS 增量是优化手段。</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>CDS 生成</h1></div>
+        <div class="card"><p>CDS = Cluster，每个上游服务一份。来源：K8s Service、ServiceEntry、DestinationRule 的 subset。Higress 通过翻译 Ingress + McpBridge 间接控制 CDS。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：DestinationRule 的 LoadBalancer 设置最终落到 CDS 的哪个字段？</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>EDS 生成与增量</h1></div>
+        <div class="card"><p>EDS 推送 ClusterLoadAssignment（每个 cluster 的 endpoint 列表）。这是最高频的资源类型——Pod IP 一动就 push。Istio 支持<strong>增量 xDS</strong>（delta），Higress 通过 <code>XdsOptions.EnableEDSDebounce</code> 控制是否对 EDS 也加 debounce。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Nacos 实例上下线频率高时怎么避免 push 风暴？</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>SDS 与证书</h1></div>
+        <div class="card"><p>SDS 推送 TLS 证书与私钥。Higress 用 <code>pkg/cert</code> 自动签发证书后存入 Secret，Pilot 通过 Secret → SDS 推到 Envoy。Envoy 不落盘私钥，所有都在内存。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Secret 修改触发 SDS 推送的链路？答：Secret Informer → ConfigUpdate → SDS。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>Aggregate 聚合器</h1></div>
+        <div class="card"><p><code>configaggregate</code>、<code>aggregate</code> 分别聚合 ConfigStore 与 ServiceRegistry。聚合器对外暴露统一接口，对内按 cluster / source 分发查询。Higress 多集群 / 多注册中心都靠它。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：当两个源声明了同名 Service，聚合器怎么处理？</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>krt 新式 Informer</h1></div>
+        <div class="card"><p><code>istio.io/istio/pkg/kube/krt</code> 是 Istio 1.20+ 推出的<strong>声明式 collection</strong>：用 <code>krt.NewCollection</code> 把多个底层 informer 组合成可派生的视图，类似 RX。Higress 部分 controller 已迁移到 krt，其它仍是老式 Informer + workqueue。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：krt vs 老式 Informer 的优缺点？</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>Higress 注入点</h1></div>
+        <div class="card"><p>Higress 与 Istio 的接缝可总结成 3 处：</p>
+        <ol><li><strong>configaggregate</strong> 加入 IngressConfig 作为 ConfigStore。</li>
+        <li><strong>aggregate.Controller</strong> 加入 memory.ServiceRegistry 作为 ServiceDiscovery。</li>
+        <li><strong>EnvoyFilter</strong> 由 IngressConfig 合成，用来塞 Wasm / Lua / 自定义 filter。</li></ol></div>
+        <div class="card warn-card"><strong>思考</strong>：能否完全不用 EnvoyFilter，把所有扩展放到 IstioOperator API？提示：成本高、可扩展性差。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>推送一次的全流程</h1></div>
+        <div class="card"><pre><code class="language-bash">Ingress YAML changed
+  → Informer event
+  → IngressConfig 缓存重算 + EventHandler 通知
+  → DiscoveryServer.ConfigUpdate(PushRequest)
+  → debounce 合并
+  → PushContext.InitContext (重建快照)
+  → 对每个连接的 Envoy
+       └─ proxy.SidecarScope 更新
+       └─ generators 按 TypeURL 生成资源
+       └─ 发送 DiscoveryResponse
+  → Envoy ACK / NACK</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：哪一步最重？为什么 PushContext 重建是性能瓶颈？</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>调试 syncz / configz</h1></div>
+        <div class="card"><p>常用端点：</p>
+        <ul><li><code>:15014/debug/syncz</code>：每个 Envoy 当前 ACK 状态。</li>
+        <li><code>:15014/debug/configz</code>：当前 ConfigStore 内容。</li>
+        <li><code>:15014/debug/registryz</code>：服务发现内容。</li>
+        <li><code>:15014/debug/endpointShardz</code>：EDS 切片视图。</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：用户报"路由没生效"，先访问哪个端点？答：syncz 看是否 ACK 最新版本。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>与上游 Istio 差异</h1></div>
+        <div class="card"><p>Higress 主要 patch 点：</p>
+        <ul><li>禁用 sidecar injector / Citadel CA。</li>
+        <li>增强 Gateway label 选择器（GatewaySelectorKey/Value）。</li>
+        <li>支持 KeepConfigLabels / KeepConfigAnnotations 这种透传开关。</li>
+        <li>嵌入了对 Higress 自定义 CRD 的 schema。</li></ul>
+        <p>这些都可以在 <code>istio/istio</code> 子目录里 diff 上游来确认。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你应该理解了 Higress = Istio Pilot + 自有 Config 合成器 + 自有 ServiceRegistry。下一期我们深入 K8s controller 范式。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第 02 期 · 控制面启动与初始化 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#22c55e);">02</div>
+            <h2>第 02 期</h2>
+            <p class="version">控制面启动与初始化 · 20 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本期 20 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · main.go 全文 32 行</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · EnableKlogWithCobra</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · GetRootCommand</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · server 子命令</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · version 子命令</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ServerArgs 参数对象</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ServerInterface 抽象</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · NewServer 主线</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · initKubeClient</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · MeshConfig Watcher</a></li>
+            <li><a href="#l11" class="nav-link" data-section="l11">L11 · initConfigController</a></li>
+            <li><a href="#l12" class="nav-link" data-section="l12">L12 · initRegistryEventHandlers</a></li>
+            <li><a href="#l13" class="nav-link" data-section="l13">L13 · initXdsServer</a></li>
+            <li><a href="#l14" class="nav-link" data-section="l14">L14 · initGrpcServer</a></li>
+            <li><a href="#l15" class="nav-link" data-section="l15">L15 · initAuthenticators</a></li>
+            <li><a href="#l16" class="nav-link" data-section="l16">L16 · initAutomaticHttps</a></li>
+            <li><a href="#l17" class="nav-link" data-section="l17">L17 · initHttpServer 调试入口</a></li>
+            <li><a href="#l18" class="nav-link" data-section="l18">L18 · Start 与 waitForCacheSync</a></li>
+            <li><a href="#l19" class="nav-link" data-section="l19">L19 · 优雅退出 waitForShutDown</a></li>
+            <li><a href="#l20" class="nav-link" data-section="l20">L20 · 环境变量与 Feature Flag</a></li>
+
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-source-ep01.html" class="nav-link">&larr; 上一期 · 架构总览</a></li>
+            <li><a href="higress-source-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">总目录</a></li>
+            <li><a href="higress-source-ep03.html" class="nav-link" style="color:var(--accent-green);">下一期 · Pilot 与 xDS &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">第 02 期 / 共 10 期</span>
+            <h1 class="part-title">控制面启动与初始化</h1>
+            <p class="part-desc">把 <code>cmd/higress/main.go</code> 一路追到 <code>pkg/bootstrap/server.go</code> 的最后一个 init。读完这一期你能在白板上完整画出 Higress 启动的 6 步主线。</p>
+        </div>
+
+        <section id="l01" class="section"><div class="section-header"><span class="section-number">L01</span><h1>main.go 全文 32 行</h1></div>
+        <div class="card"><pre><code class="language-go">package main
+import (
+    "fmt"; "os"
+    "istio.io/pkg/log"
+    "github.com/alibaba/higress/v2/pkg/cmd"
+)
+func main() {
+    log.EnableKlogWithCobra()
+    if err := cmd.GetRootCommand().Execute(); err != nil {
+        fmt.Fprintln(os.Stderr, err); os.Exit(1)
+    }
+}</code></pre>
+        <p>它只是一个 thin shell：日志接管 + 启动 Cobra root 命令。所有逻辑都被推到 <code>pkg/cmd</code>，让 main 可被替换、可被测试。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么主函数代码越少越好？提示：可测试、可复用为库。</div></section>
+
+        <section id="l02" class="section"><div class="section-header"><span class="section-number">L02</span><h1>EnableKlogWithCobra</h1></div>
+        <div class="card"><p>该函数把 K8s 的 klog 输出桥接到 Istio 的 <code>istio.io/pkg/log</code>，并把 klog 的 <code>--v</code>、<code>-vmodule</code> 等 flag 注册到 cobra root。这是 Higress 与 client-go 共用日志栈的关键。</p>
+        <p>它的意义在于：你可以用 Istio 的 <code>--log_output_level</code> 控制所有依赖库日志。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：调试时想看 client-go 详细日志，你应该传什么 flag？答：<code>--log_output_level=klog:debug</code> 这类。</div></section>
+
+        <section id="l03" class="section"><div class="section-header"><span class="section-number">L03</span><h1>GetRootCommand</h1></div>
+        <div class="card"><pre><code class="language-go">// pkg/cmd/root.go
+func GetRootCommand() *cobra.Command {
+    cmd := &cobra.Command{Use: "higress", Short: "Higress",
+        Long: "Next-generation Cloud Native Gateway"}
+    cmd.AddCommand(getServerCommand())
+    cmd.AddCommand(getVersionCommand())
+    return cmd
+}</code></pre>
+        <p>整棵命令树只有两枝：<code>serve</code> 与 <code>version</code>。结构简单到极致——所有复杂度都在 <code>getServerCommand</code> 的 RunE 里。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：如果要加一个 <code>higress debug</code> 子命令，从哪个文件开始？</div></section>
+
+        <section id="l04" class="section"><div class="section-header"><span class="section-number">L04</span><h1>server 子命令</h1></div>
+        <div class="card"><p><code>pkg/cmd/server.go</code> 是控制面真正的入口。三件事：</p>
+        <ol><li>把 cobra flag 绑到 <code>serverArgs *bootstrap.ServerArgs</code>。</li>
+        <li>RunE 里调 <code>serverProvider(serverArgs)</code> → <code>bootstrap.NewServer</code> 得到 Server。</li>
+        <li>调 <code>server.Start(stop)</code>，再 <code>waitForMonitorSignal</code> 阻塞直到收到 SIGTERM。</li></ol>
+<pre><code class="language-go">serverProvider = func(args *bootstrap.ServerArgs) (bootstrap.ServerInterface, error) {
+    return bootstrap.NewServer(args)
+}</code></pre>
+        <p>这层间接抽出 <code>serverProvider</code> 是为了测试可替换。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么要把 <code>serverProvider</code> 弄成包级变量？提示：<code>pkg/cmd/server_test.go</code>。</div></section>
+
+        <section id="l05" class="section"><div class="section-header"><span class="section-number">L05</span><h1>version 子命令</h1></div>
+        <div class="card"><p>用法：<code>higress version -o json</code>。实现在 <code>pkg/cmd/version/</code>，输出二进制版本、git commit、build date，并尝试连接 xDS 拉取数据面版本。这是排查"我装的是哪个版本"问题的官方途径。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：构建时如何把 git commit 注入二进制？提示：<code>-ldflags "-X version.gitRevision=..."</code>。</div></section>
+
+        <section id="l06" class="section"><div class="section-header"><span class="section-number">L06</span><h1>ServerArgs 参数对象</h1></div>
+        <div class="card"><p>定义于 <code>pkg/bootstrap/server.go</code>。它聚合了所有命令行参数：</p>
+<pre><code class="language-go">type ServerArgs struct {
+    XdsOptions       XdsOptions       // 推送 debounce/EDS 控制
+    RegistryOptions  RegistryOptions  // K8s / FileDir 等
+    KeepaliveOptions *keepalive.Options
+    HTTPAddr, GRPCAddr, MonitoringAddr string
+    Namespace        string
+    GatewaySelectorKey, GatewaySelectorValue string
+    EnableAutomaticHttps bool
+    // ...
+}</code></pre>
+        <p>这是经典的"<strong>Parameter Object</strong>"模式，让 server 包能被库式调用。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：如果新增一个 flag，应该改哪几个文件？答：<code>pkg/cmd/server.go</code> 绑定 + <code>ServerArgs</code> 加字段 + 真正消费它的地方。</div></section>
+
+        <section id="l07" class="section"><div class="section-header"><span class="section-number">L07</span><h1>ServerInterface 抽象</h1></div>
+        <div class="card"><pre><code class="language-go">type ServerInterface interface {
+    Start(stop &lt;-chan struct{}) error
+    WaitUntilCompletion()
+}</code></pre>
+        <p>把 NewServer 返回类型抽象为接口，让 <code>pkg/cmd/server.go</code> 不直接依赖 *Server，方便测试替换。这是依赖倒置的微缩样本。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：单元测试中如何用 fake server 替换真 server？</div></section>
+
+        <section id="l08" class="section"><div class="section-header"><span class="section-number">L08</span><h1>NewServer 主线</h1></div>
+        <div class="card"><pre><code class="language-go">func NewServer(args *ServerArgs) (*Server, error) {
+    s := &Server{...}
+    s.initKubeClient(args)
+    s.initMeshConfig()
+    s.initConfigController()
+    s.initRegistryEventHandlers()
+    s.initXdsServer()
+    s.initGrpcServer()
+    s.initAuthenticators()
+    s.initAutomaticHttps()
+    s.initHttpServer()
+    return s, nil
+}</code></pre>
+        <p>这就是控制面的"<strong>启动 6+步</strong>"骨架——把每一步当黑盒，就能在 5 分钟内读完 main path。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：这些 init 函数之间有强先后依赖吗？答：有部分，例如 KubeClient 必须先于 ConfigController。</div></section>
+
+        <section id="l09" class="section"><div class="section-header"><span class="section-number">L09</span><h1>initKubeClient</h1></div>
+        <div class="card"><p>位于 <code>server.go</code> 第 411 行附近。基于 in-cluster 或 kubeconfig 创建 <code>istiokube.Client</code>，并包一层 Higress 自己的 <code>higresskube.Client</code>（pkg/kube/client.go）。</p>
+        <p>关键点：Higress 用的是 Istio 的 <strong>multi-client 封装</strong>，一份 Client 持有 typed kube + dynamic + istio + 自定义 CRD 多个 clientset。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：本地开发想跑 controller 怎么传 kubeconfig？答：<code>--kubeconfig ~/.kube/config</code> + <code>--master ...</code>。</div></section>
+
+        <section id="l10" class="section"><div class="section-header"><span class="section-number">L10</span><h1>MeshConfig Watcher</h1></div>
+        <div class="card"><p>Higress 复用 Istio 的 <code>meshwatcher</code>：监听一个 ConfigMap（默认 <code>higress-config</code>）里的 mesh config YAML，变更时把新配置 hot reload 到 <code>environment.Mesh</code>。</p>
+        <p>这是 Pilot 推送语义的关键依赖：Mesh 决定了默认 sidecar 行为、扩展协议等。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：把 mesh config 放 ConfigMap 而不是 CRD 的原因？提示：兼容历史、便于 Helm 模板化。</div></section>
+
+        <section id="l11" class="section"><div class="section-header"><span class="section-number">L11</span><h1>initConfigController</h1></div>
+        <div class="card"><p>核心：构造一个聚合 ConfigStore，把 K8s 原生 CRD store 与 Higress 自己的 <code>IngressTranslation</code> 合并：</p>
+<pre><code class="language-go">stores := []model.ConfigStoreController{}
+stores = append(stores, kubeCRDStore)
+stores = append(stores, ingressTranslation)
+configController = configaggregate.MakeWriteableCache(stores, nil)</code></pre>
+        <p>对 Pilot 来说看到的是一份 ConfigStore；对 Higress 来说，IngressConfig 可以注入任意自定义合成的 VirtualService / DR / EnvoyFilter。这是 Higress 改造 Istio 最巧妙的接缝。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：configaggregate 聚合多个 store 时，重名资源怎么去重？</div></section>
+
+        <section id="l12" class="section"><div class="section-header"><span class="section-number">L12</span><h1>initRegistryEventHandlers</h1></div>
+        <div class="card"><p>把 ServiceRegistry 的事件（Service/Endpoint 增删改）转发给 xDS：变更触发 push。具体做法是注册 <code>ServiceHandler</code>、<code>WorkloadHandler</code> 到聚合 ServiceRegistry，回调里调用 <code>XDSServer.ConfigUpdate</code>。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：注册中心实例频繁抖动会引发推送风暴吗？防护手段？答：debounce + 增量 EDS。</div></section>
+
+        <section id="l13" class="section"><div class="section-header"><span class="section-number">L13</span><h1>initXdsServer</h1></div>
+        <div class="card"><p>构造 <code>xds.NewDiscoveryServer(environment, generators, ...)</code>。<code>environment</code> 包了 ConfigStore + ServiceRegistry + Mesh + PushContext。<code>generators</code> 是按资源类型分发的 xDS 生成器（LDS/RDS/CDS/EDS/SDS 等）。</p>
+        <p>Higress 在此阶段可以注入<strong>自定义 generator</strong>（如对 WasmPlugin 特殊处理），但大多数情况复用 Istio 的实现。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Higress 如果想把 EnvoyFilter 渲染成 LDS 的 typed_config，需要 hack 哪个 generator？</div></section>
+
+        <section id="l14" class="section"><div class="section-header"><span class="section-number">L14</span><h1>initGrpcServer</h1></div>
+        <div class="card"><p>初始化一个 gRPC server（默认 <code>:15010</code> 明文 / <code>:15012</code> 双向 TLS），把 xds.DiscoveryServer 注册进去，再加上 <code>grpc_prometheus</code>、<code>reflection</code>。</p>
+        <pre><code class="language-go">istiogrpc.NewGrpcServer(...) // 复用 Istio 的辅助函数
+prometheus.Register(grpcSrv)
+reflection.Register(grpcSrv)</code></pre></div>
+        <div class="card warn-card"><strong>思考</strong>：为什么把 reflection 注册到 gRPC server？答：方便 <code>grpcurl</code> 调试。</div></section>
+
+        <section id="l15" class="section"><div class="section-header"><span class="section-number">L15</span><h1>initAuthenticators</h1></div>
+        <div class="card"><p>为 xDS 连接配置认证器列表（kube SAToken / JWT / clientCert）。Higress 默认开启 <code>kubeauth.NewKubeJWTAuthenticator</code>，让 Envoy sidecar 用 ServiceAccount Token 鉴权。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：Higress Gateway 与 Higress Controller 共部署时这一步是否还有意义？</div></section>
+
+        <section id="l16" class="section"><div class="section-header"><span class="section-number">L16</span><h1>initAutomaticHttps</h1></div>
+        <div class="card"><p>对接 <code>pkg/cert</code> 的 CertManager：开启自动证书签发（ACME 或自签）。具体实现见第 10 期。这里只看到一个轻量入口：根据 ServerArgs.EnableAutomaticHttps 是否启动。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：自动证书与手动 Secret 共存时谁优先？</div></section>
+
+        <section id="l17" class="section"><div class="section-header"><span class="section-number">L17</span><h1>initHttpServer 调试入口</h1></div>
+        <div class="card"><p>默认 <code>:8080</code> 暴露调试端点：</p>
+        <ul><li><code>/ready</code> readyHandler — 等所有 cache synced</li>
+        <li><code>/registry/status</code> registryWatcherStatusHandler — 各注册中心健康度</li>
+        <li>Pilot 自带的 <code>/debug/...</code> 路径（如 <code>/debug/configz</code>、<code>/debug/syncz</code>）</li></ul></div>
+        <div class="card warn-card"><strong>思考</strong>：线上排查"Envoy 配置是不是最新"，你访问哪个 URL？答：<code>/debug/syncz</code>。</div></section>
+
+        <section id="l18" class="section"><div class="section-header"><span class="section-number">L18</span><h1>Start 与 waitForCacheSync</h1></div>
+        <div class="card"><pre><code class="language-go">func (s *Server) Start(stop &lt;-chan struct{}) error {
+    s.server.RunComponent(...)            // 一组 lifecycle 组件
+    if !s.waitForCacheSync(stop) { ... }   // 所有 informer cache 完成
+    // 启动 HTTP/gRPC listener，开始接受 ADS 连接
+    return nil
+}</code></pre>
+        <p><code>waitForCacheSync</code> 阻塞到所有 Lister 列表完成首次 List & Watch；否则 xDS 推送的内容是空的会引发 Envoy 误判。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：cache 永远 sync 不上的常见原因？答：RBAC 不够、Watch 被 kube-apiserver 限流。</div></section>
+
+        <section id="l19" class="section"><div class="section-header"><span class="section-number">L19</span><h1>优雅退出 waitForShutDown</h1></div>
+        <div class="card"><p>收到 SIGTERM 后：</p>
+        <ol><li>停接受新的 ADS 连接（关闭 listener）；</li>
+        <li>给 Envoy 留一段时间消费已发送的资源；</li>
+        <li>退出 informer / workqueue；</li>
+        <li>退出进程。</li></ol>
+        <p>这是控制面"<strong>不重启 Envoy</strong>"零中断升级的基础。</p></div>
+        <div class="card warn-card"><strong>思考</strong>：滚动升级 Higress 控制面 Pod，数据面会断流吗？答：通常不会，Envoy 缓存最后一份配置。</div></section>
+
+        <section id="l20" class="section"><div class="section-header"><span class="section-number">L20</span><h1>环境变量与 Feature Flag</h1></div>
+        <div class="card"><p>Higress 复用 Istio 的 <code>env.Register</code> 模式，把 feature flag 集中在 <code>pkg/cmd/server.go</code> 顶部：</p>
+        <pre><code class="language-go">keepConfigLabels = env.Register(
+    "CONTROLLER_KEEP_XDS_CONFIG_LABELS", true,
+    "If enabled, Higress Controller will keep all the labels ...").Get()</code></pre>
+        <p>所有环境变量在 <code>/debug/info</code> 类页面可见，便于运维核对。</p></div>
+        <div class="card warn-card"><strong>本期收尾</strong>：你现在能在白板上画出 Higress NewServer 的 6+步。下一期我们走进 Istio Pilot 看 xDS 怎么把 ConfigStore 推到 Envoy。</div></section>
+
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); });
+            }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
