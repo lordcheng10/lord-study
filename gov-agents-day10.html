@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 多维评测 Eval + CI 阻断 — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        .dims { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+        .dim { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:12px 8px; text-align:center; }
+        .dim .ico { font-size:20px; } .dim h5 { font-size:12px; margin:4px 0 2px; color:var(--accent-purple); } .dim p { font-size:10.5px; color:var(--text-muted); margin:0; }
+        @media(max-width:768px){ .dims{grid-template-columns:repeat(2,1fr)} }
+        .evalpipe { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; padding:14px 4px; }
+        .evalpipe .b { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:10px 12px; font-size:12px; text-align:center; min-width:90px; }
+        .evalpipe .b b { display:block; color:var(--accent-cyan); }
+        .evalpipe .a { color:var(--accent-purple); font-weight:800; }
+        .gate-ci { display:flex; align-items:center; gap:14px; background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.3); border-radius:10px; padding:16px; margin:8px 0; }
+        .gate-ci .big { font-size:30px; } .gate-ci h4 { font-size:14px; margin:0 0 4px; color:var(--accent-red); } .gate-ci p { font-size:12.5px; color:var(--text-secondary); margin:0; }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">多维评测 Eval + CI 阻断 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要评测</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · golden set 与样本</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 对话型 5 维评分</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · coding 型 6 维加权</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · run_eval 跑批</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 阈值与 CI 阻断</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 在线评测 & 回归检测</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 Memory</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 安全工具 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">多维评测 Eval + CI 阻断</h1>
+            <p class="part-desc">怎么量化"这个 Agent 靠不靠谱"？怎么防止改一版 prompt 就偷偷变差？答案是像跑单元测试一样，给 Agent 跑一套"标准考卷"打分，不及格就拦合并。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么 Agent 必须评测</h1></div>
+            <div class="card">
+                <p>传统代码有单元测试：输入固定，输出对就 PASS。但 Agent 输出的是"自然语言 + 大模型推理结果"——同一个问题两次回答可能措辞都不一样，没法简单 <code>assert 相等</code>。</p>
+                <p>可如果不评测，你改一句 prompt、换个模型，根本不知道 Agent 变好了还是变差了。所以框架把评测做成一等公民：<strong>准备一套"标准考卷"(golden set)，给 Agent 跑一遍，从多个维度打分，不及格就拦住不让合并</strong>。代码在 <code>packages/ai-trust-toolkit/src/ai_trust_toolkit/eval/</code>。</p>
+                <div class="info-box"><code>AGENTS.md</code> 里有条硬规矩：<strong>新 Agent 必须先有评测样本 + Critic，才能合并</strong>。评测不是可选项，是准入门槛。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>golden set 与评测样本</h1></div>
+            <div class="card">
+                <p>"标准考卷"就是一批 <strong>EvalSample</strong>（<code>schemas.py:61</code>），存成 JSONL 文件（每行一个样本），放在每个 agent 的 <code>data/eval_samples.jsonl</code>。一个样本长这样：</p>
+<pre><code class="language-json">{
+  "id": "sample-001",
+  "description": "DB 连接池耗尽导致的服务雪崩",
+  "input": { "user_question": "service-A 大量超时" },
+  "ground_truth": {              // 标准答案（人工标注）
+    "primary_category": "db_connection_pool",
+    "candidate_categories": ["db_connection_pool", "slow_query"],
+    "keywords_in_hypothesis": ["连接池", "耗尽"],
+    "min_supporting_specialists": 2,
+    "overall_confidence_at_least": "中"
+  },
+  "mock_responses": { ... }      // 喂给 FakeLLM 的固定回复，保证可复现
+}</code></pre>
+                <div class="glossary">
+                    <b>ground_truth（标准答案）</b>：人工标注的"这题正确答案应该长什么样"。评测就是拿 Agent 的输出跟它比。<br>
+                    <b>mock_responses</b>：因为评测走 FakeLLM（Day 11），这里预置了假大模型该返回什么——保证每次评测结果<strong>完全可复现</strong>，不受真实 LLM 随机性干扰。
+                </div>
+                <p><code>EvalSample.load_jsonl()</code>（<code>schemas.py:84</code>）批量读入。<code>GroundTruth.from_dict()</code>（<code>schemas.py:44</code>）还有个巧思：不认识的 key 自动塞进 <code>detail</code>，方便非 RCA 类 agent 复用同一套结构。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>对话型：5 维评分（FiveDimScorer）</h1></div>
+            <div class="card">
+                <p>像 sre-rca 这种"给结论"的 agent，用 <code>FiveDimScorer</code>（<code>scorers.py:48</code>）打 5 个布尔维度——每一维过没过：</p>
+                <div class="dims">
+                    <div class="dim"><div class="ico">🎯</div><h5>top1_hit</h5><p>第一根因命中标准答案</p></div>
+                    <div class="dim"><div class="ico">🥉</div><h5>top3_hit</h5><p>Top-3 里命中候选之一</p></div>
+                    <div class="dim"><div class="ico">📏</div><h5>confidence</h5><p>置信度校准达标</p></div>
+                    <div class="dim"><div class="ico">👥</div><h5>specialists</h5><p>足够多专家支撑</p></div>
+                    <div class="dim"><div class="ico">🔑</div><h5>keywords</h5><p>关键词命中率≥50%</p></div>
+                </div>
+                <p style="margin-top:12px;">匹配逻辑很务实（<code>scorers.py:321</code> <code>_category_match</code>）：大小写不敏感、去下划线、支持子串——避免因为"DB_pool" vs "db pool"这种格式差异误判。置信度比较用 <code>{低:1, 中:2, 高:3}</code> 的等级映射（<code>scorers.py:77</code>）。</p>
+                <div class="tip"><strong>为什么用"多维布尔"而不是"一个总分"？</strong> 因为不同维度反映不同问题：top1 不中但 top3 中，说明"方向对但排序不准"；关键词全中但置信度虚高，说明"过度自信"。分维度看，你能精确知道<strong>是哪一项退步了</strong>，而不是只看到一个模糊的总分下降。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>coding 型：6 维加权（CodingAgentScorer）</h1></div>
+            <div class="card">
+                <p>像 spec-executor 这种"改代码"的 agent，评价标准不同——用 <code>CodingAgentScorer</code>（<code>scorers.py:107</code>）打 6 个<strong>加权浮点</strong>维度（权重之和=1.0）：</p>
+                <table>
+                    <thead><tr><th>维度</th><th>衡量</th></tr></thead>
+                    <tbody>
+                        <tr><td>tool_success</td><td>工具调用成功率</td></tr>
+                        <tr><td>build_pass</td><td>改完能否通过构建/测试</td></tr>
+                        <tr><td>patch_count</td><td>补丁数量是否合理</td></tr>
+                        <tr><td>iterations</td><td>迭代轮数（越少越好）</td></tr>
+                        <tr><td>risk_distribution</td><td>改动风险分布</td></tr>
+                        <tr><td>change_minimality</td><td>改动是否最小化（可选用 Haiku 当裁判）</td></tr>
+                    </tbody>
+                </table>
+                <p><code>change_minimality</code> 支持两种裁判模式：<code>heuristic</code>（纯计算）或 <code>haiku</code>（用便宜 LLM 判断"这次改动是不是过度了"，失败自动回退启发式，<code>scorers.py:177</code>）。</p>
+                <div class="glossary">两种 scorer 都实现同一个 <code>BaseScorer</code> 协议——所以 <code>run_eval</code> 不用关心具体是哪种，传进去就能跑。这又是 Day 09 讲的"依赖抽象接口"套路。<code>EvalScore.all_passed</code>（<code>schemas.py:142</code>）会自动识别是 5 维布尔还是 coding 加权，选对应的判据。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>run_eval：批量跑考卷</h1></div>
+            <div class="card">
+                <p>把样本、图、scorer 交给 <code>run_eval()</code>（<code>runner.py:17</code>）就能跑批：</p>
+                <div class="evalpipe">
+                    <span class="b"><b>加载</b>golden set</span><span class="a">→</span>
+                    <span class="b"><b>并发跑图</b>每题 ainvoke</span><span class="a">→</span>
+                    <span class="b"><b>打分</b>scorer.score</span><span class="a">→</span>
+                    <span class="b"><b>汇总</b>EvalReport</span>
+                </div>
+<pre><code class="language-python">samples = EvalSample.load_jsonl("data/eval_samples.jsonl")
+report = await run_eval(graph, samples, scorer=FiveDimScorer())
+report.print_summary()              # 漂亮打印各维通过率
+
+# CI 里用阈值判定，不达标就退出码非 0
+if not report.meets_thresholds(EvalThresholds(top1=0.5, top3=0.7)):
+    raise SystemExit(1)</code></pre>
+                <p>关键细节：用 <code>asyncio.Semaphore</code> 控制并发（<code>runner.py:42</code>）；<strong>单条样本挂了不影响整体</strong>——异常被捕获记进那条的 <code>EvalScore.error</code>（<code>runner.py:55</code>）。整套评测走 FakeLLM，所以几秒跑完、结果可复现。</p>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>阈值与 CI 阻断：不达标合不了</h1></div>
+            <div class="card">
+                <p><code>EvalThresholds</code>（<code>schemas.py:98</code>）定义每一维的及格线，默认：top1=0.5、top3=0.7、confidence=0.7、specialists=0.7、keywords=0.6。<code>report.meets_thresholds()</code>（<code>schemas.py:222</code>）任一维不达标就返回 False。</p>
+                <p>这个能力被接进了 CI 流水线（Day 18 细讲）——有一道专门的闸门 <code>ci-gate-eval</code>：</p>
+                <div class="gate-ci">
+                    <span class="big">🚫</span>
+                    <div><h4>ci-gate-eval：评测不达标 → 阻止 merge</h4><p>PR 里改了某个 agent，CI 自动对它重跑评测，任一维掉到阈值以下，流水线直接失败，<strong>合并按钮点不动</strong>。PR 模式只跑变更的 agent，省时间。</p></div>
+                </div>
+                <div class="tip"><strong>这就是"防退步"的护城河</strong>：你改 prompt、换模型、重构节点——只要让 Agent 的核心能力退步了，CI 立刻拦下来。评测样本和业务代码<strong>放在同一个仓库、同一个 PR</strong>，所以能力和考卷永远同步演进。这是把"Agent 质量"纳入工程化管控的关键一步。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>在线评测 & 回归检测</h1></div>
+            <div class="card">
+                <p>除了 CI 里用 golden set 的"离线评测"，框架还有两个进阶能力：</p>
+                <h3>ObservableScorer — 在线评测（scorers.py:381）</h3>
+                <p>golden set 需要人工标答案，成本高、覆盖有限。<code>ObservableScorer</code> <strong>不依赖标准答案</strong>，纯从线上真实调用的 envelope 信号统计：成功率分布、延迟/成本的百分位、SLO 违约率。它回答的是"线上整体健康吗"，而不是"这道题对不对"。</p>
+                <h3>RegressionDetector — 回归检测</h3>
+                <p>对比"这次评测"和"历史基线"，自动找出<strong>哪一维退步了</strong>。配合仓库里的 <code>eval-replay</code> skill（Day 19）：给一个线上出问题的 case_id，能拉出历史输入重放、对比 5 维评分、定位是哪一维掉了。</p>
+                <div class="glossary"><b>离线 vs 在线评测</b>：离线 = 拿固定考卷考（可控、可复现、进 CI）；在线 = 观察真实流量表现（覆盖真实分布、发现考卷没覆盖的问题）。两者互补——离线保下限，在线抓意外。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周收官自测</h3>
+                <ul>
+                    <li>Agent 为什么不能用普通单测、要专门评测？（输出是自然语言，没法 assert 相等）</li>
+                    <li>golden set / ground_truth / mock_responses 各是什么？</li>
+                    <li>对话型 5 维、coding 型 6 维分别评什么？为什么用多维而不是一个总分？</li>
+                    <li>评测怎么进 CI 阻断合并？（meets_thresholds + ci-gate-eval）</li>
+                    <li>离线评测和在线评测（ObservableScorer）的区别？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看 eval 模块清单
+sed -n '1,61p' packages/ai-trust-toolkit/src/ai_trust_toolkit/eval/__init__.py
+
+# 2. 看一个真实的 golden 样本文件
+head -3 apps/sre-rca-agent/data/eval_samples.jsonl
+
+# 3. 读 5 维评分器
+sed -n '48,110p' packages/ai-trust-toolkit/src/ai_trust_toolkit/eval/scorers.py
+
+# 4. 亲自跑一遍 sre-rca 的评测
+uv run python apps/sre-rca-agent/scripts/run_eval.py
+
+# 5. 跑 eval 单测
+uv run pytest packages/ai-trust-toolkit/tests/test_eval.py -q</code></pre>
+                <div class="tip"><strong>第 3 周预告 · Day 11 起</strong>：可信底座讲完了！第 3 周转向"运行时与实战"。Day 11 补齐 toolkit 最后几块拼图——<code>@safe_tool_result</code>、<code>get_llm/set_llm_factory</code> 厂商无关注入、FakeLLM 测试基础设施，它们是前面所有"测试友好、厂商无关"的技术底座。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 Memory</a>
+                <a href="gov-agents-day11.html" style="color:var(--accent-green);">Day 11 · 安全工具 & LLM 注入 & FakeLLM &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
