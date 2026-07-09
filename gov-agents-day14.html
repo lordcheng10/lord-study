@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 精读旗舰 Agent sre-rca — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        /* 全图流动动画 */
+        .bigflow { display:flex; flex-direction:column; gap:10px; padding:16px; background:radial-gradient(120% 100% at 50% 0%,rgba(34,197,94,.05),transparent); border-radius:12px; }
+        .bfrow { display:flex; align-items:center; gap:8px; justify-content:center; flex-wrap:wrap; }
+        .bn { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:9px 12px; font-size:12px; text-align:center; transition:all .3s; min-width:80px; }
+        .bn.lit { border-color:var(--accent-green); box-shadow:0 0 14px rgba(34,197,94,.4); color:var(--accent-green); transform:translateY(-2px); }
+        .bn b { display:block; font-size:12.5px; } .bn small { font-size:10px; color:var(--text-muted); }
+        .bn .m { font-size:9px; padding:1px 6px; border-radius:8px; background:rgba(139,92,246,.15); color:var(--accent-purple); margin-top:3px; display:inline-block; }
+        .bn .m.hk { background:rgba(6,182,212,.15); color:var(--accent-cyan); } .bn .m.rule { background:rgba(107,114,133,.2); color:var(--text-muted); }
+        .bfa { color:var(--accent-purple); font-weight:800; }
+        .stepcard { border-left:3px solid var(--accent-green); background:var(--bg-secondary); border-radius:0 9px 9px 0; padding:14px; margin:10px 0; }
+        .stepcard h4 { font-size:14px; margin:0 0 6px; color:var(--accent-green); } .stepcard h4 code{font-size:12px;color:var(--accent-cyan)}
+        .stepcard p { font-size:12.5px; color:var(--text-secondary); margin:0 0 6px; }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">精读旗舰 Agent sre-rca · 9 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 9 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · sre-rca 做什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 全图动画走一遍</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · triage 规则分诊</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · recall 记忆召回</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 4 专家并行取证</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · rag + synthesizer</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · critic + writeback</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · prompt 工程文档</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 CLI & MCP</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 Agent 全家福 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 运行时与实战</span>
+            <h1 class="part-title">精读旗舰 Agent：sre-rca</h1>
+            <p class="part-desc">前面所有知识点的总演练。逐文件读一个真实的故障根因分析 Agent，把 Day 03-12 学的 State / 图 / 专家 / Critic / 闸门 / 记忆 / 成本，在一个 agent 上完整看一遍怎么协同。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>sre-rca 做什么</h1></div>
+            <div class="card">
+                <p><code>apps/sre-rca-agent</code> 是平台的<strong>旗舰范本</strong>——一个 SRE 故障根因分析（Root Cause Analysis）Agent。你给它一个告警/现象（"service-A 大量超时"），它自动从 trace、指标、发布记录、日志四个视角取证，综合出 Top-3 最可能的根因，并给出带证据、带教学性的分析。</p>
+                <p>它是"满配"agent：10 个节点、4 专家并行、双层 Critic 三态重试、四层记忆全用上。<strong>读懂它，其它 agent 都是它的简化/变体。</strong></p>
+                <div class="info-box"><strong>宝藏参照</strong>：<code>server.py:142</code> 的 <code>/agents/rca/graph</code> 端点，把每个节点的 role/model/purpose/输入/输出以 JSON 硬编码——相当于官方的"节点职责表"。今天讲的每个节点都能在那里对照。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>全图动画走一遍</h1></div>
+            <div class="card">
+                <p>下图会自动依次点亮，模拟一次真实执行。每个节点标了它用哪档模型（🟣Sonnet / 🔵Haiku / ⚪规则不调 LLM）——留意"省钱三档"的分布：</p>
+                <div class="bigflow">
+                    <div class="bfrow" id="bf1">
+                        <span class="bn" data-i="0"><b>START</b></span><span class="bfa">→</span>
+                        <span class="bn" data-i="1"><b>triage</b><small>分诊</small><span class="m rule">规则</span></span><span class="bfa">→</span>
+                        <span class="bn" data-i="2"><b>recall</b><small>召回历史</small><span class="m rule">记忆</span></span>
+                    </div>
+                    <div class="bfrow"><span class="bfa">⇊ 扇出并行 ⇊</span></div>
+                    <div class="bfrow" id="bf2">
+                        <span class="bn" data-i="3"><b>trace</b><small>链路专家</small><span class="m">Sonnet</span></span>
+                        <span class="bn" data-i="3"><b>metric</b><small>指标专家</small><span class="m">Sonnet</span></span>
+                        <span class="bn" data-i="3"><b>deploy</b><small>发布专家</small><span class="m">Sonnet</span></span>
+                        <span class="bn" data-i="3"><b>log</b><small>日志专家</small><span class="m">Sonnet</span></span>
+                    </div>
+                    <div class="bfrow"><span class="bfa">⇊ 扇入汇合 ⇊</span></div>
+                    <div class="bfrow" id="bf3">
+                        <span class="bn" data-i="4"><b>rag</b><small>查 SOP</small><span class="m rule">检索</span></span><span class="bfa">→</span>
+                        <span class="bn" data-i="5"><b>synthesizer</b><small>综合</small><span class="m">Sonnet</span></span><span class="bfa">→</span>
+                        <span class="bn" data-i="6"><b>critic</b><small>质检</small><span class="m hk">Haiku</span></span><span class="bfa">⇢</span>
+                        <span class="bn" data-i="7"><b>writeback</b><small>沉淀</small><span class="m rule">记忆</span></span><span class="bfa">→</span>
+                        <span class="bn" data-i="8"><b>END</b></span>
+                    </div>
+                </div>
+                <p>critic 那个虚箭头 <span class="bfa">⇢</span> 是三态条件边：通过→writeback，不过→回 synthesizer 重做（最多 2 次），触顶→END。下面逐个节点看真实代码。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>triage — 规则分诊（0 成本）</h1></div>
+            <div class="stepcard">
+                <h4>triage_node <code>nodes/triage.py:27</code></h4>
+                <p>入口节点。用关键词字典 <code>ALERT_KEYWORDS</code> 把 <code>user_question</code> 归到 5 类 <code>alert_type</code>，并算 <code>need_full_dag</code>（健康查询走简版）。<strong>纯规则、不调 LLM、0 成本</strong>。</p>
+            </div>
+            <div class="card">
+                <div class="note"><strong>一个耐人寻味的细节</strong>：<code>prompts/triage-v1.md</code> 里其实设计了一个基于 Haiku 的 LLM 版分诊 prompt，但生产代码<strong>退化成了纯规则版</strong>。这正是"能用代码就别用 LLM"省钱哲学的落地——分诊这种简单分类，规则就够了，何必花钱调模型。读代码时对照 prompt 和实现的差异，能读出很多设计取舍。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>recall — 情景记忆召回</h1></div>
+            <div class="stepcard">
+                <h4>build_recall_node <code>nodes/recall.py:10</code></h4>
+                <p>工厂函数，把 <code>EpisodicStore</code> 闭包进去（Day 09）。用 <code>trace_id/service/question</code> 拼 query，<code>await episodic.recall(...)</code> 捞相似历史 case（默认 top_k=3）。<strong>异常吞掉返回空列表</strong>（<code>recall.py:20</code>）——挂了不影响主流程（Day 08 韧性思想）。</p>
+            </div>
+            <div class="card">
+                <p>为什么用"工厂返回节点"而不是直接写节点函数？因为节点需要访问 <code>EpisodicStore</code> 这个依赖。用工厂 <code>build_recall_node(episodic)</code> 把依赖闭包进去，返回的闭包函数签名还是标准的 <code>async def node(state) -&gt; dict</code>——既满足 LangGraph 的节点约定，又能拿到依赖。这是本框架里节点的常见写法（对照 Day 05）。</p>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>4 专家并行取证</h1></div>
+            <div class="card">
+                <p>核心取证环节。trace/metric/deploy/log 四个专家从 recall 出发并行跑、汇入 rag（Day 03 的扇出扇入 + Day 05 的专家工厂）。每个专家文件才 ~30 行，因为都用 <code>make_specialist_node</code>：</p>
+<pre><code class="language-python"># specialists/metric_sp.py:13
+metric_specialist = make_specialist_node(SpecialistConfig(
+    name="metric_specialist",
+    state_field="metric_finding",           # 写进 state 的哪个字段（并行不冲突）
+    system_prompt=load("metric-specialist-v1.md"),
+    fetch_fn=lambda state: get_metrics(...), # 先抓数据（@safe_tool_result 包过）
+    fallback_finding={"health": "unknown"},  # 抓失败的降级结果
+    model_tier="sonnet",                     # 取证是难活，用 Sonnet
+))</code></pre>
+                <p>工厂内部（<code>specialists/factory.py:84</code>）自动做：fetch 拉数据（判 ok）→ get_llm 调模型 → 解析写字段 →（关键）<strong>自动包 Day 08 的 <code>wrap_with_fallback</code></strong>。所以哪怕某个专家的数据源彻底挂了，它也只返回 <code>fallback=True</code> 的降级 finding，其余 3 个照常，图不崩。</p>
+                <div class="tip">回扣 Day 07：Critic 的 L1 会检查"至少 2 个专家真出了结果（非 fallback）"。所以"降级不崩"和"证据不足就诚实收尾"配合——降级是允许的，但不能靠降级结果瞎下结论。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>rag + synthesizer</h1></div>
+            <div class="stepcard">
+                <h4>build_rag_node <code>nodes/rag.py:10</code></h4>
+                <p>用 4 个专家 finding 里的 hint/hypothesis 拼查询，<code>await semantic.lookup(query, record_type="sop")</code> 检索运维手册（Day 09 语义记忆）。没有有效 finding 就直接返回空。</p>
+            </div>
+            <div class="stepcard">
+                <h4>build_synthesizer_node <code>nodes/synthesizer.py:49</code></h4>
+                <p>综合节点，调 Sonnet（难活）。把 4 专家 + 历史 case + SOP + 上轮 Critic 反馈拼成 user message，system prompt 从 <code>synthesizer-v1.md</code> 读。产出 Top-3 根因假设。</p>
+            </div>
+            <div class="card">
+                <p>两个工程细节值得学：</p>
+                <ul>
+                    <li>外层用 toolkit 的 <code>build_synth_safeguard(..., min_real_specialists=1)</code> 包裹（<code>synthesizer.py:54</code>，Day 08 闸②）——真实证据不够时<strong>跳过 LLM</strong>直接返回"信息不足"，省钱又诚实。</li>
+                    <li><code>_parse_conclusion</code>（<code>synthesizer.py:60</code>）容错解析：先试裸 JSON → 再试 ```json 代码块 → 最后兜底 dict。因为 LLM 输出格式不总是完美，解析必须能容错。</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>critic + writeback</h1></div>
+            <div class="stepcard">
+                <h4>build_critic_for_rca <code>nodes/critic.py:12</code></h4>
+                <p>直接复用 toolkit 的 <code>build_critic_node(CriticConfig(...))</code>（Day 07）。关键配置：<code>llm_factory=lambda: get_llm("haiku", cache_system=True)</code>——<strong>用 Haiku 省 80% + prompt 缓存再省</strong>；<code>conclusion_field="conclusion"</code>；<code>soft_fail=True</code>。system prompt 来自 <code>critic-v1.md</code>。</p>
+            </div>
+            <div class="stepcard">
+                <h4>build_writeback_node <code>nodes/writeback.py:12</code></h4>
+                <p>先用 <code>should_writeback(state)</code> 守门（Day 08 闸④，仅"质检通过且信息充分"才写），再 <code>episodic.writeback(...)</code> 把这次 case 沉淀进记忆库。无论写不写，都生成 <code>summary_for_human</code> 给人看。</p>
+            </div>
+            <div class="card">
+                <p>Critic 之后的三态路由就是 builder 里那句 <code>build_critic_router(pass_dest="writeback", retry_dest="synthesizer", end_dest=END, max_retries=2)</code>（Day 07）。<strong>整个"综合→质检→（不过就回炉）"构成一个受控循环，最多转 2 圈，转不出满意结果就诚实收尾。</strong></p>
+                <div class="tip"><strong>看到闭环了吗？</strong> writeback 把"通过质检的好结论"沉淀进情景记忆 → 下次相似故障，recall 就能召回它当参考 → Agent 越用越准。而 should_writeback 守门保证"没通过质检的"不会污染记忆。这就是 Day 09 说的"越用越聪明又不学坏"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>prompt 也是工程文档</h1></div>
+            <div class="card">
+                <p>别忽略 <code>prompts/*.md</code>——它们是本仓最好的 prompt 工程教材。以 <code>critic-v1.md</code> 为例，它不只是一段 prompt，而是包含：</p>
+                <ul>
+                    <li><strong>6 项检查</strong>：证据 ID 真实性 / 置信度校准 / 语言风格铁律 / 矛盾处理 / 动作安全性 / 教学性；</li>
+                    <li><strong>三态决策</strong>：PASS / PASS_WITH_NOTES / FAIL，各自的判定条件；</li>
+                    <li><strong>few-shot 示例</strong>：1 个 FAIL + 1 个 PASS 的完整样例；</li>
+                    <li><strong>设计说明表格</strong>：逐段解释"为什么这么写"；</li>
+                    <li><strong>Token/成本估算</strong>：<code>critic-v1.md</code> 里算过——同样工作 Haiku ¥0.04 vs Sonnet ¥0.20，全链路约 ¥0.44/次，压在 ¥0.5 预算内。</li>
+                </ul>
+                <p><code>synthesizer-v1.md</code> 更狠：8 步思考 + 语言铁律（禁绝对措辞、必引 ≥2 专家证据、教学性、失败开关）+ 一个完整的"DB 慢连锁"分析范例。</p>
+                <div class="glossary"><b>为什么把这些写进 prompt 文件？</b> 因为 prompt 是 Agent 行为的"源代码"。把检查项、决策规则、示例、成本都写清楚，等于给 prompt 配了完整文档——换人维护、A/B 新版、排查为什么某次判错，都有据可查。版本号 <code>-v1</code> 支持回滚。这是把 prompt 当一等工程产物对待。</div>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>sre-rca 的 10 个节点各干什么、用哪档模型？</li>
+                    <li>triage 为什么有 LLM 版 prompt 却用规则实现？（省钱哲学）</li>
+                    <li>专家为什么用工厂、失败为什么不崩？（make_specialist_node 自动包 fallback）</li>
+                    <li>综合前的证据不足开关、解析容错各解决什么？</li>
+                    <li>writeback 守门 + recall 召回怎么形成自我改进闭环？</li>
+                    <li>prompt 文件为什么是"工程文档"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：逐文件读一遍（今天的核心作业）</h3>
+<pre><code class="language-bash"># 图的骨架（Day 05 读过，再读一遍串起来）
+sed -n '42,120p' apps/sre-rca-agent/sre_rca/builder.py
+# 6 个节点
+cat apps/sre-rca-agent/sre_rca/nodes/triage.py
+cat apps/sre-rca-agent/sre_rca/nodes/recall.py
+cat apps/sre-rca-agent/sre_rca/nodes/synthesizer.py
+cat apps/sre-rca-agent/sre_rca/nodes/critic.py
+cat apps/sre-rca-agent/sre_rca/nodes/writeback.py
+# 一个专家 + 数据源工具
+cat apps/sre-rca-agent/sre_rca/specialists/metric_sp.py
+sed -n '1,40p' apps/sre-rca-agent/sre_rca/tools/observability.py
+# prompt 工程文档
+sed -n '1,120p' apps/sre-rca-agent/prompts/critic-v1.md
+# 跑测试 + 跑评测
+uv run pytest apps/sre-rca-agent -q
+uv run python apps/sre-rca-agent/scripts/run_eval.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15</strong>：读透了一个满配 agent，Day 15 横向扫一遍<strong>全部 20+ 个 agent</strong>各干什么、结构上有什么变体（无 Critic、仅 L1、纯路由…），以及最精彩的"元 Agent"——agent-creator / spec-author 如何"用 Agent 造 Agent"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 CLI & MCP</a>
+                <a href="gov-agents-day15.html" style="color:var(--accent-green);">Day 15 · Agent 全家福 + 元 Agent &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const seq = document.querySelectorAll('.bn[data-i]');
+            const byStep = {};
+            seq.forEach(n => { const i = n.dataset.i; (byStep[i] = byStep[i]||[]).push(n); });
+            const steps = Object.keys(byStep).sort((a,b)=>a-b);
+            let s = 0;
+            setInterval(() => {
+                seq.forEach(n => n.classList.remove('lit'));
+                byStep[steps[s]].forEach(n => n.classList.add('lit'));
+                s = (s + 1) % steps.length;
+            }, 800);
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

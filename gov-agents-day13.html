@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · CLI 与 MCP 接入 IDE — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        .surfaces { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; padding:16px 4px; }
+        .surfaces .s { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:12px 14px; font-size:12px; text-align:center; min-width:110px; }
+        .surfaces .s b { display:block; font-size:13px; margin-bottom:2px; }
+        .surfaces .s.ide{border-color:rgba(236,72,153,.4)} .surfaces .s.ide b{color:var(--accent-pink)}
+        .surfaces .s.mcp{border-color:rgba(139,92,246,.4)} .surfaces .s.mcp b{color:var(--accent-purple)}
+        .surfaces .s.srv{border-color:rgba(34,197,94,.4)} .surfaces .s.srv b{color:var(--accent-green)}
+        .surfaces .a { color:var(--text-muted); font-weight:800; }
+        .surfaces .a small { display:block; font-size:9px; font-weight:400; }
+        .twomcp { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .twomcp .m { border-radius:10px; padding:14px; font-size:12.5px; }
+        .twomcp .a { background:rgba(139,92,246,.06); border:1px solid rgba(139,92,246,.25); }
+        .twomcp .b { background:rgba(245,158,11,.06); border:1px solid rgba(245,158,11,.25); }
+        .twomcp h5 { font-size:13px; margin:0 0 6px; } .twomcp .a h5{color:var(--accent-purple)} .twomcp .b h5{color:var(--accent-orange)}
+        .twomcp ul { margin:6px 0 0; padding-left:16px; } .twomcp li { margin-bottom:4px; color:var(--text-secondary); }
+        @media(max-width:768px){ .twomcp{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">CLI 与 MCP 接入 IDE · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 四种接入面</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · agentctl CLI</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CLI 命令映射</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · MCP 是什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · gov-agents-mcp 瘦代理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · bmc-agent-mcp 一键装</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 两个 MCP 别混淆</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 server</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 精读 sre-rca &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 运行时与实战</span>
+            <h1 class="part-title">CLI 与 MCP 接入 IDE</h1>
+            <p class="part-desc">除了 HTTP，agent 还能通过命令行给 CI/运维用、通过 MCP 让 IDE"说人话就调"。今天讲清这两种入口，并厘清最容易混的"两个 MCP"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>四种接入面</h1></div>
+            <div class="card">
+                <p>同一个 agent 能力，平台通过四种"面（surface）"暴露给不同用户：</p>
+                <table>
+                    <thead><tr><th>接入面</th><th>给谁用</th><th>怎么用</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>HTTP API</strong></td><td>程序 / 前端 / 集成</td><td>POST /v1/agent/…（Day 12）</td></tr>
+                        <tr><td><strong>CLI (agentctl)</strong></td><td>CI/CD / 运维 / 脚本</td><td>命令行调用</td></tr>
+                        <tr><td><strong>MCP</strong></td><td>IDE 里的 AI（Cursor/Claude Code）</td><td>自然语言触发</td></tr>
+                        <tr><td><strong>Skills</strong></td><td>IDE 里的人</td><td>一句话 SOP（Day 19）</td></tr>
+                    </tbody>
+                </table>
+                <p>关键点：<strong>CLI 和 MCP 本身都不含业务逻辑</strong>，它们最终都是把请求转成对 Day 12 那个 HTTP server 的调用。二者甚至共用同一个 HTTP 客户端 <code>PlatformClient</code>。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>agentctl：命令行封装</h1></div>
+            <div class="card">
+                <p><code>packages/gov-agents-cli</code> 提供命令 <code>agentctl</code>（基于 Typer）。入口 <code>gov_agents_cli.main:app</code>。它就是把 Day 12 的 HTTP 端点包成好用的命令行，给 CI/CD、运维脚本、Jupyter 用。</p>
+                <p>它内部用 <code>PlatformClient</code>（<code>main.py:50</code>）调平台，统一了退出码映射（<code>_run</code>, <code>main.py:58</code>）：0 成功 / 1 HTTP 错 / 2 输入错 / 3 网络错 / 130 Ctrl+C——这对 CI 脚本判断成败很重要。</p>
+                <div class="glossary"><b>一个有意思的取舍</b>：CLI 里写死了只认 5 个 canonical agent 名（<code>AGENT_NAMES</code>, <code>main.py:31</code>：biz-link-gov / rca / risk-review / alert-triage / doc-check），而 server 注册表有 18 个。为什么不复用？<strong>因为 CLI 要保持极轻——不 import 任何平台业务包</strong>（否则会拉进 langgraph/大模型一堆重依赖，启动变慢）。所以它宁可硬编码一小份名单。这又是一处"务实的重复"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CLI 命令 → HTTP 映射</h1></div>
+            <div class="card">
+                <p>每个命令对应一个 Day 12 的端点：</p>
+                <table>
+                    <thead><tr><th>命令</th><th>对应 HTTP</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>agentctl invoke &lt;agent&gt; --data ...</code></td><td>POST /invoke</td></tr>
+                        <tr><td><code>agentctl stream &lt;agent&gt; --data ...</code></td><td>POST /stream（自己解析 SSE）</td></tr>
+                        <tr><td><code>agentctl cases &lt;agent&gt; [--limit --table]</code></td><td>GET /cases</td></tr>
+                        <tr><td><code>agentctl case &lt;agent&gt; &lt;case_id&gt;</code></td><td>GET /cases/{id}</td></tr>
+                        <tr><td><code>agentctl feedback &lt;agent&gt; &lt;case_id&gt; --verdict ...</code></td><td>POST /feedback</td></tr>
+                        <tr><td><code>agentctl health</code></td><td>GET /v1/healthz</td></tr>
+                        <tr><td><code>agentctl agents</code></td><td>本地列名，不走网络</td></tr>
+                    </tbody>
+                </table>
+                <p>还有子命令组：<code>agentctl skill</code>（init/validate/index/check，管 L4 skills）、<code>agentctl new agent</code>（脚手架起新 agent，用 6 个 Jinja2 模板，Day 19 用到）。环境变量 <code>PLATFORM_BASE_URL</code>（默认 <code>localhost:8080</code>）指定连哪个平台。</p>
+<pre><code class="language-bash"># 例：命令行调 rca，等价于 Day 02 那个 curl
+agentctl invoke rca --data '{"user_question": "service-A 超时"}'
+agentctl cases rca --limit 10 --table       # 看最近 10 条调用
+agentctl feedback rca 01HXXX --verdict approve --score 5</code></pre>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>MCP 是什么：让 IDE 的 AI 能调你的 agent</h1></div>
+            <div class="card">
+                <p><strong>MCP（Model Context Protocol）</strong>是一个标准协议，让 IDE 里的 AI 助手（Cursor / Claude Code / Cline / Windsurf）能"调用外部工具"。你在 IDE 里说一句人话，AI 就能触发一个 MCP tool 帮你干活。</p>
+                <div class="surfaces">
+                    <div class="s ide"><b>IDE 的 AI</b>Cursor / Claude Code</div>
+                    <span class="a">stdio<small>启动子进程</small></span>
+                    <div class="s mcp"><b>MCP server</b>gov-agents-mcp</div>
+                    <span class="a">HTTP<small>转发调用</small></span>
+                    <div class="s srv"><b>平台 server</b>Day 12</div>
+                </div>
+                <p>本框架把 agent 暴露成 MCP tool，于是你在 IDE 里说"<em>帮我分析下 service-A 的超时根因</em>"，AI 就会调 <code>invoke_sre_rca</code> 这个 MCP tool，背后其实是打了平台的 HTTP 接口。</p>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>gov-agents-mcp：HTTP 瘦代理</h1></div>
+            <div class="card">
+                <p><code>packages/gov-agents-mcp</code> 是一个 <strong>MCP stdio 瘦代理</strong>：IDE 通过 stdio 启动它，它把平台的 5 个 agent 暴露成 MCP tools，把 case 历史暴露成 MCP resources。<strong>零业务逻辑，全部转成对平台的 HTTP 调用</strong>。</p>
+                <ul>
+                    <li><strong>5 个 tool</strong>（<code>schemas.py:68</code>）：<code>invoke_biz_link_gov / invoke_sre_rca / invoke_risk_review / invoke_alert_triage / invoke_doc_check</code>。</li>
+                    <li>每个 tool 的输入 schema 用 Pydantic 模型的 <code>model_json_schema()</code> 自动生成（<code>tools.py:14</code>）——注意这些 schema 是<strong>手抄的</strong>，不 import agent 包（同样为了轻量）。</li>
+                    <li><strong>resources</strong>：<code>cases://&lt;agent&gt;</code>（最近 50 条）和 <code>case://&lt;agent&gt;/&lt;id&gt;</code>（单条详情），让 IDE 能直接浏览历史调用。</li>
+                    <li><code>PlatformClient</code>（<code>client.py:49</code>）把 HTTP 状态码归成 4 类友好错误（422→输入错 / 401,403→鉴权 / 500→agent错 / 其它→上游错）。</li>
+                </ul>
+                <p>装到 IDE 就是往 <code>.mcp.json</code> 加一段（README 示例）：</p>
+<pre><code class="language-json">{"mcpServers": {"gov-agents": {
+  "command": "uvx", "args": ["gov-agents-mcp"],
+  "env": {"PLATFORM_BASE_URL": "http://localhost:8080",
+          "MCP_USER_ID": "mcp:alice"}}}}</code></pre>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>bmc-agent-mcp：curl 一键装的独立 MCP</h1></div>
+            <div class="card">
+                <p>README 首页那条 <code>curl ... | bash</code> 一键安装，装的其实是<strong>另一个</strong> MCP——<code>apps/bmc-agent-mcp</code>，专做"把 Java 工程的 bmc-parent 升版"。它和 gov-agents-mcp 架构完全不同。</p>
+                <p>安装脚本 <code>bmc-mcp.sh</code> 做 4 件事：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>检测 Python ≥ 3.10</h4><p>从 3.13 往下试到 3.10。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>建 venv + 从公司 Nexus 装 bmc-agent-mcp</h4><p>venv 在 <code>~/.bmc-mcp</code>，shim 落 <code>~/.local/bin</code>。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>交互收集 3 项配置</h4><p>Anthropic key / Maven Home / settings.xml（curl|bash 时把 stdin 切到 /dev/tty 的技巧）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>探测 IDE 并安全 merge 写配置</h4><p>Cursor/Claude Code/Windsurf 的 mcp.json，保留已有配置、叠加新值。</p></div></div>
+                </div>
+                <p>关键区别：bmc-agent-mcp <strong>直接 import 复用 <code>bmc_agent</code> 的图</strong>（不走 HTTP！），用 <code>FastMCP</code> 暴露 4 个 tool（scan/diagnose/upgrade/read_report）。它是"独立进程、内嵌 agent"形态。</p>
+                <div class="note"><strong>一个 stdio 小坑值得学</strong>：MCP 走 stdio 传 JSON-RPC，如果 agent 里的 rich 库往 stdout 打印会污染协议。bmc-agent-mcp 用 <code>contextlib.redirect_stdout</code> 把这些输出导到 stderr（<code>server.py:20</code>）——这种"保护协议通道"的细节，是做 MCP server 的常见坑。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三个易错点：两个 MCP、两个 supervisor、三层命名</h1></div>
+            <div class="card">
+                <p>本框架有几组"名字像、其实不同"的东西，一次讲清避免踩坑：</p>
+                <div class="twomcp">
+                    <div class="m a"><h5>gov-agents-mcp</h5><ul><li>HTTP 瘦代理</li><li>暴露平台 5 个 agent</li><li>不含业务，转发 HTTP</li><li><code>uvx gov-agents-mcp</code></li></ul></div>
+                    <div class="m b"><h5>bmc-agent-mcp</h5><ul><li>独立进程内嵌 agent</li><li>专做 Java BMC 升版</li><li>直接 import bmc_agent 的图</li><li>curl 一键装</li></ul></div>
+                </div>
+                <p style="margin-top:12px;">另外两组（前面讲过，这里汇总）：</p>
+                <ul>
+                    <li><strong>两个 supervisor</strong>（Day 04）：图内 <code>supervisor_node</code>（选专家、真跑）vs 跨 agent <code>router</code>（选 agent、只建议）。</li>
+                    <li><strong>三层命名</strong>（Day 12）：注册表名(<code>sre-rca</code>) ≠ 路由名(<code>rca</code>) ≠ CLI/MCP canonical 名。</li>
+                </ul>
+                <div class="tip"><strong>读代码时的自保习惯</strong>：遇到 "supervisor" / "mcp" / agent 名，先确认"这是哪一个"——看它在哪个包、import 了什么、<code>agent_name=</code> 传的什么。名字相近但职责不同，是大型项目的常态。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>四种接入面各给谁用？（HTTP/CLI/MCP/Skills）</li>
+                    <li>CLI 和 MCP 为什么都不含业务？（都是转发到 Day 12 的 HTTP server）</li>
+                    <li>MCP 让 IDE 能干嘛？（说人话触发 agent 调用）</li>
+                    <li>两个 MCP 的架构区别？（HTTP 瘦代理 vs 独立进程内嵌 agent）</li>
+                    <li>CLI 为什么硬编码 5 个 agent 名而不复用注册表？（保持轻量，不拉业务依赖）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读 CLI 命令定义
+sed -n '31,80p' packages/gov-agents-cli/src/gov_agents_cli/main.py
+
+# 2. 读 MCP 瘦代理的 tool 生成 + HTTP 转发
+cat packages/gov-agents-mcp/src/gov_agents_mcp/tools.py
+sed -n '68,102p' packages/gov-agents-mcp/src/gov_agents_mcp/schemas.py
+
+# 3. 读 bmc 一键安装脚本（IDE 配置 merge）
+sed -n '184,262p' apps/bmc-agent/static/install/bmc-mcp.sh
+
+# 4. 对比两个 MCP server 的入口
+sed -n '1,50p' packages/gov-agents-mcp/src/gov_agents_mcp/server.py
+sed -n '1,45p' apps/bmc-agent-mcp/bmc_agent_mcp/server.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：前面的知识点，明天来一次"总演练"——<strong>逐文件精读旗舰 Agent sre-rca</strong>。从 state 到 builder 到每个节点的真实代码，把 Day 03-12 学的所有东西在一个真实 agent 上完整走一遍。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 server</a>
+                <a href="gov-agents-day14.html" style="color:var(--accent-green);">Day 14 · 精读旗舰 Agent sre-rca &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
