@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 配置 / Docker / 部署 — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <style>
+        .stages { display:flex; gap:0; flex-direction:column; }
+        .stg { border:1px solid var(--border-color); padding:14px; }
+        .stg:first-child{border-radius:8px 8px 0 0} .stg:last-child{border-radius:0 0 8px 8px}
+        .stg.b { background:rgba(6,182,212,.06); } .stg.r { background:rgba(34,197,94,.06); }
+        .stg h4 { font-size:14px; margin:0 0 6px; } .stg.b h4{color:var(--accent-cyan)} .stg.r h4{color:var(--accent-green)}
+        .stg ul { margin:0; padding-left:16px; } .stg li { font-size:12.5px; color:var(--text-secondary); margin-bottom:4px; }
+        .forms { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .form { border-radius:10px; padding:14px; } .form.m{background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.25)} .form.s{background:rgba(6,182,212,.06);border:1px solid rgba(6,182,212,.25)}
+        .form h5{font-size:13px;margin:0 0 6px} .form.m h5{color:var(--accent-purple)} .form.s h5{color:var(--accent-cyan)}
+        .form code{display:block;font-size:11px;margin-top:6px}
+        @media(max-width:768px){ .forms{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">配置 / Docker / 部署 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 部署全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 配置 profile 深合并</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 多阶段 Dockerfile</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · docker-compose</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · K8s Kustomize</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两种部署形态</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · uv.lock 的分量</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 门户</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 CI &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 平台化与收官</span>
+            <h1 class="part-title">配置 / Docker / 部署</h1>
+            <p class="part-desc">把平台从"本地能跑"变成"上生产"。配置深合并、多阶段镜像构建、compose 本地全栈、K8s 编排、两种部署形态。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>部署全景</h1></div>
+            <div class="card">
+                <p>回忆 Day 12 的核心理念：<strong>一个镜像 + <code>ENABLED_AGENTS</code> + <code>APP_ENV</code> = 任意 agent 组合 × 任意环境</strong>。今天把这条链上的每一环讲清：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>配置：APP_ENV 选 profile</h4><p><code>configs/&lt;env&gt;.yaml</code> 深合并 base，决定这个环境的所有参数。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>构建：多阶段 Dockerfile</h4><p>用 uv 构建一个通用镜像，装好全 workspace。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>本地：docker-compose</h4><p>redis + platform 一键起。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>生产：K8s Kustomize</h4><p>base + overlays 按环境覆盖，部到集群。</p></div></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>配置 profile 深合并（Day 02 进阶）</h1></div>
+            <div class="card">
+                <p>Day 02 讲过 <code>load_config()</code> 的 5 步。今天补两个部署相关的关键点：</p>
+                <ul>
+                    <li><strong>深合并（deep merge）</strong>：<code>_deep_merge()</code> 是<strong>递归</strong>的——嵌套字典逐层合并，不是整块覆盖。所以 env profile 只写差异字段，base 里同层的其它字段仍保留。</li>
+                    <li><strong>${VAR} 环境变量注入</strong>：secret 不写死在 yaml，而是 <code>${DB_PASSWORD}</code> / <code>${VAR:-默认值}</code> 从环境变量取。生产靠 K8s Secret / Vault 注入这些变量。</li>
+                    <li><strong>app_env 强制 SSOT</strong>：合并后代码强制 <code>merged["app_env"] = app_env</code>，不被 yaml 内的值覆盖——保证"当前环境"这个真相唯一。</li>
+                    <li><strong>Pydantic <code>extra="forbid"</code></strong>：拼错 key 启动即报错。</li>
+                </ul>
+                <div class="card warn-card" style="border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.05);">
+                    <p style="margin:0;color:var(--text-secondary);">🚨 <strong>再次点名</strong>：<code>dev/prod/test.yaml</code> 里硬编码了明文密码和真实 API key，违反了 base.yaml 自己声明的"secret 走 ${VAR}"规范。<strong>部署真实系统时务必用环境变量/Secret 注入，绝不能像仓库里这样明文写死。</strong>这是 Day 01 说的"理想 vs 现实"反面教材。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>多阶段 Dockerfile</h1></div>
+            <div class="card">
+                <p>根目录 <code>Dockerfile</code> 用 <strong>多阶段构建（multi-stage）</strong>+ uv。核心思想是"把重的依赖装在 builder 阶段，运行镜像只带必要的东西"：</p>
+                <div class="stages">
+                    <div class="stg b">
+                        <h4>Stage 1 · builder（python:3.12-slim）</h4>
+                        <ul>
+                            <li>先<strong>只 COPY 所有 pyproject.toml + uv.lock</strong>，跑一次 <code>uv sync --frozen --no-install-workspace</code> 装第三方依赖——<strong>利用 layer 缓存，依赖不变就不重装</strong></li>
+                            <li>再 COPY 全部源码 + configs + docs（门户页内渲染）+ examples（模板 zip），第二次 <code>uv sync</code> editable 装 workspace</li>
+                        </ul>
+                    </div>
+                    <div class="stg r">
+                        <h4>Stage 2 · runtime（python:3.12-slim）</h4>
+                        <ul>
+                            <li>装 git（供 coding agent 用）、建<strong>非 root 用户 app</strong>、只拷 venv + 源码</li>
+                            <li>启动：<code>uvicorn gov_agents_server.main:app --port 8080 --workers 2 --proxy-headers</code></li>
+                            <li>HEALTHCHECK 打 <code>/healthz</code></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="glossary"><b>为什么"先拷依赖清单、后拷源码"？</b> Docker 是分层缓存的。把"很少变的依赖安装"放在"经常变的源码拷贝"之前，只要 <code>pyproject.toml</code>/<code>uv.lock</code> 没变，这一层缓存就命中——改业务代码重新构建时，跳过耗时的依赖安装。这是 Dockerfile 优化的头号技巧。<code>--frozen</code> 表示严格按 uv.lock 装、不重新解析版本。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>docker-compose：本地全栈</h1></div>
+            <div class="card">
+                <p>Day 02 提过。<code>docker-compose.yml</code> 实际两个服务（README 说四个是漂移）：</p>
+<pre><code class="language-yaml">services:
+  redis:                        # Working Memory 的 checkpointer 后端
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck: ...
+  platform:
+    build: .                    # 用根 Dockerfile 构建
+    ports: ["8080:8080"]
+    depends_on:
+      redis: { condition: service_healthy }   # 等 redis 健康才起
+    environment:
+      APP_ENV: ${APP_ENV:-dev}                 # ← 打通 config profile
+      ENABLED_AGENTS: sre-rca,risk-reviewer,... # 16 个 agent
+      REDIS_URL: redis://redis:6379
+      # 一堆 ${VAR:-} 占位透传 DB/Anthropic/Lark</code></pre>
+                <p>关键：<code>APP_ENV: ${APP_ENV:-dev}</code> 把 compose 和 Day 02 的配置系统打通——<code>APP_ENV=prod docker compose up</code> 就切生产配置，同一份 compose 文件。</p>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>K8s Kustomize</h1></div>
+            <div class="card">
+                <p>生产部署清单在 <code>deploy/k8s/</code>，用 <strong>Kustomize</strong> 组织——和配置 profile 一样的"base + overlay 覆盖"思想：</p>
+                <ul>
+                    <li><code>base/</code>：通用的 Deployment / Service / ConfigMap 等。</li>
+                    <li><code>overlays/&lt;env&gt;/</code>：每个环境的差异（副本数、资源、镜像 tag、环境专属配置）叠加在 base 上。</li>
+                </ul>
+                <p><code>deploy/grafana/</code> 还有现成的监控面板（<code>cache-dashboard.json</code>）——对接 Day 11 的 Prometheus 指标。</p>
+                <div class="glossary"><b>Kustomize 是什么？</b> K8s 官方的配置管理工具，思路和本项目 config profile 一模一样：写一份 base，各环境只写"跟 base 的差异"，用 overlay 打补丁。避免了给每个环境复制粘贴一整套 YAML。看到这你应该有种熟悉感——<strong>"base + 差异覆盖"是这个项目从配置到部署一以贯之的模式</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>两种部署形态</h1></div>
+            <div class="card">
+                <div class="forms">
+                    <div class="form m"><h5>① 多 agent 平台（推荐）</h5>一个进程挂多个 agent，共享资源。<code>gov_agents_server.main:app</code><code>+ ENABLED_AGENTS=a,b,c</code></div>
+                    <div class="form s"><h5>② 单 agent 独立</h5>一个 agent 独立部署，用它自己的 main.py。<code>&lt;pkg&gt;.main:app</code><code>（如 sre_rca.main:app）</code></div>
+                </div>
+                <p style="margin-top:12px;">这就是 Day 05 讲的"一个 agent 有 <code>server.py</code>（给平台挂）和 <code>main.py</code>（独立跑）两个入口"的部署对应。<code>ENABLED_AGENTS</code> 未设=挂全部；写非法名快速失败报错。</p>
+                <div class="tip"><strong>怎么选？</strong> 大多数用形态①——一个平台进程按需挂一组 agent，运维简单、资源共享。只有当某个 agent 特别重、需要独立扩缩容/隔离时，才用形态②单独部署。同一份 agent 代码两种形态都支持，不用改。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>uv.lock 的分量</h1></div>
+            <div class="card">
+                <p>最后强调一个部署可靠性的基石——那个 890KB 的 <code>uv.lock</code>。<code>docs/deployment.md</code> 有句话点透了它的本质：</p>
+                <div class="final-quote"><strong>"uv.lock 不是版本，是版本组合的精确快照。任何 pyproject.toml 改动都要重跑 <code>uv lock</code> 写进同一个 PR。"</strong></div>
+                <p style="margin-top:12px;">它锁死了几百个包的精确版本 + 哈希。所以你本地、同事机器、CI、生产镜像装出来的东西<strong>字节级一致</strong>——彻底消灭"在我机器上是好的"。这也是为什么 Dockerfile 用 <code>--frozen</code>（严格按 lock 装）、CI 有专门的 gate 校验 lock 与 BOM 一致（Day 18）。</p>
+                <div class="note"><strong>操作纪律</strong>：改任何依赖（加一个 agent、升一个库），都必须 <code>uv lock</code> 重新生成 lock 文件、并和代码改动<strong>放进同一个 PR</strong>。否则别人拉下来装的依赖和你不一样，就埋下"环境不一致"的雷。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>"一个镜像跑任意组合×任意环境"靠哪两个环境变量？（ENABLED_AGENTS + APP_ENV）</li>
+                    <li>配置深合并、${VAR} 注入分别解决什么？</li>
+                    <li>多阶段 Dockerfile 为什么先拷依赖清单再拷源码？（layer 缓存）</li>
+                    <li>Kustomize 和 config profile 的共同思想？（base + 差异覆盖）</li>
+                    <li>两种部署形态怎么选？</li>
+                    <li>uv.lock 为什么必须和代码改动进同一 PR？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读多阶段 Dockerfile
+cat Dockerfile
+
+# 2. 读 compose 两个服务
+cat docker-compose.yml
+
+# 3. 看配置深合并逻辑
+sed -n '236,340p' packages/ai-trust-toolkit/src/ai_trust_toolkit/config.py
+
+# 4. 看 K8s 部署清单
+find deploy -type f
+
+# 5. 本地起全栈（有 Docker 的话）
+APP_ENV=dev docker compose up -d
+curl localhost:8080/healthz</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：部署清楚了，那"怎么保证合进来的代码不破坏平台"？Day 18 讲 <strong>CI 流水线的治理闸门</strong>——7 个 stage、BOM 审计、评测回归、成本红线、敏感度红线、金丝雀发布，把前面所有"可信"承诺在合并前强制执行。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 门户</a>
+                <a href="gov-agents-day18.html" style="color:var(--accent-green);">Day 18 · CI 流水线与治理闸门 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
