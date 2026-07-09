@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · gov-agents-server 运行时 — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .oneimg { display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; padding:14px 4px; }
+        .oneimg .img { background:rgba(139,92,246,.1); border:2px solid var(--accent-purple); color:var(--accent-purple); border-radius:12px; padding:14px 20px; font-weight:700; text-align:center; }
+        .oneimg .img small { display:block; font-weight:400; font-size:11px; color:var(--text-muted); margin-top:3px; }
+        .oneimg .a { color:var(--accent-cyan); font-weight:800; font-size:20px; }
+        .oneimg .combo { display:flex; flex-direction:column; gap:6px; }
+        .oneimg .combo .cc { background:var(--bg-secondary); border:1px solid rgba(34,197,94,.4); color:var(--accent-green); border-radius:8px; padding:7px 12px; font-size:11.5px; }
+        .pipeline2 { display:flex; flex-direction:column; gap:0; }
+        .ps { display:flex; align-items:center; gap:12px; padding:11px 14px; border:1px solid var(--border-color); background:var(--bg-secondary); }
+        .ps:first-child{border-radius:8px 8px 0 0} .ps:last-child{border-radius:0 0 8px 8px}
+        .ps .n { flex-shrink:0; width:26px;height:26px;border-radius:50%; background:var(--accent-purple); color:#fff; display:flex;align-items:center;justify-content:center; font-size:12px; font-weight:700; }
+        .ps p { margin:0; font-size:12.5px; color:var(--text-secondary); } .ps p b { color:var(--text-primary); }
+        .env-fields { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+        .ef { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; font-size:12px; }
+        .ef code { color:var(--accent-cyan); } .ef span { color:var(--text-muted); display:block; margin-top:2px; font-size:11px; }
+        @media(max-width:768px){ .env-fields{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">gov-agents-server 运行时 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · server 的角色</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一个镜像跑任意组合</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · AGENT_REGISTRY 注册表</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · create_app 启动流程</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · build_v1_router 工厂</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一次 invoke 的治理链</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 统一 envelope & 鉴权</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 安全工具</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 CLI & MCP &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 运行时与实战</span>
+            <h1 class="part-title">gov-agents-server 运行时</h1>
+            <p class="part-desc">把 Agent 变成能对外服务的 HTTP 接口。看清"一个镜像跑任意 agent 组合"的机制，以及一个 agent 只写业务、鉴权/记账/落库全自动的秘密——build_v1_router。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>server 的角色：只做托管，不含业务</h1></div>
+            <div class="card">
+                <p><code>packages/gov-agents-server</code> 是平台主进程——一个 FastAPI 服务。它<strong>自己没有任何业务逻辑</strong>，只干四件事：</p>
+                <ul>
+                    <li>维护一张"哪个 agent 名对应哪个模块"的注册表；</li>
+                    <li>按 <code>ENABLED_AGENTS</code> 环境变量，懒加载并挂载对应 agent 的路由；</li>
+                    <li>提供首页、健康检查、静态资源（skills 目录、安装脚本）；</li>
+                    <li>统一接可观测性。</li>
+                </ul>
+                <p>主文件 <code>gov_agents_server/main.py</code>（约 1021 行）。它是 Day 02 "启动平台"那条命令 <code>uvicorn gov_agents_server.main:app</code> 背后的东西。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一个镜像跑任意 agent 组合</h1></div>
+            <div class="card">
+                <p>平台的核心部署理念（写在 <code>Dockerfile</code> 开头）：<strong>构建一个镜像，靠 <code>ENABLED_AGENTS</code> 环境变量决定这个实例跑哪些 agent</strong>。</p>
+                <div class="oneimg">
+                    <div class="img">一个镜像<small>build 一次</small></div>
+                    <span class="a">+</span>
+                    <div class="img">ENABLED_AGENTS<small>环境变量</small></div>
+                    <span class="a">=</span>
+                    <div class="combo">
+                        <div class="cc">实例A：sre-rca,alert-triage</div>
+                        <div class="cc">实例B：doc-checker,risk-reviewer</div>
+                        <div class="cc">实例C：不设 = 挂全部</div>
+                    </div>
+                </div>
+                <p>好处：同一个制品在不同环境按需组合，SRE 相关的部一台、质量相关的部一台，互不干扰又共用一份代码。不设 <code>ENABLED_AGENTS</code> 就挂全部；写了不存在的名字<strong>立刻报错退出</strong>（fail-fast，绝不静默忽略）。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>AGENT_REGISTRY：显式注册表，不是自动扫描</h1></div>
+            <div class="card">
+                <p>server 怎么知道有哪些 agent？靠 <code>main.py:62-81</code> 一张<strong>写死的字典</strong>——<code>{agent名: (模块路径, 工厂函数名)}</code>：</p>
+<pre><code class="language-python">AGENT_REGISTRY: dict[str, tuple[str, str]] = {
+    "sre-rca":        ("sre_rca.server",        "build_router"),
+    "risk-reviewer":  ("risk_reviewer.server",  "build_router"),
+    "alert-triage":   ("alert_triage.server",   "build_router"),
+    # ... 共 18 条
+}</code></pre>
+                <p>启动时按名字用 <code>importlib.import_module</code> <strong>懒加载</strong>对应模块，取出它的 <code>build_router</code> 函数。<code>_load_router()</code>（<code>main.py:299</code>）还有<strong>三条调用约定</strong>：</p>
+                <div class="pipeline2">
+                    <div class="ps"><div class="n">1</div><p>需要 DB 池的 agent（如 arch-compliance）→ <code>fn(pool)</code> 位置传参</p></div>
+                    <div class="ps"><div class="n">2</div><p>普通 agent → <code>fn(case_store=...)</code> 关键字传参</p></div>
+                    <div class="ps"><div class="n">3</div><p>用 <code>inspect.signature</code> 探测：<code>build_router</code> 含 <code>app</code> 参数就额外注入 FastAPI 实例（给 agent-creator 的 sandbox 用）</p></div>
+                </div>
+                <div class="note"><strong>重点：是显式注册表，不是文件系统自动发现。</strong> 所以加一个新 agent 必须手动往这张表加一行（还要加 workspace 依赖 + pyproject）。Day 19 起新 agent 时你会亲手改它。这种"显式 &gt; 隐式"的选择，牺牲了一点便利，换来了"打开这张表就知道平台到底有哪些 agent"的可读性。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>create_app：启动流程</h1></div>
+            <div class="card">
+                <p><code>create_app()</code>（<code>main.py:375</code>）是平台工厂。模块底部 <code>app = create_app()</code>（<code>main.py:1021</code>）就是 uvicorn 直接 import 的实例。启动做这些：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>load_config()</h4><p>模块顶层就加载配置，缺字段直接抛错终止——启动即校验（Day 02）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>凭据桥接 _bridge</h4><p>把 yaml 里的 ANTHROPIC_API_KEY / Lark 配置在"env 未设时"补进环境变量（非空 env 优先，方便 K8s Vault 覆盖）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>建单例 CaseStore</h4><p><code>make_case_store_from_env()</code>——跨 agent 共享的"调用历史存储"，首页据此列最近 case。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>lifespan 生命周期</h4><p>启动时初始化 SqliteCaseStore、给需要的 agent 建 DB 池（不可达就 warning 降级、跳过该 agent，其余照常）；退出时清理。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>挂路由 + 静态资源 + 可观测</h4><p>遍历 enabled 逐个 <code>_load_router</code> 并 include；挂 <code>/skills</code>、<code>/install</code>；<code>setup_observability</code> 挂 <code>/metrics</code>。</p></div></div>
+                </div>
+                <div class="tip"><strong>韧性设计</strong>：某个 agent 需要的数据库连不上时，平台不会整体启动失败，而是打个 warning、跳过这个 agent，让其它 agent 正常服务。这种"部分降级而非全盘崩溃"的思路，和 Day 08 的失败闸门一脉相承。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>build_v1_router：一行装齐所有治理</h1></div>
+            <div class="card">
+                <p>这是全平台<strong>覆盖率最高、最该理解的抽象</strong>。每个 agent 的 <code>server.py</code> 里的 <code>build_router</code>，核心就是调 toolkit 的 <code>build_v1_router()</code>（<code>api/router.py:261</code>）。业务只写一个 <code>_invoke</code> 函数，其余全自动：</p>
+<pre><code class="language-python"># apps/sre-rca-agent/sre_rca/server.py:66
+def build_router(case_store=None):
+    router = APIRouter(tags=["sre-rca"])
+    graph = build_rca_graph()                    # 你的 LangGraph 图
+    store = case_store or make_case_store_from_env()
+
+    async def _invoke(body, ctx, tracker) -&gt; AgentOutcome:
+        # ↑ 你只写这个：校验入参 → 跑图 → 包成结果
+        with anthropic_key_override(ctx.anthropic_api_key):
+            result = await graph.ainvoke(initial, config)
+        return AgentOutcome(...)
+
+    router.include_router(build_v1_router(         # ← 一行装齐下面全部
+        agent_name="rca", invoke_fn=_invoke,
+        stream_fn=_stream, case_store=store))
+    return router</code></pre>
+                <p>这一行 <code>build_v1_router</code> 自动给这个 agent 挂上标准端点：</p>
+                <div class="env-fields">
+                    <div class="ef"><code>POST /v1/agent/{name}/invoke</code><span>同步调用</span></div>
+                    <div class="ef"><code>POST /v1/agent/{name}/stream</code><span>SSE 流式（逐节点推）</span></div>
+                    <div class="ef"><code>GET /v1/agent/{name}/cases</code><span>历史调用列表 + 单条</span></div>
+                    <div class="ef"><code>POST /v1/agent/{name}/feedback</code><span>人工反馈打分</span></div>
+                </div>
+                <div class="glossary"><b>为什么这个抽象这么重要？</b> 因为"鉴权、限流、配额、预算、生成 case_id、成本追踪、构造统一 envelope、脱敏落库、推 Prometheus 指标、老路径 alias"这一整套<strong>每个 agent 都需要、且必须一致</strong>的东西，全被 <code>build_v1_router</code> 收了。业务作者<strong>只写业务推理（_invoke），治理白拿</strong>——这正是整个框架"业务代码 + 调 API，可信能力开箱即用"承诺的最终兑现点。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一次 invoke 的完整治理链</h1></div>
+            <div class="card">
+                <p>把前面所有天串起来——一次 <code>POST /v1/agent/rca/invoke</code> 进来，<code>_do_invoke</code>（<code>router.py:318</code>）按顺序过这条链（前面的日子学的东西全在这里汇合）：</p>
+                <div class="pipeline2">
+                    <div class="ps"><div class="n">1</div><p><b>限频 ratelimit</b>：这个 user 每分钟没超 60 次？（Day 08 四件套）</p></div>
+                    <div class="ps"><div class="n">2</div><p><b>token 配额 quota</b>：日/月 token 没超？</p></div>
+                    <div class="ps"><div class="n">3</div><p><b>租户预算 budget</b>：本月 USD 没超上限？超了 429（Day 08）</p></div>
+                    <div class="ps"><div class="n">4</div><p><b>生成 case_id</b>（ULID）+ 透传父 case / 调用深度</p></div>
+                    <div class="ps"><div class="n">5</div><p><b>bind CostTracker</b>：绑定记账器（Day 11 ContextVar）</p></div>
+                    <div class="ps"><div class="n">6</div><p><b>执行你的 _invoke</b>：跑 LangGraph 图（Critic/闸门/记忆全在图里，Day 05-09）</p></div>
+                    <div class="ps"><div class="n">7</div><p><b>构造 envelope</b>：统一返回外壳</p></div>
+                    <div class="ps"><div class="n">8</div><p><b>持久化 case</b>：字段脱敏 → PII scrub → 落库（Day 08）</p></div>
+                </div>
+                <div class="tip"><strong>这就是"跟一次请求走全程"的主线</strong>。你现在应该能看懂：一个请求先过一堆治理闸（限频/配额/预算），再进业务图（分诊→取证→综合→Critic），出来包成统一信封、脱敏落库、推指标。前 11 天的知识点在这一条链上全部各就各位。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>统一 envelope & 鉴权契约</h1></div>
+            <div class="card">
+                <h3>统一 envelope（api/envelope.py:63）</h3>
+                <p>所有 agent 返回的外壳完全一致（Day 02 见过）：</p>
+<pre><code class="language-python">class InvokeResponse(BaseModel):
+    case_id: str        # 26 字符 ULID（带校验）
+    agent: str
+    status: InvokeStatus            # success / critic_end / failed
+    result: dict                    # agent 的业务字段装这
+    metrics: Metrics                # elapsed_ms / tokens_in|out / cost_usd / retry_count
+    trace_id: str
+    deprecated_path: str | None     # 走老路径时的提示</code></pre>
+                <h3>鉴权 header 契约（api/auth.py）</h3>
+                <p>请求通过几个 header 传身份：<code>X-User-Id</code> / <code>X-Tenant-Id</code> / <code>X-Trace-Id</code> / <code>X-Anthropic-Api-Key</code>。这些被封装成 <code>CallContext</code>（<code>auth.py:45</code>）传给业务——注意 <strong>per-request 的 API key 不落库</strong>，用完即弃。三档鉴权模式 <code>PLATFORM_AUTH_MODE</code>：open / header / strict。</p>
+                <div class="note"><strong>命名的三层别混淆</strong>（Day 13 还会遇到）：注册表名（<code>sre-rca</code>）≠ 路由名（<code>rca</code>，由各 agent 的 <code>build_router</code> 传给 <code>build_v1_router</code> 决定）≠ CLI/MCP 认的 canonical 名。同一个 agent 在不同层可能叫不同名字，看代码时留意 <code>agent_name=</code> 参数到底传的啥。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>server 的四个职责是什么？（注册表/按 ENABLED_AGENTS 挂载/首页健康检查/可观测）</li>
+                    <li>"一个镜像跑任意组合"怎么实现？（ENABLED_AGENTS 环境变量）</li>
+                    <li>agent 是怎么被发现的？（显式 AGENT_REGISTRY + importlib 懒加载，非自动扫描）</li>
+                    <li>build_v1_router 帮业务免写了哪些东西？（鉴权/限流/配额/预算/envelope/落库/指标）</li>
+                    <li>一次 invoke 要过哪 8 步治理链？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读注册表和三条调用约定
+sed -n '62,81p' packages/gov-agents-server/src/gov_agents_server/main.py
+sed -n '299,331p' packages/gov-agents-server/src/gov_agents_server/main.py
+
+# 2. 读一个 agent 的 build_router 怎么用 build_v1_router
+sed -n '66,125p' apps/sre-rca-agent/sre_rca/server.py
+
+# 3. 读 v1 路由工厂 + 一次 invoke 的治理链
+sed -n '261,340p' packages/ai-trust-toolkit/src/ai_trust_toolkit/api/router.py
+
+# 4. 读统一 envelope
+sed -n '40,95p' packages/ai-trust-toolkit/src/ai_trust_toolkit/api/envelope.py
+
+# 5. 起服务看首页和自我说明书
+# curl localhost:8080/api ; curl localhost:8080/agents/rca/graph</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：HTTP 只是一种入口。Day 13 讲另外两种——<code>agentctl</code> 命令行（给 CI/运维用）和 MCP（把 agent 暴露给 Cursor/Claude Code 等 IDE，"说人话就调 agent"）。还会厘清"两个 MCP、两个 supervisor"的易错点。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 安全工具</a>
+                <a href="gov-agents-day13.html" style="color:var(--accent-green);">Day 13 · CLI 与 MCP 接入 IDE &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

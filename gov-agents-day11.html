@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · 安全工具 & LLM 注入 & FakeLLM — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .inject { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .inject .c { border-radius:10px; padding:14px; }
+        .inject .real { background:rgba(34,197,94,.06); border:1px solid rgba(34,197,94,.25); }
+        .inject .fake { background:rgba(6,182,212,.06); border:1px solid rgba(6,182,212,.25); }
+        .inject h5 { font-size:13px; margin:0 0 8px; } .inject .real h5{color:var(--accent-green)} .inject .fake h5{color:var(--accent-cyan)}
+        @media(max-width:768px){ .inject{grid-template-columns:1fr} }
+        .cvar { display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap; padding:14px 4px; }
+        .cvar .b { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:9px 12px; font-size:11.5px; text-align:center; }
+        .cvar .b b { display:block; color:var(--accent-purple); }
+        .cvar .a { color:var(--accent-cyan); font-weight:800; }
+        .tier3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+        .t { border-radius:10px; padding:14px; text-align:center; border:1px solid var(--border-color); background:var(--bg-secondary); }
+        .t h4 { font-size:14px; margin:0 0 4px; } .t p { font-size:11.5px; color:var(--text-muted); margin:0; }
+        .t.s h4{color:var(--accent-purple)} .t.h h4{color:var(--accent-cyan)} .t.a h4{color:var(--accent-orange)}
+        @media(max-width:768px){ .tier3{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">安全工具 & LLM 注入 & FakeLLM · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 本日全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · safe_tool_result</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · get_llm 厂商无关</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三档 tier & auto 降级</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · prompt 缓存省钱</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · FakeLLM 测试基础设施</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ContextVar 自动采集</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 评测</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 server &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 运行时与实战</span>
+            <h1 class="part-title">安全工具 & LLM 注入 & FakeLLM</h1>
+            <p class="part-desc">补齐 toolkit 最后几块地基：工具永不抛异常、大模型厂商无关注入、0 外网测试基础设施、以及"业务零侵入自动记账"的技术底座 ContextVar。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>本日全景：前面一切的技术底座</h1></div>
+            <div class="card">
+                <p>前面几天反复出现三句话：<em>"工具挂了自动兜底"</em>、<em>"业务不直接 import anthropic，走 get_llm"</em>、<em>"测试走 FakeLLM 不联网"</em>。今天就把这三件底层能力讲透——它们是整个可信底座能成立的技术前提。</p>
+                <div class="feature-grid">
+                    <div class="feature-item"><div class="feature-icon">🔧</div><h4>@safe_tool_result</h4><p>工具永不抛异常，失败返回统一 {ok, data, error}。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🤖</div><h4>get_llm / set_llm_factory</h4><p>厂商无关的 LLM 注入点，测试时一键换成假的。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🧪</div><h4>FakeLLM</h4><p>返回固定答案的假大模型，让测试可复现、零成本。</p></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>safe_tool_result：工具永不抛异常</h1></div>
+            <div class="card">
+                <p>回忆 Day 08 闸⑤"基础设施降级"。它的实现之一就是 <code>@safe_tool_result</code> 装饰器（<code>tools/safe_result.py:38</code>）。它把任何工具函数包成"<strong>永远返回统一结构、永不抛异常</strong>"：</p>
+<pre><code class="language-python">@safe_tool_result(fallback={"hint": "tool failed"})
+async def get_metrics(service: str) -&gt; dict:
+    return await call_prometheus(service)   # 就算这里炸了……
+
+# 调用方永远拿到统一结构，不用写 try/except：
+result = await get_metrics(service="A")
+if result["ok"]:
+    data = result["data"]        # 成功：真实数据
+else:
+    data = result["data"]        # 失败：fallback 兜底值
+    err  = result["error"]       # "ConnectionError: ..."（带异常类名）</code></pre>
+                <p>返回的 <code>ToolResult</code>（<code>safe_result.py:30</code>）永远是 <code>{ok, data, error}</code>。成功 <code>ok=True</code>；异常时 <code>ok=False</code>、<code>data=fallback</code>、<code>error</code> 带上异常类名（便于聚合分析）。还支持 <code>timeout</code> 参数（<code>asyncio.wait_for</code> 超时也算失败）。</p>
+                <div class="tip"><strong>为什么强制这个约定？</strong> 因为一个 Agent 要调很多外部系统（Prometheus、日志、发布记录），任何一个抖动都不该让整个图崩。统一成 <code>{ok, data, error}</code> 后，节点里只需判 <code>ok</code>，代码干净、行为可预测。这也是 Day 05 里 sre-rca 的 4 个 observability 工具全都带这个装饰器的原因。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>get_llm：厂商无关的 LLM 注入点</h1></div>
+            <div class="card">
+                <p>这是全框架<strong>最关键的一条约定</strong>：业务代码<strong>绝不直接 <code>import anthropic</code> 或 <code>ChatAnthropic(...)</code></strong>，一律通过 <code>get_llm()</code> 拿模型（<code>llm.py</code>）。为什么？看这张对比：</p>
+                <div class="inject">
+                    <div class="c real"><h5>生产：get_llm 返回真 Claude</h5><code>llm = get_llm("sonnet")</code><br>底层 <code>_default_factory</code>（<code>llm.py:224</code>）创建真 <code>ChatAnthropic</code>，还自动挂上计费回调。</div>
+                    <div class="c fake"><h5>测试：一行换成假的</h5><code>set_llm_factory(lambda tier: FakeLLM(...))</code><br>业务代码<strong>一个字不改</strong>，get_llm 就返回假模型。不联网、不花钱、结果固定。</div>
+                </div>
+                <p>核心 3 个函数（<code>llm.py</code>）：</p>
+                <ul>
+                    <li><code>get_llm(tier, cache_system=, ...)</code>（<code>llm.py:325</code>）：从"当前工厂"取一个模型实例。</li>
+                    <li><code>set_llm_factory(fn)</code>（<code>llm.py:311</code>）：注入自定义工厂（测试用）。</li>
+                    <li><code>reset_llm_factory()</code>（<code>llm.py:408</code>）：测试结束还原。</li>
+                </ul>
+                <div class="glossary"><b>这就是"依赖注入"</b>：业务只依赖 <code>get_llm</code> 这个抽象入口，真正给什么模型由外部工厂决定。它是 Day 10 讲的"评测/测试全走 FakeLLM"能成立的根本前提，也让"以后想换个大模型厂商"变成只改一处工厂的事。<code>AGENTS.md</code> 把"直接 import anthropic"列为头号反模式。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三档 tier & auto 成本降级</h1></div>
+            <div class="card">
+                <p><code>get_llm(tier)</code> 的 tier 参数就是 Day 05 讲的"省钱三档"（<code>ModelTier</code>, <code>llm.py:27</code>）：</p>
+                <div class="tier3">
+                    <div class="t s"><h4>sonnet</h4><p>贵但强<br>综合/专家等难活</p></div>
+                    <div class="t h"><h4>haiku</h4><p>便宜快<br>分诊/质检等轻活</p></div>
+                    <div class="t a"><h4>auto ⭐</h4><p>自动选<br>按预算动态降级</p></div>
+                </div>
+                <p><code>get_llm("auto")</code> 是 v0.6 的成本感知路由：预算充足用 Sonnet，<strong>预算剩余低于阈值（默认 10%）时自动降到 Haiku</strong>。决策在 <code>cost/router.py</code> 的 <code>CostAwareRouter.resolve_tier()</code>（<code>router.py:108</code>），按优先级短路：</p>
+<pre><code class="language-python"># router.py:118 —— 按优先级决定实际用哪个 tier
+if requested != "auto":      return (requested, "explicit")       # 明确指定就用它
+if tracker is None:          return (default,   "no_tracker")      # 没追踪器用默认
+if not tenant_id:            return (default,   "no_tenant")
+if pct &lt; threshold:          return (degrade_tier, "budget_degradation")  # 预算紧张降级
+else:                        return (default,   "default")</code></pre>
+                <div class="note"><strong>两个工程细节值得学</strong>：① 决策原因（reason）走一个<strong>白名单</strong>（<code>router.py:63</code>），防止乱塞字面量导致 Prometheus label 爆炸。② 整个 <code>resolve_tier</code> 全程 try/except 不抛——路由决策<strong>绝不能阻塞主推理路径</strong>，出错就退回默认 tier。cost-routing.json（根目录）配置了每个 agent 的默认 tier 和基线用量。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>prompt 缓存：同样的开头别重复付费</h1></div>
+            <div class="card">
+                <p>Critic、专家这些节点的 system prompt 很长且<strong>每次调用都一样</strong>。Anthropic 的 prompt caching 能让"重复的前缀"只算一次钱（后续命中约 9 折优惠）。<code>get_llm("haiku", cache_system=True)</code> 就是开启它。</p>
+                <p>实现上有个兼容性巧思（<code>llm.py:361-368</code>）：<code>get_llm</code> 先尝试把 cache 参数传给工厂；如果工厂签名不支持（比如测试注入的 FakeLLM），<strong>catch 掉 TypeError，退化成"取到 llm 再外层包一层"</strong>——保证真模型能用缓存、假模型也不会崩。</p>
+                <div class="glossary"><b>为什么这个兼容这么重要？</b> 因为同一份业务代码要同时服务"真 Claude（要缓存优化）"和"FakeLLM（不懂缓存）"两种场景。框架用"先试传参、失败降级"的方式让两者都能跑——这类"为可测试性做的隐藏兼容"，在 <code>get_llm</code>、<code>budget_gate</code>（无 tracker 静默）、<code>sensitivity.classify</code>（async 无 IO）里到处都是，是可信工程化的暗线。</div>
+                <div class="note">仓库还有 <code>scripts/lint_cache_system.py</code>：静态检查每处 <code>cache_system=True</code> 附近必须有"prompt 需 ≥1024 token 才真生效"的注释——防止有人以为开了缓存就一定省钱（system prompt 太短根本触发不了缓存）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>FakeLLM 测试基础设施</h1></div>
+            <div class="card">
+                <p>代码 <code>testing/fakes.py</code>。三个东西支撑了"整套测试几秒跑完、0 外网、可复现"：</p>
+                <ul>
+                    <li><strong>FakeLLM(responses=[...])</strong>（<code>fakes.py:31</code>）：按顺序返回预置回复。适合单个节点的单测。记录调用次数便于断言。</li>
+                    <li><strong>SystemAwareFake(rules, default)</strong>（<code>fakes.py:62</code>）：<strong>按 system prompt 里的关键词分发</strong>不同回复。适合一个进程里多个节点共用一个工厂——比如 sre-rca 里 4 个专家 + 综合 + Critic 各要不同假答案，靠各自 system prompt 的关键词区分。</li>
+                    <li><strong>install_fakes()</strong>（<code>fakes.py:119</code>）：一键装好"假 LLM + 假 embedder + 内存向量库"，返回三件套，测试 fixture 一行搞定。</li>
+                </ul>
+<pre><code class="language-python"># 典型的 conftest.py fixture
+@pytest.fixture(autouse=True)
+def fake_llm():
+    set_llm_factory(lambda tier: SystemAwareFake({
+        "trace 专家": '{"trace_finding": {...}}',
+        "综合":       '{"conclusion": {...}}',
+    }))
+    yield
+    reset_llm_factory()      # 测试结束还原</code></pre>
+                <div class="tip"><strong>回扣 Day 02</strong>：为什么 <code>uv run pytest</code> 几秒就跑完 900 多个测试？就是因为它们全走 FakeLLM——不发一个真实网络请求、不花一分钱、每次结果完全一样。<code>AGENTS.md</code> 的收尾金句之一就是"<strong>保持 fake LLM 测试</strong>"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ContextVar：业务零侵入的自动采集</h1></div>
+            <div class="card">
+                <p>最后一块底座，也是最巧的一块。问题：一次调用里，成本要按节点归因、业务效果指标要统计——难道每个节点都手动传一个"记账本"进去？太侵入了。</p>
+                <p>框架用 Python 的 <strong>ContextVar</strong>（上下文变量，task-local）解决。在一次 invoke 的入口 <code>bind_tracker(tracker)</code> 绑一个记账器，之后<strong>任何深处的代码都能通过 <code>current_tracker()</code> 拿到它</strong>，不用层层传参：</p>
+                <div class="cvar">
+                    <span class="b"><b>invoke 入口</b>bind_tracker</span><span class="a">→</span>
+                    <span class="b"><b>图跑</b>各节点</span><span class="a">→</span>
+                    <span class="b"><b>LLM 回调</b>on_llm_end</span><span class="a">→</span>
+                    <span class="b"><b>current_tracker()</b>自动 record</span><span class="a">→</span>
+                    <span class="b"><b>finalize</b>推 Prometheus</span>
+                </div>
+<pre><code class="language-python"># api/cost.py：一次 invoke 的自动记账
+with bind_tracker(tracker):          # ContextVar 绑定
+    await graph.ainvoke(...)         # 图里每次真 LLM 调用，
+                                     # UsageMetadataCallbackHandler 在 on_llm_end
+                                     # 自动 current_tracker().record(tokens...)
+metrics = tracker.finalize(status)   # 推 3 个 Prometheus 指标</code></pre>
+                <p>三个东西共用这套 ContextVar 范式：<strong>成本追踪</strong>（<code>api/cost.py</code>）、<strong>业务效果指标</strong> <code>record_effect()</code>（<code>effect.py</code>，在"真完成一次业务动作"处记一行）、<strong>预算闸门</strong>（Day 08）。而且 LangGraph 用 asyncio task 并行跑节点时会<strong>自动 copy 上下文</strong>，所以并发累加也正确。</p>
+                <div class="glossary"><b>ContextVar 是什么？</b> 可以理解成"当前这次调用链专属的全局变量"——同一次 invoke 里到处都能读到，但不同 invoke 之间互不干扰（哪怕并发）。它让"记账"这件横切的事对业务完全透明：业务节点只管调 <code>get_llm</code> 推理，花了多少钱有人在背后自动记好了。FakeLLM 不走真 ChatAnthropic、不触发计费回调，所以测试也不受影响。</div>
+                <p>顺带提一句<strong>可观测性一键接入</strong>：<code>observability.py</code> 的 <code>setup_observability(app, service_name)</code> 给业务 FastAPI 一行挂上 <code>/metrics</code>（Prometheus）+ 可选 OTel。没装 OTel 就返回一个空操作的 tracer，业务无脑写 <code>with tracer.start_as_current_span(...)</code> 也不会报错。</p>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>@safe_tool_result 保证了什么？（工具永不抛异常，统一返回 {ok,data,error}）</li>
+                    <li>为什么业务不直接 import anthropic、要走 get_llm？（依赖注入，测试可换 FakeLLM、可换厂商）</li>
+                    <li>三档 tier 和 auto 降级怎么工作？（sonnet/haiku/auto，预算<10%自动降 haiku）</li>
+                    <li>FakeLLM / SystemAwareFake 分别适合什么场景？</li>
+                    <li>ContextVar 怎么做到"业务零侵入自动记账"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读 safe_tool_result（就 72 行，很好读）
+cat packages/ai-trust-toolkit/src/ai_trust_toolkit/tools/safe_result.py
+
+# 2. 读 get_llm / set_llm_factory
+sed -n '311,370p' packages/ai-trust-toolkit/src/ai_trust_toolkit/llm.py
+
+# 3. 读 FakeLLM 三件套
+cat packages/ai-trust-toolkit/src/ai_trust_toolkit/testing/fakes.py
+
+# 4. 读成本感知路由的优先级短路
+sed -n '108,150p' packages/ai-trust-toolkit/src/ai_trust_toolkit/cost/router.py
+
+# 5. 跑相关单测
+uv run pytest packages/ai-trust-toolkit/tests/test_llm_factory.py \
+              packages/ai-trust-toolkit/tests/test_safe_result.py -q</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：底座全部讲完！Day 12 进入"运行时"——<code>gov-agents-server</code> 怎么用"一个镜像 + ENABLED_AGENTS"跑任意 agent 组合，<code>build_v1_router</code> 怎么给每个 agent 自动装上鉴权/envelope/落库/限流/记账。这是"跟一次请求走全程"的主线。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 评测</a>
+                <a href="gov-agents-day12.html" style="color:var(--accent-green);">Day 12 · gov-agents-server 运行时 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
