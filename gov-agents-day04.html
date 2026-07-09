@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · Supervisor 模式与多 Agent 协作 — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .super { display:flex; flex-direction:column; align-items:center; gap:12px; padding:18px 8px; }
+        .super .hub { background:rgba(139,92,246,.1); border:2px solid var(--accent-purple); color:var(--accent-purple);
+            border-radius:12px; padding:14px 24px; font-weight:700; text-align:center; min-width:220px; }
+        .super .hub small { display:block; font-weight:400; font-size:11px; color:var(--text-muted); margin-top:3px; }
+        .super .fan { display:flex; gap:60px; color:var(--text-muted); font-size:20px; }
+        .super .workers { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+        .super .w { background:var(--bg-secondary); border:1px solid rgba(6,182,212,.4); color:var(--accent-cyan);
+            border-radius:10px; padding:10px 14px; font-size:12px; text-align:center; min-width:100px; }
+        .compare { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        .compare .c { border-radius:10px; padding:16px; }
+        .compare .c.a { background:rgba(139,92,246,.06); border:1px solid rgba(139,92,246,.25); }
+        .compare .c.b { background:rgba(6,182,212,.06); border:1px solid rgba(6,182,212,.25); }
+        .compare h4 { font-size:14px; margin:0 0 8px; }
+        .compare .c.a h4 { color:var(--accent-purple); } .compare .c.b h4 { color:var(--accent-cyan); }
+        .compare ul { margin:0; padding-left:16px; } .compare li { font-size:12.5px; color:var(--text-secondary); margin-bottom:5px; }
+        @media(max-width:768px){ .compare{grid-template-columns:1fr} }
+        .chain { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:12px 0; }
+        .chain .step { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:8px 12px; font-size:12px; }
+        .chain .step b { color:var(--accent-green); }
+        .chain .a { color:var(--accent-purple); font-weight:800; }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">Supervisor 模式与多 Agent 协作 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是 Supervisor 模式</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 为何不用 supervisor-py</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两种 supervisor 全景</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 图内分派 supervisor_node</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 跨 agent 路由 router</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · scope guard 只决策不执行</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · handoff 与 route_chain</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 LangGraph</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 Agent 解剖 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 建立心智</span>
+            <h1 class="part-title">Supervisor 模式与多 Agent 协作</h1>
+            <p class="part-desc">一个任务来了，谁来干？多个 Agent / 多个专家怎么配合？今天讲"主管调度"模式，并厘清本框架里两种容易混淆的 supervisor。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是 Supervisor 模式</h1></div>
+            <div class="card">
+                <p><strong>Supervisor（主管）模式</strong>是多智能体协作最经典的一种结构：设一个"中央主管"，它负责接任务、判断该派给哪个"下属"去做、收集结果，下属之间不直接对话，全部经过主管。</p>
+                <div class="super">
+                    <div class="hub">Supervisor 主管<small>接任务 · 决定派给谁 · 汇总</small></div>
+                    <div class="fan">↙ &nbsp; ↓ &nbsp; ↓ &nbsp; ↘</div>
+                    <div class="workers">
+                        <div class="w">worker A</div><div class="w">worker B</div>
+                        <div class="w">worker C</div><div class="w">worker D</div>
+                    </div>
+                </div>
+                <p>对比另一种"去中心化"结构（每个 agent 都能直接叫别的 agent），主管模式的好处是：<strong>调度逻辑集中、可控、可观测</strong>——你永远知道现在是谁在干、为什么派给它。缺点是主管可能成为瓶颈。本框架选了主管模式，因为可信/可控是第一优先级。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>为什么不用官方的 langgraph-supervisor 库</h1></div>
+            <div class="card">
+                <p>LangChain 官方出过一个 <code>langgraph-supervisor</code> 库。但本框架<strong>默认不用它</strong>——<code>README.md:302-307</code> 和 <code>docs/architecture.md:65</code> 明确说明：官方后来自己都建议改用"<strong>用 tools 直接实现 supervisor</strong>"的模式，所以仓里只在 <code>third_party/langgraph-supervisor-py</code> 保留一份副本供参考。</p>
+                <div class="note"><strong>这给你一个重要认知</strong>：AI/Agent 领域演进极快，"官方推荐"半年就可能翻篇。本框架的应对是 Day 01 讲过的分层——把易变的东西（supervisor 实现方式）放在能替换的位置，而把稳定的可信能力（toolkit）攥在自己手里。所以本框架的 supervisor 是<strong>自己实现</strong>的，不绑定那个三方库。</div>
+                <p>于是问题变成：本框架自己怎么实现 supervisor？答案是——<strong>它有两种，分别解决两个不同层面的问题</strong>。这是今天最容易搞混、也最该厘清的地方。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>两种 supervisor 全景（务必分清）</h1></div>
+            <div class="card">
+                <div class="compare">
+                    <div class="c a">
+                        <h4>① 图内 supervisor_node（进程内）</h4>
+                        <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 8px;">包：<code>ai-trust-toolkit-starter-supervisor</code></p>
+                        <ul>
+                            <li>解决："<strong>一个 agent 内部</strong>，下一步该调哪个 specialist（专家）"</li>
+                            <li>是 LangGraph 图里的<strong>一个节点</strong></li>
+                            <li>真的会去执行被选中的专家</li>
+                            <li>用在：单个复杂 agent 的图内调度</li>
+                        </ul>
+                    </div>
+                    <div class="c b">
+                        <h4>② 跨 agent router（进程外）</h4>
+                        <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 8px;">app：<code>apps/supervisor-router-agent</code></p>
+                        <ul>
+                            <li>解决："<strong>一句话任务</strong>，该路由到平台上哪个 agent"</li>
+                            <li>是一个独立的 <strong>agent/服务</strong></li>
+                            <li><strong>只出决策、不真执行</strong>（scope guard）</li>
+                            <li>用在：工程师说人话，帮他选对入口</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="tip"><strong>一句话区分</strong>：①是"<em>图内、选专家、真跑</em>"；②是"<em>进程外、选 agent、只给建议不跑</em>"。下面两讲分别看它们的代码。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>① 图内分派：supervisor_node</h1></div>
+            <div class="card">
+                <p>代码在 <code>packages/ai-trust-toolkit-starter-supervisor/.../dispatch.py</code>。核心是 <code>supervisor_node(state, specialists, llm, max_iter=10)</code>（<code>dispatch.py:82</code>）：给 LLM 一份 specialist 名单 + 当前对话，让它输出"下一个调谁"或"给最终答案"。</p>
+<pre><code class="language-python"># LLM 被要求只输出这两种 JSON 之一：
+{"next": "trace_specialist"}      # 还要继续，调这个专家
+{"final_answer": "根因是..."}      # 够了，收尾</code></pre>
+                <p>配套的 <code>route_after_supervisor()</code>（<code>dispatch.py:186</code>）就是 Day 03 学的<strong>条件边路由函数</strong>——把 LLM 的决策翻译成"图里下一步走哪个节点"。<code>max_iter</code> 防止 LLM 反复横跳陷入死循环（<code>dispatch.py:103-115</code>）。默认它用 <code>get_llm("haiku")</code>——用便宜的 Haiku 做调度决策，省钱。</p>
+                <p>组装出来的图长这样：<code>START → supervisor → 条件分派 → {各 specialist / END}</code>，specialist 干完再回到 supervisor 让它决定下一步。这就是 <code>auto_configure_supervisor()</code> 自动搭好的骨架（要求必须开 Critic，否则 raise）。</p>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>② 跨 agent 路由：router</h1></div>
+            <div class="card">
+                <p>代码在 <code>apps/supervisor-router-agent/supervisor_router/core.py</code>。它<strong>没有 LangGraph 图</strong>，就是一个 <code>route(task, tier)</code> 函数（<code>core.py:53</code>），5 步走完：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>list_agents()</h4><p>拿到平台上有哪些 agent（优先查门户 registry，失败用本地 mock，5 分钟缓存）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>get_llm("haiku")</h4><p>用便宜模型做决策。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>渲染 prompt → LLM</h4><p>把任务 + agent 名单塞进模板，让 LLM 选。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>正则抓 JSON → 构建 RouteDecision</h4><p>拿到 <code>{agent_id, confidence, reasoning, fallback_alternatives}</code>。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>_critic_validate</h4><p>校验：选的 agent 不在名单里 → 退回 unsure；置信度低于阈值(默认0.5) → 也退回 unsure，把原选放候选。</p></div></div>
+                </div>
+                <p>返回的 <code>RouteDecision</code>（<code>core.py:37</code>）包含：选了哪个 agent、置信度、理由、<strong>建议命令</strong>、备选方案，以及 token/耗时。关键设计：<strong>任何一步失败都优雅返回 "unsure"，绝不抛异常</strong>（<code>_unsure</code>, <code>core.py:130</code>）——路由器自己挂了也不能拖垮调用方。</p>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>scope guard：只决策，不执行</h1></div>
+            <div class="card">
+                <p>这是 router 一个刻意的、重要的约束：<strong>它只告诉你"应该调 X agent、命令大概这么写"，但绝不替你真的去调</strong>。为什么？</p>
+                <div class="constraint-grid">
+                    <div class="constraint-group forbidden">
+                        <h4>🚫 如果 router 自动执行下游</h4>
+                        <ul>
+                            <li>一个决策错误会级联触发一串真实操作</li>
+                            <li>权限/审计边界模糊，谁为副作用负责？</li>
+                            <li>成本不可控，一句话可能烧一大笔</li>
+                        </ul>
+                    </div>
+                    <div class="constraint-group allowed">
+                        <h4>✅ 只出决策的好处</h4>
+                        <ul>
+                            <li>人（或上层）看过决策再决定要不要执行</li>
+                            <li>决策可解释、可审计、可回放</li>
+                            <li>路由器本身零副作用、极安全</li>
+                        </ul>
+                    </div>
+                </div>
+                <p>这个"scope guard（范围守卫）"思想在框架里到处都是——比如 Day 15 会讲的 <code>spec-executor</code> 只往 <code>agent/*</code> 分支提交、绝不碰 main。<strong>把"决策"和"执行"分开，是可信 Agent 系统的一条通用安全原则。</strong></p>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>handoff 与 route_chain：多步接力</h1></div>
+            <div class="card">
+                <p>有时一个任务要好几个 agent 接力完成。框架用两个东西支持：</p>
+                <h3>HandoffSignal（交接信号）</h3>
+                <p>定义在 <code>ai_trust_toolkit/handoff.py:14</code>，是个很简单的数据类：一个 agent 干完，可以在返回结果上挂一个"建议下一个谁接手"的信号，但<strong>同样只是建议</strong>——由 supervisor 决定要不要真交接（又是 scope guard）。</p>
+<pre><code class="language-python">@dataclass(frozen=True)
+class HandoffSignal:
+    next_agent_hint: str | None   # None = 这条链结束
+    context_for_next: dict        # 传给下一棒的上下文
+    chain_id: str                 # 同一条链共享的 ID
+    reason: str</code></pre>
+                <p><code>chain_id</code> 把一条接力链上的多次调用串起来，便于在门户里回放整条链。telemetry 会自动把它上报，业务无需手动处理。</p>
+                <h3>route_chain（多步规划）</h3>
+                <p><code>core.py:322</code> 的 <code>route_chain(task, max_steps=5)</code> 让 LLM 一次性规划出 2-5 步的 agent 调用链：</p>
+                <div class="chain">
+                    <span class="step">任务</span><span class="a">→</span>
+                    <span class="step"><b>1.</b> requirement-discoverer</span><span class="a">→</span>
+                    <span class="step"><b>2.</b> spec-author</span><span class="a">→</span>
+                    <span class="step"><b>3.</b> spec-executor</span><span class="a">→</span>
+                    <span class="step"><b>4.</b> release-coordinator</span>
+                </div>
+                <p>依然是<strong>只规划、不执行</strong>——打印出计划 + 共享 chain_id 给你看。上面这条链其实就是 Day 15/20 要讲的平台"自我开发"闭环。</p>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Supervisor 模式的核心结构是什么？（中央主管调度，下属不直接对话）</li>
+                    <li>为什么不用 langgraph-supervisor 库？（官方已转向 tools 模式，框架自实现以保持可控）</li>
+                    <li>两种 supervisor 分别是什么？（图内 supervisor_node 选专家真跑 vs 跨 agent router 选 agent 只建议）</li>
+                    <li>scope guard 是什么？为什么重要？（只决策不执行，把决策与执行分开，安全可审计）</li>
+                    <li>handoff 和 chain_id 干嘛的？（多 agent 接力的建议信号 + 串起整条链）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 看图内 supervisor 的分派协议
+sed -n '82,130p' packages/ai-trust-toolkit-starter-supervisor/src/*/dispatch.py
+
+# 看跨 agent router 的 route() 与优雅降级
+sed -n '37,146p' apps/supervisor-router-agent/supervisor_router/core.py
+
+# （若已启用）用 CLI 试试路由决策
+uv run supervisor-router "帮我看下这个 PR 的上线风险" --chain</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：第 1 周收官。我们把前面所有概念落到"一个真实 Agent 的标准目录结构"上——state / builder / nodes / specialists / prompts / tools / server 各是什么、彼此怎么配合。这是 Day 14 逐文件精读 sre-rca 的地图。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 LangGraph 入门</a>
+                <a href="gov-agents-day05.html" style="color:var(--accent-green);">Day 05 · 一个 Agent 的标准解剖 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
