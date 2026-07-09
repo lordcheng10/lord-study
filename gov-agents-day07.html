@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · Critic 双层防幻觉 — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .twolayer { display:flex; flex-direction:column; gap:0; margin:10px 0; }
+        .tlr { display:flex; align-items:center; gap:14px; padding:16px; border:1px solid var(--border-color); }
+        .tlr.l1 { background:rgba(6,182,212,.07); border-radius:10px 10px 0 0; }
+        .tlr.l2 { background:rgba(139,92,246,.07); }
+        .tlr.pass { background:rgba(34,197,94,.07); border-radius:0 0 10px 10px; }
+        .tlr .badge { flex-shrink:0; width:56px; height:56px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; color:#fff; }
+        .tlr.l1 .badge { background:var(--accent-cyan); } .tlr.l2 .badge { background:var(--accent-purple); } .tlr.pass .badge { background:var(--accent-green); }
+        .tlr h4 { font-size:14px; margin:0 0 4px; } .tlr p { font-size:12.5px; color:var(--text-secondary); margin:0; }
+        .tlr .cost { margin-left:auto; text-align:right; font-size:11px; color:var(--text-muted); white-space:nowrap; }
+        .checks { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+        .chk { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:12px; border-left:3px solid var(--accent-cyan); }
+        .chk h5 { font-size:13px; margin:0 0 4px; color:var(--accent-cyan); } .chk p { font-size:12px; color:var(--text-secondary); margin:0; }
+        @media(max-width:768px){ .checks{grid-template-columns:1fr} }
+        .tri { display:flex; gap:10px; flex-wrap:wrap; margin:8px 0; }
+        .tri .s { flex:1; min-width:150px; border-radius:10px; padding:14px; text-align:center; }
+        .tri .s h4 { font-size:14px; margin:0 0 6px; } .tri .s p { font-size:12px; margin:0; color:var(--text-secondary); }
+        .tri .pass { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.3); } .tri .pass h4{color:var(--accent-green)}
+        .tri .retry { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.3); } .tri .retry h4{color:var(--accent-orange)}
+        .tri .end { background:rgba(239,68,68,.08); border:1px solid rgba(239,68,68,.3); } .tri .end h4{color:var(--accent-red)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">Critic 双层防幻觉 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是幻觉</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 双层拦截总图</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · L1 代码层 4 项检查</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · L2 LLM 层 & 短路</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 三态路由与重试循环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 业务规则 L1</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三档 Critic 强度</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 toolkit 总览</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 失败闸门 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 可信底座</span>
+            <h1 class="part-title">Critic 双层防幻觉</h1>
+            <p class="part-desc">大模型会一本正经地编造证据、过度自信。Critic 是专门给结论"挑刺"的评审员——用"先 0 成本代码规则、再便宜 LLM"两层把幻觉拦下来。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是"幻觉"，为什么必须防</h1></div>
+            <div class="card">
+                <p><strong>幻觉（hallucination）</strong>指大模型生成了"看起来很合理、其实是编造"的内容。在本框架的场景里，典型幻觉有：</p>
+                <ul>
+                    <li>引用了一个<strong>根本不存在的证据 ID</strong>（比如凭空捏造一条 trace_id）；</li>
+                    <li>结论<strong>过度自信</strong>（明明证据不足却说"确定就是它"）；</li>
+                    <li>只引 1 个证据就下大结论、忽略反例；</li>
+                    <li>对高风险动作（重启、回滚）不加"先验证"的提示。</li>
+                </ul>
+                <p>对一个要给 SRE 做故障根因的 Agent 来说，幻觉是致命的——你不能让它把运维人员带到错误方向。所以框架专门设了 <strong>Critic 节点</strong>：在综合出结论后、返回给用户前，先自我审查一遍。代码在 <code>packages/ai-trust-toolkit/src/ai_trust_toolkit/critic/</code>。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>双层拦截总图：先便宜后贵</h1></div>
+            <div class="card">
+                <p>Critic 的核心巧思是<strong>分两层，按"成本递增"顺序拦截</strong>——能用 0 成本代码解决的，绝不浪费 LLM 调用：</p>
+                <div class="twolayer">
+                    <div class="tlr l1">
+                        <div class="badge">L1</div>
+                        <div><h4>代码层：纯 Python 规则检查</h4><p>机械性错误（编造 ID、置信度非法、专家数不够）用确定性代码就能 100% 拦下。<strong>先跑这层，不过直接返回，根本不调 LLM。</strong></p></div>
+                        <div class="cost">0 成本<br>毫秒级<br>100% 准确</div>
+                    </div>
+                    <div class="tlr l2">
+                        <div class="badge">L2</div>
+                        <div><h4>LLM 层：Haiku 语义审查</h4><p>L1 过了，才用便宜的 Haiku 做"语义级"审查：结论和证据逻辑一致吗？有没有过度外推？教学性够不够？</p></div>
+                        <div class="cost">约 ¥0.04/次<br>Haiku</div>
+                    </div>
+                    <div class="tlr pass">
+                        <div class="badge">✓</div>
+                        <div><h4>两层都过 → 结论可信，放行</h4><p>否则打回重做（见 L05 三态路由）。</p></div>
+                        <div class="cost">继续 writeback</div>
+                    </div>
+                </div>
+                <div class="tip"><strong>为什么这个顺序省钱又快？</strong> 因为大量幻觉是"机械错误"（编造 ID 这种），L1 用代码毫秒级就拦了，压根不用花钱调 LLM。只有通过 L1 的"看起来没硬伤"的结论，才值得花 ¥0.04 让 Haiku 做语义审查。这是"用最便宜的手段解决最多的问题"的典型。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>L1 代码层：4 项确定性检查</h1></div>
+            <div class="card">
+                <p>代码在 <code>critic/layer1.py</code>。汇总入口 <code>run_layer1_checks()</code>（<code>layer1.py:135</code>）跑 4 项检查，返回 <code>(是否通过, 违规列表, 详情)</code>：</p>
+                <div class="checks">
+                    <div class="chk"><h5>① check_evidence_ids</h5><p>结论里引用的证据 ID，必须都在"合法 ID 集合"里。<code>fabricated = 引用的 - 合法的</code>，只要有编造的就挂（<code>layer1.py:75</code>）。</p></div>
+                    <div class="chk"><h5>② check_min_specialists</h5><p>至少 N 个（默认 2）专家真的产出了 finding（排除 fallback 降级的），防止只凭一个证据下结论（<code>layer1.py:88</code>）。</p></div>
+                    <div class="chk"><h5>③ check_schema</h5><p>置信度必须 ∈ {高,中,低}，风险等级 ∈ {high,medium,low}——格式非法直接拦（<code>layer1.py:101</code>）。</p></div>
+                    <div class="chk"><h5>④ check_high_risk_verify_first</h5><p>高风险动作（重启/回滚等）必须带 <code>verify_first</code> 提示，不能让 Agent 直接叫人干危险操作（<code>layer1.py:121</code>）。</p></div>
+                </div>
+                <p style="margin-top:12px;">"合法 ID 集合"从哪来？<code>collect_valid_evidence_ids(state)</code>（<code>layer1.py:44</code>）会把 4 个专家 finding 里的真实证据 ID 全部收集起来。所以只要结论引用了不在这个集合里的 ID，就一定是编造的——<strong>这是用代码 100% 抓幻觉的关键机制</strong>。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>L2 LLM 层 & 短路优化</h1></div>
+            <div class="card">
+                <p>代码在 <code>critic/layer2.py</code>。<code>build_critic_node(config)</code>（<code>layer2.py:51</code>）返回一个 async 节点。它的执行逻辑最能体现"双层"设计——<strong>先跑 L1，L1 不过直接返回、根本不烧 LLM</strong>：</p>
+<pre><code class="language-python">async def critic_node(state):
+    valid_ids = collect_valid_evidence_ids(state)
+    l1 = run_layer1_checks(state, valid_ids)      # 先跑代码层
+    if not l1.passed:
+        return {"critique_passed": False,
+                "critique_layer": 1,               # ← 标记：被代码层拦下
+                "retry_count": 1, ...}             # 不调 LLM，直接返回
+    # 只有 L1 通过，才调 Haiku 做语义审查（6 项铁律）
+    llm = config.llm_factory()                    # 通常 get_llm("haiku")
+    response = await llm.ainvoke([system, user])
+    ...                                            # critique_layer=2 表示 LLM 层结果</code></pre>
+                <p>配置项 <code>CriticConfig</code>（<code>layer2.py:30</code>）业务需要提供：<code>system_prompt</code>（审查用的 prompt，就是 Day 05 见过的 <code>critic-v1.md</code>）、<code>llm_factory</code>、<code>conclusion_field</code>（结论存在 state 哪个字段）、<code>soft_fail</code>（默认 True）。</p>
+                <div class="glossary"><b>critique_layer 这个字段很妙</b>：它记录"是被哪一层拦下的"——0=通过、1=代码层拦下、2=LLM 层拦下。回忆 Day 05，sre-rca 的 State 里就有这个字段。它让你事后能分析"我们的幻觉大多是机械错误(1)还是语义错误(2)"，从而针对性优化。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>三态路由：形成重试循环</h1></div>
+            <div class="card">
+                <p>Critic 审完，怎么决定下一步？回忆 Day 03 的"条件边"和 Day 05 builder 里那句 <code>build_critic_router(...)</code>。它就是把 Critic 结果翻译成三种走向（代码在 <code>failsafe/retry_router.py:12</code>，属于失败闸门，Day 08 会再提）：</p>
+                <div class="tri">
+                    <div class="s pass"><h4>✓ 通过</h4><p><code>critique_passed=True</code><br>→ 去 <strong>writeback</strong> 沉淀经验，正常结束</p></div>
+                    <div class="s retry"><h4>↻ 不过 & 没超次数</h4><p>回 <strong>synthesizer</strong> 重新综合<br>（把 Critic 的意见带回去改）</p></div>
+                    <div class="s end"><h4>■ 不过 & 超 2 次</h4><p>→ <strong>END</strong><br>诚实输出"信息不足，无法给出可靠结论"</p></div>
+                </div>
+<pre><code class="language-python">def critic_router(state):                    # retry_router.py:12
+    if state.get("critique_passed"):
+        return "writeback"                   # 通过
+    if state.get("retry_count", 0) &gt;= max_retries:
+        return END                           # 触顶，诚实收尾
+    return "synthesizer"                     # 打回重做</code></pre>
+                <div class="note"><strong>"触顶诚实收尾"是可信设计的点睛之笔</strong>：如果重试了 2 次还是过不了 Critic，框架<strong>不会硬憋出一个结论</strong>，而是老实说"我信息不足"。宁可承认不知道，也不给一个可能误导人的答案——这正是"可信"二字的分量。<code>retry_count</code> 用 Day 05 讲的累加 Reducer 计数，所以能可靠判断是否触顶。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>业务规则 L1：不调 LLM 的轻量 Critic</h1></div>
+            <div class="card">
+                <p>有些高频、低延迟的 agent（比如 alert-triage 告警治理，要求 P99 &lt; 5 秒）<strong>连 Haiku 都嫌慢</strong>。于是 v0.3 抽出了纯规则版的 <code>business_layer1.py</code>——用几条业务规则做校验，<strong>0 成本、&lt; 1 毫秒、不调任何 LLM</strong>。</p>
+                <p>核心是 <code>Rule</code>（<code>business_layer1.py:34</code>）+ <code>build_business_critic_l1(rules)</code>（<code>business_layer1.py:51</code>）。业务用几个 helper 声明规则即可：</p>
+<pre><code class="language-python">critic_l1 = build_business_critic_l1([
+    # 决策必须在允许集合内
+    rule_in_allowed_set("routing_decision", ALLOWED_DECISIONS),
+    # 如果决定"立即呼叫"，就必须填了业务影响字段
+    rule_conditional_field(
+        when=lambda s: s["routing_decision"] == "page_immediately",
+        require_field="business_impact"),
+])
+builder.add_node("critic", critic_l1)</code></pre>
+                <p>提供的 helper 有：<code>rule_in_allowed_set</code>（值在枚举内）、<code>rule_field_not_empty</code>（非空）、<code>rule_conditional_field</code>（条件必填）、<code>rule_field_in_range</code>（数值范围）、<code>rule_list_min_length</code>（列表最短长度）。规则本身崩了也视为违规（<code>business_layer1.py:86</code>），绝不放过。</p>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三档 Critic 强度：按场景取舍</h1></div>
+            <div class="card">
+                <p>框架并不强制每个 agent 都上"双层完整 Critic"。它按场景提供三档强度，这本身就是一个很好的"权衡"教学案例：</p>
+                <table>
+                    <thead><tr><th>档位</th><th>代表 agent</th><th>配置</th><th>为什么</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>满配</strong></td><td>sre-rca</td><td>L1 + L2 + 三态重试</td><td>根因分析责任重，值得花时间反复审</td></tr>
+                        <tr><td><strong>仅 L1</strong></td><td>alert-triage</td><td>只跑代码规则，不调 LLM</td><td>高频在线，P99&lt;5s，延迟敏感</td></tr>
+                        <tr><td><strong>无 Critic</strong></td><td>risk-reviewer</td><td>不设 Critic 节点</td><td>刻意验证"toolkit 在无 Critic 场景也可复用"</td></tr>
+                    </tbody>
+                </table>
+                <div class="tip"><strong>设计智慧</strong>：可信不等于"处处堆满最重的防护"，而是<strong>按场景选择合适的防护强度</strong>。责任重的多审、延迟敏感的用轻量、有些故意做减法来验证框架弹性。这种"因地制宜"比"一刀切"更成熟。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>幻觉有哪些典型形式？（编造证据 ID、过度自信、证据不足下大结论）</li>
+                    <li>为什么先 L1 后 L2？（L1 用代码 0 成本拦机械错误，通过了才花钱让 LLM 审语义）</li>
+                    <li>L1 怎么 100% 抓出编造的证据 ID？（收集所有专家真实 ID 组成合法集合，引用不在集合里就是编造）</li>
+                    <li>三态路由是哪三态？触顶为什么诚实收尾？（通过/重试/触顶；宁可说不知道也不误导）</li>
+                    <li>三档 Critic 强度对应什么场景？（满配/仅L1/无Critic）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看 critic 模块能力清单
+sed -n '1,61p' packages/ai-trust-toolkit/src/ai_trust_toolkit/critic/__init__.py
+
+# 2. 读 L1 的 4 项检查
+sed -n '44,135p' packages/ai-trust-toolkit/src/ai_trust_toolkit/critic/layer1.py
+
+# 3. 读 L2 的"先L1后LLM"短路逻辑
+sed -n '51,110p' packages/ai-trust-toolkit/src/ai_trust_toolkit/critic/layer2.py
+
+# 4. 读 sre-rca 的 critic-v1.md（6 项检查 + 三态 + few-shot）
+sed -n '1,90p' apps/sre-rca-agent/prompts/critic-v1.md
+
+# 5. 跑相关单测感受
+uv run pytest packages/ai-trust-toolkit/tests/test_critic_layer1.py -q</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：Critic 是"防幻觉"，那"防崩溃、防超预算"呢？Day 08 讲 <strong>失败闸门 Failsafe</strong>——节点兜底、证据不足开关、写回守门、以及 v0.6 新增的预算硬熔断，一共 5→6 道防御纵深。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 toolkit 总览</a>
+                <a href="gov-agents-day08.html" style="color:var(--accent-green);">Day 08 · 失败闸门 Failsafe &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
