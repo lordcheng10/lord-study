@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 四层 Memory Protocol — gov-agents-platform 框架学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .mem4 { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+        .m { border-radius:11px; padding:16px; border:1px solid var(--mc,var(--border-color)); background:var(--bg-secondary); }
+        .m h4 { font-size:14px; margin:0 0 5px; color:var(--mc); } .m .en { font-size:11px; color:var(--text-muted); font-family:monospace; }
+        .m p { font-size:12.5px; color:var(--text-secondary); margin:6px 0 0; }
+        .m .file { font-size:11px; color:var(--text-muted); font-family:monospace; margin-top:6px; }
+        .m.work{--mc:#06b6d4} .m.epi{--mc:#8b5cf6} .m.sem{--mc:#22c55e} .m.vec{--mc:#f59e0b}
+        @media(max-width:768px){ .mem4{grid-template-columns:1fr} }
+        .vecflow { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; padding:14px 4px; }
+        .vecflow .b { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:10px 12px; font-size:12px; text-align:center; }
+        .vecflow .b b { display:block; color:var(--accent-orange); }
+        .vecflow .a { color:var(--accent-purple); font-weight:800; }
+        .swap { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .swap .c { border-radius:9px; padding:14px; font-size:12.5px; }
+        .swap .local { background:rgba(6,182,212,.06); border:1px solid rgba(6,182,212,.25); }
+        .swap .prod { background:rgba(34,197,94,.06); border:1px solid rgba(34,197,94,.25); }
+        .swap h5 { font-size:13px; margin:0 0 6px; } .swap .local h5{color:var(--accent-cyan)} .swap .prod h5{color:var(--accent-green)}
+        @media(max-width:768px){ .swap{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">四层 Memory Protocol · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Agent 为什么要记忆</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 四层记忆总图</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 向量检索是什么</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Protocol 解耦厂商</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 情景 & 语义记忆</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工作记忆 checkpointer</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 在 sre-rca 里的运用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="gov-agents-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 失败闸门</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="gov-agents-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 评测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 可信底座</span>
+            <h1 class="part-title">四层 Memory Protocol</h1>
+            <p class="part-desc">Agent 怎么记住过去的对话、历史故障、团队知识？四层记忆各司其职，靠 Protocol 抽象做到"换存储不动业务代码"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Agent 为什么需要记忆</h1></div>
+            <div class="card">
+                <p>大模型本身是"无状态"的——每次调用它都不记得上一次说了什么。但一个好用的 Agent 需要三种"记性"：</p>
+                <ul>
+                    <li><strong>记住这次对话</strong>：多轮追问要接得上（这是"工作记忆"）；</li>
+                    <li><strong>记住历史经验</strong>：这个故障以前遇到过吗、当时怎么解决的（"情景记忆"）；</li>
+                    <li><strong>记住团队知识</strong>：相关的 SOP、运维手册、架构拓扑（"语义记忆"）。</li>
+                </ul>
+                <p>本框架把这些抽象成<strong>四层 Memory Protocol</strong>，代码在 <code>packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/</code>。每一层是一个文件，职责清晰。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>四层记忆总图</h1></div>
+            <div class="card">
+                <div class="mem4">
+                    <div class="m work"><h4>① Working 工作记忆</h4><span class="en">会话内 · 短期</span><p>当前这次执行的 state，多轮之间接得上。就是 Day 03 讲的 checkpointer。</p><div class="file">memory/checkpointer.py</div></div>
+                    <div class="m epi"><h4>② Episodic 情景记忆</h4><span class="en">历史 case · 具体经验</span><p>过去处理过的一个个具体故障 case。新故障来了先召回相似历史。</p><div class="file">memory/episodic.py</div></div>
+                    <div class="m sem"><h4>③ Semantic 语义记忆</h4><span class="en">通用知识 · SOP</span><p>团队沉淀的 SOP、runbook、拓扑等通用知识，供 RAG 检索。</p><div class="file">memory/semantic.py</div></div>
+                    <div class="m vec"><h4>④ 向量底座</h4><span class="en">②③ 共用的存储</span><p>情景和语义记忆都建立在同一个"向量库"之上，负责相似度检索。</p><div class="file">memory/vector_store.py</div></div>
+                </div>
+                <div class="glossary"><b>为什么分这么细？</b> 因为三种记性的"读写模式"完全不同：工作记忆随会话生灭；情景记忆是"具体案例"，越攒越多；语义记忆是"提炼过的知识"，相对稳定。分层后每层能独立选合适的存储和策略。而②③底层其实共用一套向量检索（第④层），只靠一个 <code>metadata.type</code> 字段区分。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>向量检索：让机器"按意思找"</h1></div>
+            <div class="card">
+                <p>情景/语义记忆的核心是"<strong>按语义相似度找</strong>"，而不是"按关键词精确匹配"。比如查"服务 A 变慢"，它应该能召回"service-A 响应延迟升高"这种意思相近但用词不同的历史 case。这靠<strong>向量检索（vector search）</strong>实现：</p>
+                <div class="vecflow">
+                    <span class="b">一段文本<br><b>"服务A变慢"</b></span><span class="a">→</span>
+                    <span class="b">Embedder<br><b>转成向量</b></span><span class="a">→</span>
+                    <span class="b">[0.12, -0.8, ...]<br><b>一串数字</b></span><span class="a">→</span>
+                    <span class="b">向量库<br><b>找最近邻</b></span><span class="a">→</span>
+                    <span class="b">相似历史<br><b>Top-K case</b></span>
+                </div>
+                <div class="glossary">
+                    <b>Embedder（嵌入器）</b>：把一段文本"翻译"成一串数字（向量），意思越相近的文本，向量在空间里越靠近。<br>
+                    <b>向量库</b>：存这些向量、并能快速找出"跟给定向量最接近的 K 条"。相似度常用"余弦相似度"衡量。
+                </div>
+                <p>所以一次记忆召回 = "把查询文本 embed 成向量 → 在向量库里搜最近的几条 → 返回对应的原文"。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Protocol 解耦：换厂商不动业务</h1></div>
+            <div class="card">
+                <p>问题来了：本地开发想用"内存里的假向量库 + 假 embedder"（快、免费、可复现），生产想用"PostgreSQL+pgvector + Ollama 真 embedder"。怎么做到<strong>切换存储时业务代码一行都不用改</strong>？</p>
+                <p>答案是 Python 的 <strong>Protocol（协议/接口）</strong>——只约定"必须有哪些方法"，不关心具体实现。业务只依赖协议，跑时注入哪个实现都行：</p>
+<pre><code class="language-python"># memory/vector_store.py:28 —— 只定义"长什么样"，不管怎么实现
+class VectorStore(Protocol):
+    async def search(self, embedding, top_k, filter) -&gt; list[Record]: ...
+    async def add(self, records): ...
+    async def delete(self, ids): ...
+    def count(self) -&gt; int: ...</code></pre>
+                <div class="swap">
+                    <div class="c local"><h5>本地/测试</h5><code>InMemoryVectorStore</code>（<code>vector_store.py:58</code>，dict + 余弦）<br><code>MockEmbedder</code>（<code>embedder.py:26</code>，SHA256 切片，<strong>确定性、可复现</strong>）</div>
+                    <div class="c prod"><h5>生产</h5><code>PgVectorStore</code>（<code>vector_store.py:112</code>，PG16 + pgvector，ivfflat/hnsw 索引）<br><code>BgeM3Embedder</code>（<code>embedder.py:58</code>，接 Ollama，1024 维）</div>
+                </div>
+                <p style="margin-top:12px;">两种实现都满足同一个 <code>VectorStore</code> / <code>Embedder</code> 协议，所以业务节点拿到的接口一模一样。<code>PgVectorStore</code> 还做了防注入——表名走白名单校验（<code>vector_store.py:149</code>）。</p>
+                <div class="tip"><strong>这就是"依赖倒置"</strong>：业务不依赖具体的数据库，而是依赖一个抽象接口；具体用哪个数据库，由启动时的配置决定。测试快、生产稳，两全其美——这也是为什么本框架的测试能几秒跑完、不联网。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>情景记忆 & 语义记忆</h1></div>
+            <div class="card">
+                <h3>Episodic 情景记忆（episodic.py）</h3>
+                <p><code>EpisodicStore</code>（<code>episodic.py:16</code>）持有一个向量库 + 一个 embedder，两个方法：</p>
+                <ul>
+                    <li><code>recall(query, top_k)</code>（<code>episodic.py:39</code>）：把查询 embed 后在向量库搜，<strong>只搜 type=case 的记录</strong>，返回相似历史故障。</li>
+                    <li><code>writeback(case_id, text, metadata)</code>（<code>episodic.py:58</code>）：把这次的 case 存进去。注意——调用前必须先过 Day 08 的 <code>should_writeback</code> 守门。</li>
+                </ul>
+                <h3>Semantic 语义记忆（semantic.py）</h3>
+                <p><code>SemanticStore</code>（<code>semantic.py:16</code>）和情景记忆<strong>共用同一个向量库</strong>，靠 <code>metadata.type</code> 区分（sop/runbook/topology 等）：</p>
+                <ul>
+                    <li><code>seed(records)</code>（<code>semantic.py:40</code>）：团队离线把 SOP、手册灌进去。</li>
+                    <li><code>lookup(query, record_type)</code>（<code>semantic.py:60</code>）：在线召回，就是 RAG 检索。</li>
+                </ul>
+                <div class="glossary"><b>RAG（检索增强生成）</b>：调 LLM 前，先从知识库里检索出相关资料，塞进 prompt 一起给模型。好处是让模型基于"真实资料"回答，而不是凭记忆瞎编——这也是一种防幻觉手段。sre-rca 的 <code>rag</code> 节点干的就是这事。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>工作记忆：checkpointer 工厂</h1></div>
+            <div class="card">
+                <p>第①层工作记忆就是 Day 03 讲的 checkpointer（存档器），管"会话内的 state + 断点续跑"。框架把它的选择做成工厂 <code>make_checkpointer_from_env()</code>（<code>checkpointer.py:24</code>）：</p>
+<pre><code class="language-python"># 按环境变量自动选后端：
+# 有 REDIS_URL → 用 Redis
+# 有 CHECKPOINTER_PG_DSN → 用 PostgreSQL
+# 都没有 → 用内存版（本地/测试）
+checkpointer = make_checkpointer_from_env()
+graph = builder.compile(checkpointer=checkpointer)</code></pre>
+                <p>又是"Protocol 解耦"的套路——同一份业务代码，本地用内存、生产用 Redis/PG，靠环境变量切换。</p>
+                <div class="note"><strong>又一处诚实注释</strong>：<code>checkpointer.py:44</code> 说明 redis 0.4+ 需要 lifespan 集成、当前暂时降级到内存版。框架把"还没完全做好的地方"如实写在注释里，而不是假装完美——读代码时看到这种注释要特别留意，它告诉你哪些是"现状"而非"终态"。</p>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>在 sre-rca 里怎么串起来</h1></div>
+            <div class="card">
+                <p>回到 Day 05 的 sre-rca，四层记忆在它的图里各就各位：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>compile 时挂工作记忆</h4><p><code>make_checkpointer_from_env()</code> → 支持这次分析多轮接续、断点续跑。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>recall 节点用情景记忆</h4><p><code>EpisodicStore.recall()</code> 捞出相似的历史故障 case，给后面的综合当参考。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>rag 节点用语义记忆</h4><p><code>SemanticStore.lookup(type="sop")</code> 检索相关运维手册。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>writeback 节点写回情景记忆</h4><p>过了 <code>should_writeback</code> 守门后，把这次成功的分析存进去，成为未来的"历史经验"。</p></div></div>
+                </div>
+<pre><code class="language-python"># builder.py 里的组装（本地默认全走内存 mock，测试友好）
+store = EpisodicStore(vector_store=InMemoryVectorStore(),
+                      embedder=MockEmbedder())
+checkpointer = make_checkpointer_from_env()
+graph = builder.compile(checkpointer=checkpointer)</code></pre>
+                <div class="tip"><strong>闭环</strong>：情景记忆形成了一个自我改进的闭环——每处理一次故障就沉淀一条经验，下次遇到相似的先召回参考。加上 Day 08 的写回守门（只沉淀"通过质检的"），这个闭环不会被错误经验污染。这就是"越用越聪明"又"不会学坏"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>四层记忆分别是什么、各管什么？（工作/情景/语义/向量底座）</li>
+                    <li>向量检索为什么能"按意思找"？（Embedder 把文本转向量，找最近邻）</li>
+                    <li>Protocol 解耦解决了什么？（换存储不改业务：本地内存+Mock，生产 pgvector+Ollama）</li>
+                    <li>情景和语义记忆的区别？（具体 case vs 通用知识，共用向量库靠 type 区分）</li>
+                    <li>写回守门 + 情景记忆怎么形成"越用越聪明又不学坏"的闭环？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看 memory 模块清单
+sed -n '1,39p' packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/__init__.py
+
+# 2. 读向量库 Protocol + 两种实现
+sed -n '17,120p' packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/vector_store.py
+
+# 3. 读情景/语义记忆
+cat packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/episodic.py
+cat packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/semantic.py
+
+# 4. 读 checkpointer 工厂（含诚实降级注释）
+sed -n '24,105p' packages/ai-trust-toolkit/src/ai_trust_toolkit/memory/checkpointer.py
+
+# 5. 跑记忆单测
+uv run pytest packages/ai-trust-toolkit/tests/test_memory.py -q</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10</strong>：第 2 周收官。Agent 质量怎么量化、怎么防止"改一版就偷偷变差"？Day 10 讲 <strong>多维评测 Eval</strong>——golden set 5 维打分、在线评测、回归检测，以及 CI 里不达标自动拦合并。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="gov-agents-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 失败闸门</a>
+                <a href="gov-agents-day10.html" style="color:var(--accent-green);">Day 10 · 多维评测 Eval &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
