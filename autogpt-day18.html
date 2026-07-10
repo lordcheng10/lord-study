@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · API / REST 层 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#22c55e}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">API / REST 层 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · FastAPI app 结构</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · lifespan 启动钩子</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 统一异常映射</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 主要 REST 端点</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 付费墙 402</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Store 市场</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 路由模块化</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 集成凭证</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 经典起源 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 平台底座</span>
+            <h1 class="part-title">API / REST 层</h1>
+            <p class="part-desc">平台对外的门面。今天读 <code>api/rest_api.py</code> + <code>api/features/v1.py</code>：FastAPI 应用结构、启动钩子、异常映射、主要端点、付费墙、Store 市场。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>FastAPI app 结构</h1></div>
+            <div class="card">
+                <p>主 REST app 在 <code>api/rest_api.py:208</code> 创建。它是整个平台对外的 HTTP 门面——前端和外部集成都通过它操作平台。特点：lifespan 启动钩子、几个中间件（Day 04 讲过 CORS/GZip/安全头）、统一异常映射、大量 <code>include_router</code>（模块化路由）。</p>
+                <div class="baby"><span class="t">REST API 是平台的"前台"</span>
+                前端画布上的每个操作（建 Agent、运行、查余额、逛市场）背后都是一个 REST 请求。REST 层负责：接收请求 → 鉴权 → 调后端逻辑 → 返回结果。<strong>它是"用户/前端"和"平台内部"之间的接口层——所有对外能力都在这暴露。</strong>用 uvicorn + uvloop + httptools 起服务（高性能 async），显式 <code>ws="none"</code>（WebSocket 交给独立进程，Day 15）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>lifespan 启动钩子</h1></div>
+            <div class="card">
+                <p><code>rest_api.py:103</code> 的 lifespan：应用启动时连 DB/Redis、配线程池、<strong>注册所有 Block</strong>（Day 02 的 load_all_blocks + initialize_blocks）、注册托管凭证 provider、跑数据迁移。</p>
+                <div class="baby"><span class="t">为什么在启动时做这些？</span>
+                这些是"服务运行的前提"——必须在<strong>接第一个请求之前</strong>就绪：Block 得先注册好（否则前端问"有哪些块"答不上来）、DB 得连上、迁移得跑完（表结构最新）。<strong>lifespan 是 FastAPI 的"启动/关闭钩子"——启动时初始化、关闭时清理。</strong>把"一次性准备工作"放这里，保证服务对外可用时一切就绪。和 OpenHands 的 Alembic 启动迁移（Day 10）同一思路。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>统一异常映射</h1></div>
+            <div class="card">
+                <p><code>rest_api.py:309</code> 把各种内部异常映射成 HTTP 状态码：</p>
+                <table class="k">
+                    <tr><th>内部异常</th><th>→ HTTP 码</th></tr>
+                    <tr><td>Prisma 错误</td><td>500</td></tr>
+                    <tr><td>NotFound</td><td>404</td></tr>
+                    <tr><td>NotAuthorized</td><td>403</td></tr>
+                    <tr><td><code>UserPaywalledError</code></td><td><b>402（付费墙）</b></td></tr>
+                    <tr><td>PreconditionFailed</td><td>428</td></tr>
+                </table>
+                <div class="baby"><span class="t">为什么要"统一映射"？</span>
+                后端各处会抛各种业务异常（余额不足、没权限、找不到）。如果每个端点都自己 try/except 转 HTTP 码，重复且易漏。<strong>统一在一处把"业务异常 → HTTP 码"映射好——业务代码只管抛语义化的异常（如 <code>UserPaywalledError</code>），映射层自动转成正确的 HTTP 响应。</strong>这样前端能靠 HTTP 码统一处理（收到 402 就弹充值框）。<strong>关注点分离：业务抛语义异常、映射层管协议转换。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>主要 REST 端点</h1></div>
+            <div class="card">
+                <p>核心 v1 路由在 <code>api/features/v1.py</code>（前缀 <code>/api</code>）：</p>
+                <table class="k">
+                    <tr><th>功能</th><th>端点</th></tr>
+                    <tr><td>列出所有 Block</td><td><code>GET /api/blocks</code>（缓存 + GZip）</td></tr>
+                    <tr><td>直接执行单个 Block</td><td><code>POST /api/blocks/{id}/execute</code>（先扣费）</td></tr>
+                    <tr><td>创建 Agent（图）</td><td><code>POST /api/graphs</code></td></tr>
+                    <tr><td>执行 Agent</td><td><code>POST /api/graphs/{id}/execute/{version}</code></td></tr>
+                    <tr><td>停止/查状态/查成本</td><td><code>.../stop</code>、<code>.../executions</code>、<code>.../cost_summary</code></td></tr>
+                    <tr><td>查余额/充值</td><td><code>GET /api/credits</code>、<code>.../request_top_up</code></td></tr>
+                </table>
+                <div class="glossary"><code>GET /api/blocks</code> 返回 300+ 块，响应很大 → 用缓存 + GZip 压缩（Day 04）。<code>POST /api/graphs/{id}/execute</code> 就是 Day 05 追踪的执行入口。<strong>这张端点表 = 平台对外能力的清单。前端的每个功能都对应这里的某个端点。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>付费墙 402</h1></div>
+            <div class="card">
+                <p>执行/直跑 Block 的路由挂了 <code>Depends(enforce_payment_paywall)</code>（<code>v1.py:1848</code>）——余额 ≤0 就返回 <strong>402 Payment Required</strong>。</p>
+                <div class="baby"><span class="t">402 这个冷门状态码</span>
+                HTTP 402 "Payment Required" 是个<strong>很少用的状态码</strong>——大部分网站没有"必须付费才能用"的接口。但 AutoGPT Platform 是计量 SaaS，402 正好表达"你余额不够，请充值"。<strong>前端收到 402 → 弹出充值框。</strong><code>Depends(enforce_payment_paywall)</code> 是 FastAPI 的依赖注入——把"检查余额"作为这些端点的前置依赖，统一拦截，不用每个端点手写检查。<strong>用依赖注入做横切的"付费墙"检查——优雅。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Store 市场</h1></div>
+            <div class="card">
+                <p><code>api/features/store/routes.py</code> 是 Agent 市场：列出商店 Agent（<code>:141</code>）、看单个 Agent、下载、创作者列表、<strong>提交上架</strong>（<code>:424</code>）、上传媒体/生成封面图。审核走 admin 路由。</p>
+                <div class="baby"><span class="t">市场（marketplace）的意义</span>
+                用户搭好一个好用的 Agent，可以<strong>上架到市场分享/出售</strong>；别人可以浏览、下载、fork（Day 11）来用或改。<strong>这形成生态：创作者贡献 Agent、使用者受益、平台抽成——像 App Store。</strong>结合 Day 09 的计费，别人跑你上架的 Agent 消耗 credit，可能给你分成。<strong>市场 + 计费 = 把"搭 Agent"变成一门生意——这是平台商业模式的关键一环。</strong>回忆 Day 01 的转型：从"炫技的自主智能体"到"可持续的 Agent 经济平台"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>路由模块化</h1></div>
+            <div class="card">
+                <p><code>rest_api.py:328</code> 用大量 <code>include_router</code> 按功能拆分：<code>/api/integrations</code>（Day 17）、<code>/api/analytics</code>、<code>/api/store</code>、<code>/api/builder</code>、<code>/api/library</code>、<code>/api/chat</code>、<code>/api/mcp</code>、<code>/api/oauth</code>、一批 <code>/api/admin/*</code>，还 mount 了外部 API <code>/external-api</code>（给 API-key 调用方）。</p>
+                <div class="glossary"><b>为什么模块化路由？</b> 平台功能多（几十上百个端点）。按功能把路由拆成独立模块（integrations 一个、store 一个…），主 app 用 <code>include_router</code> 组装——<strong>每个模块管自己的端点，清晰、易维护、易协作（不同团队管不同模块）。</strong>和 OpenHands 的 v1_router 汇总、CrewAI 的模块化一样。<code>/external-api</code>（给外部程序用 API key 调）体现平台不只服务前端，也能被程序化调用——真正的开放平台。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>REST 层是平台的什么角色？为什么 ws="none"？</li>
+                    <li>lifespan 启动钩子做什么？为什么在启动时做？</li>
+                    <li>统一异常映射的好处？402 是什么？</li>
+                    <li>主要端点有哪些？付费墙怎么用依赖注入实现？</li>
+                    <li>Store 市场的意义？为什么路由要模块化？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+grep -n 'lifespan\|include_router\|UserPaywalledError\|402' $P/api/rest_api.py | head
+grep -n 'blocks\|graphs.*execute\|enforce_payment_paywall' $P/api/features/v1.py | head
+grep -n 'store/agents\|create.*submission' $P/api/features/store/routes.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>经典 AutoGPT 与 Forge（起源故事）</strong>——回到 2023 那个引爆热潮的"自主循环智能体"，读 <code>classic/</code> 的 think→plan→act 循环和 Forge 框架。理解 Agent 领域的来路。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 集成凭证</a>
+                <a href="autogpt-day19.html" style="color:var(--accent-green);">Day 19 · 经典起源 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
