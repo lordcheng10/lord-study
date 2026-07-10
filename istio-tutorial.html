@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Istio 源码学习 · 20 天总目录（服务网格控制面）</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .content { max-width: 1180px; }
+        .arch-anim { position:relative; display:flex; flex-direction:column; gap:9px; padding:18px; margin:10px 0 4px;
+            background:radial-gradient(120% 120% at 50% 0%, rgba(74,127,214,.09), transparent 70%); border-radius:14px; }
+        .arch-row { position:relative; border:1px solid var(--lc,var(--border-color)); border-radius:11px; padding:12px 16px;
+            background:var(--bg-card); overflow:hidden; transition:transform .25s,box-shadow .25s; }
+        .arch-row:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(0,0,0,.35); }
+        .arch-row::before { content:''; position:absolute; inset:0;
+            background:linear-gradient(90deg,transparent,var(--glow,rgba(74,127,214,.12)),transparent);
+            transform:translateX(-100%); animation:sweep 4.5s linear infinite; animation-delay:var(--d,0s); }
+        @keyframes sweep { 0%{transform:translateX(-100%)} 60%,100%{transform:translateX(100%)} }
+        .arch-row .lbl { font-size:11px; font-weight:800; letter-spacing:.06em; color:var(--lc); margin-bottom:7px; position:relative; }
+        .arch-row .boxes { display:flex; gap:7px; flex-wrap:wrap; position:relative; }
+        .arch-row .b { flex:1; min-width:110px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color);
+            border-radius:7px; padding:8px 9px; font-size:12px; color:var(--text-secondary); }
+        .arch-row .b strong { display:block; color:var(--text-primary); font-size:12.5px; margin-bottom:2px; }
+        .L1{--lc:#4a7fd6;--glow:rgba(74,127,214,.16)} .L2{--lc:#7c4dff;--glow:rgba(124,77,255,.14)}
+        .L3{--lc:#00acc1;--glow:rgba(0,172,193,.13)} .L4{--lc:#66bb6a;--glow:rgba(102,187,106,.12)}
+        .flow-dot { position:absolute; left:50%; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:#fff;
+            box-shadow:0 0 10px 3px rgba(74,127,214,.85); animation:fall 3.4s cubic-bezier(.6,0,.4,1) infinite; z-index:3; opacity:0; }
+        @keyframes fall { 0%{top:7%;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:93%;opacity:0} }
+        .loopd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;font-size:12.5px;text-align:center}
+        .loopd .n b{display:block;color:#4a7fd6;font-size:13px}.loopd .a{color:#7c4dff;font-weight:800;font-size:16px}
+        .week-bar { display:flex; align-items:center; gap:12px; margin:36px 0 14px; padding-left:2px; }
+        .week-bar .wk { width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+        .week-bar h2 { font-size:17px; font-weight:700; margin:0; } .week-bar span { font-size:12px; color:var(--text-muted); }
+        .day-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+        .day-card { display:flex; flex-direction:column; gap:8px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:18px; text-decoration:none; transition:transform .2s,border-color .2s,box-shadow .2s; }
+        .day-card:hover { transform:translateY(-4px); border-color:rgba(74,127,214,.45); box-shadow:0 12px 34px rgba(74,127,214,.10); }
+        .day-card .top { display:flex; align-items:center; gap:10px; }
+        .day-card .num { width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;font-family:'SF Mono',monospace; }
+        .day-card h3 { font-size:15px; font-weight:700; color:var(--text-primary); margin:0; line-height:1.35; }
+        .day-card p { font-size:12.5px; color:var(--text-secondary); margin:0; line-height:1.6; flex:1; }
+        .day-card .foot { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+        .day-card .mins { font-size:11px; color:var(--text-muted); }
+        .day-card .go { font-size:12px; font-weight:600; color:#4a7fd6; }
+        .day-card.soon { opacity:.55; cursor:default; }
+        .day-card.soon:hover { transform:none; border-color:var(--border-color); box-shadow:none; }
+        .day-card.soon .go { color:var(--text-muted); }
+        .badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; background:rgba(34,197,94,.12); color:var(--accent-green); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">IO</div>
+            <h2>Istio</h2>
+            <p class="version">服务网格控制面 · 20 天源码学习</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">总目录</li>
+            <li><a href="#intro" class="nav-link active">开篇 · 这是个什么项目</a></li>
+            <li><a href="#arch" class="nav-link">架构全景（动图）</a></li>
+            <li><a href="#how" class="nav-link">怎么用这份教程</a></li>
+            <li class="nav-group-title">第 1 周 · 控制面全景</li>
+            <li><a href="#week1" class="nav-link">Day 01 - 05</a></li>
+            <li class="nav-group-title">第 2 周 · xDS 生成</li>
+            <li><a href="#week2" class="nav-link">Day 06 - 10</a></li>
+            <li class="nav-group-title">第 3 周 · sidecar/安全</li>
+            <li><a href="#week3" class="nav-link">Day 11 - 15</a></li>
+            <li class="nav-group-title">第 4 周 · 遥测/扩展/安装</li>
+            <li><a href="#week4" class="nav-link">Day 16 - 20</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">源码深度学习 · 零基础友好 · higress-group 2/5</span>
+            <h1 class="part-title">Istio 源码学习</h1>
+            <p class="part-desc">20 天 · 每天 30 分钟 · 逐层读懂服务网格的控制面 Istio（Go）——它是指挥 Envoy 数据面的"大脑"。学完 Envoy（数据面）后，来看控制面怎么生成 xDS、注入 sidecar、做 mTLS。</p>
+        </div>
+
+        <section id="intro" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>开篇 · 这是个什么项目</h1></div>
+            <div class="card">
+                <p><strong>Istio</strong> 是最主流的<strong>服务网格（Service Mesh）</strong>，Go 编写。上一门课的 Envoy 是"数据面"（真正转发流量），<strong>Istio 是"控制面"（istiod）——它是指挥千百个 Envoy 的大脑</strong>：你写高层规则（把 10% 流量导到 v2、服务间自动 mTLS 加密），Istio 把它翻译成 Envoy 能懂的 xDS 配置，下发下去。它还负责给每个 Pod 注入 Envoy sidecar、签发证书、采集遥测。</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：Istio = <strong>配置模型（VirtualService/DestinationRule 等 CRD）</strong> + <strong>服务注册（发现 K8s 服务）</strong> + <strong>xDS 生成（翻译成 Envoy 配置）</strong> + <strong>Sidecar 注入</strong> + <strong>mTLS/CA（安全）</strong>。你写高层意图 → Istio 翻译 → 通过 xDS 下发给每个 Envoy → Envoy 执行。</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-item"><div class="feature-icon">🧠</div><h4>控制面 istiod</h4><p>指挥数据面的大脑：生成配置、注入、签证书。</p></div>
+                    <div class="feature-item"><div class="feature-icon">📤</div><h4>xDS 生成</h4><p>高层 CRD → Envoy 的 LDS/CDS/RDS/EDS，与 Envoy xDS 客户端对接。</p></div>
+                    <div class="feature-item"><div class="feature-icon">💉</div><h4>Sidecar 注入</h4><p>自动给 Pod 塞进一个 Envoy sidecar。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🔐</div><h4>mTLS / CA</h4><p>服务间自动双向 TLS、身份证书签发。</p></div>
+                </div>
+                <div class="info-box"><strong>和 Envoy 的关系（承上启下）</strong>：你在 Envoy 课学的 xDS 是"<strong>接收端</strong>"（Envoy 怎么消费配置）；Istio 课讲"<strong>发送端</strong>"（istiod 怎么生成并下发配置）。两者合起来才是完整服务网格。前 5 天不假设你懂 K8s/Go/服务网格。源码在 <code>higress-group/istio/pilot/</code>（控制面核心）。</div>
+            </div>
+        </section>
+
+        <section id="arch" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>架构全景（动起来看）</h1></div>
+            <div class="card">
+                <p>下图那颗<strong>发光小球</strong>是"配置从用户意图流到 Envoy"的旅程。从上到下：用户写 CRD → istiod 处理 → 生成 xDS → 下发数据面。</p>
+                <div class="arch-anim">
+                    <div class="flow-dot"></div>
+                    <div class="arch-row L1" style="--d:0s"><div class="lbl">L1 · 用户输入（CRD）</div><div class="boxes">
+                        <div class="b"><strong>VirtualService</strong>路由规则</div>
+                        <div class="b"><strong>DestinationRule</strong>目标策略</div>
+                        <div class="b"><strong>Gateway/Sidecar</strong></div>
+                    </div></div>
+                    <div class="arch-row L2" style="--d:.6s"><div class="lbl">L2 · istiod 控制面核心</div><div class="boxes">
+                        <div class="b"><strong>ConfigStore</strong>配置</div>
+                        <div class="b"><strong>ServiceRegistry</strong>服务发现</div>
+                        <div class="b"><strong>PushContext</strong>快照</div>
+                        <div class="b"><strong>DiscoveryServer</strong></div>
+                    </div></div>
+                    <div class="arch-row L3" style="--d:1.2s"><div class="lbl">L3 · xDS 生成与下发</div><div class="boxes">
+                        <div class="b"><strong>Generators</strong>生成器</div>
+                        <div class="b"><strong>Listener/Route/Cluster</strong></div>
+                        <div class="b"><strong>ADS gRPC</strong>推送</div>
+                        <div class="b"><strong>debounce</strong>合并</div>
+                    </div></div>
+                    <div class="arch-row L4" style="--d:1.8s"><div class="lbl">L4 · 数据面（Envoy sidecar）</div><div class="boxes">
+                        <div class="b"><strong>pilot-agent</strong>代理</div>
+                        <div class="b"><strong>Envoy</strong>执行配置</div>
+                        <div class="b"><strong>mTLS/SDS</strong>证书</div>
+                    </div></div>
+                </div>
+                <p>Istio 的心智模型是"<strong>CRD 意图 → istiod 翻译 → xDS 下发 → Envoy 执行</strong>"：</p>
+                <div class="loopd">
+                    <span class="n"><b>用户写 CRD</b>高层意图</span><span class="a">→</span>
+                    <span class="n"><b>istiod</b>建 PushContext</span><span class="a">→</span>
+                    <span class="n"><b>生成 xDS</b>Listener/Cluster…</span><span class="a">→</span>
+                    <span class="n"><b>推给 Envoy</b>执行</span>
+                </div>
+                <div class="tip"><strong>为什么需要控制面？</strong> 想象一个集群里几百个服务、几千个 Envoy。手动给每个 Envoy 写 xDS 配置不可能。<strong>控制面（istiod）让你写少量高层规则（"A 服务金丝雀发布"），它自动算出每个受影响 Envoy 该收到的具体配置并下发。</strong>数据面（Envoy）负责"执行"，控制面负责"决策 + 分发"——这就是数据面/控制面分离的意义。</div>
+            </div>
+        </section>
+
+        <section id="how" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>怎么用这份教程</h1></div>
+            <div class="feature-grid">
+                <div class="feature-item"><div class="feature-icon">⏱️</div><h4>每天 30 分钟</h4><p>一天一个独立页面，跟着"今日小结 + 动手"收尾。</p></div>
+                <div class="feature-item"><div class="feature-icon">👶</div><h4>零基础友好</h4><p>不假设你懂 K8s/Go/服务网格，术语首次出现都有大白话解释。</p></div>
+                <div class="feature-item"><div class="feature-icon">📍</div><h4>精确到行号</h4><p>关键代码标 <code>文件:行号</code>，可在真源码里跳转对照。</p></div>
+            </div>
+            <div class="tip"><strong>一条主线</strong>：从"控制面是什么、istiod 怎么启动"，到"配置和服务怎么被建模、PushContext 怎么建"，到"xDS 怎么生成并推送"，再到"sidecar 注入、mTLS、遥测、EnvoyFilter"。<strong>建议先学完 Envoy 再学本课。</strong></div>
+        </section>
+
+        <!-- W1 -->
+        <div class="week-bar" id="week1"><div class="wk" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">W1</div><h2>第 1 周 · 控制面全景</h2><span>全景、istiod 启动、配置模型、服务注册、PushContext</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">01</div><h3>项目全景（服务网格控制面）</h3></div><p>Istio 是什么、控制面 vs 数据面、和 Envoy 的关系。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">02</div><h3>istiod 启动</h3></div><p>pilot-discovery → bootstrap server，控制面怎么 boot。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">03</div><h3>配置模型与 CRD</h3></div><p>VirtualService/DestinationRule、Config/ConfigStore。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">04</div><h3>服务注册</h3></div><p>serviceregistry、K8s registry、Service/Endpoint 模型。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">05</div><h3>PushContext 配置快照</h3></div><p>生成代理配置用的全量快照怎么建。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W2 -->
+        <div class="week-bar" id="week2"><div class="wk" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">W2</div><h2>第 2 周 · xDS 生成</h2><span>DiscoveryServer、生成器、Builder、Push 模型、连接</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">06</div><h3>xDS DiscoveryServer</h3></div><p>ADS gRPC 服务端，与 Envoy xDS 客户端对接。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">07</div><h3>配置生成总览</h3></div><p>生成器 generators 怎么把 CRD 翻译成 xDS。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">08</div><h3>Listener/Route/Cluster Builder</h3></div><p>三大 Builder 怎么构建 Envoy 资源。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">09</div><h3>Push 与事件模型</h3></div><p>ConfigUpdate + debounce 合并，配置变更怎么触发推送。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">10</div><h3>代理连接生命周期</h3></div><p>Envoy 连上、拿初始配置、收更新 + Sidecar scope。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W3 -->
+        <div class="week-bar" id="week3"><div class="wk" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">W3</div><h2>第 3 周 · sidecar 与安全</h2><span>注入、pilot-agent、bootstrap、mTLS/CA、SDS</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">11</div><h3>Sidecar 注入</h3></div><p>mutating webhook + 注入模板，怎么给 Pod 塞 Envoy。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">12</div><h3>pilot-agent</h3></div><p>sidecar 里跑什么：引导 Envoy、SDS、代理生命周期。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">13</div><h3>Envoy bootstrap 生成</h3></div><p>agent 怎么生成 Envoy 初始配置（连回 Envoy 课）。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">14</div><h3>mTLS 与 CA</h3></div><p>服务间双向 TLS、证书签发、身份 SPIFFE。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">15</div><h3>SDS + 认证授权</h3></div><p>SDS 证书分发、PeerAuthentication/AuthorizationPolicy。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W4 -->
+        <div class="week-bar" id="week4"><div class="wk" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">W4</div><h2>第 4 周 · 遥测/扩展/安装</h2><span>遥测、EnvoyFilter、istioctl、Operator、收官</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">16</div><h3>遥测</h3></div><p>metrics/trace 采集、Telemetry API、Prometheus 集成。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">17</div><h3>EnvoyFilter（Higress 重用）</h3></div><p>直接 patch Envoy 配置的逃生舱，Higress 重度依赖。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">18</div><h3>istioctl CLI</h3></div><p>install/analyze/proxy-config/proxy-status 内省网格。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">19</div><h3>Operator 与安装</h3></div><p>IstioOperator CRD、profiles、manifests。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">20</div><h3>收官串讲</h3></div><p>Istio 全景、在 Higress 中的角色、承上启下。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <div class="card" style="margin-top:26px;text-align:center;">
+            <p style="margin:0;">📅 <strong>higress-group 系列 2/5，日拱一卒陆续上线</strong>。建议先学 Envoy 再学本课。</p>
+        </div>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+        });
+    </script>
+</body>
+</html>
