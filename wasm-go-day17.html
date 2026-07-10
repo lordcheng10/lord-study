@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Leader 选举与共享数据 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#00add8);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Leader 选举 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要选 Leader</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SharedData 与 CAS</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Lease 租约</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 抢/续租实现</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · setLease 写入</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 配合 tick 续租</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · IsLeader 用法</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day18.html" class="nav-link" style="color:#22c55e;">Day 18 AI Token &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 高级特性与实战</span>
+            <h1 class="part-title">Leader 选举与共享数据</h1>
+            <p class="part-desc">有些活只该"一个实例干"（定时上报、清理过期数据），不能每个 VM 都干一遍。今天看 wasm-go 怎么在没有外部协调服务的情况下，靠 SharedData + CAS 选出一个 Leader。这是分布式系统的经典问题。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要选 Leader</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"这活只能一个人干"</span>
+                网关有很多实例、每个实例很多 VM。<strong>有些任务重复干会出问题：比如"每分钟向监控系统上报一次汇总"——如果每个 VM 都报，数据翻了 N 倍；"每小时清理一次过期缓存"——多个一起清会冲突。</strong>解法：<strong>选出一个 Leader，只有它干这些独占任务，其余待命。</strong>这就是"Leader 选举"。难点在于：<strong>没有 ZooKeeper/etcd 这种协调服务，怎么在一堆平等的 VM 里选出唯一一个？</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SharedData 与 CAS</h1></div>
+            <div class="card">
+                <p>答案是 proxy-wasm 的 <strong>SharedData</strong>——一块<strong>跨 VM 共享的键值存储</strong>（同一 Envoy 进程内所有 VM 可见，弥补 Day 03 "全局变量各 VM 独立"的限制）。关键是它支持 <strong>CAS（Compare-And-Swap）</strong>：</p>
+<pre><code class="language-go">data, cas, err := proxywasm.GetSharedData(key)   // 读值 + 版本号 cas
+proxywasm.SetSharedData(key, newValue, cas)       // 只有 cas 匹配才写成功</code></pre>
+                <div class="baby"><span class="t">CAS = 原子的"没人改过我才写"</span>
+                <strong>读的时候拿到一个版本号 <code>cas</code>；写的时候带上它——如果期间别人改过（版本变了），你的写入失败。</strong>这保证了"多个 VM 同时抢，只有一个能成功写入"。<strong>回想 Day 07 的乐观锁、Day 15 的 Redis SetNX——都是同一个思想：用原子操作在竞争中选出唯一赢家。</strong>SharedData + CAS 是 wasm-go 不依赖外部服务就能做 Leader 选举的基础。（Day 09 的规则备份也存在 SharedData 里。）</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Lease 租约</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:563-566</code> 定义租约：</p>
+<pre><code class="language-go">type Lease struct {
+    VMID      string `json:"vmID"`      // 谁持有租约
+    Timestamp int64  `json:"timestamp"` // 何时续的
+}</code></pre>
+                <div class="baby"><span class="t">为什么用"租约"而不是"永久任命"？</span>
+                <strong>如果直接选一个 Leader 永久任命，万一它挂了（VM 崩溃/实例下线），这活就永远没人干了。</strong>租约机制：<strong>Leader 要定期"续租"（更新 Timestamp）证明自己还活着；租约过期（比如 60 秒没续）就视为 Leader 挂了，其他 VM 可以抢。</strong>好比"值班牌"要定时打卡，不打卡就换人。这样 Leader 挂了能自动故障转移。<code>VMID</code>（Day 03 的 uuid）标识是哪个 VM 持有。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>抢/续租实现</h1></div>
+            <div class="card">
+                <p><code>tryAcquireOrRenewLease</code>（<code>plugin_wrapper.go:576-608</code>）：</p>
+<pre><code class="language-go">data, cas, err := proxywasm.GetSharedData(ctx.leaderLeaseKey())
+if 没有租约 { return ctx.setLease(now, cas) }   // 没人占，我占
+var lease Lease; json.Unmarshal(data, &lease)
+// 如果租约是我自己的 → 直接续；如果过期超 60s → 抢过来
+if lease.VMID == ctx.vm.vmID || now-lease.Timestamp > 60 {
+    lease.VMID = ctx.vm.vmID; lease.Timestamp = now
+    return ctx.setLease(now, cas)                // CAS 写入，成功=当选/续租成功
+}
+return false   // 别人的有效租约，我不是 Leader</code></pre>
+                <div class="anno">读法：<b>三种情况：①没租约→抢；②租约是我的→续；③租约是别人的但过期>60s→抢。<strong>都通过 <code>setLease</code>（CAS 写入）落实——多个 VM 同时抢时，CAS 保证只有一个成功。</strong>返回 <code>true</code> 表示"我是 Leader"。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>setLease 写入</h1></div>
+            <div class="card">
+                <p><code>setLease</code>（<code>plugin_wrapper.go:610-627</code>）：把自己的 VMID + 当前时间戳序列化，用带 <code>cas</code> 的 <code>SetSharedData</code> 写入。</p>
+<pre><code class="language-go">lease := Lease{VMID: ctx.vm.vmID, Timestamp: timestamp}
+leaseByte, _ := json.Marshal(lease)
+if err := proxywasm.SetSharedData(ctx.leaderLeaseKey(), leaseByte, cas); err != nil {
+    return false   // CAS 失败（别人抢先了），我没当选
+}
+return true        // 写入成功，我是 Leader</code></pre>
+                <div class="baby"><span class="t">CAS 失败就认输</span>
+                <strong>如果 <code>SetSharedData</code> 因 cas 不匹配失败，说明有别的 VM 在你读和写之间抢先改了租约——你老实认输返回 false。</strong>这就是 CAS 保证唯一性的地方：并发抢租约时，只有拿到正确 cas 并抢先写入的那个成功。<code>leaderLeaseKey</code>（<code>:572-574</code>）用插件指纹拼 key，不同插件互不干扰。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>配合 tick 续租</h1></div>
+            <div class="card">
+                <p><code>DoLeaderElection</code>（<code>plugin_wrapper.go:568-570</code>）调 <code>tryAcquireOrRenewLease</code> 并更新 <code>isLeader</code>。典型用法是在 tick 里定期调（Day 10 的定时任务）：</p>
+<pre><code class="language-go">func parseConfig(ctx wrapper.PluginContext, json gjson.Result, config *Config) error {
+    wrapper.RegisterTickFunc(3000, func() {   // 每 3 秒
+        ctx.DoLeaderElection()                // 续租/抢租
+        if ctx.IsLeader() {
+            reportMetrics()                    // 只有 Leader 上报
+        }
+    })
+    return nil
+}</code></pre>
+                <div class="baby"><span class="t">tick + 选举 = 自动故障转移</span>
+                <strong>每 3 秒跑一次选举：Leader 借此续租（刷新时间戳）；非 Leader 借此检查"现任 Leader 是否过期"。</strong>Leader 挂了 → 停止续租 → 60 秒后租约过期 → 下次某个 VM 的 tick 检测到过期 → 抢成新 Leader。<strong>整个过程无需人工干预、无需外部协调服务——纯靠 SharedData+CAS+tick 自组织。</strong>这是很优雅的分布式设计。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>IsLeader 用法</h1></div>
+            <div class="card">
+                <p><code>IsLeader()</code>（<code>plugin_wrapper.go:629-631</code>）返回当前 VM 是否是 Leader。在需要"只干一次"的地方判断它。</p>
+                <div class="anno">读法：<b>典型场景：<strong>定时上报统计、定时清理、定时拉取远端配置——用 <code>if ctx.IsLeader()</code> 包起来，保证全局只有一个实例执行。</strong>注意 <code>isLeader</code> 是每次 <code>DoLeaderElection</code> 后更新的快照，所以要在 tick 里持续选举保持新鲜。这个能力让单个 Wasm 插件也能安全地做"集群级单例任务"。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要 Leader 选举？哪些任务只该一个实例干？</li>
+                    <li>SharedData + CAS 怎么在竞争中选唯一赢家？</li>
+                    <li>为什么用租约而不是永久任命？60 秒过期的意义？</li>
+                    <li>怎么配合 tick 实现自动故障转移？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '563,631p' pkg/wrapper/plugin_wrapper.go
+grep -n "GetSharedData\|SetSharedData" pkg/wrapper/plugin_wrapper.go pkg/matcher/*.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>AI Token 用量解析</strong>——<code>tokenusage</code> 包怎么从各家大模型（OpenAI/Gemini/Anthropic）不同格式的响应里，统一提取出 Token 用量。这是 AI 网关计费/限流的数据源头。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day16.html" style="color:var(--accent-cyan);">&larr; Day 16</a>
+                <a href="wasm-go-day18.html" style="color:#22c55e;">Day 18 · AI Token &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

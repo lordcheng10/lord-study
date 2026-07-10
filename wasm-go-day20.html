@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 构建部署与收官串讲 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .five{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .five .c{flex:1;min-width:130px;border:1px solid var(--border-color);border-radius:9px;padding:10px;background:var(--bg-card);font-size:12px;text-align:center}
+        .five .c b{display:block;color:#00add8;margin-bottom:3px}
+        .chain{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .chain .s{border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;background:var(--bg-secondary);font-size:13px}
+        .chain .s b{color:#22c55e}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#00add8);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">构建部署收官 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 编译成 wasm</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 打成 OCI 镜像</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · WasmPlugin 部署</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 插件的一生（回收）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 四周主线回顾</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 五站大串讲</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 写一个插件的路径</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 毕业 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 第 4 周 高级特性与实战</span>
+            <h1 class="part-title">构建部署与收官串讲</h1>
+            <p class="part-desc">恭喜坚持到最后一天，也是整个 higress-group 系列的收官！今天走完"插件的一生"的部署环节（编译→镜像→部署），再把 Envoy→Istio→Higress→Console→wasm-go 五站连成一个 AI 网关产品的完整全貌。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>编译成 wasm</h1></div>
+            <div class="card">
+                <p><code>README.md</code> 的构建命令（以 request-block 为例）：</p>
+<pre><code class="language-bash">cd examples/request-block
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o main.wasm main.go</code></pre>
+                <div class="baby"><span class="t">这行命令做了什么？</span>
+                <strong><code>GOOS=wasip1 GOARCH=wasm</code> 告诉 Go 编译器"目标是 WASI（Wasm 系统接口）平台"，<code>-buildmode=c-shared</code> 生成动态库形式的 <code>.wasm</code>。</strong>结果 <code>main.wasm</code> 就是能被 Envoy 加载的插件字节码。<strong>需要 Go 1.24+（<code>go.mod</code> 要求）。</strong>注意：不是普通的 <code>go build</code>——普通编译产出本机可执行文件，这里产出的是跨平台 Wasm 字节码。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>打成 OCI 镜像</h1></div>
+            <div class="card">
+                <p><code>README.md</code> 的极简 Dockerfile：</p>
+<pre><code class="language-dockerfile">FROM scratch
+COPY main.wasm plugin.wasm</code></pre>
+<pre><code class="language-bash">docker build -t <registry>/request-block:1.0.0 -f Dockerfile .
+docker push <registry>/request-block:1.0.0</code></pre>
+                <div class="baby"><span class="t">为什么用 FROM scratch？</span>
+                <strong><code>scratch</code> 是"空镜像"——里面什么都没有。插件镜像只需要装一个 <code>main.wasm</code> 文件（改名 <code>plugin.wasm</code>），不需要操作系统、不需要运行时。</strong>所以镜像极小（就是那个 wasm 文件的大小）。<strong>这不是"能跑的容器",而是"用 OCI 镜像格式当分发载体"——Higress 从镜像仓库拉这个 wasm 文件加载。</strong>回想上一站 Console：WasmPlugin CR 的 <code>url: oci://...</code> 指的就是这个镜像。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>WasmPlugin 部署</h1></div>
+            <div class="card">
+                <p>用 WasmPlugin CRD 部署（<code>README.md</code>，Day 02 见过）：</p>
+<pre><code class="language-yaml">apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata: { name: request-block, namespace: higress-system }
+spec:
+  defaultConfig: { block_urls: ["swagger.html"] }   # → parseConfig 的入参
+  url: oci://<registry>/request-block:1.0.0          # → 上一步的镜像</code></pre>
+                <div class="anno">读法：<b><code>kubectl apply</code> 这个 CR，Higress 控制器 watch 到 → 下发给 Envoy → Envoy 从 <code>url</code> 拉 wasm 加载 → 用 <code>defaultConfig</code> 调你的 parseConfig。<strong>也可以在上一站 Higress Console 界面里配（自定义插件）——最终生成的就是这个 CR。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>插件的一生（回收 Day 01）</h1></div>
+            <div class="card">
+                <div class="chain">
+                    <div class="s"><b>① 写</b>：init 里 SetCtx 注册回调（W1）+ parseConfig/RuleMatcher（W2）+ 请求处理/外部调用（W3）+ 日志/Leader/Token（W4）</div>
+                    <div class="s"><b>② 编译</b>：<code>GOOS=wasip1 GOARCH=wasm go build</code> → main.wasm</div>
+                    <div class="s"><b>③ 打包</b>：FROM scratch + COPY → OCI 镜像 → push</div>
+                    <div class="s"><b>④ 配置</b>：WasmPlugin CRD（或 Console 界面）指向 oci:// 镜像</div>
+                    <div class="s"><b>⑤ 运行</b>：Higress 下发 → Envoy 拉 wasm、每 worker 克隆 VM → OnPluginStart 加载配置</div>
+                    <div class="s"><b>⑥ 处理</b>：请求到来 → GetMatchConfig 选配置 → 各阶段钩子 → 返回 Action</div>
+                </div>
+                <div class="tip">Day 01 画的这条链，现在每一环你都懂了。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>四周主线回顾</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>W1 入门与生命周期</strong>：request-block 例子、proxy-wasm ABI、三级 Context、SetCtx 函数式选项。</li>
+                    <li><strong>W2 配置与匹配</strong>：ParseConfig 家族、RuleMatcher 五种匹配、GetMatchConfig 运行时选配、全局vs规则+隔离容错、OnPluginStart 生命周期。</li>
+                    <li><strong>W3 HTTP 与外部调用</strong>：六阶段钩子+Action、HttpContext 能力、Cluster 8 种、HttpCall/RedisCall 异步回调（Pause/Resume）。</li>
+                    <li><strong>W4 高级特性</strong>：SafeLog、Leader 选举+SharedData CAS、tokenusage 多协议、rebuild 重建+IO 限流+单测。</li>
+                </ul>
+                <div class="glossary"><b>一句话总纲</b>：wasm-go = <b>proxy-wasm ABI 的 Go 友好封装</b>——用"填回调"的极简模型（SetCtx）+ 内置的配置解析/规则匹配/HTTP&Redis 客户端/日志/Leader选举/Token解析，让你专注写插件业务，把 Wasm 的复杂度（沙箱、异步、多 VM、内存）全藏在背后。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>五站大串讲</h1></div>
+            <div class="card">
+                <div class="five">
+                    <div class="c"><b>Envoy</b>数据面<br>C++ 代理，跑 Wasm VM</div>
+                    <div class="c"><b>Istio</b>控制面<br>istiod 生成 xDS</div>
+                    <div class="c"><b>Higress</b>AI 网关<br>Core 喂配置给 istiod</div>
+                    <div class="c"><b>Console</b>管理界面<br>生成 K8s 配置</div>
+                    <div class="c"><b>wasm-go</b>插件 SDK<br>写扩展插件（本课）</div>
+                </div>
+                <div class="baby"><span class="t">五站怎么协作成一个产品（完整闭环）</span>
+                <strong>你用 <b>wasm-go</b>（本课）写个插件、编译成 wasm 推到镜像仓库 → 在 <b>Console</b>（上一站）界面里配置这个插件、绑定到某路由 → Console 生成 WasmPlugin CR 写进 K8s → <b>Higress</b> Core watch 到、翻译成 Istio 配置 → 经 MCP-over-xDS 喂给 <b>Istio</b> 的 istiod → istiod 生成 xDS 下发给 <b>Envoy</b> → Envoy 加载你的 wasm、每个请求在各阶段调用你写的钩子。</strong><br><br>
+                <strong>五站串起来就是"一个可扩展的 AI 网关产品"的完整技术栈：从流量执行（Envoy）、配置管理（Istio/Higress）、人机界面（Console）到能力扩展（wasm-go）。你现在能看懂整个产品是怎么搭起来的。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>写一个插件的路径</h1></div>
+            <div class="card">
+                <p>想动手写自己的插件，建议路径：</p>
+                <ol>
+                    <li><strong>抄一个例子起步</strong>：复制 <code>examples/request-block</code>，改成你的逻辑。</li>
+                    <li><strong>定义配置</strong>：写配置结构体 + parseConfig（Day 06），需要多套配置就用 RuleMatcher（Day 07-09）。</li>
+                    <li><strong>写处理逻辑</strong>：选合适的阶段钩子（Day 11），需要外部数据就用 HttpCall/Redis（Day 14-15）。</li>
+                    <li><strong>加固</strong>：敏感日志用 UnsafeInfo（Day 16）、独占任务用 Leader（Day 17）、长跑加 rebuild（Day 19）。</li>
+                    <li><strong>测试 + 部署</strong>：用 pkg/test 写单测（Day 19），编译打镜像部署（今天）。</li>
+                </ol>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>毕业 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🎓 20 天后，你已经能</h3>
+                <ul>
+                    <li>用 wasm-go 从零写一个 Higress Wasm 插件并部署。</li>
+                    <li>说清插件生命周期、三级 Context、配置解析与规则匹配。</li>
+                    <li>掌握异步外部调用（HTTP/Redis）的 Pause/Resume 节奏。</li>
+                    <li>运用高级特性：安全日志、Leader 选举、Token 解析、性能重建。</li>
+                    <li>把 Envoy→Istio→Higress→Console→wasm-go 五站串成一个 AI 网关产品的完整全貌。</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 毕业动手：写你的第一个插件</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go/examples
+cp -r request-block my-plugin && cd my-plugin
+# 改 main.go 的插件名和逻辑，然后：
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o main.wasm main.go
+ls -la main.wasm
+# 恭喜——你已经能造 Higress 插件了！higress-group 五站全部学完 🎉</code></pre>
+                <div class="tip"><strong>higress-group 系列 5/5 全部完成！</strong>Envoy（数据面）→ Istio（控制面）→ Higress（AI 网关）→ Console（管理界面）→ wasm-go（插件 SDK）——你已经通读了一个云原生 AI 网关产品的完整技术栈。接下来可以挑一个真实需求，写个插件贡献给社区。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day19.html" style="color:var(--accent-cyan);">&larr; Day 19</a>
+                <a href="wasm-go-tutorial.html" style="color:#22c55e;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

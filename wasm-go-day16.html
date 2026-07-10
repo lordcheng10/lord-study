@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · 日志与安全日志 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#00add8);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">日志与安全日志 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Log 接口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 全局函数</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 六个日志级别</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SafeLog 是什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Unsafe 系列</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 降级技巧</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 自定义日志复习</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day17.html" class="nav-link" style="color:#22c55e;">Day 17 Leader 选举 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 高级特性与实战</span>
+            <h1 class="part-title">日志与安全日志</h1>
+            <p class="part-desc">第 4 周进入高级特性。今天从最基础也最容易忽视的日志开始——尤其是 wasm-go 一个很用心的设计：<strong>安全日志</strong>，防止把用户的敏感信息（密码、Token、body）打进日志被采集泄露。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Log 接口</h1></div>
+            <div class="card">
+                <p><code>log/log.go:17-30</code> 定义 <code>Log</code> 接口，六个级别各有 <code>Xxx</code> 和 <code>Xxxf</code>（带格式化）两版：</p>
+<pre><code class="language-go">type Log interface {
+    Trace(msg) / Tracef(format, args...)
+    Debug / Debugf
+    Info / Infof
+    Warn / Warnf
+    Error / Errorf
+    Critical / Criticalf
+}</code></pre>
+                <div class="anno">读法：<b><code>SetPluginLog</code>（<code>:39-41</code>）设置全局 logger，默认是 <code>DefaultLog</code>（底层调 <code>proxywasm.LogXxx</code>）。<strong>你也能用 <code>WithLogger</code> 选项（Day 05）换成自定义实现。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>全局函数</h1></div>
+            <div class="card">
+                <p><code>log/log.go:55-105</code> 提供包级全局函数 <code>log.Info(msg)</code>/<code>log.Infof(fmt, args...)</code> 等——这就是 Day 05 说的"新 API 不带 log 参数"的原因：</p>
+<pre><code class="language-go">import "github.com/higress-group/wasm-go/pkg/log"
+log.Infof("处理请求 path=%s", path)   // 直接用，不用从回调参数拿 log</code></pre>
+                <div class="baby"><span class="t">为什么全局函数更方便？</span>
+                旧 API 每个回调都带 <code>log log.Log</code> 参数，你得一路传递。<strong>新 API 把 logger 存成包级全局变量，你在任何地方 <code>log.Infof(...)</code> 就能打日志——不用传参。</strong>底层它转发给 <code>SetPluginLog</code> 设的那个 logger。代码更干净。这也是为什么新版钩子签名去掉了 log 参数。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>六个日志级别</h1></div>
+            <div class="card">
+                <p>Trace &lt; Debug &lt; Info &lt; Warn &lt; Error &lt; Critical。用途约定：</p>
+                <ul>
+                    <li><strong>Trace/Debug</strong>：详细调试信息，生产通常关闭。</li>
+                    <li><strong>Info</strong>：正常流程的关键节点。</li>
+                    <li><strong>Warn</strong>：异常但可恢复（如配置为空用默认）。</li>
+                    <li><strong>Error/Critical</strong>：错误/严重错误（插件启动失败等）。</li>
+                </ul>
+                <div class="anno">读法：<b>级别是"重要性 + 采集策略"的信号——生产环境常只采 Info 及以上。<strong>这个细节和"安全日志"配合（下面）：把敏感信息降级到 Debug，生产不采集就等于不泄露。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SafeLog 是什么</h1></div>
+            <div class="card">
+                <p><code>log/log.go:46-53</code>：<code>SetSafeLogEnabled(enabled)</code> / <code>IsSafeLogEnabled()</code>。通过 Day 05 的 <code>EnableSafeLog</code> 选项开启。</p>
+                <div class="baby"><span class="t">敏感信息泄露是真实风险</span>
+                <strong>插件常要打日志排查——但请求头里有 Authorization token、body 里有用户数据、外部调用响应含隐私。如果这些无脑打进 Info 日志，被日志采集系统收走、进了可搜索的日志库，就是数据泄露！</strong>SafeLog 就是应对：<strong>开启后，用 <code>UnsafeInfo/UnsafeInfof</code> 打的"可能含敏感信息"的日志会被特殊处理（降级/抑制）。</strong>回想 Day 14：HttpCall 打请求/响应用的正是 <code>log.UnsafeInfof</code>。有个专门的例子 <code>examples/safe-log-http-call</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Unsafe 系列</h1></div>
+            <div class="card">
+                <p><code>log/log.go:107-131</code> 的 <code>UnsafeInfo</code>/<code>UnsafeInfof</code>：</p>
+<pre><code class="language-go">func UnsafeInfof(format string, args ...interface{}) {
+    if safeLogEnabled {
+        pluginLog.Debugf("\n"+format, args...)   // 安全模式：降到 Debug + 前置换行
+    } else {
+        pluginLog.Infof(format, args...)          // 普通模式：正常 Info
+    }
+}</code></pre>
+                <div class="baby"><span class="t">"Unsafe"= 我知道这条可能含敏感信息</span>
+                <strong>约定：打可能含敏感数据的日志（头/体/外部响应）用 <code>UnsafeInfo*</code>，打普通日志用 <code>Info*</code>。</strong>没开安全模式时 <code>UnsafeInfo</code> 和 <code>Info</code> 一样（方便开发调试）；<strong>开了安全模式，<code>UnsafeInfo</code> 自动降级到 Debug——生产不采 Debug 就看不到，安全。</strong>这个"标记 + 开关"设计让"开发能看、生产不漏"两全。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>降级技巧：前置换行</h1></div>
+            <div class="card">
+                <p>注意 <code>UnsafeInfof</code> 在安全模式下不只降级到 Debug，还加了 <code>"\n"</code> 前缀。注释（<code>:120-123</code>）解释了原因：</p>
+                <div class="baby"><span class="t">为什么加个换行？</span>
+                <strong>很多日志采集器是"按行"采集的。给敏感日志前面加个换行，让它和正常日志错行——即使某些 Debug 被采集，采集器也难把"完整的敏感信息"抓在一条记录里。</strong>这是"纵深防御"的小技巧：<strong>降级到 Debug 是第一道防线，前置换行是第二道（万一 Debug 也被采）。</strong>可见作者对日志泄露考虑得多细致——这正是生产级 SDK 和玩具的区别。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>自定义日志复习</h1></div>
+            <div class="card">
+                <p>别混淆两类"日志"：</p>
+                <ul>
+                    <li><strong>插件调试日志</strong>（本课）：<code>log.Infof</code>——给开发/运维看的诊断信息，进网关日志。</li>
+                    <li><strong>访问日志属性</strong>（Day 12）：<code>WriteUserAttributeToLog</code>——把业务属性写进请求的访问日志 <code>custom_log</code> 字段，用于可观测/审计。</li>
+                </ul>
+                <div class="anno">读法：<b>前者是"我这段代码干了啥"，后者是"这条请求的业务特征"。<strong>两者都可能含敏感信息，都要注意脱敏</strong>——访问日志属性由控制面/运维决定采不采，调试日志由 SafeLog 控制。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么新 API 能用全局 <code>log.Infof</code> 不带 log 参数？</li>
+                    <li>SafeLog 解决什么真实风险？何时用 <code>UnsafeInfo</code>？</li>
+                    <li>安全模式下 <code>UnsafeInfo</code> 怎么处理（降级+换行）？为什么加换行？</li>
+                    <li>调试日志和访问日志属性的区别？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '46,131p' pkg/log/log.go
+cat examples/safe-log-http-call/main.go | head -60</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>Leader 选举与共享数据</strong>——多个 VM/实例里怎么选一个"领导"干独占的活（避免重复上报），以及 SharedData 的 CAS 机制（Redis 之外的另一种跨 VM 共享）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day15.html" style="color:var(--accent-cyan);">&larr; Day 15</a>
+                <a href="wasm-go-day17.html" style="color:#22c55e;">Day 17 · Leader 选举 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

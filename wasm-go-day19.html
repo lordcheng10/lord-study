@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 性能、稳定性与测试 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#00add8);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">性能与测试 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Wasm 的内存难题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · rebuild 重建</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两个触发条件</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · rebuild 例子</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · IO 并发限制</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · streaming inject</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · pkg/test 单元测试</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day20.html" class="nav-link" style="color:#22c55e;">Day 20 构建部署收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 高级特性与实战</span>
+            <h1 class="part-title">性能、稳定性与测试</h1>
+            <p class="part-desc">插件跑在网关关键路径上，性能和稳定性至关重要。今天看 wasm-go 应对 Wasm 特有问题的三个机制（rebuild 重建、IO 限流、streaming inject），以及怎么给插件写单元测试。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Wasm 的内存难题</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Wasm 里 Go 的 GC 有点尴尬</span>
+                <strong>Go 有垃圾回收（GC），但在 Wasm 环境里，Go runtime 的内存管理受限——内存只增不太还给宿主，长期运行可能累积、导致 VM 内存越来越大。</strong>而且 Wasm VM 的内存一旦分配很难收缩。<strong>长跑的插件可能慢慢"内存膨胀",影响网关。</strong>解法：<strong>定期"重建"（rebuild）这个 VM——销毁旧的、建个干净的新的，内存归零。</strong>就像"跑久了重启一下"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>rebuild 重建</h1></div>
+            <div class="card">
+                <p><code>CommonVmCtx</code> 有三个 rebuild 相关字段（<code>plugin_wrapper.go:91-93</code>）：<code>rebuildAfterRequests</code>（处理多少请求后重建）、<code>requestCount</code>（当前计数）、<code>rebuildMaxMem</code>（内存达多少字节重建）。</p>
+                <p>通过选项开启（Day 05）：<code>WithRebuildAfterRequests(1000)</code> / <code>WithRebuildMaxMemBytes(100*1024*1024)</code>。</p>
+                <div class="anno">读法：<b>SDK 在处理请求时累加 <code>requestCount</code>、检查 VM 内存，达到阈值就设"重建标志",让网关在合适时机换一个新 VM。<strong>这是"主动预防内存问题"而非"等出事再处理"。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>两个触发条件</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>按请求数</strong>（<code>WithRebuildAfterRequests</code>）：处理满 N 个请求就重建——适合"内存随请求数线性增长"的场景。</li>
+                    <li><strong>按内存</strong>（<code>WithRebuildMaxMemBytes</code>）：VM 内存达到阈值就重建——更精准，直接盯内存。</li>
+                </ul>
+                <div class="baby"><span class="t">两条防线可以同时用</span>
+                <strong>请求数是"粗略估计"（假设每请求耗一点内存），内存阈值是"精准兜底"。两个都设，谁先到谁触发。</strong>好比汽车保养"每 1 万公里 或 每半年"，哪个先到都提醒。<strong>取值要权衡：太频繁重建（比如每 100 请求）会有重建开销和瞬时抖动，太久又可能内存涨太多。</strong>rebuild-example 里用的是 1000 请求 / 100MB。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>rebuild 例子</h1></div>
+            <div class="card">
+                <p><code>examples/rebuild-example/main.go</code>：</p>
+<pre><code class="language-go">wrapper.SetCtx("rebuild-example",
+    wrapper.ParseConfig(parseConfig),
+    wrapper.ProcessRequestHeaders(onHttpRequestHeaders),
+    wrapper.WithRebuildAfterRequests[RebuildConfig](1000),          // 1000 请求后重建
+    wrapper.WithRebuildMaxMemBytes[RebuildConfig](100*1024*1024),   // 或内存达 100MB
+)
+// 钩子里能读 VM 内存监控：
+data, _ := proxywasm.GetProperty([]string{"plugin_vm_memory"})
+memorySize := binary.LittleEndian.Uint64([]byte(data))   // 当前 VM 内存字节数</code></pre>
+                <div class="anno">读法：<b><code>plugin_vm_memory</code> 是 Higress 版 Envoy 暴露的属性（回想 Day 03 的 <code>CallForeignFunction</code>——Higress 定制），能读到当前 VM 内存用量。<strong>你可以监控它、打日志观察增长趋势，据此调 rebuild 阈值。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>IO 并发限制（回收 Day 10 伏笔）</h1></div>
+            <div class="card">
+                <p><code>WithMaxRequestsPerIoCycle</code>（<code>plugin_wrapper.go:490</code>，Day 10 在 OnPluginStart 里见它被设置）。注释（<code>:466-489</code>）详解了它的必要性：</p>
+                <div class="baby"><span class="t">复杂插件 + 外部调用的隐患</span>
+                <strong>当插件逻辑复杂、要做 HTTP/Redis 调用时，如果一个 IO 周期里塞了太多并发请求，插件的执行会"堵住"IO 周期，导致外部调用的回调（明明后端已经快速返回了）来不及在本周期处理、被误判超时。</strong>限制每 IO 周期的并发请求数能缓解。<strong>注意三点：①全局生效（不只当前插件）；②多插件设置时取最小值；③推荐值 = 外部调用超时 / 所有插件总执行时间。</strong>设太小反而增加 CPU 开销——需要按实际压测调。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>streaming inject</h1></div>
+            <div class="card">
+                <p>Day 12 提过的 <code>NeedPauseStreamingResponse</code> + <code>PushBuffer/PopBuffer</code> + <code>InjectEncodedDataToFilterChain</code>（配套 proto 在 <code>pkg/protos/inject_encoded_data.pb.go</code>）：用于"流式响应期间调外部服务再改写内容"。</p>
+                <div class="baby"><span class="t">高级场景：边流边改</span>
+                <strong>普通流式响应是"边收边转发"。但有时要"收到某块后调个外部服务、拿结果改写这块再转发"（比如流式内容审核：把敏感词替换掉）。</strong>这就需要：暂停流式（<code>NeedPauseStreamingResponse</code>）→ 缓冲当前数据到内部队列（<code>PushBuffer</code>）→ 异步调外部服务 → 拿到结果后 <code>InjectEncodedDataToFilterChain</code> 把改写后的数据注入回流。<strong>这是 wasm-go 里最复杂的能力，只有内容改写类插件才用得上，一般插件无需碰。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>pkg/test 单元测试</h1></div>
+            <div class="card">
+                <p><code>pkg/test/</code> 提供测试辅助：<code>test.go</code>（测试框架）、<code>host.go</code>（模拟宿主环境）、<code>redis.go</code>（模拟 Redis）、<code>utils.go</code>。配合 <code>rule_matcher_test.go</code>、<code>cluster_wrapper_test.go</code> 等测试文件。</p>
+                <div class="baby"><span class="t">怎么测一个跑在 Wasm 里的插件？</span>
+                <strong>插件正常要在 Envoy 里跑才能测——太重。<code>pkg/test</code> 提供一个"模拟宿主"，让你在普通 Go 测试里模拟"请求头到达""发起 HTTP 调用"等，验证插件行为。</strong>这样能像测普通 Go 代码一样 <code>go test</code> 插件逻辑，不用起真网关。<strong>写插件时配上单测，能在部署前抓住大部分 bug——这是工程化的重要一环。</strong>看 <code>rule_matcher_test.go</code> 学怎么测规则匹配。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Wasm 里 Go 插件会内存膨胀？rebuild 怎么解决？</li>
+                    <li>rebuild 两个触发条件？取值怎么权衡？</li>
+                    <li>IO 并发限制解决什么隐患？为什么全局取最小值？</li>
+                    <li>streaming inject 适合什么场景？怎么给插件写单测？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+cat examples/rebuild-example/main.go
+sed -n '435,505p' pkg/wrapper/plugin_wrapper.go
+ls pkg/test/
+go test ./pkg/matcher/ 2>&1 | tail -20</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（收官）</strong>：<strong>构建部署 + 五站大串讲</strong>——把 Go 编译成 wasm、打成 OCI 镜像、用 WasmPlugin CRD 部署，走完插件的一生；再把 Envoy→Istio→Higress→Console→wasm-go 五站连成完整全貌。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day18.html" style="color:var(--accent-cyan);">&larr; Day 18</a>
+                <a href="wasm-go-day20.html" style="color:#22c55e;">Day 20 · 构建部署收官 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

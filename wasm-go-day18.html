@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · AI Token 用量解析 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:5px 8px;text-align:left}
+        th{background:var(--bg-secondary);color:#22c55e}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#00add8);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">AI Token 解析 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要解析 Token</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 多协议路径常量</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · TokenUsage 结构</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · GetTokenUsage</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · SSE 分块处理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Extract 系列</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 存进 Context</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day19.html" class="nav-link" style="color:#22c55e;">Day 19 性能与测试 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 高级特性与实战</span>
+            <h1 class="part-title">AI Token 用量解析</h1>
+            <p class="part-desc">AI 网关要按 Token 计费和限流，第一步是"知道每次请求用了多少 Token"。但各家大模型的响应格式都不一样。今天看 <code>tokenusage</code> 包怎么统一从 OpenAI/Gemini/Anthropic 等格式里提取 Token 数。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要解析 Token</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Token 是大模型的"计量单位"</span>
+                <strong>大模型按 Token（词元）收费——输入多少 Token、输出多少 Token，各有单价。AI 网关要做计费、配额、限流，就必须知道每次调用用了多少 Token。</strong>这个数据在 LLM 的响应里（<code>usage</code> 字段）。<strong>但麻烦在于：OpenAI 叫 <code>usage.prompt_tokens</code>、Gemini 叫 <code>usageMetadata.promptTokenCount</code>、Anthropic 叫 <code>message.usage.input_tokens</code>——每家路径都不同！</strong><code>tokenusage</code> 包就是把这些差异抹平，统一提取。上一站的 ai-statistics、ai-token-ratelimit 插件都靠它。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>多协议路径常量</h1></div>
+            <div class="card">
+                <p><code>tokenusage/tokenusage.go:23-60+</code> 定义了各家协议的 gjson 路径常量：</p>
+                <table>
+                    <tr><th>字段</th><th>OpenAI</th><th>Gemini</th><th>Anthropic</th></tr>
+                    <tr><td>模型</td><td>model</td><td>modelVersion</td><td>message.model</td></tr>
+                    <tr><td>输入 Token</td><td>usage.prompt_tokens</td><td>usageMetadata.promptTokenCount</td><td>message.usage.input_tokens</td></tr>
+                    <tr><td>会话 ID</td><td>id</td><td>responseId</td><td>message.id</td></tr>
+                </table>
+                <div class="anno">读法：<b>常量名清晰标注了协议：<code>ModelPathOpenAIChatCompletions</code>、<code>UsageInputTokensPathGemini</code>、<code>ModelPathAnthropicMessages</code>…还覆盖了 OpenAI Responses/Batches/Images、Doubao 等变体。<strong>这张"路径映射表"就是抹平差异的核心资产——加新厂商就加几行路径常量。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>TokenUsage 结构</h1></div>
+            <div class="card">
+                <p><code>tokenusage.go:94</code> 的 <code>TokenUsage</code> 是统一的输出结构，含输入/输出/总 Token + 明细 map + 模型名等。上下文 key 常量（<code>:23-31</code>）：<code>CtxKeyInputToken</code>/<code>CtxKeyOutputToken</code>/<code>CtxKeyTotalToken</code>/<code>CtxKeyModel</code>/<code>CtxKeyChatId</code>…</p>
+                <div class="baby"><span class="t">统一的"出口格式"</span>
+                <strong>不管输入是哪家格式，解析结果都装进同一个 <code>TokenUsage</code> 结构。</strong>这样下游（计费、限流、统计插件）只需认识这一个结构，不用管上游是 OpenAI 还是 Gemini。<strong>"输入多样、输出统一"是适配层的经典模式——回想上一站 ai-proxy 也是"统一成 OpenAI 协议"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>GetTokenUsage</h1></div>
+            <div class="card">
+                <p><code>tokenusage.go:107</code> 的核心函数：</p>
+<pre><code class="language-go">func GetTokenUsage(ctx wrapper.HttpContext, body []byte) TokenUsage {
+    chunks := bytes.SplitSeq(wrapper.UnifySSEChunk(body), []byte("\n\n"))  // 按 SSE 分块
+    u := TokenUsage{InputTokenDetails: ..., OutputTokenDetails: ...}
+    for chunk := range chunks {
+        if !bytes.Contains(chunk, []byte(`"usage"`)) &&
+           !bytes.Contains(chunk, []byte(`"usageMetadata"`)) { continue }  // 只看含 usage 的块
+        ExtractModel(ctx, chunk, &u)
+        ExtractInputTokens(ctx, chunk, &u)
+        ExtractOutputTokens(ctx, chunk, &u)
+        ExtractInputTokenDetails(ctx, chunk, &u)
+        ExtractOutputTokenDetails(ctx, chunk, &u)
+        ExtractTotalTokens(ctx, chunk, &u)
+    }
+    return u
+}</code></pre>
+                <div class="anno">读法：<b>流程：把响应体按 SSE 分块 → 只处理含 <code>usage</code>/<code>usageMetadata</code> 的块（其余是内容块，跳过）→ 用一组 Extract 函数逐项提取。<strong>返回填好的 TokenUsage。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>SSE 分块处理</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么要处理 SSE 分块？</span>
+                <strong>LLM 流式响应是 SSE（Server-Sent Events）格式：一段段 <code>data: {...}\n\n</code>。Token 用量通常在最后一个块里（或某个特定块）。</strong>所以 <code>GetTokenUsage</code> 用 <code>wrapper.UnifySSEChunk</code> 归一化后按 <code>\n\n</code> 切块，遍历找含 usage 的块。<strong>"只处理含 usage 的块"是个优化——大部分块是内容（文字），不用解析。</strong>这呼应 Day 11 的流式响应体处理：Token 解析常在流式响应钩子里边收边算。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Extract 系列</h1></div>
+            <div class="card">
+                <p>每个 <code>ExtractXxx</code> 函数（如 <code>ExtractInputTokens</code>）内部按不同协议路径尝试 gjson 取值：</p>
+<pre><code class="language-go">// 伪代码：ExtractInputTokens 逐个协议路径尝试
+if v := gjson.GetBytes(chunk, UsageInputTokensPathOpenAIChatCompletions); v.Exists() {
+    u.InputToken = v.Int()
+} else if v := gjson.GetBytes(chunk, UsageInputTokensPathGemini); v.Exists() {
+    u.InputToken = v.Int()
+} else if v := gjson.GetBytes(chunk, UsageInputTokensPathAnthropicMessages); v.Exists() {
+    ...
+}</code></pre>
+                <div class="anno">读法：<b>"多路径兜底"——挨个协议的路径试，哪个存在用哪个。<strong>这样一个函数就能处理所有厂商，不用外面判断"这是哪家"。</strong>还处理了 Anthropic 的缓存 Token（<code>cache_creation_input_tokens</code>/<code>cache_read_input_tokens</code>）等细节。gjson 的按路径取值在这里发挥到极致。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>存进 Context</h1></div>
+            <div class="card">
+                <p>解析出的 Token 数常存进请求级 Context（用 <code>CtxKeyInputToken</code> 等 key），供后续阶段/其他插件读取。</p>
+                <div class="baby"><span class="t">Token 数据的流转</span>
+                <strong>ai-proxy 或 ai-statistics 在响应体阶段调 <code>GetTokenUsage</code> 解析 → 存进 Context → StreamDone 阶段（Day 11）取出上报 metric / 写自定义日志（Day 12）。</strong>ai-token-ratelimit 则拿它扣减 Redis 里的配额（Day 15）。<strong>看，这一天把前面所有能力串起来了：流式处理（Day 11）+ Context（Day 12）+ Redis（Day 15）+ Token 解析（今天）= 一个完整的 AI 计费限流插件。</strong>回想上一站 Console 的 AI Dashboard，数据源头就在这里。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 AI 网关要解析 Token？各家格式差异体现在哪？</li>
+                    <li>路径常量表怎么抹平多协议差异？</li>
+                    <li>GetTokenUsage 为什么按 SSE 分块、只处理含 usage 的块？</li>
+                    <li>Extract 的"多路径兜底"怎么一个函数处理所有厂商？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '23,105p' pkg/tokenusage/tokenusage.go
+sed -n '107,132p' pkg/tokenusage/tokenusage.go
+grep -n "func Extract" pkg/tokenusage/tokenusage.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>性能、稳定性与测试</strong>——插件的 rebuild 重建机制（防内存泄漏/GC 抖动）、IO 并发限制、streaming inject、以及 <code>pkg/test</code> 单元测试工具。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day17.html" style="color:var(--accent-cyan);">&larr; Day 17</a>
+                <a href="wasm-go-day19.html" style="color:#22c55e;">Day 19 · 性能与测试 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
