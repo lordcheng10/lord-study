@@ -9,9 +9,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
     <style>
         .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
         .modes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
         .md{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:12px;border-left:3px solid var(--mc)}
         .md h4{font-size:13.5px;margin:0 0 3px;color:var(--mc);font-family:monospace} .md p{font-size:12px;color:var(--text-secondary);margin:0}
@@ -28,16 +32,16 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">09</div>
             <h2>Day 09</h2>
-            <p class="version">权限系统 · 8 讲</p>
+            <p class="version">权限系统（加深版）· 8 讲</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么需要权限</a></li>
             <li><a href="#l02" class="nav-link" data-section="l02">L02 · 5 种权限模式</a></li>
             <li><a href="#l03" class="nav-link" data-section="l03">L03 · 权限规则从哪来</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 判定顺序（核心）</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 哪些能被 bypass</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 审批弹窗 = await Promise</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 判定顺序（真实代码）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 哪些连 bypass 都拦</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 弹窗 = await Promise（真实代码）</a></li>
             <li><a href="#l07" class="nav-link" data-section="l07">L07 · auto 模式分类器</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
@@ -50,100 +54,116 @@
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 核心引擎</span>
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 核心引擎 · 加深版</span>
             <h1 class="part-title">权限系统</h1>
-            <p class="part-desc">Agent 能动手改你的电脑，凭什么信它？权限系统就是那道闸。今天讲清 5 种模式、判定顺序，以及"哪些操作再高的权限也拦不住"。</p>
+            <p class="part-desc">Agent 能动手改你的电脑，凭什么信它？权限系统就是那道闸。这一页贴 <code>permissions.ts</code> 的真实判定代码，讲清 5 种模式、过闸顺序、以及"哪些操作再高的权限也拦不住"。</p>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么需要权限</h1></div>
             <div class="card">
                 <p>模型会自主决定调 Bash 跑命令、调 Edit 改文件。但模型可能判断错、也可能被恶意输入诱导。<strong>权限系统就是"在工具真执行前踩一脚刹车"</strong>——高风险操作停下来问你，低风险的放行，还能按规则批量允许/禁止。</p>
-                <p>Day 07 讲过：执行管线里"权限检查"在 <code>tool.call()</code> 之前（第 6 关）。今天钻进那关。核心文件 <code>src/utils/permissions/permissions.ts</code>，文件系统相关在 <code>filesystem.ts</code>，Bash 在 <code>bashPermissions.ts</code>。</p>
+                <p>Day 07 L08 讲过：执行管线里"权限检查"排在 <code>tool.call()</code> 之前（第 6 关）。今天钻进那关。核心文件 <code>src/utils/permissions/permissions.ts</code>，文件系统相关在 <code>filesystem.ts</code>（Day 08 见过危险清单），Bash 在 <code>bashSecurity.ts</code>（Day 08 的 tree-sitter）。</p>
             </div>
         </section>
 
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>5 种权限模式</h1></div>
             <div class="card">
-                <p>外部可选模式（<code>src/types/permissions.ts:15</code>）。你用 Shift+Tab 切换的就是它们：</p>
+                <p>你用 <kbd>Shift+Tab</kbd> 切换的就是这些模式（<code>src/types/permissions.ts:15</code>）：</p>
                 <div class="modes">
                     <div class="md" style="--mc:#6366f1"><h4>default</h4><p>正常询问：高风险操作弹窗确认</p></div>
                     <div class="md" style="--mc:#22c55e"><h4>acceptEdits</h4><p>工作目录内的编辑自动放行，其它照常问</p></div>
                     <div class="md" style="--mc:#06b6d4"><h4>plan</h4><p>只读规划，不动手；ExitPlanMode 提交方案后才开工</p></div>
-                    <div class="md" style="--mc:#ef4444"><h4>bypassPermissions</h4><p>几乎全放行——但 deny 规则、ask 规则、safetyCheck 仍免疫</p></div>
+                    <div class="md" style="--mc:#ef4444"><h4>bypassPermissions</h4><p>几乎全放行——但 deny 规则、ask 规则、safetyCheck 仍免疫（L05）</p></div>
                     <div class="md" style="--mc:#f59e0b"><h4>dontAsk</h4><p>把所有 ask 直接转成 deny（宁可不做也不问）</p></div>
                 </div>
-                <p>另有内部模式 <code>auto</code>（不弹窗，用 AI 分类器自动判，L07 讲）和 <code>bubble</code>。</p>
-                <div class="glossary"><b>怎么理解这几个模式？</b> 想象一个"信任滑杆"：<code>plan</code>（只看不动）→ <code>default</code>（动手要问）→ <code>acceptEdits</code>（改文件不用问）→ <code>bypassPermissions</code>（基本全放）。越往右越省心但越危险。<code>dontAsk</code> 是另类——它不是"更信任"，而是"别烦我，拿不准的就别做"。实际用时最常在 default 和 acceptEdits 之间切。</div>
+                <div class="baby"><span class="t">用一个"信任滑杆"理解</span>
+                <code>plan</code>（只看不动）→ <code>default</code>（动手要问）→ <code>acceptEdits</code>（改文件不用问）→ <code>bypassPermissions</code>（基本全放）。越往右越省心但越危险。<code>dontAsk</code> 是另类——不是"更信任"，而是"别烦我，拿不准的就别做"。实际最常在 <code>default</code> 和 <code>acceptEdits</code> 之间切。另有内部模式 <code>auto</code>（不弹窗、用 AI 分类器判，L07）。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
             <div class="section-header"><span class="section-number">L03</span><h1>权限规则从哪来</h1></div>
             <div class="card">
-                <p>除了模式，还有<strong>规则</strong>——三种行为 <code>allow</code>/<code>deny</code>/<code>ask</code>，可精确到工具甚至工具的参数：</p>
-<pre><code class="language-json">// settings.json 里配的规则示例
-{
+                <p>除了模式，还有<strong>规则</strong>——三种行为 <code>allow</code>/<code>deny</code>/<code>ask</code>，可精确到工具甚至参数。配在 settings.json：</p>
+<pre><code class="language-json">{
   "permissions": {
     "allow": ["Read", "Bash(git status)"],   // 整工具 或 参数级
     "deny":  ["Bash(rm *)", "Edit(/etc/**)"],
     "ask":   ["Bash(git push*)"]
   }
 }</code></pre>
-                <p>规则来源有优先级（<code>permissions.ts:57</code>）：<code>userSettings / projectSettings / localSettings / flagSettings / policySettings / cliArg / command / session</code>。它们最终落到权限上下文的 <code>alwaysAllowRules</code>/<code>alwaysDenyRules</code>/<code>alwaysAskRules</code>。</p>
-                <div class="glossary"><b>整工具规则 vs 参数级规则</b>：<code>Bash</code> 是"整个 Bash 工具"；<code>Bash(git status)</code> 是"只有跑 git status 时"。参数级规则让你能精细控制——比如"允许 git status，但 git push 要问"。你在弹窗里点"始终允许 <code>Bash(git status)</code>"，就是往 session 级规则里加一条参数级 allow。<b>policySettings</b>（企业策略）优先级最高，用来做组织级强制管控。</div>
+                <div class="baby"><span class="t">整工具规则 vs 参数级规则</span>
+                <code>Bash</code> = "整个 Bash 工具"；<code>Bash(git status)</code> = "只有跑 git status 时"。参数级让你精细控制——"允许 git status，但 git push 要问"。<strong>你在弹窗里点"始终允许 Bash(git status)"，就是往规则里加一条参数级 allow。</strong></div>
+                <p>规则来源有优先级（<code>permissions.ts</code>）：<code>userSettings / projectSettings / localSettings / flagSettings / policySettings / cliArg / command / session</code>——企业策略（policy）最高。它们最终落到权限上下文的 <code>alwaysAllowRules</code>/<code>alwaysDenyRules</code>/<code>alwaysAskRules</code>。</p>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>判定顺序：一步步过闸（核心）</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>判定顺序：一步步过闸（真实代码）</h1></div>
             <div class="card">
-                <p>入口 <code>hasPermissionsToUseTool</code>（<code>permissions.ts:473</code>）→ <code>hasPermissionsToUseToolInner</code>（<code>:1179</code>）。代码里就用 step 编号标注了顺序，逐条过：</p>
+                <p>入口 <code>hasPermissionsToUseTool</code>（<code>permissions.ts:473</code>）→ 内部 <code>hasPermissionsToUseToolInner</code>（<code>:1179</code>）。源码里用注释标了 step 编号，逐条过。看开头两步的<strong>真实代码</strong>（<code>:1190</code>）：</p>
+<pre><code class="language-typescript">// 1a. Entire tool is denied
+const denyRule = getDenyRuleForTool(appState.toolPermissionContext, tool)
+if (denyRule) {
+  return { behavior: 'deny', ... }        // ← 命中 deny 规则，直接拒绝（最先、最硬）
+}
+
+// 1b. Check if the entire tool should always ask for permission
+const askRule = getAskRuleForTool(appState.toolPermissionContext, tool)
+if (askRule) {
+  // ...（sandbox 自动放行是例外）
+  return { behavior: 'ask', ... }         // ← 命中 ask 规则，弹窗询问
+}</code></pre>
+                <div class="anno">读法：<b>先查有没有"禁止规则"（deny）——有就立刻拒绝、不再往下看</b>；<b>再查有没有"询问规则"（ask）——有就弹窗</b>。这两步排在最前面，是刻意的。</div>
+                <p>完整过闸顺序（源码 step 编号）：</p>
                 <div class="steps">
                     <div class="st deny"><span class="n">1a</span><p><b>整工具 deny 规则</b> → deny（最先，最硬）</p></div>
                     <div class="st ask"><span class="n">1b</span><p><b>整工具 ask 规则</b> → ask</p></div>
-                    <div class="st"><span class="n">1c</span><p>调工具自己的 <b>checkPermissions</b>（Day 07/08，如 Read 的"工作目录内放行"）</p></div>
+                    <div class="st"><span class="n">1c</span><p>调工具自己的 <b>checkPermissions</b>（Day 07/08，如 Read 的"工作目录内放行"、Bash 的 AST）</p></div>
                     <div class="st deny"><span class="n">1d</span><p>工具返回 deny → deny</p></div>
-                    <div class="st ask"><span class="n">1e</span><p>需要用户交互 + ask → 即使 bypass 也 ask</p></div>
-                    <div class="st ask"><span class="n">1f</span><p><b>内容级 ask 规则</b> → ask（bypass 免疫）</p></div>
-                    <div class="st ask"><span class="n">1g</span><p><b>safetyCheck 类 ask</b>（.git/.claude 等，Day 08）→ ask（bypass 免疫）</p></div>
+                    <div class="st ask"><span class="n">1e-1g</span><p>需要用户交互 / 内容级 ask / <b>safetyCheck</b>（.git/.claude 等，Day 08）→ ask（<strong>bypass 免疫</strong>）</p></div>
                     <div class="st allow"><span class="n">2a</span><p><b>模式放行</b>：bypassPermissions → allow</p></div>
                     <div class="st allow"><span class="n">2b</span><p><b>整工具 allow 规则</b> → allow</p></div>
                     <div class="st ask"><span class="n">3</span><p><b>passthrough 转 ask</b>（工具没明确表态，交给用户）</p></div>
                 </div>
-                <div class="glossary"><b>顺序的智慧</b>：deny 和 ask 排在 allow <strong>前面</strong>——先看"有没有理由拒绝/询问"，再看"有没有理由放行"。而且 1e/1f/1g（几种 ask）排在 2a（bypass 放行）<strong>前面</strong>，所以它们能"免疫"bypass。这个顺序编排就是安全策略的核心：<strong>禁止 &gt; 询问 &gt; 允许，且某些询问不可被跳过。</strong></div>
+                <div class="glossary"><b>顺序里藏着整个安全策略：禁止 &gt; 询问 &gt; 允许。</b> deny/ask（1a-1g）都排在"模式放行"（2a）<strong>前面</strong>——所以它们能"免疫"bypass。源码注释（<code>:1083</code>）明说："bypassPermissions mode respects everything that fires before step 2a"（bypass 模式尊重 step 2a 之前触发的一切）。<strong>这个"顺序编排"就是安全的核心：把"不该做的"和"要确认的"放在"放行"之前判，且让它们凌驾于放行模式。</strong></div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>哪些能被 bypass、哪些不能</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>哪些连 bypass 都拦得住</h1></div>
             <div class="card">
-                <p>很多人以为 <code>bypassPermissions</code> 是"全放行"。<strong>不对。</strong>由 L04 的顺序可知，即使在 bypass 模式，这几类<strong>仍然拦得住</strong>：</p>
+                <p>很多人以为 <code>bypassPermissions</code> = "全放行"。<strong>不对。</strong>由 L04 的顺序（deny/ask/safetyCheck 都在 2a 之前）可知，即使 bypass 模式，这几类<strong>仍然拦得住</strong>：</p>
                 <ul>
-                    <li><strong>deny 规则</strong>（1a/1d）：明确禁止的永远禁止。</li>
-                    <li><strong>ask 规则</strong>（1b/1f）：明确要求确认的仍会问。</li>
-                    <li><strong>safetyCheck</strong>（1g）：动 <code>.git</code>/<code>.claude</code>/<code>.bashrc</code>/<code>.mcp.json</code> 这类危险文件仍会问（Day 08）。</li>
+                    <li><strong>deny 规则</strong>（1a/1d）：你明说"绝不许"的红线，永远禁止。</li>
+                    <li><strong>ask 规则</strong>（1b/1f）：你明说"要确认"的，仍会问。</li>
+                    <li><strong>safetyCheck</strong>（1g）：动 <code>.git</code>/<code>.claude</code>/<code>.bashrc</code>/<code>.mcp.json</code> 等危险文件仍会问（Day 08 那份清单）。</li>
                     <li><strong>需要用户交互的工具</strong>（1e）：如 AskUserQuestion。</li>
                 </ul>
-                <div class="glossary"><b>为什么 bypass 也留这几道闸？</b> 因为"绕过权限"是为了省去<strong>常规</strong>确认的烦扰，不是为了让 Agent 能干<strong>灾难级</strong>操作。deny 是你明说"绝不许"的红线；safetyCheck 是"改这个可能毁掉环境"的雷区。这些无论多信任都该留一道人工闸——否则一次幻觉就能删库、改坏 shell 配置。<strong>"最大放行模式也保留最小安全底线"</strong>是这个系统最值得学的设计。</div>
+                <div class="glossary"><b>为什么 bypass 也留这几道闸？（核心设计哲学）</b> 因为"绕过权限"是为了省去<strong>常规</strong>确认的烦扰，不是为了让 Agent 能干<strong>灾难级</strong>操作。deny 是你划的红线；safetyCheck 是"改这个可能毁掉环境或泄密"的雷区。这些无论多信任都该留一道人工闸——否则一次幻觉就能删库、改坏 shell 配置、注入恶意 MCP。<strong>"最大放行模式也保留最小安全底线"</strong>——这是整个权限系统最值得学的一条。gov-agents 教程的失败闸门、敏感度红线也是同一思想：有些底线不可绕过。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>审批弹窗 = await 一个 Promise</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>审批弹窗 = await 一个 Promise（真实代码）</h1></div>
             <div class="card">
-                <p>判定出 <code>ask</code> 后，怎么变成你看到的那张权限卡？<code>hasPermissionsToUseTool</code> 只<strong>产出决策</strong>，真正弹 UI 的是 <code>useCanUseTool</code>（<code>src/hooks/useCanUseTool.tsx:46</code>）。它用了一个优雅的模式：</p>
-<pre><code class="language-typescript">// useCanUseTool.tsx:52 —— 把"等用户点击"变成一个可 await 的 Promise
-return new Promise((resolve) =&gt; {
-  setToolUseConfirmQueue(q =&gt; [...q, {
-    tool, input,
-    onAllow: () =&gt; resolve({ behavior: 'allow', ... }),   // 用户点"允许"
-    onReject: () =&gt; resolve({ behavior: 'deny', ... }),   // 用户点"拒绝"
-  }])
-})
-// 工具执行在这里"挂起"，直到用户点了按钮，Promise 才 resolve、继续往下</code></pre>
-                <div class="glossary"><b>这个模式太妙了</b>：工具执行是异步的（<code>await canUseTool(...)</code>）。当需要用户确认时，代码创建一个 Promise 但<strong>先不 resolve</strong>，把它的 resolve 函数塞进 UI 的确认队列。界面渲染出权限卡（Day 04 讲的队列渲染），你点"允许"就调 <code>onAllow()</code>→<code>resolve('allow')</code>，那个 <code>await</code> 才继续。<strong>于是"等一个人类决定"被表达成了"await 一个 Promise"</strong>——异步代码里等用户交互的经典写法。工具执行天然地在这一步挂起，不用轮询、不用回调地狱。</div>
+                <p>判定出 <code>ask</code> 后，怎么变成你看到的那张权限卡、并"等你点"？<code>hasPermissionsToUseTool</code> 只<strong>产出决策</strong>，真正弹 UI + 等待的是 <code>useCanUseTool</code>（<code>src/hooks/useCanUseTool.tsx:52</code>）。真实代码：</p>
+<pre><code class="language-typescript">return new Promise(resolve =&gt; {           // ← 创建一个 Promise，先不 resolve
+  const ctx = createPermissionContext(tool, input, ...);
+  if (ctx.resolveIfAborted(resolve)) return;
+
+  const decisionPromise = hasPermissionsToUseTool(tool, input, ...);  // 算出 allow/deny/ask
+  return decisionPromise.then(async result =&gt; {
+    if (result.behavior === 'allow') { ... resolve(...) }   // 直接放行
+    // 若是 ask：把一个 {tool, input, onAllow, onReject} 压进确认队列，
+    //          等用户点"允许/拒绝"时才 resolve 这个 Promise
+  });
+});</code></pre>
+                <div class="glossary"><b>这个模式太妙了，值得单独理解。</b> 工具执行是异步的（<code>await canUseTool(...)</code>）。当需要用户确认时，代码创建一个 Promise 但<strong>先不 resolve</strong>，把它的 resolve 函数塞进 UI 的确认队列。界面渲染出权限卡（Day 04/18 讲的队列渲染），你点"允许"就调 <code>onAllow()</code> → <code>resolve('allow')</code>，那个 <code>await</code> 才继续往下。<strong>于是"等一个人类点按钮"被表达成了"await 一个 Promise"——工具执行天然地在这一步挂起，不用轮询、不用回调地狱。</strong></div>
+                <div class="baby"><span class="t">Promise 是什么？resolve 又是什么？</span>
+                <b>Promise</b> 是 JS 里表示"一件未来才有结果的事"的对象。<code>await 一个 Promise</code> = "在这等它有结果再往下"。<b>resolve</b> 是"给这个 Promise 填上结果"的函数——一调用，所有 <code>await</code> 它的地方就继续。这里的巧思：创建 Promise 时把 <code>resolve</code> 存起来（塞进队列），等用户点按钮那一刻才调它。<strong>本质就是："用户的点击"当成"未来的结果"，用 Promise 把等待表达出来。</strong></div>
                 <p>权限卡组件是 <code>PermissionRequest</code>（<code>components/permissions/</code>），内部按工具类型分派到 BashPermissionRequest / FileEditPermissionRequest 等具体样式。</p>
             </div>
         </section>
@@ -151,13 +171,14 @@ return new Promise((resolve) =&gt; {
         <section id="l07" class="section">
             <div class="section-header"><span class="section-number">L07</span><h1>auto 模式：用 AI 分类器代替弹窗</h1></div>
             <div class="card">
-                <p><code>auto</code> 模式（<code>permissions.ts:519</code>）不弹窗，改用一个 <strong>AI 分类器</strong>（yolo classifier）自动判断这次操作安不安全。判定路径：</p>
+                <p><code>auto</code> 模式（<code>permissions.ts:519</code> 附近）不弹窗，改用一个 <strong>AI 分类器</strong>自动判断这次操作安不安全。判定路径：</p>
                 <ol>
-                    <li>先试 acceptEdits 快速路径（<code>:599</code>，工作目录内编辑直接过）。</li>
-                    <li>查"安全工具白名单" <code>isAutoModeAllowlistedTool</code>（<code>:659</code>，如只读工具）。</li>
-                    <li>都不满足 → 调 <code>classifyYoloAction</code>（<code>:695</code>）让一个小模型判"这个操作危险吗"，据此 allow/deny。</li>
+                    <li>先试 acceptEdits 快速路径（工作目录内编辑直接过）。</li>
+                    <li>查"安全工具白名单"（如只读工具直接放）。</li>
+                    <li>都不满足 → 调分类器（一个小模型）判"这个操作危险吗"，据此 allow/deny。</li>
                 </ol>
-                <div class="glossary"><b>auto 模式解决什么？</b> <code>default</code> 太烦（每步都问），<code>bypass</code> 太险（全放）。<code>auto</code> 是折中——<strong>用一个便宜的 AI 分类器替你做"这操作要不要拦"的判断</strong>：只读/编辑这类明显安全的直接放，可疑的（删文件、改系统配置）才拦。相当于给你配了个"自动审批助理"。这是本 fork 的特色能力之一。<b>headless/后台代理</b>（没有人能点弹窗）则走另一条：先跑 PermissionRequest hook，没决策就自动 deny（<code>:953</code>）——无人值守时"拿不准就拒绝"。</div>
+                <div class="glossary"><b>auto 模式解决什么？</b> <code>default</code> 太烦（每步都问），<code>bypass</code> 太险（全放）。<code>auto</code> 是折中——<strong>用一个便宜的 AI 分类器替你做"这操作要不要拦"的判断</strong>：只读/编辑这类明显安全的直接放，可疑的（删文件、改系统配置）才拦。相当于配了个"自动审批助理"。这是本 fork 的特色能力。<b>无人值守时（headless/后台代理，没人能点弹窗）</b>走另一条：拿不准就默认拒绝——"没人确认 = 不做"，安全优先。</div>
+                <div class="glossary"><b>还有一层"精简版复核" <code>checkRuleBasedPermissions</code></b>（<code>:1088</code>）：即使 hook 或分类器说"放行"，仍会用它复核一遍 deny/ask 规则——<strong>hook/分类器不能绕过你明确设的 deny 规则和 ask 规则</strong>。又一处"底线不可绕过"。</div>
             </div>
         </section>
 
@@ -166,31 +187,31 @@ return new Promise((resolve) =&gt; {
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>5 种权限模式各是什么？（default/acceptEdits/plan/bypass/dontAsk）</li>
-                    <li>权限规则的三种行为 + 整工具 vs 参数级？</li>
-                    <li>判定顺序为什么"deny/ask 在 allow 前"？</li>
-                    <li>bypassPermissions 拦不住哪几类？（deny/ask 规则、safetyCheck、交互工具）</li>
-                    <li>审批弹窗怎么用"await 一个 Promise"实现？</li>
-                    <li>auto 模式怎么工作？</li>
+                    <li>5 种权限模式各是什么？（用"信任滑杆"记）</li>
+                    <li>权限规则三种行为 + 整工具 vs 参数级？</li>
+                    <li>判定顺序为什么"deny/ask 在 allow 前"？（禁止&gt;询问&gt;允许）</li>
+                    <li>bypassPermissions 拦不住哪几类？（deny/ask 规则、safetyCheck、交互工具）为什么留这些底线？</li>
+                    <li>审批弹窗怎么用"await 一个 Promise"实现？（resolve 存进队列，点按钮才调）</li>
+                    <li>auto 模式怎么工作？为什么无人值守时默认拒绝？</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash"># 1. 看权限模式定义
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. 权限模式定义
 sed -n '15,45p' src/types/permissions.ts
 
-# 2. 读判定主流程的 step 顺序（核心）
-sed -n '1179,1340p' src/utils/permissions/permissions.ts | head -90
+# 2. 判定顺序 step 1a/1b（L04，真实代码）
+sed -n '1179,1228p' src/utils/permissions/permissions.ts
 
-# 3. 读文件读/写权限判定
-sed -n '1030,1150p' src/utils/permissions/filesystem.ts | head -60
+# 3. bypass 免疫的注释（L05）
+sed -n '1083,1090p' src/utils/permissions/permissions.ts
 
-# 4. 读"await 一个 Promise"的审批
-sed -n '46,110p' src/hooks/useCanUseTool.tsx
+# 4. "await 一个 Promise" 的审批（L06）
+sed -n '46,104p' src/hooks/useCanUseTool.tsx
 
-# 5. 亲身体验：起 dev，切换模式（Shift+Tab），让它改个文件看弹窗
+# 5. 亲身体验：起 dev，Shift+Tab 切模式，让它改个文件看弹窗
 bun run dev</code></pre>
-                <div class="tip"><strong>明天预告 · Day 10</strong>：第 2 周收官。对话越来越长，上下文会撑爆——Day 10 讲 <strong>上下文与 Token 管理</strong>：微压缩、大摘要（autocompact）、token 预算、以及"什么时候一轮才算真的结束"的各种续命/刹车机制。</p></div>
+                <div class="tip"><strong>明天预告 · Day 10</strong>：第 2 周收官。对话越来越长会撑爆上下文——Day 10 加深版会贴 <code>query.ts</code> 里"每轮开头分级瘦身"的真实代码：microcompact 微压缩、autocompact 大摘要、以及 Stop hook 续命 / token 预算这些"何时才算真结束"的协商机制。</p></div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="claude-code-src-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 内置工具</a>
