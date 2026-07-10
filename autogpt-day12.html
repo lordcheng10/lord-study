@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 执行引擎 manager — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .arch{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+        .arch .r{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .arch .r b{color:#06b6d4}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">执行引擎 manager · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 执行引擎全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · MQ + 线程池</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 事件总线</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 分布式锁去重</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 图执行调度循环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两个事件循环</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 状态机与容错</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 Graph 模型</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 数据流 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 执行引擎</span>
+            <h1 class="part-title">执行引擎 manager</h1>
+            <p class="part-desc">整个平台的心脏。今天读 <code>executor/manager.py</code>：ExecutionManager 的进程架构（MQ + 线程池 + 事件总线）、一次图执行的生命周期、分布式锁去重。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>执行引擎全景</h1></div>
+            <div class="card">
+                <p><code>ExecutionManager</code>（<code>manager.py:1353</code>）是一个常驻进程。它由三样东西支撑：</p>
+                <div class="arch">
+                    <div class="r"><b>RabbitMQ</b> — 消费"图执行请求"和"取消请求"两个队列（跨进程/跨机器分发任务）</div>
+                    <div class="r"><b>线程池 ThreadPoolExecutor</b> — 每个图执行占一个 worker 线程（并发跑多个图）</div>
+                    <div class="r"><b>Redis 事件总线</b> — 每次节点/图状态变化 publish 事件（推给前端/子 Agent）</div>
+                </div>
+                <div class="baby"><span class="t">先建立全局图景</span>
+                <strong>REST 把"图执行请求"发到 RabbitMQ（Day 05）→ ExecutionManager 消费 → 交给线程池的一个 worker → worker 跑这张图（拓扑执行各 Block）→ 每步状态变化 publish 到 Redis → WebSocket 转发给前端。</strong>三个基础设施各司其职：MQ 分发任务、线程池并发执行、事件总线广播进度。今天聚焦"一张图怎么被一个 worker 跑起来"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>MQ + 线程池</h1></div>
+            <div class="card">
+                <p>ExecutionManager 用两个消费线程（<code>manager.py:1379/1431</code>）分别消费"运行"和"取消"队列，一个线程池（<code>:1394</code>）作为图执行工作池：</p>
+<pre><code class="language-python"># 收到运行消息 → executor.submit(execute_graph, ...) 丢进线程池
+# MQ 用 auto_ack=False（:1480）：worker 挂了消息重回队列不丢
+# prefetch_count=pool_size（:1476）：一个 pod 不抢超过它能跑的任务</code></pre>
+                <div class="anno">读法：<b><code>auto_ack=False</code> 和 <code>prefetch_count</code> 是两个关键的 MQ 可靠性设置。</b>前者保证"任务处理完才确认"——中途崩溃消息不丢、会被别的 worker 重新拿。后者保证"一个 worker 只预取它能处理的量"——不会一个 pod 贪心拿走所有任务却跑不过来。</div>
+                <div class="baby"><span class="t">为什么图执行要用线程池，一次一个 worker？</span>
+                因为一张图可能跑<strong>很久</strong>（分钟到小时级——涉及多次 LLM 调用、外部 API）。用线程池能<strong>并发跑多张图</strong>（pool_size 个），每张图独占一个 worker 线程互不干扰。<strong>MQ + 线程池 = 可靠地、并发地处理长任务——这是任务型系统的标准架构。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>事件总线（发布-订阅）</h1></div>
+            <div class="card">
+                <p>基于 Redis 的 <code>RedisExecutionEventBus</code>——每次节点/图状态变化就 publish 事件到两个频道：<code>exec/{graph_exec_id}</code>（这次执行）和 <code>{graph_id}/all</code>（这个图的所有执行）。</p>
+                <div class="baby"><span class="t">谁在订阅这些事件？</span>
+                ① <strong>WebSocket 进程</strong>——订阅后转发给前端，你就看到画布上节点实时亮起（Day 15）。② <strong>子 Agent</strong>——Agent-as-Block（Day 03）里，父块订阅子图执行事件，子图产出即父块产出。<strong>发布-订阅解耦：executor 只管"发生了什么就广播"，不关心谁在听；订阅者各取所需。</strong>这和 OpenHands、CrewAI 的事件系统完全同构——事件驱动是 Agent 系统的通用可观测层。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>分布式锁去重（ClusterLock）</h1></div>
+            <div class="card">
+                <p>收到运行消息后（<code>_handle_run_message</code>，<code>manager.py:1529</code>），先尝试获取一把 <strong>ClusterLock</strong>（Redis 分布式锁，<code>:1670</code>）——保证<strong>同一个 graph_exec_id 全集群只在一个 pod 上跑</strong>。</p>
+                <div class="baby"><span class="t">为什么需要分布式锁？</span>
+                生产环境有<strong>多个 executor pod</strong>（多台机器/容器）。如果一条 MQ 消息因为网络抖动被投递两次，或两个 pod 同时抢到——同一次执行可能<strong>被跑两遍</strong>（重复扣费、重复副作用如发两封邮件）。<strong>ClusterLock 保证"同一执行全集群只有一个 pod 在跑"</strong>——拿到锁的才跑，没拿到的跳过。<strong>分布式系统里，"防止重复执行"必须靠分布式锁（单机锁不够，因为跨机器）。</strong>完成时 <code>_on_run_done</code>（<code>:1717</code>）ack 消息、释放锁。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>图执行调度循环（核心）</h1></div>
+            <div class="card">
+                <p><code>_on_graph_execution</code>（<code>manager.py:942</code>）是真正的调度循环：</p>
+<pre><code class="language-python"># 1. 建进程内 ExecutionQueue（节点级队列）
+# 2. 预填队列：把 QUEUED/RUNNING 的节点执行捞出来入队（起始节点已建为 QUEUED）
+# 3. 主调度循环：
+while 队列有节点 或 有在跑的节点:
+    node = 队列.取一个
+    billing.charge_usage(node)          # 预扣费（Day 09）
+    异步执行 on_node_execution(node)    # 丢到专门的事件循环跑
+    # 内层：取在跑节点的输出 → _process_node_output → 入队下游（Day 13）</code></pre>
+                <div class="anno">读法：<b>调度循环就是"从队列取节点 → 预扣费 → 异步执行 → 产出的输出决定下游哪些节点入队 → 重复，直到没有节点可跑"。</b>这就是 Day 05 讲的拓扑执行的代码核心。起始节点（Day 11 的 starting_nodes）在创建执行时已入队。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>两个事件循环（并行度优化）</h1></div>
+            <div class="card">
+                <p>调度用了<strong>两个独立的 asyncio 事件循环线程</strong>（<code>manager.py:794</code>）：</p>
+                <ul>
+                    <li><code>node_execution_loop</code>：跑 Block 的业务逻辑（可能慢、I/O 密集——调 API、跑代码）。</li>
+                    <li><code>node_evaluation_loop</code>：处理输出、算下游节点、入队（DB 写入）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么分两个循环？</span>
+                如果"跑 Block"和"算下游/入队"在同一个循环里排队，那么<strong>一个慢 Block（比如调 LLM 等 10 秒）会阻塞"算下游"的工作</strong>——即使别的 Block 已经产出了输出、下游本可以开跑，也得干等。<strong>分成两个循环：一边埋头跑 Block、一边同时处理已产出的输出并入队下游——两者并行，不互相阻塞，并行度更高。</strong>这是对"执行"和"调度"两种不同性质工作的解耦（跑 Block 是计算/IO，算下游是数据处理）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>状态机与容错</h1></div>
+            <div class="card">
+                <p>执行状态用一个"合法跳转表" <code>VALID_STATUS_TRANSITIONS</code>（<code>data/execution.py:131</code>）约束——<strong>写进 SQL 的 where 子句</strong>做条件更新，实现并发安全的状态机。</p>
+<pre><code class="language-python"># execution.py:131（概念）
+VALID_STATUS_TRANSITIONS = {
+    QUEUED: [INCOMPLETE, TERMINATED, REVIEW],
+    RUNNING: [INCOMPLETE, QUEUED, ...],
+    COMPLETED: [RUNNING], ...
+}
+# 更新状态时 SQL where 加"当前状态必须∈允许来源"——数据库层原子保证</code></pre>
+                <div class="baby"><span class="t">为什么把状态机做进 SQL？</span>
+                多个线程/进程可能同时想改同一条执行记录的状态。如果先读状态、判断、再写，中间可能被别人插队（竞态）——比如已 COMPLETED 又被改回 RUNNING。<strong>把"当前状态必须是合法来源"写进 SQL 的 where 条件，用数据库的原子更新保证——非法跳转的更新直接"落空"（影响 0 行）。</strong>这是"用数据库的原子性做并发状态机"的漂亮技巧。<strong>容错</strong>：图执行结束（含异常）时 <code>_cleanup_graph_execution</code>（<code>:1261</code>）停掉所有在跑节点、清理队列残余、清临时文件。取消（<code>:1495</code>）只是 set 一个 cancel_event，主循环检测到就优雅 break。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>执行引擎的三大支撑？（MQ / 线程池 / 事件总线）</li>
+                    <li>auto_ack=False 和 prefetch_count 保证什么？</li>
+                    <li>ClusterLock 分布式锁防什么？</li>
+                    <li>调度循环的核心逻辑？为什么用两个事件循环？</li>
+                    <li>状态机为什么做进 SQL？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+grep -n 'class ExecutionManager\|ThreadPoolExecutor\|auto_ack\|prefetch_count\|ClusterLock' $P/executor/manager.py | head
+sed -n '942,1030p' $P/executor/manager.py | head -50    # 调度循环
+grep -n 'VALID_STATUS_TRANSITIONS' $P/data/execution.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>数据流与拓扑执行</strong>——输出如何精确地"喂"给下游输入（_enqueue_next_nodes）、"攒齐输入才入队"的 fan-in、静态连线回填。拓扑执行的最后一块拼图。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 Graph 模型</a>
+                <a href="autogpt-day13.html" style="color:var(--accent-green);">Day 13 · 数据流 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

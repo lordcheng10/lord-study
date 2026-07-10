@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · Graph 模型深入 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">Graph 模型深入 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三层 Graph 模型</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 计算字段自动推导</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 能力探测字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · starting_nodes 复习</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 两级图校验</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 版本管理</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · fork 与子图拍平</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 SDK</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 执行引擎 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 执行引擎</span>
+            <h1 class="part-title">Graph 模型深入</h1>
+            <p class="part-desc">Day 03 建立了 Node/Link/Graph 的直觉，今天深入 <code>data/graph.py</code>：三层模型、计算字段、两级校验、版本/fork/子图拍平——为读执行引擎打好基础。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三层 Graph 模型</h1></div>
+            <div class="card">
+                <p>Graph 用继承分层（<code>graph.py:191-397</code>），初学者记住递进关系：</p>
+                <ul>
+                    <li><code>GraphBaseMeta</code>（<code>:191</code>）：核心元数据——version、is_active、name、description、instructions、forked_from_id。</li>
+                    <li><code>BaseGraph</code>（<code>:206</code>）：加 <code>nodes</code> + <code>links</code>，并提供一批计算字段（L02）。</li>
+                    <li><code>Graph</code>（<code>:348</code>）：加 <code>sub_graphs</code>（拍平的子图列表）。</li>
+                    <li><code>GraphModel</code>（<code>:385</code>）：最完整，带 user_id/created_at 和执行期全部计算字段。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么分这么多层？</span>
+                不同场景用不同"厚度"的模型：只需要元数据（列个图列表）用薄的 GraphBaseMeta；要执行用最全的 GraphModel。<strong>分层让每个场景只带它需要的字段，减少不必要的数据加载/传输。</strong>继承复用了公共字段，不重复定义。这是数据建模的分层技巧。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>计算字段自动推导 I/O（Day 03 深化）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># graph.py:218 input_schema —— 扫描所有 BlockType.INPUT 节点
+# graph.py:230 output_schema —— 扫描所有 BlockType.OUTPUT 节点
+# 合成整个 Agent 对外的输入/输出 JSON schema</code></pre>
+                <div class="anno">读法：<b>这些是 Pydantic 的 <code>computed_field</code>——不是存储的，而是<strong>每次访问时从图结构现算</strong>。</b>Agent 有哪些输入参数？扫一遍图里的 INPUT 块自动得出。前端表单、API 文档、调用参数全靠它。</div>
+                <div class="baby"><span class="t">"计算字段"为什么优于"存储字段"？</span>
+                如果把 Agent 的 input_schema 存成一个独立字段，一旦图改了（加/删 INPUT 块），你得记得同步更新它——容易忘、容易不一致。<strong>计算字段"从图现算"——图是唯一真相，schema 永远和图一致，不可能不同步。</strong>代价是每次访问要算一下（但图不大，可忽略）。<strong>用"派生"代替"存储冗余"——消除不一致的经典手法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>能力探测字段</h1></div>
+            <div class="card">
+                <p>还有一批计算字段"扫一遍节点判断图有没有某种能力"（<code>graph.py:244-302</code>）：<code>has_external_trigger</code>（有 webhook 触发块吗）、<code>has_human_in_the_loop</code>（有需人工介入的块吗）、<code>has_sensitive_action</code>（有敏感操作吗）、<code>trigger_setup_info</code> 等。</p>
+                <div class="baby"><span class="t">这些"能力探测"有什么用？</span>
+                平台需要知道一个 Agent 的"性质"来决定怎么对待它：<strong>有外部触发</strong>→需要注册 webhook；<strong>有人工介入</strong>→执行可能会暂停等人；<strong>有敏感操作</strong>→UI 上给用户警示。<strong>与其让用户手动标注"我这个 Agent 有没有 X"，不如从图结构自动探测——放了对应类型的块，能力就有。</strong>又是"让数据自己描述自己"（L02 同一思想）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>starting_nodes（Day 03 复习）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># graph.py:401
+@property
+def starting_nodes(self):
+    outbound_nodes = {link.sink_id for link in self.links}   # 被连入的节点
+    input_nodes = {n.id for n in self.nodes if n.block.block_type == BlockType.INPUT}
+    return [n for n in self.nodes if n.id not in outbound_nodes or n.id in input_nodes]</code></pre>
+                <div class="anno">读法：<b>起始节点 = 没有入边的节点 + 所有 INPUT 节点——执行引擎从这里开始"灌数据"。</b>Day 12 的执行引擎会用它确定"图从哪些节点开跑"。</div>
+                <div class="glossary">Node 还有个健壮设计：若 Block 被删除，<code>node.block</code> 返回占位 <code>_UnknownBlockBase</code>（<code>graph.py:1957</code>），运行时只 yield 一个 error，<strong>避免整图崩溃</strong>。<code>NodeModel</code>（<code>:135</code>）是数据库版，多了 graph_id/version，<code>stripped_for_export</code> 导出时抹掉凭证/密钥/webhook（安全）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>两级图校验（Day 03 深化）</h1></div>
+            <div class="card">
+                <p><code>validate_graph</code>（<code>graph.py:686</code>）对主图和每个子图都跑，两大类：</p>
+                <ul>
+                    <li><strong>结构校验</strong>（<code>:995</code>）：每条 Link 两端节点/Block 存在、连接的输入输出口名字在 Block schema 里。还会把"源是 static_output 的连线"标记为 <code>is_static=True</code>（<code>:1041</code>）。</li>
+                    <li><strong>节点校验</strong>（<code>:735</code>）：必填字段已填或已连线（<code>provided_inputs</code> = input_default 的 key + 入边的 sink_name）、字段依赖、凭证 discriminator、auto-credentials 不能硬编码。</li>
+                </ul>
+                <div class="glossary"><code>for_run=True</code>（执行前）全量严校验；否则只校验 I/O/AGENT 节点。<strong>"保存时轻校验、运行时严校验"——让半成品能存盘，但真跑前堵死所有坑。</strong>（Day 03 讲过，这里看到源码位置。）<code>provided_inputs</code> 的逻辑很关键：一个输入口"有值"= 用户手填了（input_default）<strong>或</strong>有连线连进来（入边）——两者之一即可，否则必填校验报错。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>版本管理</h1></div>
+            <div class="card">
+                <p>每个 (id, version) 是一行。<code>__create_graph</code>（<code>graph.py:1623</code>）保存时若版本已存在<strong>自动 +1</strong>（<code>:1662</code>）；<code>is_active</code> 标记当前活跃版本；<code>set_graph_active_version</code>（<code>:1436</code>）激活某版本、把其它设非活跃。</p>
+                <div class="baby"><span class="t">为什么改图要存新版本而非覆盖？</span>
+                ① <strong>可回溯</strong>：能看到 Agent 的演进历史。② <strong>可回滚</strong>：新版本改坏了，切回旧版本。③ <strong>执行绑版本</strong>：一次执行记录了"用的是 v3"，即使你后来改成 v4，那次执行的语义仍清晰（能重现）。④ <strong>不影响正在跑的</strong>：你改图时，正在运行的旧版本执行不受影响。<strong>版本化 = 安全地演进 + 可追溯——生产系统对"配置/流程"的标准处理（和 eino 编译产物、git 版本一个道理）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>fork 与子图拍平</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>fork</strong>（<code>fork_graph</code>）：复制整图，<code>reassign_ids</code>（<code>:621</code>）给所有 node/link/graph 重新生成 UUID、清凭证引用、记 <code>forked_from_id</code>。像 git fork——基于别人的 Agent 改自己的。</li>
+                    <li><strong>子图拍平</strong>（<code>get_sub_graphs</code>，<code>:1375</code>）：从主图出发，广度优先逐层查出所有被 <code>AgentExecutorBlock</code> 引用的子图，拍平成 <code>sub_graphs</code> 列表。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要"拍平"子图？</span>
+                Day 03 讲了 Agent-as-Block（一个 Agent 嵌进另一个）。执行引擎需要知道"这次执行涉及哪些图"（主图 + 所有嵌套的子图），才能一次性加载好。<strong>"拍平"= 把递归嵌套的子图结构，展开成一个扁平列表——执行前一次查全，避免执行到子图节点时才临时去查（慢、易错）。</strong>这是"执行前把依赖备齐"的准备工作，Day 12 执行引擎会用到。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>三层 Graph 模型为什么分层？</li>
+                    <li>计算字段（input_schema 等）为什么优于存储字段？</li>
+                    <li>能力探测字段有什么用？</li>
+                    <li>两级校验（for_run）为什么？provided_inputs 怎么判断输入齐没齐？</li>
+                    <li>版本管理为什么存新版不覆盖？子图为什么要拍平？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend/data
+sed -n '191,302p' $P/graph.py | head -60      # 三层模型 + 计算字段
+sed -n '686,740p' $P/graph.py | head -40      # 校验
+grep -n 'def fork_graph\|def get_sub_graphs\|set_graph_active_version' $P/graph.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>执行引擎 manager</strong>——心脏！读 <code>executor/manager.py</code>：ExecutionManager 进程架构（MQ + 线程池 + 事件总线）、一次图执行的完整生命周期、分布式锁去重。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 SDK</a>
+                <a href="autogpt-day12.html" style="color:var(--accent-green);">Day 12 · 执行引擎 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
