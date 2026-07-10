@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 线程模型 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e91e63,#7c4dff);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">线程模型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 1 主 + N worker</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · worker 数量</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 每 worker 独立</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ThreadLocal 核心</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 物理落点</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · set 跨线程更新</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 无锁热路径</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 启动路径</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day04.html" class="nav-link" style="color:#e91e63;">Day 04 事件循环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 架构与线程</span>
+            <h1 class="part-title">线程模型（招牌设计）</h1>
+            <p class="part-desc">Envoy 为什么这么快？核心答案就是今天的线程模型：<strong>1 个主线程 + N 个 worker 线程 + 线程本地存储（TLS）</strong>，让请求处理的热路径<strong>完全无锁</strong>。这是 Envoy 最值得学的设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>1 主 + N worker</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">分工：主线程"管理"，worker"干活"</span>
+                <strong>主线程（main thread）</strong>：负责"管理"——加载/更新配置、维护集群列表、协调。它<strong>不处理业务请求</strong>。<strong>worker 线程（N 个）</strong>：负责"干活"——每个 worker 独立处理一批网络连接的请求。<strong>关键：配置的"读写分离"——只有主线程能改配置，worker 只读配置的本地副本。</strong>好比一个厨房：主厨（主线程）定菜单、备料（配置），多个厨师（worker）各自炒菜（处理请求），各用各的一份菜谱副本，谁也不用等谁、不用抢。这就是无锁的前提。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>worker 数量</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/server/options_impl.cc:82-83
+// --concurrency 默认值 = std::thread::hardware_concurrency()（CPU 硬件线程数）
+// :273 concurrency_ = std::max(1U, concurrency.getValue());  // 至少 1
+
+// worker 创建 source/common/listener_manager/listener_manager_impl.cc:424
+for (uint32_t i = 0; i &lt; server.options().concurrency(); i++) {
+  workers_.emplace_back(worker_factory.createWorker(i, ..., absl::StrCat("worker_", i)));
+}</code></pre>
+                <div class="anno">读法：<b>worker 数默认 = CPU 核数（<code>--concurrency</code> 可调）。这样每个 CPU 核跑一个 worker，充分利用多核、又不过度切换。</b>ListenerManager 构造时按这个数创建 worker。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>每 worker 独立</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/server/worker_impl.cc:35 createWorker
+Event::DispatcherPtr dispatcher(api_.allocateDispatcher(worker_name, ...));  // 每 worker 独立事件循环
+auto conn_handler = getHandler(*dispatcher, index, ...);
+// :52 WorkerImpl 构造时把自己的 dispatcher 注册进 TLS（非主线程）
+tls_.registerThread(*dispatcher_, false);
+// :145 threadRoutine（线程主体）
+dispatcher_-&gt;run(Event::Dispatcher::RunType::Block);  // :156 worker 阻塞在自己的事件循环</code></pre>
+                <div class="baby"><span class="t">每个 worker = 一个线程 + 一个独立事件循环</span>
+                每个 worker 有<strong>自己独立的 Dispatcher（事件循环，Day 04）</strong>，各自阻塞在自己的 <code>run(Block)</code> 里处理自己那批连接。<strong>worker 之间互不干扰、不共享可变状态。</strong>一个连接一旦被分配给某个 worker，它的整个生命周期都在这个 worker 线程里处理（不会跨线程跳）。这样单个连接的处理全程在一个线程内，<strong>无需为"连接状态"加锁</strong>。SO_REUSEPORT 让每个 worker 有自己的监听 socket 分片，内核帮忙分发新连接。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ThreadLocal 核心</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/thread_local/thread_local.h
+class Slot {                                          // :21 一个 TLS 槽位
+  virtual void set(InitializeCb cb) PURE;             // :62 在每个线程上分别构造该线程自己的对象
+};
+using InitializeCb = std::function&lt;ThreadLocalObjectSharedPtr(Event::Dispatcher&amp;)&gt;;  // :61
+template&lt;class T&gt; class TypedSlot {                    // :111 类型安全封装
+  // operator-&gt; / operator*（:161/:170）直接拿本线程对象
+};</code></pre>
+                <div class="baby"><span class="t">ThreadLocal（TLS）= "每个线程一个私人保险箱"</span>
+                想让某份数据"每个线程各有一份、互不干扰"？用 TLS。<strong>你申请一个 Slot（槽位），然后 <code>set()</code> 一个"构造函数"——这个构造函数会在<strong>每个线程</strong>各跑一次，为该线程造一份属于它自己的对象。</strong>之后每个线程访问这个 slot，拿到的都是自己那份（<code>operator-&gt;</code>）。集群列表、路由表、连接池…这些都放在 TLS 里，所以每个 worker 读到的是自己的副本，<strong>读时零锁</strong>。这就是 Day 13 "线程本地集群"的底层机制。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>物理落点</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/thread_local/thread_local_impl.cc:17 —— 真正的线程本地变量
+thread_local InstanceImpl::ThreadLocalData InstanceImpl::thread_local_data_;
+// ThreadLocalData（thread_local_impl.h:72）= {
+//   Event::Dispatcher* dispatcher_;
+//   std::vector&lt;ThreadLocalObjectSharedPtr&gt; data_;   // data_[slot_index] = 该 slot 在本线程的对象
+// }</code></pre>
+                <div class="anno">读法：<b>C++ 的 <code>thread_local</code> 关键字保证 <code>thread_local_data_</code> 每个线程一份。<code>data_</code> 是个 vector，按 slot 索引存对象。读取时 <code>data_[index]</code> 直接访问——<strong>O(1) 无锁</strong>。</b>这一行 <code>thread_local ...</code> 就是整个无锁模型的物理基础。分配槽位 <code>allocateSlot</code>（<code>:27</code>）只允许主线程调。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>set 跨线程更新</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// thread_local_impl.cc:124 set 如何更新所有线程
+// 对每个已注册线程 dispatcher.post(...)，在各自事件循环里执行 setThreadLocal(index, cb(dispatcher))
+// 主线程直接执行。—— 跨线程更新走 post()，不是加锁！
+
+// runOnAllThreads（:179）：把回调 post 到每个线程；带完成回调的版本
+//   用 shared_ptr 自定义 deleter，在最后一个线程完成后回主线程触发回调</code></pre>
+                <div class="baby"><span class="t">配置更新怎么"无锁"地传到每个 worker？</span>
+                主线程算好新配置后，要更新到每个 worker 的副本。<strong>它<strong>不</strong>直接去改 worker 的数据（那要加锁），而是给每个 worker 的事件循环<strong>投递一个任务</strong>（<code>dispatcher.post</code>）："等你有空时，把你自己的副本换成这份新的。"</strong>worker 在自己的线程里执行这个替换——因为是在它自己线程里改自己的数据，<strong>没有竞争、无需锁</strong>。这就是"用消息投递代替共享内存加锁"的并发哲学（Actor 模型的思想）。<code>still_alive_guard_</code> + weak_ptr 确保 slot 已销毁时回调不会 use-after-free。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>无锁热路径</h1></div>
+            <div class="card">
+                <div class="glossary"><b>招牌设计一句话总结</b>：<strong>配置解析/更新只在主线程；主线程通过 <code>Slot::set</code>/<code>runOnAllThreads</code> 用 <code>dispatcher.post</code> 把"新配置对象"推送到每个 worker；worker 在自己的事件循环里替换本线程的 <code>shared_ptr</code>。</strong>因此每个请求在 worker 内读配置/集群/路由，都是访问<strong>本线程私有对象</strong>——<strong>热路径完全无锁、无竞争</strong>。<br><br>这是 Envoy 能在多核上近乎线性扩展、扛百万连接、且延迟稳定的根本原因。你在 Day 13（线程本地集群）已经见过它的应用，后面 Day 18（stats 无锁）还会再见。<strong>"读多写少的共享状态 → 每线程副本 + 消息投递更新" 是可以带走用到任何高并发系统的设计模式。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>主线程和 worker 线程各干什么？（管理 vs 干活）</li>
+                    <li>worker 数默认多少？为什么？</li>
+                    <li>为什么单个连接全程在一个 worker 线程处理？</li>
+                    <li>ThreadLocal 是什么？物理落点是哪一行？</li>
+                    <li>配置更新为什么用 post 而非加锁？"无锁热路径"如何达成？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+grep -n 'thread_local InstanceImpl' source/common/thread_local/thread_local_impl.cc
+sed -n '21,115p' envoy/thread_local/thread_local.h | head -50
+sed -n '145,170p' source/server/worker_impl.cc</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>Dispatcher 事件循环</strong>——每个线程"阻塞在事件循环"到底在干什么？基于 libevent 的 <code>event_base_loop</code>、非阻塞 IO（<code>event_assign</code>）、单轮循环的步骤、<code>post</code>/延迟删除。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 启动路径</a>
+                <a href="envoy-day04.html" style="color:#e91e63;">Day 04 · Dispatcher 事件循环 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

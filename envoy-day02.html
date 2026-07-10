@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 启动路径 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e91e63,#7c4dff);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">启动路径 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 启动全链路</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · main()</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · MainCommon</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · TLS 最先创建</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · InstanceBase 初始化</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · run 事件循环</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 信号与 worker 启动</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day03.html" class="nav-link" style="color:#e91e63;">Day 03 线程模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 架构与线程</span>
+            <h1 class="part-title">启动路径</h1>
+            <p class="part-desc">敲下 <code>envoy -c config.yaml</code> 回车后发生了什么？今天追一遍启动全链路：<code>main()</code> → <code>MainCommon</code> → <code>Server::InstanceImpl</code> 初始化 → 主线程阻塞在事件循环。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>启动全链路</h1></div>
+            <div class="card">
+<pre><code class="language-bash">main()                          # source/exe/main.cc:16
+ → MainCommon::main             # main_common.cc:155
+ → 构造 MainCommon → createFunction() lambda 创建 Server::InstanceImpl  # main_common.cc:43
+ → server->initialize()         # main_common.cc:47
+ → MainCommonBase::run()        # main_common.cc:77
+ → runServer() → InstanceBase::run()  # server.cc:1040
+ → dispatcher_->run(Block)      # server.cc:1061 —— 主线程阻塞在事件循环</code></pre>
+                <div class="anno">读法：<b>启动 = "构造 server 对象 → 初始化（加载配置、建集群管理器等）→ 跑主线程事件循环"。最后一行 <code>dispatcher_-&gt;run(Block)</code> 是"心跳"起点——进程就阻塞在这里处理事件，直到收到退出信号。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>main()</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/exe/main.cc:16
+int main(int argc, char** argv) {
+  ...
+  return Envoy::MainCommon::main(argc, argv);   // main.cc:24
+}</code></pre>
+                <div class="anno">读法：<b><code>main()</code> 极薄——只做站点特定初始化，立刻转入 <code>MainCommon::main</code>。</b>真正的逻辑在 <code>MainCommon</code>。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>MainCommon::main</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/exe/main_common.cc:155
+int MainCommon::main(int argc, char** argv) {
+  Thread::MainThread main_thread;                    // :161 标记主线程身份
+  try {
+    auto main_common = std::make_unique&lt;MainCommon&gt;(argc, argv);  // :168 构造+初始化整个 server
+  } catch (...) { ... }
+  return main_common-&gt;run() ? EXIT_SUCCESS : EXIT_FAILURE;  // :189 事件循环放 try 外，便于崩溃 core dump
+}</code></pre>
+                <div class="baby"><span class="t">为什么事件循环放在 try/catch 外面？</span>
+                注意 <code>run()</code>（事件循环）故意<strong>不</strong>包在 try 块里。<strong>因为如果运行期崩溃（比如某扩展 bug），你希望进程直接 core dump（生成崩溃现场），方便调试；而不是被 catch 悄悄吞掉、丢失现场。</strong>构造/初始化阶段的错误才 catch（那些是配置错误，能友好报错退出）。<code>Thread::MainThread</code> 标记"我是主线程"——后面大量代码会断言"这个操作只能在主线程做"（Day 03 线程安全）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>TLS 最先创建</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/exe/stripped_main_base.cc:44-75（StrippedMainBase 构造）
+tls_ = std::make_unique&lt;ThreadLocal::InstanceImpl&gt;();   // :68 创建线程本地存储实例
+// :69 创建 Stats::ThreadLocalStoreImpl</code></pre>
+                <div class="anno">读法：<b>注意 <strong>线程本地存储（TLS）实例在最早期就创建</strong>，早于一切配置加载。</b>因为它是整个 Envoy 无锁并发的基础设施（Day 03 详讲），几乎所有东西都依赖它。<code>createFunction()</code>（<code>main_common.cc:43</code>）随后创建 <code>Server::InstanceImpl</code> 并 <code>initialize()</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>InstanceBase 初始化</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/server/server.cc 构造（:78）+ initializeOrThrow（:464）
+:98  dispatcher_(api_->allocateDispatcher("main_thread"))  // 主线程 Dispatcher/事件循环
+:478 thread_local_.registerThread(*dispatcher_, true);     // 主线程注册进 TLS
+:719 创建 listener_manager_（其构造里创建 N 个 worker）
+:723 stats_store_.initializeThreading(...)                 // 此后可跨线程写 stats
+:819 config_.initialize(...)                               // 解析 bootstrap 配置、建集群管理器
+:861 创建看门狗 main_thread_guard_dog_ / worker_guard_dog_</code></pre>
+                <div class="anno">读法：<b>初始化按依赖顺序建好核心对象：主线程 Dispatcher → 注册主线程 → ListenerManager（含创建 worker）→ stats 线程化 → 解析配置 → 看门狗。</b>看门狗（guard dog）监控线程是否卡死——某线程长时间不"喂狗"就报警/杀进程（防死锁静默）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>run 事件循环</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/server/server.cc:1040 InstanceBase::run
+const auto run_helper = RunHelper(..., [this] {
+    notifyCallbacksForStage(Stage::PostInit);
+    startWorkers();                                  // :1047 集群就绪后拉起 worker 线程
+});
+dispatcher_-&gt;post([this] { notifyCallbacksForStage(Stage::Startup); });  // :1060
+dispatcher_-&gt;run(Event::Dispatcher::RunType::Block);  // :1061 —— 阻塞在此！
+terminate();                                          // :1068 退出后清理</code></pre>
+                <div class="baby"><span class="t">"阻塞在事件循环"是什么意思？</span>
+                <code>dispatcher_-&gt;run(Block)</code> 这一行<strong>不会返回</strong>（直到退出）——主线程就"住"在这个事件循环里，不停地处理事件：有新连接？处理。定时器到点？处理。收到信号？处理。<strong>这就是 Envoy 的"主循环"，Day 04 会拆开看它内部。</strong>注意 <code>startWorkers()</code> 是在"集群初始化完成"后才调的——因为要等控制面配置就绪（Day 13 的初始化顺序），worker 才开始接流量。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>信号与 worker 启动</h1></div>
+            <div class="card">
+                <p><code>RunHelper</code>（<code>server.cc:964</code>）注册信号处理：<code>:980</code> SIGTERM、<code>:985</code> SIGINT（优雅退出）、<code>:990</code> SIGUSR1（重开日志）、<code>:995</code> SIGHUP（热重启）。集群就绪回调触发 <code>startWorkers()</code>（<code>:919</code>）→ <code>listener_manager_-&gt;startWorkers(...)</code> 真正拉起 worker 线程。</p>
+                <div class="anno">读法：<b>信号处理让 Envoy 能响应运维操作（优雅关闭、重载日志、热重启不断流）。worker 启动是"集群配置就绪"这个事件触发的——事件驱动贯穿始终。</b>下一课看 worker 线程模型。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>启动全链路 main → MainCommon → InstanceImpl → run 的大致步骤？</li>
+                    <li>为什么事件循环放在 try/catch 外？</li>
+                    <li>为什么 TLS 最先创建？</li>
+                    <li><code>dispatcher_-&gt;run(Block)</code> 为什么"阻塞"？worker 什么时候启动？</li>
+                    <li>看门狗和信号处理各干什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '16,25p' source/exe/main.cc
+sed -n '155,190p' source/exe/main_common.cc
+sed -n '1040,1069p' source/server/server.cc</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>线程模型（Envoy 招牌设计）</strong>——1 主线程 + N worker + 线程本地存储 + 热路径无锁。worker 数怎么定、每个 worker 是什么、TLS 怎么让配置无锁地分发到每个线程。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="envoy-day03.html" style="color:#e91e63;">Day 03 · 线程模型 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

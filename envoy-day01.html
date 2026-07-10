@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#e91e63}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e91e63,#7c4dff);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Envoy 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 代理是什么</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 顶层目录地图</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · source 内部</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 六大术语</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 在 higress-group 的角色</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 20 天路线</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day02.html" class="nav-link" style="color:#e91e63;">Day 02 启动路径 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 架构与线程</span>
+            <h1 class="part-title">项目全景：云原生代理</h1>
+            <p class="part-desc">欢迎来到 Envoy。这是 higress-group 系列的第一个、也是最底层的项目。第一天建立全局地图：Envoy 是什么、"代理"是什么、目录怎么组织、六大核心术语，以及它在整个 higress 生态里的位置。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Envoy 是什么</h1></div>
+            <div class="card">
+                <p><strong>Envoy</strong> 是 CNCF 毕业的<strong>云原生高性能边缘/服务代理</strong>，C++ 编写，由 Lyft 开源。它是 Istio 服务网格、Higress 网关等的<strong>数据面内核</strong>——真正扛流量、做转发的那一层。</p>
+                <div class="baby"><span class="t">一句话：Envoy = "超级智能的流量中转站"</span>
+                所有进出你服务的网络请求，都先经过 Envoy。<strong>它负责：路由（这个请求该转发到哪）、负载均衡（后端有多台，选哪台）、限流、认证、可观测（记录延迟/错误率）、故障注入、TLS 加解密等。</strong>你的业务代码只管写业务，把这些"网络治理"的脏活累活全交给 Envoy。<strong>而且它极快（C++ + 精心设计的线程模型），能扛百万级并发连接。</strong>本周你会看到它快的秘密。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>"代理"是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">代理 = "中间人"</span>
+                客户端不直接连你的服务，而是先连"代理"，代理再转发给真正的服务。<strong>好比公司前台：访客不直接冲进办公室，而是先到前台，前台帮忙转达、登记、拦截不速之客。</strong>Envoy 做的就是这件事，只不过对象是网络请求。<strong>下游（downstream）= 连进来的客户端侧；上游（upstream）= Envoy 转发去的后端侧。</strong>请求从下游进、被 Envoy 处理、转发到上游、拿回响应、再返回下游。记住"下游=客户端、上游=后端"这个方向，看源码不会晕。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>顶层目录地图</h1></div>
+            <div class="card">
+                <p>权威依据 <code>REPO_LAYOUT.md</code>：</p>
+                <table class="k">
+                    <tr><th>目录</th><th>作用</th></tr>
+                    <tr><td><code>api/</code></td><td>数据面 API，全是 Protobuf（<code>.proto</code>）——你写的所有配置的 schema</td></tr>
+                    <tr><td><code>envoy/</code></td><td>核心<strong>接口头文件</strong>，几乎 100% 纯虚抽象类（interface）</td></tr>
+                    <tr><td><code>source/</code></td><td>核心 + 扩展的真正 C++ <strong>实现</strong></td></tr>
+                    <tr><td><code>test/</code></td><td>测试，镜像 source/ 布局</td></tr>
+                    <tr><td><code>bazel/ ci/ configs/</code></td><td>构建、CI、示例配置</td></tr>
+                </table>
+                <div class="baby"><span class="t">"接口"和"实现"分两个目录（关键设计）</span>
+                注意 <code>envoy/</code>（接口）和 <code>source/</code>（实现）<strong>物理分离</strong>：<code>envoy/</code> 里全是"约定"（纯虚类，定义"应该有哪些方法"但不写怎么做），<code>source/</code> 里才是"干活的代码"。<strong>这就是我们在每个框架都见到的"接口/实现分离"，Envoy 用目录结构把它落到了极致。</strong>好处：上层代码只依赖接口，实现可替换（比如换个负载均衡算法）。读源码时，想知道"某能力的约定"看 <code>envoy/</code>，想知道"怎么实现"看 <code>source/</code>。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>source 内部</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>目录</th><th>内容</th></tr>
+                    <tr><td><code>source/common/</code></td><td>与"独立 server"无关的核心代码（event/、network/、http/、router/、thread_local/），可当库复用</td></tr>
+                    <tr><td><code>source/exe/</code></td><td>生产二进制的入口，真正的 <code>main()</code></td></tr>
+                    <tr><td><code>source/server/</code></td><td>以 standalone server 运行的代码：配置加载、启动、worker 线程</td></tr>
+                    <tr><td><code>source/extensions/</code></td><td>所有可插拔扩展（filters/http 64 个、clusters、tracers…）</td></tr>
+                </table>
+                <div class="anno">读法：<b><code>common</code>=引擎核心、<code>exe</code>=入口、<code>server</code>=服务器骨架、<code>extensions</code>=可插拔功能。<code>extensions/</code> 按类别组织（Day 16 详讲），是 Envoy 功能丰富的秘密。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>六大术语</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>术语</th><th>大白话</th></tr>
+                    <tr><td><strong>Listener</strong> 监听器</td><td>Envoy 对外暴露的端口（下游客户端连它）</td></tr>
+                    <tr><td><strong>Cluster</strong> 集群</td><td>一组等价的上游后端（转发目的地）</td></tr>
+                    <tr><td><strong>Route</strong> 路由</td><td>"什么请求转发到哪个 Cluster"的规则</td></tr>
+                    <tr><td><strong>Filter</strong> 过滤器</td><td>可插拔的请求处理单元（L4 字节 / L7 HTTP）</td></tr>
+                    <tr><td><strong>Upstream/Downstream</strong></td><td>上游=后端侧，下游=客户端侧</td></tr>
+                    <tr><td><strong>xDS</strong></td><td>动态配置发现（LDS/CDS/RDS/EDS，Day 11 详讲）</td></tr>
+                </table>
+                <div class="anno">读法：<b>这六个词是 Envoy 世界的"基本词汇"。一个请求的一生就是：进 <strong>Listener</strong> → 走 <strong>Filter</strong> 链 → 按 <strong>Route</strong> 选 <strong>Cluster</strong> → 负载均衡到某 <strong>Upstream</strong> 后端。</b>xDS 让这一切配置能动态热更新。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>在 higress-group 的角色</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Envoy 是整个 higress 生态的地基</b>：<br>
+                • <strong>Envoy（本项目）</strong> = 数据面，真正转发流量的"发动机"<br>
+                • <strong>Istio</strong>（本系列后面） = 控制面，生成配置并通过 xDS 下发给 Envoy 的"控制器"<br>
+                • <strong>Higress</strong> = 基于 Envoy + Istio 的云原生网关，做了增强 + Wasm 插件生态<br>
+                • <strong>wasm-go</strong> = 用 Go 写 Higress/Envoy 的 Wasm 插件的 SDK<br>
+                <strong>所以先学 Envoy（最底层）→ 再学 Istio（控制它）→ 再学 Higress（增强它）→ 最后 wasm-go（扩展它）。层层向上，理解一个完整的云原生网关是怎么搭起来的。</strong>这个 fork 里有很多 <code>#if defined(HIGRESS)</code> 分支，是 Higress 对上游 Envoy 的定制，教程中会标注。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>20 天路线</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>第 1 周（架构与线程）</strong>：全景 → 启动 → 线程模型 → 事件循环 → 请求入口。</li>
+                    <li><strong>第 2 周（过滤器与请求）</strong>：L4 过滤器 → HCM → L7 过滤器 → Router → Codec。</li>
+                    <li><strong>第 3 周（xDS 与上游）</strong>：xDS → 配置订阅 → 集群管理 → 负载均衡 → 健康检查。</li>
+                    <li><strong>第 4 周（扩展/可观测/构建）</strong>：扩展机制 → Wasm → 可观测 → Buffer/Bazel → 收官。</li>
+                </ul>
+                <div class="anno">读法：<b>由底向上：先懂"引擎怎么跑、为何快"（W1），再懂"请求怎么被处理"（W2），再懂"配置怎么动态下发、后端怎么选"（W3），最后"怎么扩展、观测、构建"（W4）。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Envoy 是什么？它在服务架构里扮演什么角色？</li>
+                    <li>"代理"是什么？上游/下游怎么区分？</li>
+                    <li>envoy/ 和 source/ 为什么物理分离？</li>
+                    <li>六大术语各是什么？一个请求的一生怎么走？</li>
+                    <li>Envoy/Istio/Higress/wasm-go 的关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+cat REPO_LAYOUT.md | head -50
+ls source/ envoy/ api/
+cat docs/root/intro/arch_overview/intro/terminology.rst 2>/dev/null | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>启动路径</strong>——<code>envoy</code> 进程怎么 boot：<code>main.cc</code> → <code>MainCommon</code> → <code>Server::InstanceImpl</code> → 主线程事件循环 <code>dispatcher_-&gt;run(Block)</code>。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="envoy-day02.html" style="color:#e91e63;">Day 02 · 启动路径 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
