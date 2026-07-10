@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景与模块地图 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        .mod-map { display:grid; grid-template-columns:repeat(2,1fr); gap:9px; }
+        .mm { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:13px; border-left:3px solid var(--mc,var(--accent-orange)); }
+        .mm h4 { font-size:13.5px; margin:0 0 3px; color:var(--mc,var(--accent-orange)); } .mm .path { font-size:11px; font-family:'SF Mono',monospace; color:var(--text-muted); }
+        .mm p { font-size:12px; color:var(--text-secondary); margin:5px 0 0; }
+        @media(max-width:768px){ .mod-map{grid-template-columns:1fr} }
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .stat-row { display:flex; gap:10px; flex-wrap:wrap; margin:6px 0; }
+        .stat { flex:1; min-width:120px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:10px; padding:14px; text-align:center; }
+        .stat b { display:block; font-size:22px; color:var(--accent-orange); font-family:'SF Mono',monospace; } .stat span { font-size:11px; color:var(--text-muted); }
+        .warn-box { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.3); border-radius:8px; padding:12px 16px; margin:10px 0; font-size:13px; color:var(--text-secondary); }
+        .warn-box b { color:var(--accent-orange); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景与模块地图 · 10 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 10 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 它到底是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 逆向 ≠ 薄封装</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 一个 AI Agent 的直觉</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 技术栈</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 项目规模画像</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 核心模块地图</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · monorepo 包一览</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · bin 入口映射</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 读源路线 & 坑</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="claude-code-src-day02.html" class="nav-link" style="color:var(--accent-green);">下一天 · 启动链 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 建立心智</span>
+            <h1 class="part-title">项目全景与模块地图</h1>
+            <p class="part-desc">今天不写代码。目标：搞清"这是个什么项目、用什么造的、代码分成哪几大块"，在脑子里建立一张地图。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>它到底是什么</h1></div>
+            <div class="card">
+                <p>我们要读的仓库叫 <code>claude-code-best</code>（简称 <strong>CCB</strong>）。<code>package.json</code> 第 2-3 行写得很清楚：</p>
+<pre><code class="language-json">"name": "claude-code-best",
+"version": "2.8.3",
+"description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal"</code></pre>
+                <p>翻译过来：它是 Anthropic 官方 <strong>Claude Code CLI</strong>（那个在终端里跟你结对编程的 AI 助手）的<strong>逆向工程 / 反编译后完整重写的 TypeScript 版本</strong>。<code>CLAUDE.md:7</code> 也明说 "This is a reverse-engineered / decompiled version of Anthropic's official Claude Code CLI tool."</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：它是<strong>跑在终端里的 AI 编程 Agent</strong>——你用自然语言下命令，它自己调用工具（读写文件、跑命令、搜代码…）把编程任务干完。我们要逐层读懂"这样一个 Agent 内部怎么运转"。</p>
+                </div>
+                <p>它甚至比官方版<strong>功能更多</strong>：README（<code>README.md:19-37</code>）列出它额外实现了 Goal 持续驱动、Artifacts HTML 托管、Ultracode 多 Agent 编排、Remote Control 远程控制、Voice 语音、Web Search 等——而且"关闭了外部封控点"、完全兼容官方配置文件。</p>
+                <div class="warn-box"><b>合规提醒</b>：README 声明本项目仅供学习研究，Claude Code 的权利归 Anthropic 所有。我们读它是为了学习 Agent 工程，不用于其它用途。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>逆向 ≠ 薄封装</h1></div>
+            <div class="card">
+                <p>很多人以为"复刻一个 CLI"就是包一层调官方的包。<strong>CCB 完全不是。</strong>它没有运行时依赖官方 <code>@anthropic-ai/claude-code</code> 包，而是<strong>自己从头重实现了每一个子系统</strong>：agent 循环、工具系统、终端 UI、MCP、skills、hooks、workflow 引擎……</p>
+                <p>官方的 <code>@anthropic-ai/claude-agent-sdk</code> 只作为 <strong>devDependency</strong>（<code>package.json:85</code>）存在——只用来对齐类型/协议定义，运行时一点不依赖它。</p>
+                <div class="glossary"><b>为什么这对学习是好事？</b> 因为它把官方那个压缩混淆的产物，重写成了<strong>可读的、模块清晰的 TypeScript 源码</strong>。你能看到每个决策的真实实现，而不是一坨 minified 代码。这是学习"一个成熟 Agent CLI 到底怎么工程化"的绝佳标本。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>先建立"一个 AI Agent"的直觉</h1></div>
+            <div class="card">
+                <p>零基础最需要先有的一个直觉——<strong>Agent 不是"聊天机器人"，它会"动手"</strong>。区别在于：</p>
+                <ul>
+                    <li><strong>聊天机器人</strong>：你问，它答（只输出文字）。</li>
+                    <li><strong>Agent</strong>：你给个目标，它<strong>自己反复调用工具</strong>（读文件、改代码、跑测试），观察结果，再决定下一步，直到把事办完。</li>
+                </ul>
+                <p>所以这个 CLI 的灵魂是一个<strong>循环</strong>（就是总目录页那个转圈动画）：</p>
+                <div class="glossary">
+                    你输入需求 → <b>拼请求发给大模型</b>（带上可用工具清单）→ 模型流式返回（可能是文字，也可能是"我要调 Edit 工具"）→ <b>如果要调工具，就真去执行</b> → 把工具结果喂回给模型 → 模型继续 → …… → 直到模型说"干完了"。
+                </div>
+                <p>这个循环在本项目由 <code>src/query.ts</code> + <code>src/QueryEngine.ts</code> 驱动（Day 03、06 细讲）。今天你只要记住"<strong>Agent = 模型 + 工具 + 一个不停转的循环</strong>"。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>技术栈</h1></div>
+            <div class="card">
+                <table>
+                    <thead><tr><th>方面</th><th>选型</th><th>出处 / 备注</th></tr></thead>
+                    <tbody>
+                        <tr><td>运行时</td><td><strong>Bun</strong>（不是 Node！）</td><td><code>.tool-versions</code> 锁 bun 1.3.13；产物也兼容 node</td></tr>
+                        <tr><td>语言</td><td>TypeScript（strict）</td><td><code>tsconfig.json:8</code>，ESM 模块</td></tr>
+                        <tr><td>终端 UI</td><td><strong>React 19 + Ink</strong>（自研 fork <code>@anthropic/ink</code>）</td><td>用 React 写、渲染到终端；Day 04 细讲</td></tr>
+                        <tr><td>CLI 框架</td><td>Commander</td><td>解析命令行参数/子命令</td></tr>
+                        <tr><td>校验</td><td>zod</td><td>工具输入 schema 等</td></tr>
+                        <tr><td>Lint/格式化</td><td>Biome</td><td><code>biome.json</code></td></tr>
+                        <tr><td>构建</td><td>Bun.build + Vite 双管线</td><td>Day 02/20 细讲</td></tr>
+                        <tr><td>模型供应商</td><td>Anthropic + OpenAI + Bedrock + Vertex + Gemini + Grok…</td><td>7 个供应商，Day 17 讲</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary">
+                    <b>Bun</b> 是一个比 Node 更快的 JavaScript 运行时（自带打包、测试、包管理）。<br>
+                    <b>Ink</b> 是"能用 React 写终端界面"的库——你写的还是 <code>&lt;Box&gt;&lt;Text&gt;</code> 这种组件，但它渲染成的不是网页，而是终端里的字符。这就是为什么这个 CLI 里有 700+ 个 <code>.tsx</code> 文件。
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>项目规模画像</h1></div>
+            <div class="card">
+                <p>先有个体量的心理准备（别怕，我们会拆开读）：</p>
+                <div class="stat-row">
+                    <div class="stat"><b>2500+</b><span>.ts 文件</span></div>
+                    <div class="stat"><b>700+</b><span>.tsx 组件</span></div>
+                    <div class="stat"><b>15+</b><span>monorepo 包</span></div>
+                    <div class="stat"><b>5640</b><span>行 · main.tsx</span></div>
+                </div>
+                <p><code>src/</code> 下按文件数排：<code>utils/</code>(773)、<code>components/</code>(418)、<code>commands/</code>(400)、<code>services/</code>(301)、<code>hooks/</code>(119)…… 数量最大的是工具函数和 UI 组件，这很正常——一个成熟 CLI 大量代码花在"界面"和"打杂"上，真正的"agent 大脑"反而集中在少数几个文件里。</p>
+                <div class="tip"><strong>好消息</strong>：投入产出比最高的其实就几个文件——<code>src/query.ts</code> + <code>src/QueryEngine.ts</code>（大脑）、<code>src/Tool.ts</code> + <code>packages/builtin-tools</code>（手脚）、<code>src/screens/REPL.tsx</code>（界面）。本教程主要围绕它们，不会让你陷进 773 个 utils 里。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>核心模块地图</h1></div>
+            <div class="card">
+                <p>这是本教程最重要的一张图——记住这几大块各在哪、干什么，后面每天都是往里钻：</p>
+                <div class="mod-map">
+                    <div class="mm" style="--mc:#f59e0b"><h4>① Agent 查询循环</h4><div class="path">src/query.ts · QueryEngine.ts · query/</div><p>核心大脑：发消息、处理流式响应、执行 tool calls、管理一轮对话。<strong>Day 03/06/10</strong></p></div>
+                    <div class="mm" style="--mc:#8b5cf6"><h4>② 工具系统</h4><div class="path">src/Tool.ts · tools.ts · packages/builtin-tools</div><p>手脚：~60 个工具（读写文件、Bash、搜索、子代理…）。<strong>Day 07/08</strong></p></div>
+                    <div class="mm" style="--mc:#06b6d4"><h4>③ 终端 UI (Ink)</h4><div class="path">src/components(418) · screens/REPL.tsx · main.tsx</div><p>脸面：消息列表、输入框、权限弹窗，全用 React 渲染到终端。<strong>Day 04/18</strong></p></div>
+                    <div class="mm" style="--mc:#22c55e"><h4>④ Slash 命令</h4><div class="path">src/commands(400) · commands.ts</div><p>"/help /model /compact" 等斜杠命令。<strong>Day 11</strong></p></div>
+                    <div class="mm" style="--mc:#ec4899"><h4>⑤ Services 服务层</h4><div class="path">src/services(301)</div><p>API 客户端、MCP、分析、oauth、SessionMemory 等后台服务。<strong>Day 17</strong></p></div>
+                    <div class="mm" style="--mc:#6366f1"><h4>⑥ MCP / Skills / Hooks</h4><div class="path">packages/mcp-client · src/skills · src/hooks</div><p>扩展能力：接外部工具、技能、生命周期钩子。<strong>Day 12/13/14</strong></p></div>
+                    <div class="mm" style="--mc:#f59e0b"><h4>⑦ Workflow 引擎</h4><div class="path">src/workflow · packages/workflow-engine</div><p>多 Agent 编排（Ultracode）。<strong>Day 19</strong></p></div>
+                    <div class="mm" style="--mc:#8b5cf6"><h4>⑧ Bridge / Remote</h4><div class="path">src/bridge(40) · daemon · ssh · remote-control-server</div><p>远程控制：手机/web 控制终端里的 Claude Code。<strong>Day 19</strong></p></div>
+                </div>
+                <div class="note">除此之外还有一堆"锦上添花"的子系统：Buddy 陪伴宠物、Proactive 自主模式、Voice 语音、Vim 模式、Coordinator 多 worker、Daemon 守护进程。它们大多是<strong>可通过构建 feature flag 开关</strong>的扩展特性，不是核心，我们放到 Day 18/19 顺带讲。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>monorepo 包一览</h1></div>
+            <div class="card">
+                <p><code>package.json:32-36</code> 定义 workspaces = <code>packages/*</code>、<code>packages/@ant/*</code>、<code>packages/@anthropic-ai/*</code>。关键包：</p>
+                <table>
+                    <thead><tr><th>包</th><th>用途</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>builtin-tools</code></td><td>★ 内置工具集（~60 个 tool 实现）。Day 08 精读</td></tr>
+                        <tr><td><code>agent-tools</code></td><td>子代理相关工具</td></tr>
+                        <tr><td><code>mcp-client</code></td><td>★ MCP 客户端库。Day 12</td></tr>
+                        <tr><td><code>workflow-engine</code></td><td>确定性 JS 脚本编排引擎（多 agent，端口适配器模式）。Day 19</td></tr>
+                        <tr><td><code>remote-control-server</code></td><td>自托管远程控制服务端（React+Vite Web UI，Docker 部署）。Day 19</td></tr>
+                        <tr><td><code>@ant/ink</code></td><td>★ fork 的 Ink 终端 UI 框架本体。Day 04</td></tr>
+                        <tr><td><code>acp-link / cloud-artifacts / weixin</code></td><td>ACP 桥接 / HTML 托管 / 微信集成</td></tr>
+                        <tr><td><code>*-napi（audio/image/color-diff/modifiers/url）</code></td><td>原生能力（音频/图像/颜色/键盘修饰键/URL）。Day 20</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary"><b>monorepo（单体仓库）</b>：把很多相关的包放在同一个 git 仓库、用一套依赖统一管理。<code>packages/*</code> 里每个子目录都是一个能独立发布的包，但它们共享顶层的依赖锁和构建。<b>napi</b> 指用原生代码（非 JS）实现的能力，比如音频捕获——JS 干不了的活交给原生。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>bin 入口：命令怎么映射到代码</h1></div>
+            <div class="card">
+                <p>装好后你会得到几个命令行入口（<code>package.json:27-31</code>）：</p>
+<pre><code class="language-json">"bin": {
+  "ccb": "dist/cli-node.js",           // 用 node 跑
+  "ccb-bun": "dist/cli-bun.js",        // 用 bun 跑
+  "claude-code-best": "dist/cli-node.js"
+}</code></pre>
+                <p>这些 <code>cli-*.js</code> 是构建生成的<strong>极薄 shim</strong>（就一行 <code>import "./cli.js"</code>），真正的产物是 <code>dist/cli.js</code>，它打包自源码入口 <code>src/entrypoints/cli.tsx</code>。所以完整映射链是：</p>
+<pre><code class="language-bash">你敲 ccb
+  → dist/cli-node.js          (#!/usr/bin/env node, 一行 import)
+  → dist/cli.js               (打包产物)
+  → src/entrypoints/cli.tsx   (真正的源码入口 ★)</code></pre>
+                <div class="tip"><strong>记住 <code>src/entrypoints/cli.tsx</code> 这个入口文件</strong>——明天 Day 02 我们就从它开始，一步步追到界面渲染出来。读任何 CLI 项目，"找到真正的入口文件"永远是第一步。</div>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>读源路线 & 必知的坑</h1></div>
+            <div class="card">
+                <h3>三条主线（贯穿本教程）</h3>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>纵向：跟一次对话走完全程</h4><p>从 cli.tsx 启动 → REPL 界面 → 你输入 → query 循环 → 调工具 → 返回。这是理解全局的主线。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>横向：吃透工具系统</h4><p>从 Tool 接口到一个具体工具（如 Edit）的完整生命周期。理解 Agent"手脚"的主线。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>扩展：MCP / Skills / Hooks / Workflow</h4><p>Agent 如何被外部能力增强。理解可扩展性的主线。</p></div></div>
+                </div>
+            </div>
+            <div class="card warn-card" style="border-color:rgba(245,158,11,.4);background:linear-gradient(135deg,rgba(245,158,11,.06),transparent);">
+                <h3 style="color:var(--accent-orange);">⚠️ 必知的坑</h3>
+                <ul>
+                    <li><strong>文档滞后于代码</strong>：<code>CLAUDE.md</code> 里写"当前版本 2.2.1"、"main.tsx ~5674 行"，而实际 <code>package.json</code> 是 2.8.3、main.tsx 5640 行。<strong>一律以源码为准，文档是快照。</strong></li>
+                    <li><strong>CLAUDE.md 和 AGENTS.md 几乎是同一份</strong>（AGENTS.md 开头标题甚至写着 "# CLAUDE.md"）——两个副本供不同 AI 读取，别以为是两份不同文档。</li>
+                    <li><strong>用的是 Bun 不是 Node</strong>：很多 import、构建、执行走 Bun API。产物靠构建时打补丁做到 node/bun 双跑（Day 02 讲）。</li>
+                    <li><strong>用的是自研 fork 的 Ink</strong>（<code>@anthropic/ink</code>），不是社区 <code>ink</code> 包；还用了 React Compiler（产物里满是 <code>_c()</code> memo 调用）。</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="l10" class="section">
+            <div class="section-header"><span class="section-number">L10</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CCB 是什么？（逆向重写的 Claude Code CLI，不是薄封装，功能更多）</li>
+                    <li>"Agent" 和"聊天机器人"的区别？（Agent 会调工具、循环干活）</li>
+                    <li>技术栈？（Bun + TS + React/Ink）</li>
+                    <li>核心模块地图的 8 大块 + 各在哪个目录？</li>
+                    <li>真正的源码入口是哪个文件？（<code>src/entrypoints/cli.tsx</code>）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟（可选）</h3>
+<pre><code class="language-bash"># 1. 确认项目身份
+cd claude-code
+head -10 package.json          # 看 name/description
+sed -n '1,10p' CLAUDE.md        # 看"逆向"声明
+
+# 2. 感受规模
+find src -name '*.ts' -o -name '*.tsx' | wc -l
+for d in src/*/; do echo "$(find $d -name '*.ts*'|wc -l) $d"; done | sort -rn | head
+
+# 3. 看 bin 映射和入口
+sed -n '27,36p' package.json
+ls src/entrypoints/
+
+# 4. 看 monorepo 包
+ls packages/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：我们从 <code>src/entrypoints/cli.tsx</code> 出发，看清"敲下 <code>ccb</code> 到终端里出现交互界面"这一路上代码到底怎么跑——一个巨大的 fast-path 分发器、Bun 构建、以及 REPL 是怎么挂载起来的。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-tutorial.html" style="color:var(--accent-cyan);">&larr; 返回 20 天总目录</a>
+                <a href="claude-code-src-day02.html" style="color:var(--accent-green);">下一天 · 环境搭建与启动链 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
