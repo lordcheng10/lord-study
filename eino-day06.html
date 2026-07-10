@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · Runnable 与 4 种流式范式 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .quad{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+        .qd{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:13px;border-left:3px solid #00ADD8}
+        .qd b{font-family:'SF Mono',monospace;color:#00ADD8;font-size:14px} .qd .io{font-size:11px;color:var(--text-muted);font-family:monospace} .qd p{font-size:12px;color:var(--text-secondary);margin:5px 0 0}
+        @media(max-width:768px){ .quad{grid-template-columns:1fr} }
+        .matrix{width:100%;border-collapse:collapse;margin:8px 0} .matrix th,.matrix td{border:1px solid var(--border-color);padding:8px 10px;text-align:center;font-size:12px} .matrix th{background:var(--bg-secondary);color:#00ADD8}
+        .matrix .self{background:rgba(34,197,94,.12);color:var(--accent-green);font-weight:700}
+        .matrix .conv{color:var(--text-muted)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">Runnable 与 4 种流式范式 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要统一抽象</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Runnable 接口（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 4 范式怎么区分</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 招牌魔法：实现1补齐4</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 补齐优先级表（真实代码）</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 4 个方向的转换</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 真流式的代价</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 完整旅程</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 Chain &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 编排引擎</span>
+            <h1 class="part-title">Runnable 与 4 种流式范式</h1>
+            <p class="part-desc">进入框架心脏。<code>Runnable</code> 是编排产物的统一执行抽象，有 4 种调用方式。理解"组件只实现一个、框架自动补齐四个"这个 Eino 最精妙的设计——是读懂后面一切的钥匙。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要一个统一抽象</h1></div>
+            <div class="card">
+                <p>Day 04 你见过：ChatModel 有 Generate/Stream，Tool 有 InvokableRun/StreamableRun，各组件方法名都不一样。可编排引擎要把它们"当成统一的东西"连起来跑——总不能给每种组件写一套连接逻辑吧？</p>
+                <div class="card highlight-card" style="margin:12px 0;"><p style="margin:0;font-size:15px;">🎯 <code>Runnable</code> 就是那个"统一插头"：<strong>任何组件、任何编排产物（Chain/Graph/Workflow），编译后都变成一个 <code>Runnable</code></strong>，都有相同的 4 个方法可调。编排引擎只跟 Runnable 打交道。</p></div>
+                <div class="glossary"><b>类比</b>：各种电器插头形状不一，但都转成"国标插头"后就能插同一个插座。<code>Runnable</code> 就是 Eino 的"国标插头"——它抹平了各组件的差异。<code>compose/runnable.go</code> 是本页的主角文件。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Runnable 接口（真实代码）</h1></div>
+            <div class="card">
+                <p><code>compose/runnable.go:32</code> 的真实定义——4 个方法，泛型 <code>[I, O]</code>（输入类型/输出类型，编译期定死）：</p>
+<pre><code class="language-go">type Runnable[I, O any] interface {
+    Invoke(ctx, input I, opts ...Option) (output O, err error)
+    Stream(ctx, input I, opts ...Option) (output *schema.StreamReader[O], err error)
+    Collect(ctx, input *schema.StreamReader[I], opts ...Option) (output O, err error)
+    Transform(ctx, input *schema.StreamReader[I], opts ...Option) (output *schema.StreamReader[O], err error)
+}</code></pre>
+                <div class="anno"><b>I</b> = 输入类型，<b>O</b> = 输出类型（泛型，编译期就确定，所以类型安全）。四个方法名字不同，区别只在"输入是不是流、输出是不是流"。</div>
+                <div class="baby"><span class="t">泛型 [I, O] 是什么？（Go 小白）</span>
+                <code>Runnable[string, *Message]</code> 意思是"输入是 string、输出是 *Message 的可运行体"。泛型让同一套 Runnable 代码能用于任意输入输出类型，且编译器会帮你检查类型对不对——你不会把一个"输入 int"的 Runnable 误当"输入 string"用。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>4 范式怎么区分：看输入输出是不是流</h1></div>
+            <div class="card">
+                <p>4 个方法按"输入是不是流 × 输出是不是流"两两组合（源码注释里的比喻很形象）：</p>
+                <div class="quad">
+                    <div class="qd"><b>Invoke</b> <span class="io">单值 → 单值</span><p>ping ⇒ pong。普通调用：给一句，等一个完整答案。</p></div>
+                    <div class="qd"><b>Stream</b> <span class="io">单值 → 流</span><p>ping ⇒ stream。给一句，边生成边返回（打字机）。</p></div>
+                    <div class="qd"><b>Collect</b> <span class="io">流 → 单值</span><p>stream ⇒ pong。输入是流，收齐了给完整答案。</p></div>
+                    <div class="qd"><b>Transform</b> <span class="io">流 → 流</span><p>stream ⇒ stream。流进流出，一段段处理一段段产出。</p></div>
+                </div>
+                <div class="glossary"><b>什么时候用哪个？</b> 大部分时候你用 <code>Invoke</code>（要完整结果）或 <code>Stream</code>（要打字机效果）。<code>Collect/Transform</code> 用于"输入本身就是流"的场景——比如上一个节点吐流、这个节点要接着处理。<strong>关键是：你不用关心组件内部实现了哪几个，任意一个都能调（下一讲揭秘）。</strong>对应地，你写自定义逻辑（Lambda）时也有这 4 种函数签名（<code>types_lambda.go:27</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>招牌魔法：实现 1 个，自动补齐 4 个</h1></div>
+            <div class="card">
+                <p>这是 Eino 最精髓的设计。源码注释直说（<code>runnable.go:29</code>）：</p>
+                <div class="glossary" style="font-style:italic;">"we do downgrade compatibility for four data flow patterns, and can automatically connect components that only implement one or more methods. eg, if a component only implements Stream(), you can still call Invoke()..."</div>
+                <p>翻译：<strong>组件只实现了其中一两个方法，框架能自动"降级/升级"补齐另外几个</strong>。比如 <code>ChatModel</code> 只提供了 <code>Generate</code>（≈Invoke）和 <code>Stream</code>（<code>component_to_graph_node.go:93</code>，Collect/Transform 传 nil），但编译后你依然能对整张图调 <code>Collect</code>/<code>Transform</code>。</p>
+                <div class="baby"><span class="t">为什么这个设计牛？（大白话）</b>
+                想象你在搭流水线：模型天生是"流式"的（Stream），但你下一个节点（比如存数据库）只要"完整结果"（Invoke 式）。<strong>没有这个魔法，你就得手写"把模型的流拼成完整值"的胶水代码；有了它，框架自动帮你拼</strong>（用 Day 03 的 <code>ConcatMessages</code>）。反过来，一个只会返回完整值的组件，框架也能把它包成"单元素流"。<strong>结果：组件作者只写对它最自然的 1-2 种，用户四种随便调。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>补齐优先级表（真实代码）</h1></div>
+            <div class="card">
+                <p>自动补齐发生在 <code>newRunnablePacker</code>（<code>runnable.go:345</code>）。它是一张"优先级表"——补 <code>Invoke</code> 时，自己有就用自己，否则依次尝试用 Stream/Collect/Transform 转：</p>
+<pre><code class="language-go">// runnable.go:368 —— 补 Invoke
+if i != nil {
+    r.i = i                       // 自己有 Invoke，直接用
+} else if s != nil {
+    r.i = invokeByStream(s)       // 否则：用 Stream 转（拿到流再拼成完整值）
+} else if c != nil {
+    r.i = invokeByCollect(c)      // 或：用 Collect 转（把输入包成单元素流）
+} else {
+    r.i = invokeByTransform(t)    // 或：用 Transform 转
+}
+// Stream / Collect / Transform 各有类似的优先级链（runnable.go:378-406）</code></pre>
+                <div class="anno">读法：<b>四个方法各有一条"自己没有就找别人代劳"的优先级链。</b>只要组件至少实现了 4 个里的 1 个，其余 3 个都能被推导出来。</div>
+                <p>用一张矩阵直观看"从谁能推出谁"：</p>
+                <table class="matrix">
+                    <thead><tr><th>目标\来源</th><th>有 Invoke</th><th>有 Stream</th><th>有 Collect</th><th>有 Transform</th></tr></thead>
+                    <tbody>
+                        <tr><th>要 Invoke</th><td class="self">直接用</td><td class="conv">拼流</td><td class="conv">包单元素流</td><td class="conv">拼流</td></tr>
+                        <tr><th>要 Stream</th><td class="conv">包成单块流</td><td class="self">直接用</td><td class="conv">—</td><td class="conv">真流式</td></tr>
+                        <tr><th>要 Collect</th><td class="conv">拼输入+Invoke</td><td class="conv">—</td><td class="self">直接用</td><td class="conv">真流式</td></tr>
+                        <tr><th>要 Transform</th><td class="conv">拼输入+包块流</td><td class="conv">—</td><td class="conv">—</td><td class="self">直接用</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>4 个方向的转换（血肉）</h1></div>
+            <div class="card">
+                <p>补齐靠的是四类转换函数（<code>runnable.go:203-343</code>）。理解这三种基本操作就懂了全部：</p>
+                <ul>
+                    <li><strong>流 → 单值</strong>：<code>concatStreamReader</code> 把所有 chunk 拼成完整值（用 Day 03 的 <code>ConcatMessages</code>）。例：<code>invokeByStream</code>——先 Stream 拿流，再拼成单值。</li>
+                    <li><strong>单值 → 流</strong>：把单值包成"只有一个元素的流"——<code>StreamReaderFromArray([]O{out})</code>（<code>runnable.go:243</code> 的 <code>streamByInvoke</code>）。</li>
+                    <li><strong>单值喂给需要流的方法</strong>：把单值包成单元素流再喂进去，如 <code>invokeByCollect</code>（<code>runnable.go:214</code>）。</li>
+                </ul>
+                <div class="glossary"><b>一张记忆图</b>：<br>
+                <code>Invoke</code>（要完整值）→ 可从任何流方法"拼接(concat)"降级得到。<br>
+                <code>Stream</code>（要真流）→ 真流式优先来自 Transform 或 Stream 自身；用 Invoke 降级会退化成"单块流"（就一个大块，没了逐字效果）。<br>
+                <code>Collect</code> → 先把输入流拼成单值，再走 Invoke。<br>
+                <code>Transform</code> → 真流式；用 Invoke 降级 = 先拼输入、算完再包成单块流。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>真流式的代价：一个节点破功，全链凝固</h1></div>
+            <div class="card">
+                <p>魔法虽好，但有个重要认知（初学者必懂）：<strong>真正的"逐字流式"只有当链路上<u>每个</u>节点都提供了 Stream/Transform 时，才能端到端保持。</strong>任何一个节点只有 Invoke，流到那里就会被 concat 成整块。</p>
+                <div class="glossary"><b>为什么？</b> 假设链路 <code>模型(Stream) → 过滤(只有 Invoke) → 输出</code>。模型吐流，但过滤节点只会 <code>Invoke</code>（要完整输入）——框架只能先把模型的流<strong>拼成完整消息</strong>再喂给过滤。于是"逐字"效果在过滤这里就没了，后面即使想流也是"一整块"。<strong>所以想要端到端打字机效果，链路上每个节点都得是流式的。</strong>源码在 <code>chain.go:264</code> 特别提醒：想要真流式输出，请用 <code>StreamableLambda</code>/<code>TransformableLambda</code> 写你的自定义节点。</div>
+                <div class="baby"><span class="t">内部实现的一个小知识</span>
+                Runnable 对外是泛型 <code>[I,O]</code>（类型安全），但内部执行时用 <code>any</code>（无类型）——<code>composableRunnable</code>（<code>runnable.go:46</code>）只保留 <code>i</code>(处理非流)和 <code>t</code>(处理流)两个函数 + 三个 <code>reflect.Type</code> 做类型校验。编译好的图最后又用 <code>toGenericRunnable</code>（<code>runnable.go:411</code>）包回强类型接口给你。<strong>外层强类型（好用、安全）、内层无类型（灵活、统一）</strong>——这是 Go 泛型 + 反射的经典配合。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Runnable 是什么？为什么需要它？（编排产物的统一执行插头）</li>
+                    <li>4 种范式怎么区分？（输入是不是流 × 输出是不是流）</li>
+                    <li>"实现 1 个补齐 4 个"怎么做到？（newRunnablePacker 的优先级表 + 转换函数）</li>
+                    <li>三种基本转换？（流→单值拼接、单值→单块流、单值→单元素流）</li>
+                    <li>为什么"一个非流节点会让全链凝固"？想要真流式怎么办？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. Runnable 接口（L02）
+sed -n '32,40p' compose/runnable.go
+
+# 2. 补齐优先级表（L05，本页精华）
+sed -n '345,409p' compose/runnable.go
+
+# 3. 4 个方向的转换函数（L06）
+sed -n '203,260p' compose/runnable.go
+
+# 4. Lambda 的 4 种函数签名
+sed -n '27,39p' compose/types_lambda.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：懂了 Runnable，我们看最简单的编排——<strong>Chain（链式）</strong>：组件一个接一个串成流水线，自动连边、自动补到 END。它是 Graph 的简化封装。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 完整旅程</a>
+                <a href="eino-day07.html" style="color:var(--accent-green);">Day 07 · Chain 链式编排 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
