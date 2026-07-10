@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · 技能系统 skills — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#0ea5e9);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">技能系统 skills · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 技能 vs 工具</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SKILL.md 长啥样</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · frontmatter 门控</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三层发现加载</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 优先级覆盖</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 渐进式披露</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 斜杠命令直达</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 记忆</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day12.html" class="nav-link" style="color:#0ea5e9;">Day 12 扩展 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 技能与渠道</span>
+            <h1 class="part-title">技能系统 skills</h1>
+            <p class="part-desc">第 3 周讲"手和嘴"。今天：<code>skills/</code> 里 52 个技能怎么定义（SKILL.md + frontmatter）、三层发现加载、以及一个反直觉的事实——<strong>技能不是可调用的工具，而是"渐进式披露的提示词片段"</strong>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>技能 vs 工具</h1></div>
+            <div class="card">
+                <p>OpenClaw 里"技能（skill）"和"工具（tool）"是两种不同机制，别混：</p>
+                <ul>
+                    <li><strong>工具</strong>：一段可执行代码（<code>{name, description, parameters, execute}</code>），模型调用它、它跑函数返回结果。</li>
+                    <li><strong>技能</strong>：一个 <code>SKILL.md</code> markdown 文件（数据，无可执行代码），靠"提示词 + 模型自己读文件照做"生效。</li>
+                </ul>
+                <div class="baby"><span class="t">工具是"按钮"，技能是"操作手册"</span>
+                工具像遥控器上的<strong>按钮</strong>——按下去（调用）就执行一个确定动作。<strong>技能像一本<strong>操作手册</strong>——它本身不"执行"，而是教模型"遇到这类需求时该怎么一步步做"（通常是"用 curl 调这个 API""按这个格式输出"）。</strong>模型读了手册，用已有的工具（如 exec 跑 curl）去照做。<strong>所以加一个技能 = 加一篇 markdown 说明书，零代码；这让非程序员也能给助理"教新本领"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SKILL.md 长啥样</h1></div>
+            <div class="card">
+                <p><code>skills/</code> 下 52 个目录，每个核心是 <code>SKILL.md</code>（YAML frontmatter + markdown 正文）。真实例子 <code>skills/weather/SKILL.md:1-6</code>：</p>
+<pre><code class="language-markdown">---
+name: weather
+description: "Get current weather and forecasts via wttr.in ... Use when: ... NOT for: ..."
+homepage: https://wttr.in/:help
+metadata: { "openclaw": { "emoji": "☔", "requires": { "bins": ["curl"] } } }
+---
+
+（正文：教模型怎么用 curl 调 wttr.in、怎么解析、怎么呈现）</code></pre>
+                <div class="anno">读法：<b>frontmatter 是"元信息"（名字、描述、依赖），正文是"给模型的操作说明"。<code>description</code> 里的 "Use when / NOT for" 很关键——它帮模型判断"这个技能该不该用"。</b><code>skills/canvas/SKILL.md</code> 甚至没有 frontmatter（说明 frontmatter 可选）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>frontmatter 门控</h1></div>
+            <div class="card">
+                <p><code>metadata.openclaw.requires</code> 声明技能的"启用前提"（Schema 在 <code>src/agents/skills/types.ts</code>）：</p>
+                <ul>
+                    <li><code>requires.bins: ["curl"]</code>：需要某命令存在（weather）。</li>
+                    <li><code>requires.anyBins</code> + <code>install</code>：缺了可自动装（<code>spotify-player</code>，brew 公式）。</li>
+                    <li><code>requires.config: ["channels.slack"]</code>：需要某配置（<code>skills/slack</code>）。</li>
+                    <li><code>os</code> / <code>requires.env</code>：限定系统/环境变量。</li>
+                </ul>
+                <div class="anno">读法：<b>门控让技能"条件启用"：没装 curl 的机器就不给 weather 技能（免得模型调了报错）。</b>资格过滤在 <code>shouldIncludeSkill</code>（<code>skills/config.ts:71-103</code>）。frontmatter 解析 + 安全校验在 <code>frontmatter.ts</code>（含防 shell 注入的 <code>normalizeSafeBrewFormula</code>——防止恶意技能借"自动安装"跑任意命令）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三层发现加载</h1></div>
+            <div class="card">
+                <p><code>loadSkillEntries</code>（<code>skills/workspace.ts:292-527</code>）扫多个 root：</p>
+                <ul>
+                    <li><strong>bundled</strong>：仓库自带 <code>skills/</code>（<code>resolveBundledSkillsDir</code>）。</li>
+                    <li><strong>managed</strong>：<code>~/.openclaw/skills</code>（用户装的）。</li>
+                    <li><strong>workspace</strong>：<code>&lt;workspace&gt;/skills</code>（本项目专属）。</li>
+                    <li>外加 <code>~/.agents/skills</code>、插件贡献目录。</li>
+                </ul>
+                <div class="anno">读法：<b>三层来源让技能可以"自带一批 + 用户全局装一批 + 每个工作区再加一批"。</b>含符号链接逃逸防护、体积/数量上限（防恶意撑爆）、chokidar 热重载（<code>skills/refresh.ts</code>，改了 SKILL.md 立即生效）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>优先级覆盖</h1></div>
+            <div class="card">
+                <p>同名技能冲突时的优先级（后者覆盖前者，<code>workspace.ts:491</code>）：</p>
+<pre><code class="language-typescript">extra &lt; bundled &lt; managed &lt; agents-personal &lt; agents-project &lt; workspace</code></pre>
+                <div class="baby"><span class="t">"就近覆盖"——本地定制赢</span>
+                如果仓库自带一个 <code>weather</code> 技能，但你想在自己的工作区改它，<strong>只要在 <code>&lt;workspace&gt;/skills/weather/SKILL.md</code> 放一个同名的，它就覆盖内置版</strong>——因为 workspace 优先级最高。<strong>这就像 CSS 的层叠、或配置文件的"本地覆盖全局"：越"贴近你当前项目"的定义越优先。</strong>让你能定制内置技能而不用改仓库源码。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>渐进式披露（技能怎么"调用"）</h1></div>
+            <div class="card">
+                <p>关键：技能<strong>不是</strong>可调用工具。运行流程是（呼应 Day 09 技能段）：</p>
+                <ol>
+                    <li>系统提示里只放技能<strong>目录</strong>（name+description+location，XML 形式）。</li>
+                    <li>模型按 description 判断该不该用某技能。</li>
+                    <li>命中 → 模型用 <code>read</code> 工具读那个 <code>SKILL.md</code> 的 <code>&lt;location&gt;</code>。</li>
+                    <li>模型遵循 markdown 正文（通常执行其中的 bash/curl）。</li>
+                </ol>
+                <div class="baby"><span class="t">为什么不一次性全塞进提示？</span>
+                52 个技能，每个 SKILL.md 可能几百行。<strong>全塞进每次请求 = 巨量 token 浪费 + 撑爆上下文。</strong>渐进式披露（progressive disclosure）：<strong>先只给"目录+简介"（几行），模型真需要某个才去读全文。</strong>好比图书馆——你先看书目，需要哪本才借来读，而不是把整个图书馆搬回家。运行时取技能在 <code>skills-runtime.ts</code>，注入提示在 <code>attempt.ts:1417/1654</code>，格式化由 Pi 的 <code>formatSkillsForPrompt</code> 生成。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>斜杠命令直达</h1></div>
+            <div class="card">
+                <p>第二条路径：技能可注册成<strong>用户斜杠命令</strong>，甚至绕过 LLM 直接调工具（<code>skills/workspace.ts:775-881</code> + <code>auto-reply/skill-commands.ts</code>）：</p>
+<pre><code class="language-typescript">// frontmatter 设 command-dispatch: tool + command-tool: &lt;name&gt;
+// → 用户发 /skillname，直接调用指定工具，不经过 LLM 推理
+//   （SkillCommandDispatchSpec，types.ts:40-49）</code></pre>
+                <div class="anno">读法：<b>这是技能唯一"变成真工具"的场景：确定性任务（如 /weather 北京）不需要 LLM 绕一圈，直接触发工具，快且省。</b>两条路径并存：智能路径（模型判断+读文件）和确定性路径（斜杠命令直达）。安装/扫描 CLI 在 <code>skills-install.ts</code>（含 <code>security/skill-scanner</code> 安全扫描，Day 17）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>技能和工具的本质区别？</li>
+                    <li>SKILL.md 的 frontmatter + 正文各是什么？</li>
+                    <li>requires 门控解决什么问题？</li>
+                    <li>三层发现 + 优先级覆盖怎么让技能可定制？</li>
+                    <li>渐进式披露是什么？为什么要它？斜杠命令直达又是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+ls skills/ | head -30
+sed -n '1,10p' skills/weather/SKILL.md
+grep -n 'extra.*bundled.*managed\|shouldIncludeSkill' src/agents/skills/workspace.ts src/agents/skills/config.ts | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>扩展系统 extensions</strong>——extension（=plugin）是可执行 TS 模块，能注入 provider/channel/tool/hook。它和技能的区别、<code>register(api)</code> 加载流水线、生命周期钩子。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 记忆</a>
+                <a href="openclaw-day12.html" style="color:#0ea5e9;">Day 12 · 扩展系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 扩展系统 extensions — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#8b5cf6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#0ea5e9);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">扩展系统 extensions · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · extension=plugin</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 扩展 vs 技能</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 扩展的结构</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · register(api)</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 加载流水线</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 生命周期钩子</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 安全门控</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 技能</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day13.html" class="nav-link" style="color:#0ea5e9;">Day 13 渠道抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 技能与渠道</span>
+            <h1 class="part-title">扩展系统 extensions</h1>
+            <p class="part-desc">技能是"数据"，扩展是"代码"。extension（代码里叫 plugin）是可执行 TS 模块，能向宿主注入 provider / channel / tool / hook / 服务 / HTTP 路由。今天看它怎么被发现、加载、注册。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>extension = plugin</h1></div>
+            <div class="card">
+                <p>先厘清术语：目录叫 <code>extensions/</code>，但类型/清单/代码里都叫 <strong>plugin</strong>（<code>OpenClawPlugin*</code>、<code>openclaw.plugin.json</code>、<code>src/plugins/</code>）。<strong>本课"扩展"和"插件"是同一个东西。</strong></p>
+                <div class="anno">读法：<b>真正的插件 API 是 <code>OpenClawPluginApi</code>（<code>src/plugins/types.ts:366-409</code>）；面向插件作者的 SDK 入口是 <code>src/plugin-sdk/</code>（扩展 <code>import "openclaw/plugin-sdk/&lt;子路径&gt;"</code>）。</b>（<code>src/extensionAPI.ts</code> 只是 15 行的再导出壳，不是真 API。）</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>扩展 vs 技能</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th></th><th>技能 skill（Day 11）</th><th>扩展 extension（今天）</th></tr>
+                    <tr><td>形态</td><td>SKILL.md（markdown 数据）</td><td>TS 模块（可执行代码）</td></tr>
+                    <tr><td>怎么生效</td><td>提示词 + 模型读文件照做</td><td>被 import 并调 register(api) 注入能力</td></tr>
+                    <tr><td>能干什么</td><td>教模型用已有工具完成任务</td><td>注入新 provider/channel/tool/hook/服务</td></tr>
+                    <tr><td>门槛</td><td>写 markdown，零代码</td><td>写 TS 代码</td></tr>
+                </table>
+                <div class="anno">读法：<b>技能扩"知识/玩法"，扩展扩"底层能力"。想让助理"会查天气"→ 写技能；想让助理"支持一个新聊天平台/新模型来源"→ 写扩展。</b>两者可连接：扩展清单可带 <code>skills?: string[]</code> 字段附带技能目录。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>扩展的结构</h1></div>
+            <div class="card">
+                <p>每个 <code>extensions/&lt;名&gt;/</code> 含三样：</p>
+                <ul>
+                    <li><code>openclaw.plugin.json</code>：清单（必需），含 <code>id</code> + <code>configSchema</code>。</li>
+                    <li><code>package.json</code>：含 <code>openclaw.extensions: ["./index.ts"]</code> 声明入口。</li>
+                    <li><code>index.ts</code>：默认导出注册逻辑。</li>
+                </ul>
+                <p>真实例子 <code>extensions/ollama/</code>（provider 型）：</p>
+<pre><code class="language-json">// openclaw.plugin.json
+{ "id": "ollama", "providers": ["ollama"], "configSchema": { ... } }</code></pre>
+                <div class="anno">读法：<b>清单声明"我是谁、我提供什么（providers/channels）、我的配置长啥样"。configSchema 用于校验 + 生成配置向导。</b>清单只被"读"（不执行代码），加载时先扫清单再决定要不要真正 import（安全，见 L07）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>register(api)</h1></div>
+            <div class="card">
+                <p>入口 <code>index.ts</code> 的 <code>register(api)</code> 是扩展往宿主"插能力"的地方。四类真实例子：</p>
+<pre><code class="language-typescript">// Provider 型（ollama）：注入新模型来源
+register(api) { api.registerProvider({ id, label, auth, discovery, wizard, onModelSelected }); }
+
+// Channel 型（telegram）：注入新聊天渠道
+register(api) { api.registerChannel({ plugin: telegramPlugin }); }
+
+// Tool 型（llm-task）：注入新工具
+export default function register(api) { api.registerTool(createLlmTaskTool(api), { optional: true }); }
+
+// Memory 型（memory-lancedb）：注入工具 + 钩子 + 服务
+register(api) {
+  api.registerTool({ name: "memory_recall", parameters, execute });
+  api.on("before_agent_start", autoRecall);
+  api.on("agent_end", autoCapture);
+  api.registerService(...);
+}</code></pre>
+                <div class="anno">读法：<b><code>api.registerX(...)</code> 系列是扩展的"能力插槽"：Provider/Channel/Tool/Hook/Service/HttpRoute/Cli/Command/ContextEngine。</b>register 必须<strong>同步</strong>执行（加载器要求）。<code>createApi</code> 在 <code>src/plugins/registry.ts:186</code>，各 registerX 把东西推进 <code>PluginRegistry</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>加载流水线</h1></div>
+            <div class="card">
+                <p><code>loadOpenClawPlugins()</code>（<code>loader.ts:517-897</code>）五步：</p>
+                <ol>
+                    <li><strong>发现</strong> <code>discoverOpenClawPlugins</code>：扫 4 类 root（bundled <code>extensions/</code>、global <code>&lt;configDir&gt;/extensions</code>、workspace <code>&lt;ws&gt;/.openclaw/extensions</code>、config loadPaths）。</li>
+                    <li><strong>清单注册</strong>：只读 <code>openclaw.plugin.json</code>（不执行），按来源优先级 config &gt; workspace &gt; global &gt; bundled（用户可覆盖内建）。</li>
+                    <li><strong>逐个加载</strong>：去重、解析 enable、<strong>memory 槽位互斥</strong>（只允许一个 memory 扩展生效）、要求 configSchema。</li>
+                    <li><strong>import + register</strong>：用 <strong>jiti</strong>（<code>loader.ts:753</code>）import TS 入口，校验配置，<code>createApi()</code> 后调 <code>register(api)</code>。</li>
+                    <li><strong>激活</strong> <code>activatePluginRegistry</code> → <code>initializeGlobalHookRunner</code> 让钩子生效。</li>
+                </ol>
+                <div class="baby"><span class="t">为什么"先读清单、后执行代码"？</span>
+                执行第三方代码有风险。<strong>OpenClaw 先只读所有扩展的清单（纯数据、安全），据此决定哪些启用、有没有冲突、memory 槽位归谁；确定后才真正 import 那些要启用的、执行其 register。</strong>这样能在"跑代码"前做完所有决策和安全检查。jiti 是个能直接 import TS 的运行时（免预编译），方便本地扩展开发。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>生命周期钩子</h1></div>
+            <div class="card">
+                <p>扩展可用 <code>api.on(hookName, handler, {priority})</code> 挂钩到 Agent 生命周期各点（<code>PluginHookName</code>，<code>types.ts:424-448</code>）：</p>
+<pre><code class="language-typescript">before_model_resolve   // 换模型（Day 06）
+before_prompt_build    // 注入系统提示（Day 09，受策略门控）
+before_agent_start / agent_end       // 运行前后（memory 扩展的自动召回/捕获）
+llm_input / llm_output               // 模型输入输出
+before_tool_call / after_tool_call   // 工具调用前后（before 可 {block:true} 否决！）
+message_received / message_sending / message_sent
+session_start / session_end / gateway_start / gateway_stop
+before_compaction / after_compaction / subagent_*</code></pre>
+                <div class="anno">读法：<b>钩子让扩展"插进 Agent 的关键时刻"做事：memory 扩展在 <code>before_agent_start</code> 自动检索相关记忆、<code>agent_end</code> 自动保存新记忆；安全扩展在 <code>before_tool_call</code> 拦截危险调用。</b>这是典型的"事件钩子/中间件"架构，和你学过的 crewAI events、OpenHands 事件流同源。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>安全门控</h1></div>
+            <div class="card">
+                <p>扩展是"可信计算基"（装了就等于本地代码同权限，Day 17 会展开），但加载器仍有多道门控：</p>
+                <ul>
+                    <li>路径安全：<code>isUnsafePluginCandidate</code> 拒绝全局可写/越界目录（<code>discovery.ts:250-272</code>）。</li>
+                    <li>注册冲突：拒绝重复 provider id、重叠 HTTP 路由。</li>
+                    <li>提示注入门控：<code>before_prompt_build</code> 注入受 <code>allowPromptInjection</code> 策略约束（<code>registry.ts:520-567</code>）。</li>
+                    <li>memory 槽位互斥：多个 memory 扩展只放行一个。</li>
+                </ul>
+                <div class="anno">读法：<b>虽然信任模型认为"你自己装的扩展是可信的"，加载器还是做了防呆和冲突检测——避免误装到危险目录、避免两个扩展抢同一资源。</b>这是"信任但验证"的工程姿态。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>extension 和 plugin 什么关系？</li>
+                    <li>扩展和技能的四点区别？</li>
+                    <li>扩展的三个文件 + register(api) 干什么？</li>
+                    <li>加载流水线为什么"先读清单后执行代码"？</li>
+                    <li>生命周期钩子举 3 个用途？before_tool_call 能做什么特别的事？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+ls extensions/ | head -40
+cat extensions/ollama/openclaw.plugin.json
+grep -n 'register(api)\|registerProvider\|registerChannel' extensions/ollama/index.ts extensions/telegram/index.ts
+grep -n 'PluginHookName' src/plugins/types.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>渠道抽象接口</strong>——所有聊天平台怎么统一？<code>ChannelPlugin</code> 用"组合式 adapter"（不是基类继承）定义收/发/连接/归一化契约。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 技能</a>
+                <a href="openclaw-day13.html" style="color:#0ea5e9;">Day 13 · 渠道抽象接口 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
