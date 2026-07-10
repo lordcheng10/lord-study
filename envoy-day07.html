@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · HTTP 连接管理器 HCM — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ff7043,#e91e63);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">HTTP 连接管理器 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · HCM 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 是个 L4 ReadFilter</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · onData → dispatch</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · newStream</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ActiveStream</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · decodeHeaders</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 响应编码出口</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 L4 过滤器</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day08.html" class="nav-link" style="color:#e91e63;">Day 08 L7 过滤器 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 过滤器与请求</span>
+            <h1 class="part-title">HTTP 连接管理器 HCM</h1>
+            <p class="part-desc">HCM（<code>conn_manager_impl.cc</code>，2700+ 行）是 L7 的心脏。它是"L4 到 L7 的桥"——本身是个网络读过滤器，把原始字节解析成 HTTP，为每个请求建流，启动 L7 过滤器链。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>HCM 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">HCM = "HTTP 世界的总调度"</span>
+                前面 L4 过滤器处理的是原始字节流（不认识 HTTP）。<strong>HCM（HTTP Connection Manager）负责把字节流"翻译"成 HTTP 请求，然后管理这些请求的一生：解析、建流、跑 L7 过滤器、收响应、编码回去。</strong>它是 Envoy 里最重要、最复杂的一个组件。一条 HTTP/2 连接上可以有多个并发请求（多路复用），HCM 为每个请求建一个"流（stream）"分别管理。<strong>理解了 HCM，就理解了 Envoy 怎么处理 HTTP。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>它本身是个 L4 ReadFilter</h1></div>
+            <div class="card">
+                <p>关键设计：<strong>HCM 继承 <code>Network::ReadFilter</code></strong>（Day 06 的 L4 读过滤器）——它是网络过滤器链的最后一个（终端）过滤器。<code>initializeReadFilterCallbacks()</code>（<code>conn_manager_impl.cc:180</code>）作为 ReadFilter 被安装时调用。</p>
+                <div class="anno">读法：<b>这就是 L4→L7 的桥（Day 05 讲过）：网络过滤器链处理字节，走到 HCM 这个"特殊过滤器"，它开始说 HTTP。<code>#if defined(HIGRESS)</code>（<code>:188-203</code>）是 Higress 定制的每 IO 周期请求数限制。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>onData → dispatch</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// conn_manager_impl.cc:539 —— HCM 作为 L4 过滤器的 onData
+if (!codec_) createCodec(data);              // :549 首次创建 HTTP codec（按 H1/H2/H3）
+codec_-&gt;dispatch(data);                       // :556 ★核心：把字节交给 codec 解析
+// codec 解析过程中回调 HCM 的 newStream / decodeHeaders
+return Network::FilterStatus::StopIteration; // :591 HCM 是 L4 链终点，不再往后传</code></pre>
+                <div class="anno">读法：<b><code>onData</code> 拿到 L4 传来的字节，交给 <code>codec_-&gt;dispatch()</code>（HTTP 解析器，Day 10）。codec 边解析边<strong>回调</strong>HCM——解析出新请求就回调 <code>newStream</code>、解析出请求头就回调 <code>decodeHeaders</code>。</b>始终返回 StopIteration（HCM 是 L4 链末端，字节不再往后传给别的 L4 过滤器）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>newStream（新请求）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// conn_manager_impl.cc:435 —— codec 解析到新请求时回调
+RequestDecoder&amp; newStream(ResponseEncoder&amp; response_encoder, ...) {
+  auto new_stream = ActiveStream(...);       // :455 每个请求一个 ActiveStream
+  LinkedList::moveIntoList(std::move(new_stream), streams_);  // :493 加入 streams_ 链表
+  return **streams_.begin();                 // ActiveStream 实现了 RequestDecoder
+}</code></pre>
+                <div class="baby"><span class="t">一个请求 = 一个 ActiveStream</span>
+                HTTP/2 一条连接能并发多个请求。<strong>HCM 为每个请求创建一个 <code>ActiveStream</code> 对象，放进 <code>streams_</code> 链表管理。</strong>每个 ActiveStream 独立持有这个请求的状态：请求头、响应、它自己的 L7 过滤器链（<code>filter_manager_</code>）。<strong>这样多个并发请求互不干扰，各走各的过滤器链。</strong>连接是"管道"，stream 是"管道里并行流动的一个个请求"。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ActiveStream</h1></div>
+            <div class="card">
+                <p><code>ActiveStream</code> 内含一个 <code>filter_manager_</code>（<code>FilterManager</code> 成员）——这是 L7 过滤器链的真正持有者（Day 08）。它还实现了 <code>RequestDecoder</code>——codec 解析出的 HTTP 事件（decodeHeaders/decodeData）直接回调到它。</p>
+                <div class="anno">读法：<b>ActiveStream 一身多任：既是"请求的状态容器"，又是"codec 的回调接收者（RequestDecoder）"，还持有"L7 过滤器链（filter_manager_）"。它是连接 codec 和 L7 过滤器的枢纽。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>decodeHeaders（启动 L7 链）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// conn_manager_impl.cc:1352 ActiveStream::decodeHeaders（codec 解析出请求头后回调）
+request_headers_ = std::move(headers);       // :1364
+// 快照路由配置、过载丢弃检查、100-continue 处理…
+refreshCachedRoute();                         // :1565 ★路由匹配在这里做并缓存（Day 05 易错点）
+filter_manager_.createDownstreamFilterChain(); // :1576 按配置创建 L7 过滤器链
+filter_manager_.decodeHeaders(*request_headers_, end_stream);  // :1612 启动 decode 链迭代</code></pre>
+                <div class="anno">读法：<b>请求头到齐后：①<code>refreshCachedRoute()</code> 算好路由并缓存（<strong>路由在 HCM 算，不在 Router！</strong>Day 05 强调过）②创建 L7 过滤器链 ③启动 decode 迭代（Day 08）。</b><code>decodeData</code>/<code>decodeTrailers</code> 类似转发给 filter_manager_。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>响应编码出口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// conn_manager_impl.cc:1940 ActiveStream::encodeHeaders（L7 encode 链走完后回调）
+// 尾部（:2087）：
+response_encoder_-&gt;encodeHeaders(headers, end_stream);  // :2088 经 codec 编码写回网络
+// encodeData（:2097）→ response_encoder_->encodeData()</code></pre>
+                <div class="baby"><span class="t">请求进、响应出，形成闭环</span>
+                <strong>进来的路：字节 → codec 解析 → decodeHeaders → L7 decode 链 → Router 转发上游。</strong><strong>出去的路：上游响应 → L7 encode 链 → <code>ActiveStream::encodeHeaders</code> → <code>response_encoder_-&gt;encodeHeaders</code>（codec 编码成字节）→ 写回下游。</strong>HCM 管着这一进一出的完整闭环。decode（解码/请求方向）和 encode（编码/响应方向）是 L7 的两个对称路径——明天详讲。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>HCM 的角色？为什么说它是 L4→L7 的桥？</li>
+                    <li>onData 怎么把字节变成 HTTP？（dispatch + 回调）</li>
+                    <li>一个请求对应什么对象？多路复用怎么管理？</li>
+                    <li>ActiveStream 一身几任？</li>
+                    <li>路由到底在哪里算？decode/encode 两条路径？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '539,592p' source/common/http/conn_manager_impl.cc   # onData
+sed -n '435,495p' source/common/http/conn_manager_impl.cc   # newStream
+grep -n 'refreshCachedRoute\|createDownstreamFilterChain\|filter_manager_.decodeHeaders' source/common/http/conn_manager_impl.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>L7 HTTP 过滤器</strong>——丰富的 <code>FilterHeadersStatus</code>、StreamDecoderFilter/StreamEncoderFilter 接口、decode/encode 双向迭代、以及 HIGRESS 定制点。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 L4 过滤器</a>
+                <a href="envoy-day08.html" style="color:#e91e63;">Day 08 · L7 HTTP 过滤器 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

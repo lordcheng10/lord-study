@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · L4 网络过滤器链 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ff7043,#e91e63);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">L4 网络过滤器链 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 过滤器链思想</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · FilterStatus</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ReadFilter</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · WriteFilter</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · FIFO vs LIFO</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · onContinueReading</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 暂停与恢复</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 请求入口</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day07.html" class="nav-link" style="color:#e91e63;">Day 07 HCM &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 过滤器与请求</span>
+            <h1 class="part-title">L4 网络过滤器链</h1>
+            <p class="part-desc">第 2 周深入"请求怎么被处理"。先看最底层的 L4（TCP 字节流）过滤器：<code>FilterStatus</code>、ReadFilter/WriteFilter 接口、FilterManager 的读写链表，以及迭代/暂停/恢复机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>过滤器链思想</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">过滤器链 = "流水线"</span>
+                Envoy 处理请求像工厂流水线：数据依次经过一个个"工位"（过滤器），每个工位做一件事（限速、加密、日志、转发…）。<strong>每个过滤器处理完，决定"传给下一个工位"（Continue）还是"先停一下"（StopIteration）。</strong>好处：功能<strong>可组合、可插拔</strong>——想加个限流，插一个限流过滤器进链子即可，不用改别的。<strong>L4 过滤器处理原始 TCP 字节流，L7 过滤器处理解析后的 HTTP（Day 08）。今天讲 L4。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>FilterStatus（迭代控制）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/network/filter.h:41
+enum class FilterStatus {
+  Continue,        // 继续调用后续过滤器
+  StopIteration    // 停止迭代（等异步操作完成后再 continue）
+};</code></pre>
+                <div class="anno">读法：<b>L4 层的迭代控制极简——只有两个值。每个过滤器处理完返回其一：Continue = "我处理好了，交给下一个"；StopIteration = "我还没处理完（比如在等一个异步鉴权），先别往下走，我完事了会主动喊继续"。</b>L7 的状态码丰富得多（Day 08）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>ReadFilter（读路径）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/network/filter.h:241
+class ReadFilter {
+  virtual FilterStatus onData(Buffer::Instance&amp; data, bool end_stream) PURE;  // :252 读到数据时调用
+  virtual FilterStatus onNewConnection() PURE;                                // :260 连接首次建立
+  virtual void initializeReadFilterCallbacks(ReadFilterCallbacks&amp; callbacks) PURE;  // :273
+};</code></pre>
+                <div class="anno">读法：<b>ReadFilter 处理"从下游连接读进来"的数据。<code>onData</code> 是核心（拿到字节缓冲 <code>data</code>，可修改）。<code>onNewConnection</code> 做一次性初始化。</b>回调 <code>ReadFilterCallbacks</code> 提供 <code>continueReading()</code>（恢复被停的链）、<code>injectReadDataToFilterChain()</code>（注入数据）等。<strong>HCM（Day 07）就是一个 ReadFilter。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>WriteFilter（写路径）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/network/filter.h:123
+class WriteFilter {
+  virtual FilterStatus onWrite(Buffer::Instance&amp; data, bool end_stream) PURE;  // :133 数据写往连接时
+};
+// Filter（:289）同时继承 ReadFilter + WriteFilter，一个实例覆盖读写两路</code></pre>
+                <div class="anno">读法：<b>WriteFilter 处理"往下游连接写出去"的数据（响应方向）。<code>Filter</code> = 读写都管的过滤器。</b>读=下游进来的、写=返回下游的，方向相反。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>FIFO vs LIFO</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// FilterManager 接口 envoy/network/filter.h:295
+addReadFilter()   // :315 FIFO 顺序（先加先调）
+addWriteFilter()  // :303 LIFO 顺序（后加先调）</code></pre>
+                <div class="baby"><span class="t">为什么读是 FIFO、写是 LIFO？</span>
+                想象过滤器 A、B 按顺序配置（A 在前）。<strong>读方向（进来）：A→B（先配的先处理进入的数据，FIFO）。写方向（出去）：B→A（后配的先处理出去的数据，LIFO）。</strong>为什么？因为要对称——数据"进来时 A 先看、出去时 A 后看"，就像剥洋葱：进去一层层往里剥（A、B），出来一层层往外包（B、A）。<strong>比如 A 是加密过滤器：进来时 A 先解密（最外层），出去时 A 最后加密（最外层）。FIFO/LIFO 保证了这种对称的"洋葱模型"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>onContinueReading（读迭代核心）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/network/filter_manager_impl.cc:62 —— L4 读的心脏
+for (; entry != upstream_filters_.end(); entry++) {
+  if (!(*entry)-&gt;initialized_) {          // 首次先调 onNewConnection()
+    FilterStatus status = (*entry)-&gt;filter_-&gt;onNewConnection();
+    if (status == FilterStatus::StopIteration) return;
+  }
+  StreamBuffer read_buffer = buffer_source.getReadBuffer();
+  if (read_buffer.buffer.length() &gt; 0 || read_buffer.end_stream) {
+    FilterStatus status = (*entry)-&gt;filter_-&gt;onData(read_buffer.buffer, read_buffer.end_stream);
+    if (status == FilterStatus::StopIteration) return;   // 停止即返回
+  }
+}</code></pre>
+                <div class="anno">读法：<b>就是一个 for 循环遍历读过滤器链，逐个调 <code>onData</code>。任一过滤器返回 <code>StopIteration</code> 就 <code>return</code>（中断迭代）。</b><code>onRead()</code>（<code>:100</code>）是入口。这个朴素的"遍历 + 可中断"就是过滤器链的执行引擎。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>暂停与恢复</h1></div>
+            <div class="card">
+                <p>某过滤器返回 <code>StopIteration</code> 后，链子暂停。等它异步操作完成，调 <code>continueReading()</code>（<code>ActiveReadFilter</code> 回调 <code>parent_.onContinueReading(this, ...)</code>）以 <code>this</code> 为起点从 <code>std::next(filter-&gt;entry())</code> 恢复迭代。</p>
+                <div class="baby"><span class="t">为什么要能"暂停"？</span>
+                有些过滤器要做<strong>异步</strong>操作——比如调外部鉴权服务问"这个连接允许吗？"，这需要时间。<strong>它不能傻等（会阻塞整个 worker 线程、拖累其他连接，违背 Day 04 的事件驱动）。所以它返回 StopIteration（"我先挂起，别人先处理"），等鉴权结果回来（通过事件循环），再调 <code>continueReading()</code> 从暂停点继续。</strong>这就是事件驱动世界里过滤器做异步操作的标准姿势——挂起而非阻塞。连接关闭也有协调机制（<code>disableClose</code> 延迟关闭直到过滤器处理完）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>过滤器链的"流水线"思想？可插拔的好处？</li>
+                    <li>FilterStatus 两个值各是什么意思？</li>
+                    <li>ReadFilter/WriteFilter/Filter 各处理什么方向？</li>
+                    <li>读 FIFO、写 LIFO 的"洋葱模型"？</li>
+                    <li>过滤器为什么要能暂停？怎么恢复？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '41,46p' envoy/network/filter.h        # FilterStatus
+sed -n '241,281p' envoy/network/filter.h      # ReadFilter
+sed -n '62,104p' source/common/network/filter_manager_impl.cc  # onContinueReading</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>HTTP 连接管理器 HCM</strong>——L7 的心脏。它本身是个 L4 ReadFilter，<code>onData</code> 把字节喂给 codec 解析 HTTP，<code>newStream</code> 为每个请求建 ActiveStream，启动 L7 过滤器链。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 请求入口</a>
+                <a href="envoy-day07.html" style="color:#e91e63;">Day 07 · HTTP 连接管理器 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
