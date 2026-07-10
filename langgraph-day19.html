@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 部署与 Platform — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">部署与 Platform · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 从图到服务</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · langgraph.json</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · langgraph-cli</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Server 提供什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Assistants/Runs</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 任务队列</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · SDK 客户端</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 流式</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day20.html" class="nav-link" style="color:var(--accent-green);">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 应用层</span>
+            <h1 class="part-title">部署与 Platform</h1>
+            <p class="part-desc">本地跑通的图怎么变成线上服务？<code>langgraph-cli</code> + <code>langgraph.json</code> + LangGraph Server/Platform 把你的图包装成带 API、持久化、任务队列的生产服务。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>从图到服务</h1></div>
+            <div class="card">
+                <p>你的图现在是个 Python 对象。要给别人用，得变成<strong>能收 HTTP 请求、多用户并发、状态持久、长任务可靠</strong>的服务。LangGraph Platform 就是干这个的——把生产级基础设施封装好。</p>
+                <div class="baby"><span class="t">"能跑" ≠ "能上线"</span>
+                本地 <code>graph.invoke()</code> 能跑，但上线要面对一堆现实问题：<strong>多个用户同时请求怎么办？长任务跑一半服务重启了怎么办？怎么给前端一个稳定 API？怎么管理不同配置的 Agent？</strong>这些"脏活累活"就是 LangGraph Platform 替你解决的。<strong>它把你前三周学的检查点、流式、人在环，包装成一个开箱即用的生产服务器。</strong>你负责写图逻辑，它负责把逻辑变成靠谱的线上服务。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>langgraph.json（部署清单）</h1></div>
+            <div class="card">
+                <p>部署配置文件，声明"哪些图要暴露、依赖、环境变量":</p>
+<pre><code class="language-json">{
+  "dependencies": ["."],
+  "graphs": {
+    "my_agent": "./agent.py:graph"    // 图名 → 文件里的图对象
+  },
+  "env": ".env"
+}</code></pre>
+                <div class="anno">读法：<b><code>graphs</code> 把"图名字"映射到"哪个文件的哪个变量"——服务启动时按这个清单加载图、暴露成 API。</b>一个服务可托管多张图。这是"约定优于配置"的部署入口。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>langgraph-cli</h1></div>
+            <div class="card">
+<pre><code class="language-bash">pip install langgraph-cli
+langgraph dev      # 本地起开发服务器（含 LangGraph Studio 可视化调试）
+langgraph build    # 打包成 Docker 镜像
+langgraph up       # 本地起完整服务（含 Postgres + Redis）</code></pre>
+                <div class="anno">读法：<b><code>langgraph dev</code> 是开发利器——起本地服务 + 可视化 Studio，能看图结构、单步调试、时间旅行（Day 13）。<code>build</code>/<code>up</code> 走向生产（Docker）。</b>CLI 把"部署"简化成几条命令。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Server 提供什么</h1></div>
+            <div class="card">
+                <p>LangGraph Server 在你的图之上，自动提供一套生产能力：</p>
+                <ul>
+                    <li><strong>REST API</strong>：invoke/stream 变成 HTTP 端点。</li>
+                    <li><strong>持久化</strong>：内置 Postgres 做 checkpointer + store（Day 12/15）。</li>
+                    <li><strong>任务队列</strong>：长任务后台跑，Redis 做队列（L06）。</li>
+                    <li><strong>多租户</strong>：thread/assistant 管理（Day 12 thread_id 的生产版）。</li>
+                </ul>
+                <div class="anno">读法：<b>你前三周手动配的 checkpointer/store，Server 全帮你接好（Postgres）。你只管写图。</b>这是"框架把工程复杂度吃掉"的又一体现。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Assistants 与 Runs</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>概念</th><th>含义</th></tr>
+                    <tr><td><strong>Assistant</strong></td><td>图 + 一套配置（prompt/model/参数）的组合——同一张图配不同参数=不同 assistant</td></tr>
+                    <tr><td><strong>Thread</strong></td><td>一个会话（Day 12 的 thread_id，这里是一等公民）</td></tr>
+                    <tr><td><strong>Run</strong></td><td>一次执行（在某 thread 上跑某 assistant）</td></tr>
+                </table>
+                <div class="baby"><span class="t">同一张图，多个"人设"</span>
+                <strong>Assistant = 图 + 配置。</strong>比如同一个客服图，配"温柔话术 + GPT-4"是一个 assistant，配"简洁话术 + Claude"是另一个——图代码不变，只是配置不同。<strong>这让你不改代码就能派生出多个 Agent 变体，还能各自版本管理。</strong>Thread 是会话、Run 是一次跑——三个概念把"谁、在哪个会话、跑哪个 Agent 版本"讲清楚了。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>任务队列（长任务可靠）</h1></div>
+            <div class="card">
+                <p>Agent 任务常常几十秒到几分钟。Server 用<strong>任务队列</strong>把 Run 放后台执行：客户端发起后立即拿到 run_id，之后轮询/流式获取进度；服务重启也能靠检查点续跑（Day 11）。</p>
+                <div class="anno">读法：<b>长任务不阻塞 HTTP 连接——发起即返回，后台队列消费，配合检查点做到"可靠长运行"。</b>这正是 Day 11 持久执行能力在生产架构里的价值兑现：<strong>队列 + 检查点 = 崩了能续、慢了不卡。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>SDK 客户端</h1></div>
+            <div class="card">
+<pre><code class="language-python">from langgraph_sdk import get_client
+client = get_client(url="http://localhost:2024")
+
+thread = await client.threads.create()
+async for chunk in client.runs.stream(thread["thread_id"], "my_agent",
+                                      input={"messages": [...]}):
+    print(chunk)   # 远程流式，和本地 graph.stream 体验一致</code></pre>
+                <div class="anno">读法：<b>SDK 让远程调用和本地 API 几乎一样（stream/invoke/get_state 都有对应）。</b>前端/其他服务通过它接入你部署的 Agent。<strong>本地 graph.stream 学到的一切，在远程 client.runs.stream 无缝复用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>"能跑"到"能上线"要解决哪些问题？</li>
+                    <li>langgraph.json 声明什么？langgraph dev/build/up 各干嘛？</li>
+                    <li>Server 自动提供哪四类能力？</li>
+                    <li>Assistant / Thread / Run 分别是什么？</li>
+                    <li>任务队列 + 检查点怎么实现"可靠长运行"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 找 CLI 与 SDK 包
+ls libs/cli/ libs/sdk-py/ 2>/dev/null
+find . -name 'langgraph.json' | head
+grep -rn '"graphs"' libs/cli/ 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>总复盘 + 六框架大对比</strong>——把 LangGraph 20 天串成一条线，并横向对比 eino / OpenHands / crewAI / AutoGPT / SuperAGI / LangGraph 六大框架的设计哲学。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 流式</a>
+                <a href="langgraph-day20.html" style="color:var(--accent-green);">Day 20 · 结业与六框架对比 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

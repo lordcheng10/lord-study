@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 流式输出 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">流式输出 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要流式</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · stream() API</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · values 模式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · updates 模式</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · messages 模式</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · custom / debug</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · yield 从何而来</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 ToolNode</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 部署 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 应用层</span>
+            <h1 class="part-title">流式输出</h1>
+            <p class="part-desc">聊天界面里 AI 逐字蹦字、工具进度实时刷新——怎么做到的？读 <code>stream_mode</code>（<code>types.py:120</code>）的五种模式，理解 Day 08 驱动循环里的 <code>yield</code> 怎么变成用户看到的流。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要流式</h1></div>
+            <div class="card">
+                <p><code>invoke()</code> 要等整个图跑完才返回——长任务用户干等几十秒，体验差。<code>stream()</code> 让你<strong>边跑边拿中间结果</strong>：token 逐个出、每个节点完成即推送。</p>
+                <div class="baby"><span class="t">流式 = "边做边报告"，不是"做完才交卷"</span>
+                想象点外卖：<strong>invoke 像"做好了一次性端上来"（中间你啥也看不到）；stream 像"下单成功→开始备餐→骑手取货→即将送达"实时推送。</strong>对 Agent 尤其重要——它可能要想好几轮、调好几个工具，几十秒起步。流式让用户看到"AI 正在查天气""正在计算"，甚至答案逐字蹦出，体验天差地别。<strong>这就是所有 AI 聊天产品都用流式的原因。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>stream() API</h1></div>
+            <div class="card">
+<pre><code class="language-python">for chunk in graph.stream(input, config, stream_mode="updates"):
+    print(chunk)   # 每个超步/每个节点完成就吐一块，不用等全跑完</code></pre>
+                <p><code>stream_mode</code>（<code>types.py:120-134</code>）决定"吐什么粒度"，可传单个或列表（多模式混合）。</p>
+                <div class="anno">读法：<b><code>stream()</code> 返回一个生成器，用 for 循环边跑边收。<code>stream_mode</code> 是关键参数——同一次执行，选不同模式看到的"流"完全不同。</b>下面逐个看五种模式。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>values 模式</h1></div>
+            <div class="card">
+                <p><code>stream_mode="values"</code>：每个超步后吐出<strong>完整的当前状态</strong>。</p>
+                <div class="anno">读法：<b>每步给你"此刻整个 state 长啥样"。</b>适合"我只关心最新完整状态"的场景（如每步都想渲染完整对话历史）。代价：数据量大（每次全量）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>updates 模式</h1></div>
+            <div class="card">
+                <p><code>stream_mode="updates"</code>：每个节点执行后，只吐出<strong>该节点做的增量更新</strong>（<code>{节点名: 它的返回值}</code>）。</p>
+<pre><code class="language-python">for chunk in graph.stream(input, stream_mode="updates"):
+    # {"agent": {"messages": [AIMessage(...)]}}   ← 谁更新了什么
+    for node, update in chunk.items():
+        print(f"{node} 更新了: {update}")</code></pre>
+                <div class="anno">读法：<b>values 给"全量状态"，updates 给"这步谁改了啥"（增量）。</b>updates 更省、更能反映"哪个节点在动"——调试和进度展示的首选。<strong>values vs updates = 全量快照 vs 增量事件，按需选。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>messages 模式（逐 token）</h1></div>
+            <div class="card">
+                <p><code>stream_mode="messages"</code>：吐出 LLM 生成的<strong>每个 token</strong>（配元数据），实现打字机效果：</p>
+<pre><code class="language-python">for token, metadata in graph.stream(input, stream_mode="messages"):
+    print(token.content, end="", flush=True)   # 逐字打印，像 ChatGPT 那样蹦字</code></pre>
+                <div class="anno">读法：<b>这就是聊天界面"逐字蹦字"的来源——它深入到 LLM 的 token 流。</b>metadata 带节点名等信息（可区分是哪个节点的输出）。<strong>三种主力模式分工：values(全量)/updates(节点增量)/messages(token 级)。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>custom / debug 模式</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>模式</th><th>吐什么</th></tr>
+                    <tr><td><code>custom</code></td><td>节点内用 <code>get_stream_writer()</code> 主动推送的自定义进度（如"已处理 30/100"）</td></tr>
+                    <tr><td><code>debug</code></td><td>最详尽的调试事件（任务开始/结束、检查点等）</td></tr>
+                </table>
+                <div class="baby"><span class="t">custom = 你自己往流里塞消息</span>
+                有时你想推送的不是状态、不是 token，而是<strong>你自定义的进度信息</strong>——比如工具在处理一个大文件，你想每处理 10% 就告诉前端。<code>custom</code> 模式让你在节点里用 <code>get_stream_writer()("已完成 30%")</code> 主动往流里塞任何东西。<strong>五种模式可以组合（传 list），一次 stream 同时拿到 token + 节点更新 + 自定义进度。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>yield 从何而来</h1></div>
+            <div class="card">
+                <p>回到 Day 08 的驱动循环：</p>
+<pre><code class="language-python">while loop.tick():
+    for _ in runner.tick(tasks, ...):
+        yield from _output(...)     # ★ 这里！执行中的产出被 yield 出来
+    loop.after_tick()</code></pre>
+                <div class="glossary"><b>闭环回到引擎</b>：你在 Day 08 见过这个 <code>yield from _output(...)</code> 却没深究。<strong>现在明白了：正是它把执行过程中的产出（按 stream_mode 过滤成 token/更新/状态）一块块 yield 给外层的 <code>for chunk in graph.stream(...)</code>。</strong>流式不是额外功能，而是驱动循环<strong>本来就在边跑边 yield</strong>——<code>invoke</code> 其实是"把 stream 的产出收集起来只返回最后一个"。<strong>理解引擎，流式就是顺理成章的产物。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>流式解决什么体验问题？</li>
+                    <li>values / updates / messages 三种主力模式各吐什么？</li>
+                    <li>逐字打字机效果用哪个模式？</li>
+                    <li>custom 模式干嘛？模式能组合吗？</li>
+                    <li>stream 的 yield 来自引擎的哪一行？invoke 和 stream 的关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph
+sed -n '120,134p' $P/types.py            # StreamMode 定义
+grep -n 'def stream\b\|stream_mode' $P/pregel/main.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>部署与 Platform</strong>——从本地图到线上服务：langgraph-cli、langgraph.json、LangGraph Platform/Server 怎么把你的图变成带 API、持久化、任务队列的生产服务。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 ToolNode</a>
+                <a href="langgraph-day19.html" style="color:var(--accent-green);">Day 19 · 部署与 Platform &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
