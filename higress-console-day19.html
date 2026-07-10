@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 部署 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">部署 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一体化打包</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SPA 回退回顾</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Dockerfile</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 构建/启动脚本</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Helm Chart</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 环境变量注入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 可观测栈闭环</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day20.html" class="nav-link" style="color:#ec4899;">Day 20 收官串讲 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 前端/部署</span>
+            <h1 class="part-title">部署：从代码到运行的容器</h1>
+            <p class="part-desc">今天把"这堆代码怎么变成集群里跑的服务"讲透：Maven 一体化打包、Docker 镜像、Helm 编排，以及"部署配置怎么通过环境变量一路注入到代码"的完整闭环。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>前后端一体化打包</h1></div>
+            <div class="card">
+                <p>回收 Day 01 的工程点。<code>backend/console/pom.xml</code>：</p>
+                <ul>
+                    <li><code>:101-143</code> <code>frontend-maven-plugin</code>：install node/npm → <code>npm install</code> → <code>npm run build</code>（<code>:134-141</code>）。</li>
+                    <li><code>:146-165</code> <code>maven-resources-plugin</code>：把 <code>frontend/build</code> 拷进 <code>src/main/resources/static</code>。</li>
+                    <li><code>backend/pom.xml:406</code> 有 <code>skip.npm=true</code> profile，可跳过前端构建加速纯后端开发。</li>
+                </ul>
+                <div class="baby"><span class="t">一条命令搞定前后端</span>
+                <code>mvn package</code> 一跑：<strong>先编译前端（下载 node、装依赖、build），再把前端产物塞进后端资源目录，最后打成一个 <code>higress-console.jar</code>。</strong>前端工程师不用懂 Java、后端工程师不用懂 npm——CI 只需一条命令。<code>skip.npm</code> 让只改后端时跳过慢吞吞的前端构建。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SPA 回退回顾</h1></div>
+            <div class="card">
+                <p><code>WebMvcInitializer.java:43-58</code>（Day 02 讲过）：<code>/*</code> 映射到 <code>classpath:/static/</code>，<code>CacheControl.maxAge(ZERO).mustRevalidate()</code> 禁缓存；自定义 <code>PathResourceResolver</code> 找不到资源就回退 <code>/index.html</code>（排除 <code>/v1/</code> 和静态目录）。</p>
+                <div class="anno">读法：<b>禁缓存是为了"部署新版后用户立刻拿到新前端"。SPA 回退让刷新任意前端路由都能拿到 index.html。<code>LandingController</code>（<code>/landing</code>）返回内置落地页，<code>@AllowAnonymous</code> 免鉴权。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Dockerfile</h1></div>
+            <div class="card">
+                <p><code>backend/Dockerfile</code>：</p>
+<pre><code class="language-dockerfile">FROM eclipse-temurin:21-jdk          # :1 JDK 21
+COPY console/target/higress-console.jar /app/   # :9-10 + start.sh
+# :12-17 按 TARGETARCH 拷贝 MCP 工具（tools/mcp/{arch}/main + openapiToMcpserver.sh）
+EXPOSE 8080                          # :19
+CMD ["/app/start.sh"]                # :20</code></pre>
+                <div class="anno">读法：<b>基础镜像带 JDK 21（比编译目标 JDK 8 高，运行更快）。<strong>那个 <code>openapiToMcpserver.sh</code> 正是 Day 15 <code>swaggerToMcpConfig</code> 调的外部脚本</strong>——按 CPU 架构（amd64/arm64）拷对应二进制。整个应用一个镜像、暴露 8080。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>构建 / 启动脚本</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>build.sh</code>：<code>:3-8</code> 支持 <code>VERSION/DEV</code> 环境变量；<code>:9</code> <code>./mvnw clean package -Dmaven.test.skip=true</code>（触发前端构建）；<code>:10</code> <code>docker build</code>。</li>
+                    <li><code>start.sh</code>：<code>:3-7</code> ARM64 Mac 特判（<code>MACOS_COMPATIBLE=true</code> 加 JVM 参数禁 AES/SVE 指令规避兼容问题）；<code>:9-14</code> <code>--local</code> 决定跑本地还是容器内 jar。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要为 ARM Mac 特判？</span>
+                Apple M 系列芯片是 ARM 架构，某些 JVM 优化指令（AES/SVE）在特定 JDK 版本上会崩。<strong>作者加了个开关，检测到 ARM Mac 就关掉这些指令保稳定。</strong>这种"照顾开发者本机环境"的细节，是成熟开源项目的贴心之处。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Helm Chart</h1></div>
+            <div class="card">
+                <p><code>helm/Chart.yaml:1-8</code>：<code>name: higress-console</code>，version/appVersion <code>2.1.0</code>。核心模板 <code>helm/templates/deployment.yaml</code>，镜像 <code>:36</code>；<code>values.yaml:62-67</code> <code>replicaCount:1</code>、镜像仓库、<code>:86</code> service <code>port:8080</code>。还有 service/serviceaccount/role/rolebinding/clusterrole（RBAC）等模板。</p>
+                <div class="baby"><span class="t">Helm 是什么？为什么要 RBAC？</span>
+                <strong>Helm 是 K8s 的"安装包管理器"——把一堆 K8s 资源模板打包成一个 Chart，一条 <code>helm install</code> 就部署整套。</strong>RBAC（角色权限）很关键：<strong>Console 要读写集群的 Ingress/ConfigMap/Secret/CRD，K8s 默认不给权限——所以 Chart 里定义了 Role/ClusterRole 授权。</strong>这也印证了 Day 03 "无数据库、一切存 K8s" 的设计：正因为要操作 K8s，才需要这些权限。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>环境变量注入（配置闭环）</h1></div>
+            <div class="card">
+                <p><code>deployment.yaml:38-52</code> 注入的环境变量，正是 Day 02 <code>SystemConfigKey</code> 定义的键：</p>
+<pre><code class="language-yaml">HIGRESS_CONSOLE_NS: ...
+HIGRESS_CONSOLE_CONTROLLER_SERVICE_NAME: higress-controller
+HIGRESS_CONSOLE_CONTROLLER_JWT_POLICY: ...
+# :73+ HIGRESS_ADMIN_WASM_PLUGIN_IMAGE_* 控制插件镜像仓库（Day 12）
+# :71-72 SPRINGDOC_* 控制 Swagger</code></pre>
+                <div class="glossary"><b>配置注入完整链（贯穿全课）</b>：<br>
+                Helm <code>values.yaml</code> → <code>deployment.yaml</code> 环境变量 <code>HIGRESS_CONSOLE_*</code> → Spring <code>@Value("${higress-console.*}")</code>（Day 02 <code>SdkConfig</code>）→ <code>HigressServiceConfig</code> → SDK 连 K8s。<b>改配置只需改 Helm values，无需动代码。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>可观测栈闭环</h1></div>
+            <div class="card">
+                <p>Chart 还打包完整可观测性栈：<code>helm/templates/{grafana,prometheus,loki}.yaml</code>。<code>deployment.yaml:53-62</code> 注入 <code>HIGRESS_CONSOLE_DASHBOARD_BASE_URL/PROM_URL/LOKI_URL</code>。</p>
+                <p>集成闭环（呼应仪表盘）：<strong>Helm 部署 Grafana/Prometheus/Loki → env 注入 console → <code>DashboardServiceImpl</code> 判定 built-in → 启动时自动在 Grafana 建数据源 + 导入三份 dashboard（<code>main/ai/logs.json</code>，运行时把 <code>${datasource.id}</code> 占位替换成真实 UID）→ 前端经 <code>/grafana/**</code> 反代内嵌展示</strong>（<code>GrafanaController</code>）。</p>
+                <div class="baby"><span class="t">"开箱即用的监控"是怎么做到的？</span>
+                一般搭监控要手动装 Grafana、配数据源、导仪表盘，很繁琐。<strong>Higress Console 把这些全自动化：部署时连监控组件一起装，Console 启动时自动配好 Grafana 数据源、导入预制的仪表盘。</strong>用户装完就能在界面里看到网关的流量/Token/日志图表，零配置。这是产品化的体现。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li><code>mvn package</code> 怎么把前后端打成一个 jar？</li>
+                    <li>Dockerfile 为什么要拷 MCP 工具？暴露哪个端口？</li>
+                    <li>Helm 为什么需要 RBAC？和"无数据库"设计什么关系？</li>
+                    <li>配置注入的完整链（Helm→env→@Value→SDK）？</li>
+                    <li>可观测栈怎么自动集成？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console
+cat backend/Dockerfile
+sed -n '101,165p' backend/console/pom.xml
+sed -n '36,72p' helm/templates/deployment.yaml
+sed -n '62,90p' helm/values.yaml
+ls helm/templates/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（收官）</strong>：<strong>全栈回顾 + higress-group 五站串讲</strong>——把 Console 的四周内容串成一条主线，再把 Envoy→Istio→Higress→Console 整个 higress-group 系列连起来，看清一个 AI 网关产品的完整全貌。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day18.html" style="color:var(--accent-cyan);">&larr; Day 18</a>
+                <a href="higress-console-day20.html" style="color:#ec4899;">Day 20 · 收官串讲 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

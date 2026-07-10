@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 前端结构与页面 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">前端结构与页面 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 目录结构</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ProLayout 布局</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 路由/菜单定义</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · request 拦截器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · service 分层</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 精读路由管理页</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 能力探测降级</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day18.html" class="nav-link" style="color:#ec4899;">Day 18 动态表单 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 前端/部署</span>
+            <h1 class="part-title">前端结构与页面</h1>
+            <p class="part-desc">今天看前端"长什么样、怎么组织"：目录结构、整体布局与菜单、API 调用层，最后精读最典型的路由管理页 CRUD。理解了这套模式，前端所有页面都是同一套路。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>目录结构</h1></div>
+            <div class="card">
+<pre><code class="language-bash">frontend/src/
+  app.ts        应用配置（Day 16）
+  i18n.ts       国际化
+  store.ts      全局 store
+  switches.ts   功能开关（SHOW_INTERNAL_ROUTES=false）
+  pages/        页面（约定式路由，每个子目录 = 一个路由段）
+  components/   公共组件（CodeEditor/Navbar/ChatRobot/AvatarDropdown…）
+  services/     API 层（按领域拆分）
+  interfaces/   TS 类型（与后端 DTO 对应）
+  models/       全局 store model
+  locales/      中英翻译</code></pre>
+                <div class="anno">读法：<b>典型的 React 项目分层：<strong>pages 放页面、components 放复用组件、services 放 API 调用、interfaces 放类型、models 放状态</strong>。<code>interfaces/</code> 里的 TS 类型和后端的 Java DTO 一一对应——前后端用同一套数据形状对话。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ProLayout 布局</h1></div>
+            <div class="card">
+                <p><code>pages/layout.tsx:39-88</code> 用 <code>@ant-design/pro-layout</code> 的 <code>ProLayout</code> 当整体外壳（<code>layout="mix"</code>）：右上角 <code>Navbar + LanguageDropdown + AvatarDropdown</code>，内容区 <code>&lt;Outlet/&gt;</code>（子路由出口）+ 全局 <code>ChatRobot</code>。</p>
+                <ul>
+                    <li><code>menuDataRender</code>（<code>:60-77</code>）：按 <code>hideFromMenu</code> 和 <code>visiblePredicate(configData)</code> 过滤，再 <code>t()</code> 翻译——菜单可按后端 config 动态显隐。</li>
+                    <li><code>:27-34</code> 若被同源 iframe 嵌套则显示 500（防嵌套攻击）。</li>
+                </ul>
+                <div class="baby"><span class="t">&lt;Outlet/&gt; 是什么？</span>
+                <strong>布局是"固定的框"（顶栏、侧边菜单），内容区随路由变化。<code>&lt;Outlet/&gt;</code> 就是"内容区的占位坑"——你点不同菜单，对应页面就渲染进这个坑里，外框不动。</strong>好比 App 底部导航栏不变、上面内容切换。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>路由 / 菜单定义</h1></div>
+            <div class="card">
+                <p><code>pages/_defaultProps.tsx:14-117</code> 静态定义菜单/路由树，路径 → <code>pages/</code> 目录约定映射：<code>/dashboard</code>、<code>/service-source</code>、<code>/service</code>、<code>/route</code>、AI 分组（<code>/ai/provider</code>、<code>/ai/route</code>、<code>/ai/dashboard</code>、<code>/mcp/list</code>）、<code>/domain</code>、<code>/tls-certificate</code>、<code>/consumer</code>、<code>/plugin</code>、<code>/system</code>。</p>
+                <div class="anno">读法：<b>这张表和第 1-3 周后端的控制器几乎一一对应——<strong>每个后端资源都有一个前端页面。</strong><code>/ai/dashboard</code> 带 <code>visiblePredicate</code>（<code>:76</code>）演示条件显隐；<code>/init</code> 和 <code>/login</code> 用 <code>hideFromMenu + usePureLayout</code>（无外框）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>request 拦截器</h1></div>
+            <div class="card">
+                <p><code>services/request.tsx</code> 是 axios 封装，核心是拦截器：</p>
+<pre><code class="language-typescript">// :14-26 请求拦截器：从 localStorage 取 token 塞进 Authorization 头；
+//         GET 追加 ts=Date.now() 防缓存
+// :28-41 响应拦截器（成功）：解包 data.data（后端统一包 {data:...}）
+// :42-77 错误拦截器：401 且非 login → 跳 /login?redirect=...；
+//         其它错误按 i18n 文案弹 Modal</code></pre>
+                <div class="baby"><span class="t">"拦截器"帮你自动做什么？</span>
+                每个 API 请求都要带 token、每个响应都要解包、每个 401 都要跳登录——<strong>拦截器让你把这些"每次都做的事"写一次，所有请求自动享用。</strong>回想后端 Day 05 的 AOP 切面——前端拦截器就是前端版的"切面"，一进一出统一处理。<strong>响应拦截器自动解包 <code>data.data</code>，所以各 service 直接拿到业务对象（对应后端 Day 04 的 <code>Response</code> 三段式）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>service 按领域拆分</h1></div>
+            <div class="card">
+                <p><code>services/</code> 每个文件对应一组后端端点，都 <code>import request from './request'</code>。例如 <code>services/route.ts</code>：</p>
+<pre><code class="language-typescript">GET    /v1/routes           :4-6
+GET    /v1/routes/{name}     :9-11
+POST   /v1/routes           :13-15
+DELETE /v1/routes/{name}    :17-19
+PUT    /v1/routes/{name}    :21-23</code></pre>
+                <div class="anno">读法：<b>前端 service 和后端 Controller 端点一一对应（Day 04 的表）。<code>llm-provider.ts</code>/<code>ai-route.ts</code>/<code>dashboard.ts</code>/<code>system.ts</code>/<code>plugin.ts</code> 各管一块。<strong>前端 service 层的职责就是"把后端 REST 封装成 JS 函数"，页面调函数即可，不用关心 URL。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>精读路由管理页</h1></div>
+            <div class="card">
+                <p><code>pages/route/index.tsx</code>（670 行）是最典型的"列表 + 抽屉表单 + 删除确认"CRUD 页：</p>
+                <ul>
+                    <li>表格列（<code>:53-139</code>）：name/domains/routePredicates/services/auth/action 六列。服务列（<code>:91-105</code>）展示服务名 + 权重百分比，权重 0 标黄。</li>
+                    <li>数据加载用 ahooks 的 <code>useRequest</code>（<code>:181-209</code>）。</li>
+                    <li>保存 <code>handleDrawerOK</code>（<code>:241+</code>）：<strong>前端也校验"服务权重之和必须 = 100"</strong>（<code>:250-254</code>），呼应后端 Day 09。</li>
+                    <li>渲染骨架（<code>:568-665</code>）：<code>PageContainer</code> + 顶部筛选 + 主 <code>Table</code> + 删除 <code>Modal</code> + 编辑 <code>Drawer</code>（内含 <code>&lt;RouteForm/&gt;</code>）。</li>
+                </ul>
+                <div class="baby"><span class="t">"抽屉表单"是什么体验？</span>
+                点"新建/编辑"时从屏幕右侧滑出一个面板（Drawer 抽屉）填表单，不用跳页。<strong>列表页保持在原位，抽屉里编辑，保存后关闭抽屉刷新列表。</strong>这是管理后台最常见的交互，所有资源页（域名/证书/消费者…）都是这个套路。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>能力探测降级</h1></div>
+            <div class="card">
+                <p><code>route/index.tsx:50-51</code>：从 <code>system</code> model 读 <code>capabilities</code>，判断是否支持 <code>config.ingress.v1</code>，不支持就禁用"新建路由"按钮。</p>
+                <div class="anno">读法：<b>回想后端 Day 08 的"能力探测"——后端探测集群支持哪个 Ingress 版本，把结果放进 system 信息；<strong>前端读到这个能力位，若集群不支持就把按钮灰掉，避免用户点了却失败。</strong>前后端配合的优雅降级。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>前端目录怎么分层？interfaces 和后端什么关系？</li>
+                    <li>ProLayout + <code>&lt;Outlet/&gt;</code> 怎么组织布局？</li>
+                    <li>request 拦截器帮你自动做了哪三件事？</li>
+                    <li>路由页的"列表 + 抽屉 + 删除"套路？权重校验前后端都做？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/frontend/src
+ls pages/ components/ services/
+sed -n '39,88p' pages/layout.tsx
+sed -n '14,77p' services/request.tsx
+sed -n '241,254p' pages/route/index.tsx</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>动态插件配置表单</strong>——前端最精华的部分：从后端返回的 JSON Schema 递归渲染出表单，还能在"表单"和"YAML 源码"两个 tab 间双向同步。这是整个前端的技术高峰。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day16.html" style="color:var(--accent-cyan);">&larr; Day 16</a>
+                <a href="higress-console-day18.html" style="color:#ec4899;">Day 18 · 动态表单 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 收官串讲 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .chain{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .chain .s{border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;background:var(--bg-secondary);font-size:13px}
+        .chain .s b{color:#14b8a6}
+        .five{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .five .c{flex:1;min-width:130px;border:1px solid var(--border-color);border-radius:9px;padding:10px;background:var(--bg-card);font-size:12px;text-align:center}
+        .five .c b{display:block;color:#ec4899;margin-bottom:3px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">收官串讲 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一句话回顾</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 四周主线</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 全栈请求链</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 五大设计智慧</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · higress-group 五站</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 待改进的 TODO</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 学习路径建议</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 毕业 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 第 4 周 前端/部署</span>
+            <h1 class="part-title">收官串讲：全栈全貌 + 五站串联</h1>
+            <p class="part-desc">恭喜坚持到最后一天！今天把 Console 的四周内容收成一条主线，再把整个 higress-group 系列（Envoy→Istio→Higress→Console）串起来——你将看清"一个 AI 网关产品"从数据面到管理界面的完整全貌。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一句话回顾</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Higress Console = Spring Boot（console 模块：Web/REST/鉴权/仪表盘）+ 纯 Java SDK（sdk 模块：封装 K8s client）+ React 前端。</b><br>
+                所有网关配置（路由/域名/证书/插件/AI/消费者/MCP）都被翻译成 <b>K8s 原生对象</b>（Ingress+注解、ConfigMap、Secret、WasmPlugin/McpBridge/EnvoyFilter CRD）写入 K8s，由 Higress 控制器 watch 后下发；仅少量只读运维数据（服务发现列表、endpoint）通过 HTTP 直连控制器 <code>/debug/*</code>。<b>Console 是"人机接口"，不碰 Envoy。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>四周主线</h1></div>
+            <div class="card">
+                <div class="chain">
+                    <div class="s"><b>第 1 周 后端架构</b>：全栈打包 → Spring Boot 启动 → 三层分层 → REST API → 切面（鉴权/异常）。核心：<code>SdkConfig</code> 桥接 console↔sdk。</div>
+                    <div class="s"><b>第 2 周 SDK 与存储</b>：门面 + 手写 DI → 存储=薄封装 → K8s 客户端 → 领域模型 → "创建路由"端到端。核心：一切落 K8s。</div>
+                    <div class="s"><b>第 3 周 AI/插件/消费者</b>：AI 一对多编排 → 插件定义/实例 → 消费者=key-auth 实例 → 服务源=McpBridge → MCP 双策略工厂。核心：高层抽象→底层资源。</div>
+                    <div class="s"><b>第 4 周 前端/部署</b>：ice.js/React → 结构与页面 → schema 动态表单 → Docker/Helm。核心：schema 驱动 UI + 配置注入闭环。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>全栈请求链（把四周串成一条）</h1></div>
+            <div class="card">
+<pre><code class="language-bash">① 浏览器：路由页抽屉填表 + 权重校验（第4周）
+  → ② 前端 service + request 拦截器带 token POST /v1/routes（第4周）
+    → ③ RoutesController 校验 + 切面鉴权（第1周）
+      → ④ RouteServiceImpl.add 编排 + writeAuthConfigResources（第2/3周）
+        → ⑤ route2Ingress 转注解 + createIngress 写 K8s（第2周）
+          → ⑥（离开 Console）Higress 控制器 watch → Istio 配置 → xDS → Envoy 生效</code></pre>
+                <div class="anno">读法：<b>①②在前端，③④⑤在后端，⑥交给上一站。<strong>这条链就是全课的"任督二脉"——从用户点击到流量生效，每一段你都学过了。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>五大设计智慧</h1></div>
+            <div class="card">
+                <ol>
+                    <li><strong>无数据库，一切存 K8s</strong>：复用 K8s 的持久化/watch/一致性，Console 天然无状态可扩。</li>
+                    <li><strong>SDK 不依赖 Spring</strong>：业务能力与 Web 框架解耦，SDK 可独立复用。</li>
+                    <li><strong>高层抽象 → 底层资源编排</strong>：一条 AI 路由展开成 Ingress + 多插件 + EnvoyFilter，用户无感。</li>
+                    <li><strong>策略模式 + 注册表</strong>：LLM Provider Handler、MCP 双策略工厂——加新类型不改老代码（开闭原则）。</li>
+                    <li><strong>schema 驱动 UI</strong>：后端给 JSON Schema，前端动态渲染表单，加新插件前端零改动。</li>
+                </ol>
+                <div class="baby"><span class="t">这些智慧能迁移到你的项目吗？</span>
+                能！<strong>"用现成基础设施当存储"（无数据库）、"核心逻辑不绑框架"（可复用 SDK）、"用注册表 + 策略应对多类型"、"用 schema 驱动动态 UI"</strong>——这四条几乎适用于任何管理后台。看懂 Console 怎么用，你就能在自己的项目里照搬。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>higress-group 五站串讲</h1></div>
+            <div class="card">
+                <div class="five">
+                    <div class="c"><b>Envoy</b>数据面<br>C++ 代理，执行流量</div>
+                    <div class="c"><b>Istio</b>控制面<br>istiod 生成 xDS</div>
+                    <div class="c"><b>Higress</b>AI 网关<br>Core 喂配置给 istiod</div>
+                    <div class="c"><b>Console</b>管理界面<br>生成 K8s 配置（本课）</div>
+                    <div class="c"><b>wasm-go</b>插件 SDK<br>写扩展插件（下一站）</div>
+                </div>
+                <div class="glossary"><b>五站怎么协作</b>（一条完整链）：<br>
+                <b>你在 Console 点点点（本课）</b> → 写成 K8s Ingress+CRD → <b>Higress Core</b> watch 到、翻译成 Istio 配置 → 经 MCP-over-xDS 喂给 <b>istiod（Istio）</b> → istiod 生成 xDS 下发给 <b>Envoy</b> → Envoy 执行流量 + 运行 <b>wasm-go 写的插件</b>。<br>
+                <b>Console 是"入口"，Envoy 是"出口"，中间三层把配置层层翻译落地。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>待改进的 TODO（练手好素材）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>后端 JSONSchema 校验是空 TODO</strong>（<code>WasmPluginConfig.validateAndCleanUp</code>，Day 12）——可引入 json-schema-validator 做真正的服务端校验。</li>
+                    <li><strong>自定义插件的 <code>queryConfig/queryReadme</code> 也是 TODO</strong>（返回空）——可实现从 CRD/OCI 读取自定义插件的 schema。</li>
+                    <li><strong>鉴权只支持 key-auth</strong>（Day 13）——可新增 <code>CredentialHandler</code> 实现 jwt-auth 并注册。</li>
+                </ul>
+                <div class="anno">读法：<b>这些不是缺陷，而是<strong>清晰的扩展点</strong>——想给开源社区贡献代码，或练手真实工程，这三个是绝佳入口。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>学习路径建议</h1></div>
+            <div class="card">
+                <p>如果你要基于 Higress 做二次开发，建议顺序：</p>
+                <ol>
+                    <li>先跑起来：<code>helm install</code> 部署一套，界面点一圈，感性认识。</li>
+                    <li>抓一个功能通读：以"路由"为例，前端 route 页 → service → 后端 Controller → RouteServiceImpl → Converter → K8s，端到端走一遍。</li>
+                    <li>动手改一个 TODO：从上面三个里挑一个实现，跑通测试。</li>
+                    <li>对照上一站 Higress：看你在 Console 建的资源，怎么被 Higress 控制器消费。</li>
+                </ol>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>毕业 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🎓 20 天后，你已经能</h3>
+                <ul>
+                    <li>说清 Console 的全栈架构和"一切存 K8s"的核心设计。</li>
+                    <li>追踪任意一个功能从界面到 K8s 的完整链路。</li>
+                    <li>看懂 AI 路由的一对多编排、插件的 schema 动态表单、鉴权的 allow list 机制。</li>
+                    <li>把 Envoy→Istio→Higress→Console 五站串成一个 AI 网关产品的全貌。</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 毕业动手</h3>
+<pre><code class="language-bash"># 通读一个功能的完整链路（以路由为例）
+cd /Users/bitmart/work/codes/github/higress-group/higress-console
+echo "前端：" && ls frontend/src/pages/route/ frontend/src/services/route.ts
+echo "后端：" && ls backend/console/src/main/java/com/alibaba/higress/console/controller/RoutesController.java
+echo "SDK：" && ls backend/sdk/src/main/java/com/alibaba/higress/sdk/service/RouteServiceImpl.java
+# 挑一个 TODO 动手实现，向社区提 PR</code></pre>
+                <div class="tip"><strong>下一站预告</strong>：higress-group 系列最后一站 <strong>wasm-go</strong>——Higress 插件开发 SDK，学会自己写 Wasm 插件（<code>SetCtx</code>/三级 Context/RuleMatcher）。学完你就能给这个 AI 网关加自定义能力了。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day19.html" style="color:var(--accent-cyan);">&larr; Day 19</a>
+                <a href="higress-console-tutorial.html" style="color:#ec4899;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

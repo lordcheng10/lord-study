@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 动态插件配置表单 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .flow2 .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;font-size:12px;text-align:center}
+        .flow2 .n b{display:block;color:#ec4899}
+        .flow2 .a{color:#14b8a6;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">动态表单 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 问题：插件配置千变万化</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 插件端点</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 抽屉分发</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 数据流</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 递归渲染 generateFields</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 表单↔YAML 双向</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ArrayForm/Monaco</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day19.html" class="nav-link" style="color:#ec4899;">Day 19 部署 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 前端/部署</span>
+            <h1 class="part-title">动态插件配置表单（技术高峰）</h1>
+            <p class="part-desc">这是整个前端最精华的一讲。43 个插件各有不同配置项，前端不可能为每个插件手写表单——它从后端返回的 JSON Schema <strong>动态生成</strong>表单，还能和 YAML 源码双向同步。今天拆透这套机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>问题：插件配置千变万化</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么不能给每个插件写死表单？</span>
+                限流插件要填"QPS 数字"，鉴权插件要填"允许的消费者列表"，AI 插件要填"模型映射"……<strong>43 个插件、每个配置项都不同，而且以后还会加新插件。</strong>如果为每个插件手写一个表单页，工作量爆炸，加新插件还得改前端。<strong>解法：让后端用 JSON Schema 描述"这个插件有哪些配置项、什么类型",前端读 Schema 自动"画"出表单。加新插件只需后端给个 Schema，前端零改动。</strong>这就是"schema 驱动的动态表单"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>插件端点</h1></div>
+            <div class="card">
+                <p><code>services/plugin.ts</code>（88 行）：</p>
+<pre><code class="language-typescript">GET /v1/wasm-plugins/{name}/config     :31-33  // ← 返回配置 Schema（动态表单数据源）
+GET /v1/wasm-plugins/{name}/readme     :84-88
+// 三种作用域的实例 CRUD：
+/v1/global/plugin-instances[/{name}]           :36-48
+/v1/routes/{name}/plugin-instances/{pluginName} :51-82
+/v1/domains/{name}/plugin-instances/{pluginName}</code></pre>
+                <div class="anno">读法：<b><code>/config</code> 就是 Day 12 后端从 spec.yaml 加载的那个 <code>openAPIV3Schema</code>。前端拿它渲染表单。三种作用域对应后端 Day 09 的 ROUTE/DOMAIN/GLOBAL。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>抽屉分发</h1></div>
+            <div class="card">
+                <p><code>pages/plugin/components/PluginDrawer/index.tsx:12-17</code> 有个 <code>PLUGIN_COMP_MAP</code>：<code>rewrite/headerModify/cors/retries</code> 四个<strong>内置策略</strong>用专用组件，其余（普通 wasm 插件）走 schema 驱动的通用表单 <code>GlobalPluginDetail</code>（<code>:70-90</code>）。</p>
+                <div class="baby"><span class="t">为什么有的插件用专用表单？</span>
+                rewrite/cors 这类"路由原生能力"（不是真正的 Wasm 插件）交互特殊，用手写的专用组件体验更好。<strong>其余几十个真正的 Wasm 插件，全部走同一个通用动态表单。</strong>专用的少数、通用的多数——务实的取舍。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>数据流</h1></div>
+            <div class="card">
+                <p><code>GlobalPluginDetail.tsx</code>（767 行，最核心）的数据流：</p>
+                <div class="flow2">
+                    <span class="n"><b>getData</b>拉实例配置<br>(rawConfigurations YAML)</span><span class="a">→</span>
+                    <span class="n"><b>getConfig</b>拉 Schema<br>setSchema</span><span class="a">→</span>
+                    <span class="n"><b>yamlToFormValues</b><br>YAML 反解成表单值</span><span class="a">→</span>
+                    <span class="n"><b>generateFields</b><br>递归渲染表单</span>
+                </div>
+                <p><code>getConfig</code>（<code>:173-198</code>）：若 schema <strong>没有</strong> <code>jsonSchema.properties</code> 则强制切到 YAML 编辑 tab（<code>:178-180</code>）——即无 schema 的插件只能裸写 YAML；取 <code>x-example-raw</code> 作示例默认值。</p>
+                <div class="anno">读法：<b>这就回收了 Day 12 的伏笔——后端 schema 校验虽是空 TODO，但 <strong>schema 在前端派了大用场：驱动整个表单渲染</strong>。没 schema 就退化成纯 YAML 编辑器。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>递归渲染 generateFields</h1></div>
+            <div class="card">
+                <p><code>generateFields(scm, prefix)</code>（<code>:230-341</code>）遍历 schema 的 <code>properties</code>，按类型映射组件：</p>
+<pre><code class="language-typescript">string  → Input
+integer → Input[number] + parseInt
+number  → Input[number] step=any + parseFloat
+boolean → Select(true/false)
+object 且有子 properties → 递归（用 Card 包成嵌套子表单）  :244-258
+array   → <ArrayForm>（先 validateArrayTypes 校验元素类型）  :302-323</code></pre>
+                <p><code>getLocalizedText</code>（<code>:225-228</code>）读 <code>x-{title/description}-i18n[语言]</code>——正是 Day 12/16 那套多语言约定。</p>
+                <div class="baby"><span class="t">"递归"为什么关键？</span>
+                配置可以嵌套（一个 object 里还有 object）。<strong>递归 = 函数调用自己：遇到 object 类型就再调一次 <code>generateFields</code> 处理它的子字段，无论嵌套多深都能展开。</strong>这是处理"树状结构"的标准手法，动态表单能应对任意复杂的 schema 全靠它。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>表单 ↔ YAML 双向同步</h1></div>
+            <div class="card">
+                <p>用户可以在"表单 tab"和"YAML 源码 tab"间切换，两边数据必须实时同步。这套转换是本讲的技术核心：</p>
+<pre><code class="language-typescript">yamlToFormValues :426-462  // YAML → 扁平化成 a.b.c 点号键，数组包成 {uid,data}
+formValuesToSchema :343-380 // 点号键 → 还原成嵌套对象
+schemaToYaml :382-416       // 对象 → 手写 YAML 序列化（跳过 enabled，字符串加引号）
+fieldChange :594-603        // 表单任意字段变化 → 实时转回 YAML 存 rawConfigurations</code></pre>
+                <div class="baby"><span class="t">为什么要双向？</span>
+                有的用户喜欢点表单（直观），有的高级用户喜欢直接写 YAML（快）。<strong>Console 两种都给，但底层数据只有一份。所以要在两种表示间实时互转：改表单立刻同步到 YAML、改 YAML 也能反解回表单。</strong><code>fieldChange</code> 保证切 tab 不丢数据——这是最容易出 bug 的地方，作者用一套严谨的扁平化/还原逻辑搞定。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ArrayForm 与 Monaco</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>ArrayForm</strong>（<code>ArrayForm/index.tsx</code>，302 行）：可编辑表格（antd Table + 行内 Form），每行 <code>{uid,data}</code>，可增删，用于渲染 schema 里 type=array 的字段。</li>
+                    <li><strong>CodeEditor</strong>（<code>components/CodeEditor/index.tsx:26-58</code>）：封装 Monaco，<code>loader.config({monaco})</code> 用本地 monaco（配合 Day 16 拷贝的 vs 目录），<code>autoHeight</code> 时用 ResizeObserver 自适应高度。</li>
+                </ul>
+                <p>渲染骨架（<code>:614-763</code>）：<code>enabled</code> 开关 + 三个 Tab：<code>form</code>（动态表单）/ <code>yaml</code>（Monaco）/ <code>readme</code>（ReactMarkdown + remarkGfm，支持全屏）。提交 <code>onSubmit</code>（<code>:515-528</code>）拼 <code>{...pluginData, enabled, rawConfigurations}</code>。</p>
+                <div class="anno">读法：<b>三个 tab 完整覆盖三类用户：新手用表单、专家写 YAML、想了解插件就看 README。<strong>这个 767 行的组件是整个前端工程能力的集中体现。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么不能给每个插件手写表单？schema 驱动怎么解决？</li>
+                    <li>数据流四步（getData→getConfig→yamlToFormValues→generateFields）？</li>
+                    <li>递归渲染怎么处理嵌套 object？各类型映射成什么组件？</li>
+                    <li>表单↔YAML 双向同步为什么必要？谁保证切 tab 不丢数据？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/frontend/src/pages/plugin
+cat ../../services/plugin.ts
+sed -n '12,17p' components/PluginDrawer/index.tsx
+sed -n '230,341p' components/PluginDrawer/GlobalPluginDetail.tsx
+sed -n '426,462p' components/PluginDrawer/GlobalPluginDetail.tsx</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>部署</strong>——前后端一体化 Maven 打包、SPA 回退再回顾、Dockerfile、Helm Chart，以及"Grafana/Prometheus/Loki 可观测栈"的集成闭环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day17.html" style="color:var(--accent-cyan);">&larr; Day 17</a>
+                <a href="higress-console-day19.html" style="color:#ec4899;">Day 19 · 部署 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
