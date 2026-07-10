@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · TUI 深入 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .hooks-tbl code{font-size:11.5px}
+        .key{display:inline-block;padding:1px 7px;border:1px solid var(--border-color);border-radius:5px;font-family:monospace;font-size:11px;background:var(--bg-secondary);color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">TUI 深入 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 输入框的分层</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Cursor 不可变编辑</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 换行 vs 提交</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 自动补全</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 粘贴三层</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 键位与 vim</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 对话框优先级仲裁</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 配置模型成本</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 远程/workflow &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 平台化进阶</span>
+            <h1 class="part-title">TUI 深入</h1>
+            <p class="part-desc">Day 04 讲了 TUI 骨架，今天钻输入框细节——多行编辑、粘贴、自动补全、键位、vim 模式、对话框浮层怎么"仲裁"。终端交互的精华都在这。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>输入框的分层</h1></div>
+            <div class="card">
+                <p>输入框 <code>PromptInput.tsx</code>（2650 行）<strong>本身不处理按键</strong>——它是"编排层"，负责拼装模式/建议/粘贴/历史/渲染。真正逐键编辑在 <code>useTextInput</code>（<code>src/hooks/useTextInput.ts</code>）。分层：</p>
+                <table>
+                    <thead><tr><th>层</th><th>管什么</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>PromptInput.tsx</code></td><td>编排：模式（bash <span class="key">!</span>）、自动补全、粘贴、历史、提交分流</td></tr>
+                        <tr><td><code>useTextInput.ts</code></td><td>逐键编辑：光标、emacs 键位、换行/提交判定</td></tr>
+                        <tr><td><code>useVimInput.ts</code></td><td>在 useTextInput 外套一层 vim 状态机</td></tr>
+                        <tr><td><code>Cursor.ts</code></td><td>不可变的文本+光标模型</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary"><b>为什么分这么细？</b> 输入框看着简单，其实要处理：多行、粘贴大段文本、@文件补全、/命令补全、↑历史、emacs 快捷键、vim 模式、bash 模式……全塞一个组件会乱成一团。分层后：<code>Cursor</code> 管"文本和光标的纯数据"、<code>useTextInput</code> 管"按键怎么改光标"、<code>useVimInput</code> 加 vim、<code>PromptInput</code> 管"上层业务"。<strong>每层只干一件事，组合起来才是完整输入框。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Cursor：不可变的编辑模型</h1></div>
+            <div class="card">
+                <p>底层编辑用<strong>不可变的 <code>Cursor</code> 对象</strong>（<code>src/utils/Cursor.ts</code>）。每次按键产出一个<strong>新</strong> Cursor，而不是改旧的：</p>
+<pre><code class="language-typescript">// useTextInput.ts:478 —— 受控编辑回写
+const nextCursor = mapKey(key)(cursor)      // 按键 → 新 Cursor
+if (cursor.text !== nextCursor.text)
+  onChange(nextCursor.text)                 // 文本变了才通知上层
+setOffset(nextCursor.offset)                // 更新光标位置</code></pre>
+                <div class="glossary"><b>为什么用"不可变 Cursor"？</b> 文本编辑涉及一堆操作（插入、删除、移动光标、删词），如果直接改一个可变对象，很容易状态错乱、也难做撤销。用"每次操作返回新 Cursor"（不可变），每个操作都是纯函数 <code>旧Cursor → 新Cursor</code>——清晰、可测、天然支持撤销（保存历史 Cursor 即可）。这跟 Day 06 讲的 queryLoop"整体替换 State"是同一种"用不可变数据避免状态错乱"的思想。<code>useTextInput</code> 还内置整套 emacs 键位（Ctrl+A/E/K/U/W、kill-ring/yank）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>换行 vs 提交（点睛代码）</h1></div>
+            <div class="card">
+                <p>输入框最微妙的判断：按回车是"换行"还是"提交"？<code>useTextInput.ts:248</code> 的 <code>handleEnter</code>：</p>
+<pre><code class="language-typescript">function handleEnter(key) {
+  // 反斜杠 + Enter → 换行（删掉反斜杠）
+  if (multiline &amp;&amp; cursor.text[cursor.offset-1] === '\\')
+    return cursor.backspace().insert('\n')
+  // Shift/Option(Meta) + Enter → 换行
+  if (key.meta || key.shift) return cursor.insert('\n')
+  // 普通 Enter → 提交
+  onSubmit?.(value)
+}</code></pre>
+                <p>三种换行方式（<code>\</code>+Enter、Shift+Enter、Option+Enter），普通 Enter 才提交。而且 <code>case key.return</code> 特意排在 <code>case key.meta</code> 之前，保证 Option+Return 走换行。粘贴过程中的 Enter 被抑制（防误提交）。</p>
+                <div class="glossary"><b>为什么这么讲究？</b> 因为在终端里既要能多行输入（写长 prompt/贴代码），又要能快速提交。约定俗成：普通回车提交、修饰键+回车换行。但不同终端对修饰键+回车的支持不一，所以提供了三种换行法（连纯 <code>\</code>+回车都支持）兼容各种终端。这种"照顾各种终端怪癖"的细节，是终端应用体验好坏的关键。撤销栈由 <code>useInputBuffer</code> 单管（防抖 1000ms、最多 50 条）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>自动补全：/ @ # 触发</h1></div>
+            <div class="card">
+                <p>由 <code>useTypeahead</code>（<code>PromptInput.tsx:1281</code>）驱动。输入变化时判断触发字符：</p>
+                <ul>
+                    <li><span class="key">/</span> 开头 → 斜杠命令补全（<code>generateCommandSuggestions</code>，Day 11 的命令列表）。</li>
+                    <li><span class="key">@</span> → 文件/agent 补全。</li>
+                    <li><span class="key">#</span> → slack 频道等。</li>
+                </ul>
+                <p>建议列表存进 state，渲染在页脚下拉。接受方式：<span class="key">Tab</span>/<span class="key">→</span> 接受、<span class="key">↑↓</span> 选择、<span class="key">Esc</span> 关闭。护栏：有建议显示时，普通 Enter <strong>不提交</strong>（而是接受当前建议，<code>PromptInput.tsx:1229</code>）。</p>
+                <div class="glossary"><b>"有建议时 Enter 不提交"为什么重要？</b> 你敲 <code>/mod</code>，下拉出现 <code>/model</code>，你按回车——期望是"选中 /model"，不是"把 /mod 这半截提交出去"。所以补全下拉可见时，回车的语义变成"接受建议"。这种"根据当前 UI 状态改变按键含义"的上下文敏感，是好交互的细节。<b>Fuse.js</b>（Day 01 依赖表提过）用来做模糊搜索——你敲 <code>/mdl</code> 也能匹配到 <code>/model</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>粘贴：三层处理</h1></div>
+            <div class="card">
+                <p>往终端粘贴（尤其大段文本/图片）要特殊处理，分三层：</p>
+                <ol>
+                    <li><strong>检测层</strong> <code>usePasteHandler</code>：靠按键事件的 <code>isPasted</code> 标志（括号粘贴模式）判定，分块累积 + 100ms 超时合并；拖入的图片路径 → 读图。</li>
+                    <li><strong>业务层</strong> <code>onTextPaste</code>（<code>PromptInput.tsx:1374</code>）：清理 ANSI、<code>\r→\n</code>；<strong>超过阈值就不塞全文</strong>，而是存进 <code>pastedContents</code>、只在输入框插一个占位引用（<code>:1398</code>）。</li>
+                    <li><strong>截断层</strong> <code>inputPaste.ts</code>：&gt;10000 字保留首尾各 500 字、中间折叠。</li>
+                </ol>
+                <div class="glossary"><b>为什么大段粘贴要"占位引用"而非直接显示？</b> 你粘了 500 行代码进去——如果全显示在输入框里，输入框撑爆、界面卡、你也看不清自己在打什么。所以大段内容被<strong>折叠成一个 <code>[Pasted 500 lines]</code> 占位</strong>，实际内容存在 <code>pastedContents</code> 里，提交时才展开发给模型。图片同理插一个图片引用占位。这是"输入框只显示摘要、内容另存"的体验优化——既不卡界面又不丢内容。<b>括号粘贴模式</b>（bracketed paste）是终端的一个特性，让程序能区分"用户逐字敲的"和"粘贴进来的"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>键位系统与 vim 模式</h1></div>
+            <div class="card">
+                <p><strong>键位系统</strong>核心在 <code>@anthropic/ink</code>，仓库侧 <code>src/keybindings/</code> 多为再导出。默认绑定表 <code>defaultBindings.ts:32</code> 按上下文分组：</p>
+                <ul>
+                    <li><span class="key">Ctrl+O</span> → 切 transcript 视图；<span class="key">Ctrl+R</span> → 历史搜索；<span class="key">Shift+Tab</span> → 切权限模式（Day 09）。</li>
+                    <li>用户可用 <code>~/.claude/keybindings.json</code> 覆盖默认。</li>
+                    <li><span class="key">Ctrl+C</span>/<span class="key">Ctrl+D</span> 登记但<strong>不可重绑</strong>（走时间敏感的双击处理）。</li>
+                </ul>
+                <p><strong>vim 模式</strong>（<code>src/vim/</code> + <code>useVimInput.ts</code>）：完整实现了 NORMAL/INSERT 模式、移动（motions）、操作符（d/c/y）、文本对象（iw/ap）、<code>.</code> 重复上次修改（dot-repeat）。INSERT 模式几乎透传给 useTextInput，NORMAL 模式把按键交给状态机 <code>transition</code>（<code>useVimInput.ts:273</code>）。</p>
+                <div class="glossary"><b>vim 模式怎么套在普通编辑之上？</b> <code>useVimInput</code> 包在 <code>useTextInput</code> 外面：INSERT 模式时基本"放行"给底层的普通编辑；NORMAL 模式时拦截按键、走 vim 状态机（<code>d</code>+<code>w</code> = 删一个词……）解析成对 Cursor 的操作。<strong>因为底层是不可变 Cursor（L02），vim 的各种操作都能表达成"旧 Cursor → 新 Cursor"</strong>，dot-repeat 也只是"重放上次那串操作"。分层设计让 vim 这种复杂模式能干净地叠加上去，而不用改动底层编辑。Esc 退出 INSERT 是固定不可配的。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>对话框浮层：优先级仲裁</h1></div>
+            <div class="card">
+                <p>权限卡、模型选择、成本确认……这些浮层怎么管？<strong>不是"组件栈"，而是"队列 + 一个优先级仲裁函数"</strong>。核心是 <code>getFocusedInputDialog()</code>（<code>REPL.tsx:2414</code>）：</p>
+<pre><code class="language-typescript">// REPL.tsx:2414 —— 按固定优先级返回"当前唯一活跃"的对话框
+function getFocusedInputDialog() {
+  if (退出态) return 'exit'              // 最高
+  if (messageSelector) return 'message-selector'
+  if (用户正在打字 &amp;&amp; 距上次输入 &lt; 1500ms)
+    return null                          // ★ 抑制打断式弹窗
+  if (toolPermissionQueue.length) return 'tool-permission'
+  // ... 各类对话框按优先级
+}</code></pre>
+                <div class="glossary"><b>"优先级仲裁"而非"弹窗堆栈"的好处</b>：同一时刻只显示<strong>一个</strong>最该显示的对话框，避免弹窗打架/叠一堆。而且有个体贴设计——<strong>你正在打字时（1500ms 内）抑制打断式弹窗</strong>（<code>PROMPT_SUPPRESSION_MS</code>），不会你打一半突然蹦个框把你打断。各类请求存在各自队列（<code>toolUseConfirmQueue</code> 等），永远渲染队头 <code>[0]</code>，处理完出队。权限卡还作为 <code>FullscreenLayout</code> 的 overlay 渲染（Day 04），数据由 Day 09 的"await Promise"模式产生。<b>另一类对话框</b>在 <code>dialogLaunchers.tsx</code>——那些 REPL 之外、启动期的一次性对话框（快照更新、resume 选择器）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>输入框为什么分 PromptInput / useTextInput / useVimInput / Cursor 四层？</li>
+                    <li>为什么用不可变 Cursor？</li>
+                    <li>换行 vs 提交怎么判定？有建议时 Enter 为什么不提交？</li>
+                    <li>大段粘贴为什么用占位引用？</li>
+                    <li>vim 模式怎么叠加在普通编辑上？</li>
+                    <li>对话框为什么用"优先级仲裁"而非弹窗栈？打字时为什么抑制弹窗？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看输入框编排层 vs 编辑层
+sed -n '248,270p' src/hooks/useTextInput.ts      # 换行vs提交
+sed -n '478,485p' src/hooks/useTextInput.ts      # 受控编辑回写
+
+# 2. 看自动补全
+grep -n "useTypeahead\|generateCommandSuggestions" src/components/PromptInput/PromptInput.tsx | head
+
+# 3. 看键位默认表 + vim
+sed -n '32,60p' src/keybindings/defaultBindings.ts
+sed -n '270,290p' src/hooks/useVimInput.ts
+
+# 4. 看对话框优先级仲裁（核心）
+sed -n '2414,2495p' src/screens/REPL.tsx | head -60
+
+# 5. 实操：贴一大段文本看占位、开 vim 模式、Shift+Tab 切权限</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：Day 19 讲本 fork 最有特色的两块<strong>扩展</strong>——远程控制（手机/web 操控终端里的 Claude Code）和 workflow 引擎（多 agent 编排）。它们不是官方功能，但展示了这类系统能扩展到什么程度。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 配置模型成本</a>
+                <a href="claude-code-src-day19.html" style="color:var(--accent-green);">Day 19 · 远程控制 / daemon / workflow &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
