@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · 数据模型 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#8b5cf6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">数据模型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · DBBaseModel</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三层租户</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Agent + Config</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Execution + Feed</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工作流模型</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Tool + Toolkit</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 记忆相关模型</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 资源管理</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day16.html" class="nav-link" style="color:var(--accent-green);">Day 16 API &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 工具/记忆/资源（收官）</span>
+            <h1 class="part-title">数据模型</h1>
+            <p class="part-desc">第3周收官。系统地看 <code>models/</code> 的 35 个 DB 模型的关键几个——数据模型就是整个系统的骨架。前面学的一切都落在这些表上。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>DBBaseModel 公共基类</h1></div>
+            <div class="card">
+                <p>所有模型继承 <code>DBBaseModel</code>（<code>models/base_model.py:10</code>），统一提供时间戳和序列化：</p>
+<pre><code class="language-python">class DBBaseModel(Base):
+    __abstract__ = True                             # 本身不建表，只被继承
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, ..., onupdate=datetime.utcnow)
+    def to_dict(self): return {c.name: getattr(self, c.name) for c in self.__table__.columns}</code></pre>
+                <div class="anno">读法：<b><code>__abstract__=True</code> 表示它不建表、只被继承。所有子表自动有 created_at/updated_at 和 to_dict/to_json（DRY）。</b>SQLAlchemy ORM——每个模型类映射一张数据库表。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三层租户（Day 02 复习）</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>层级</th><th>模型</th><th>关键字段</th></tr>
+                    <tr><td>顶层</td><td>Organisation（organisation.py:7）</td><td>id/name/description</td></tr>
+                    <tr><td>中层</td><td>Project（project.py:5）</td><td>organisation_id</td></tr>
+                    <tr><td>底层</td><td>Agent（agent.py:20）</td><td>project_id + agent_workflow_id</td></tr>
+                </table>
+                <div class="glossary">Organisation → Project → Agent 三层，用外键（organisation_id/project_id）串起。<strong>多租户隔离的基础</strong>：查询时用这些外键框住范围，保证 A 组织看不到 B 组织的数据（Day 02）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Agent + AgentConfiguration</h1></div>
+            <div class="card">
+                <p>回忆 Day 02：<code>Agent</code> 表极简（身份+归属+绑工作流），配置拆到 <code>AgentConfiguration</code>（EAV key-value）。</p>
+                <div class="baby"><span class="t">为什么这个拆分值得再强调</span>
+                <strong>Agent 表 = 稳定的"身份证"；AgentConfiguration = 灵活的"配置袋"</strong>（目标、指令、工具、模型…每个一行）。加新配置项无需改表结构。<strong>这是"稳定实体 + 灵活属性"的经典建模——身份少变、配置多变，分开存。</strong>Day 14 的 <code>resource_summary</code> 也是存在 AgentConfiguration 里。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>AgentExecution + Feed</h1></div>
+            <div class="card">
+                <p>（Day 02 学过）<code>AgentExecution</code> = 一次运行的状态机（status、num_of_calls、num_of_tokens、current_agent_step_id）；<code>AgentExecutionFeed</code> = 运行过程的消息流水（feed、role、feed_group_id）。</p>
+                <div class="anno">读法：<b>Execution 记"这次运行到哪了、用了多少"，Feed 记"每一步说了什么做了什么"。</b>Feed 是短期记忆（Day 08 读回拼上下文）+ GUI 展示源 + 执行审计。<code>fetch_agent_execution_feeds</code> 按 feed_group_id 取本轮对话重建 LLM 上下文；<code>get_last_tool_response</code> 取最近某工具输出。</div>
+                <div class="glossary"><strong>这两张表是"循环在 DB 里"（Day 02）的物理载体</strong>：进度在 Execution.current_agent_step_id、对话在 Feed。Celery worker 每步读写它们，实现可断可恢复的自主循环。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工作流模型（Day 07 复习）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>AgentWorkflow</code>（<code>workflows/agent_workflow.py:9</code>）：一个工作流（id/name/description）。Agent 绑定它。</li>
+                    <li><code>AgentWorkflowStep</code>（<code>agent_workflow_step.py:13</code>）：节点——step_type、action_type、action_reference_id、<strong>next_steps（JSONB，带条件的边）</strong>。</li>
+                    <li><code>IterationWorkflow</code>/<code>IterationWorkflowStep</code>：内层迭代子工作流（Day 06 的两级 step）。</li>
+                </ul>
+                <div class="baby"><span class="t">工作流建模成图的意义（再强调）</span>
+                智能体"按什么流程干活"是<strong>数据</strong>（这些表里的图）而非硬编码。<strong>于是能有多套预置工作流、能在市场分享、能可视化编辑。</strong><code>next_steps</code> 的 JSONB 存"结果 X → 去 step Y"的条件边，让流程能分支/循环（Day 07）。<strong>"把流程建模成数据驱动的图"是 SuperAGI（和 CrewAI Flow、AutoGPT Graph）的共同选择。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Tool + Toolkit（Day 12 复习）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>Tool</code>（<code>tool.py:8</code>）：单个工具，存"代码定位"（folder_name/file_name/class_name）+ toolkit_id——靠它反射加载（Day 12）。</li>
+                    <li><code>Toolkit</code>（<code>toolkit.py:13</code>）：一组工具，含 organisation_id、tool_code_link（GitHub 链接）——支持从市场安装。</li>
+                </ul>
+                <div class="glossary">Tool 表存"代码在哪"而非逻辑，是插件化的基础（Day 12 反射加载）。Toolkit 的 tool_code_link 指向 GitHub——工具市场从这里下载。<strong>这两张表让"工具即插件、可从市场安装"成立。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>记忆相关模型</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>Resource</code>（<code>resource.py:6</code>，Day 14）：登记每个文件（storage_type/path/channel/agent_id/summary）。</li>
+                    <li><code>Knowledges</code>（<code>knowledges.py:12</code>）：外部知识库实体，通过 vector_db_index_id 关联向量索引，支持市场安装。</li>
+                    <li><code>VectordbIndices</code>（<code>vector_db_indices.py:9</code>）：一个向量库里的索引/集合（name/vector_db_id/dimensions）。配套 <code>vector_dbs.py</code>、<code>vector_db_configs.py</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">这三张表把记忆"关系化"</span>
+                Day 13 讲的向量库是"运行时的向量存储"。这几张 DB 表则是<strong>把"文件资源""知识库""底层向量索引"在关系型数据库里串起来管理</strong>——让智能体记忆既有向量检索（语义），又有元数据管理（这个知识库属于谁、用哪个向量索引、维度多少）。<strong>向量库负责"语义检索"，关系表负责"元数据/归属管理"，两者配合。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 3 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 3 周（Day 11-15）你已吃透工具/记忆/资源</h3>
+                <ul>
+                    <li><b>Day 11</b> 工具体系深入：复合工具、token 管理、@tool</li>
+                    <li><b>Day 12</b> 工具市场：下载/登记/反射加载/依赖注入</li>
+                    <li><b>Day 13</b> 向量记忆：RAG、embedding、语义检索</li>
+                    <li><b>Day 14</b> 资源管理：双写、隔离、灌向量库、摘要</li>
+                    <li><b>Day 15</b> 数据模型：整个系统的骨架表</li>
+                </ul>
+                <p style="margin-top:8px">你已理解智能体的能力、记忆、数据是怎么组织的。下周（Day 16-20）进入 <strong>平台/异步/生态</strong>——API、Celery、GUI、部署、收官。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/models
+sed -n '10,68p' base_model.py | head -30      # DBBaseModel
+sed -n '11,40p' agent_execution.py            # Execution
+sed -n '8,30p' agent_execution_feed.py        # Feed
+sed -n '13,35p' workflows/agent_workflow_step.py  # 工作流 step
+ls . | head -35                                # 35 个模型概览</code></pre>
+                <div class="tip"><strong>下周预告 · Day 16</strong>：进入平台层——<strong>API controllers</strong>：FastAPI 28 个控制器、agent/execution/tool/project 主要端点、前端怎么驱动智能体创建和运行。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 资源管理</a>
+                <a href="superagi-day16.html" style="color:var(--accent-green);">Day 16 · API &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
