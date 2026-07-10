@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · Agent 自主智能体 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#10b981}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#0ea5e9);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">Agent 自主智能体 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Agent 表极简</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 配置存 key-value</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Execution 一次运行</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Feed 短期记忆</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 循环在 DB 和队列里</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · max_iterations 熔断</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三层租户</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day03.html" class="nav-link" style="color:var(--accent-green);">Day 03 工具 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">Agent：自主智能体</h1>
+            <p class="part-desc">第一个核心概念。今天读数据模型看清 Agent 到底是什么，并揭示 SuperAGI 最关键的"啊哈"点——它的自主循环<b>不在代码里，而在数据库和消息队列里</b>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Agent 表极简</h1></div>
+            <div class="card">
+                <p>看 <code>Agent</code> 模型（<code>models/agent.py:20</code>）——出乎意料地简单：</p>
+<pre><code class="language-python">class Agent(DBBaseModel):
+    __tablename__ = 'agents'
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    project_id = Column(Integer)          # 归属哪个 Project
+    description = Column(String)
+    agent_workflow_id = Column(Integer)   # 绑定一个工作流
+    is_deleted = Column(Boolean, default=False)</code></pre>
+                <div class="anno">读法：<b>Agent 表只存"身份 + 归属 + 绑哪个工作流"，非常精简。</b>它的目标、指令、工具、模型等<strong>都不在这张表里</strong>——拆到了 <code>AgentConfiguration</code>（L02）。</div>
+                <div class="baby"><span class="t">为什么 Agent 表这么"空"？</span>
+                因为一个 Agent 的"可变配置"（目标、工具、模型…）很多且经常增改。如果全塞进 Agent 表，字段会爆炸、加新配置要改表结构。<strong>SuperAGI 把"身份"（Agent 表，稳定）和"配置"（AgentConfiguration，多变）分开——身份表精简稳定，配置用灵活的 key-value 存。</strong>这是数据建模的"稳定/多变分离"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>配置存 key-value（EAV 模式）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># models/agent_config.py:15
+class AgentConfiguration(DBBaseModel):
+    __tablename__ = 'agent_configurations'
+    agent_id = Column(Integer)
+    key = Column(String)     # 如 "goals" / "instructions" / "tools" / "model"
+    value = Column(Text)</code></pre>
+                <div class="anno">读法：<b>Agent 的目标、指令、约束、工具、模型全用"键值对"存——一个 Agent 有多行 AgentConfiguration，每行一个配置项。</b>比如 <code>key="goals", value="调研竞品定价"</code>。</div>
+                <div class="baby"><span class="t">EAV（实体-属性-值）模式的取舍</span>
+                这叫 EAV 模式——不给每种配置建一个列，而是用"key 列 + value 列"存任意配置。<strong>好处：加新配置项（比如 <code>resource_summary</code>、<code>last_resource_time</code>）无需改表结构，加一行即可。</strong>坏处：查询不如固定列直接、value 都是文本要自己转类型。<strong>对"配置项种类多、常变"的场景，EAV 灵活性优先——SuperAGI 选了它。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Execution：一次运行</h1></div>
+            <div class="card">
+                <p>Agent 是"定义"，一次实际运行叫 <code>AgentExecution</code>（<code>models/agent_execution.py:11</code>）——一个 Agent 可以被跑很多次：</p>
+<pre><code class="language-python">class AgentExecution(DBBaseModel):
+    status = Column(String)                # CREATED/RUNNING/PAUSED/COMPLETED/TERMINATED
+    agent_id = Column(Integer)
+    num_of_calls = Column(Integer, default=0)     # 调了几次 LLM
+    num_of_tokens = Column(Integer, default=0)    # 消耗了多少 token
+    current_agent_step_id = Column(Integer)       # ★ 当前走到工作流哪一步</code></pre>
+                <div class="anno">读法：<b>Execution 记录"这次运行的状态机 + 进度 + 用量"。</b>关键是 <code>current_agent_step_id</code>——它指向"这次运行现在走到工作流的哪一步"，把"运行"和"流程定义"关联起来。<code>status</code> 是运行状态机（L05）。</div>
+                <div class="baby"><span class="t">Agent vs Execution 的区别（像"类"和"对象"）</span>
+                <strong>Agent</strong> = 定义（"一个调研竞品的智能体"）。<strong>Execution</strong> = 一次具体运行（"周一那次调研"、"周二那次调研"）。一个 Agent 定义可以产生多个 Execution，各自独立跑、各有状态和进度。<strong>这样能重复运行同一个 Agent、能定时跑、能同时跑多次——都靠 Execution 承载每次的独立状态。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Feed：短期记忆</h1></div>
+            <div class="card">
+                <p><code>AgentExecutionFeed</code>（<code>models/agent_execution_feed.py:8</code>）——运行过程中每一条 LLM 对话/工具响应存一行：</p>
+<pre><code class="language-python">class AgentExecutionFeed(DBBaseModel):
+    agent_execution_id = Column(Integer)
+    feed = Column(Text)
+    role = Column(String)          # system / user / assistant
+    feed_group_id = Column(String)</code></pre>
+                <div class="baby"><span class="t">Feed = 智能体的"对话历史/短期记忆"</span>
+                智能体每一步的思考、每次工具调用的结果，都作为一条 Feed 存下来（role 区分是谁说的）。<strong>下一轮循环时，框架把这些 Feed 读回来、拼成 LLM 的对话上下文——这就是智能体"记得自己之前干了什么"的机制。</strong>同时它也是 GUI 实时展示的数据源（你在界面上看到的"智能体思考流"就是 Feed）。<strong>Feed 一举三得：短期记忆、UI 展示、执行审计。</strong>（长期记忆则在向量库，Day 13。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>循环在 DB 和队列里（最重要的"啊哈"）</h1></div>
+            <div class="card">
+                <p>SuperAGI 的自主循环<strong>不是一个 <code>while</code> 循环</strong>！它是"数据库状态机 + Celery 任务链"。看 <code>jobs/agent_executor.py:94</code>：</p>
+<pre><code class="language-python"># 执行完一步后，若没完成，就再排一个任务给自己（2秒后）
+if agent_execution.status in ("COMPLETED", "WAITING_FOR_PERMISSION"):
+    return
+superagi.worker.execute_agent.apply_async((agent_execution_id, datetime.now()), countdown=2)</code></pre>
+                <div class="baby"><span class="t">🤯 这是理解 SuperAGI 的关键</span>
+                普通自主智能体是"进程里一个大 while 循环转到底"。SuperAGI 不是——<strong>它每执行一步（一次 LLM+工具）就退出，然后通过 Celery <code>apply_async</code> 把"执行下一步"重新排进队列</strong>，2 秒后另一个（或同一个）worker 领走跑下一步。进度存在 DB 的 <code>current_agent_step_id</code>，对话存在 Feed。<strong>所以"循环"是"Celery 任务反复自我重新调度"，状态全在数据库和 Redis 里，不在内存。</strong>好处：进程可以随时断、随时恢复（状态都持久化了）、能水平扩展多个 worker、崩溃不丢进度。<strong>理解了这点，两级 step、崩溃恢复、人工审批挂起就都顺理成章。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>max_iterations 熔断</h1></div>
+            <div class="card">
+                <p>自主循环怕失控，所以有 <code>max_iterations</code> 熔断（<code>agent_executor.py:143</code> 的 <code>_check_for_max_iterations</code>）——<code>num_of_calls</code> 超过上限就停。</p>
+                <div class="baby"><span class="t">又见"能循环处必配上限"</span>
+                和 eino 的 MaxRunSteps、OpenHands/AutoGPT 的 max_iterations、CrewAI 的 max_iter 一模一样——<strong>凡是能自主循环的地方，必须配次数上限防失控烧钱。</strong>SuperAGI 用 <code>num_of_calls</code>（调 LLM 次数）计数，超 <code>max_iterations</code> 强制停。结束的其它出口：LLM 调用 <code>finish</code> 工具（自己宣布完成）、任务队列空、走到工作流的 COMPLETE 边。<strong>五个框架同一个铁律——这就是读多个源码的价值：看穿共性。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三层租户</h1></div>
+            <div class="card">
+                <p>SuperAGI 是多租户平台，三层组织架构：</p>
+                <table class="k">
+                    <tr><th>层级</th><th>模型</th><th>含义</th></tr>
+                    <tr><td>顶层</td><td><code>Organisation</code>（organisation.py:7）</td><td>租户（一个公司/团队）</td></tr>
+                    <tr><td>中层</td><td><code>Project</code>（project.py:5，含 organisation_id）</td><td>项目</td></tr>
+                    <tr><td>底层</td><td><code>Agent</code>（含 project_id）</td><td>智能体</td></tr>
+                </table>
+                <div class="glossary"><b>为什么要三层？</b> 平台服务多个组织，每个组织有多个项目，每个项目有多个智能体。<strong>层级隔离保证"A 公司看不到 B 公司的智能体"</strong>——多租户 SaaS 的基本盘。所有模型都继承 <code>DBBaseModel</code>（<code>base_model.py:10</code>），统一提供 created_at/updated_at 和序列化方法（DRY）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Agent 表为什么这么精简？配置为什么用 EAV key-value？</li>
+                    <li>Agent 和 Execution 的区别？（类 vs 对象）</li>
+                    <li>Feed 是什么？一举哪三得？</li>
+                    <li>SuperAGI 的循环为什么"在 DB 和队列里"？好处是什么？</li>
+                    <li>max_iterations 和其它框架有什么共性？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+sed -n '20,40p' $P/models/agent.py
+sed -n '11,40p' $P/models/agent_execution.py
+sed -n '94,100p' $P/jobs/agent_executor.py       # 循环 = 自我重排
+grep -n '_check_for_max_iterations' $P/jobs/agent_executor.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：第二个核心概念——<strong>工具 Tools</strong>：一个工具 = 名字 + 描述 + pydantic 参数 + _execute，看智能体的"手"怎么定义、怎么被调用。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="superagi-day03.html" style="color:var(--accent-green);">Day 03 · 工具 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

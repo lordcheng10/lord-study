@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 工具 Tools — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .four{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:12px 4px}
+        .four .b{border:1px solid #10b981;border-radius:8px;padding:9px 13px;font-size:12px;background:rgba(16,185,129,.06);text-align:center}
+        .four .b b{color:#10b981;display:block}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#0ea5e9);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">工具 Tools · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工具四要素</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 最简工具精读</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · execute 模板方法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 参数 schema 双重作用</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工具也能用 LLM</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Toolkit 工具箱</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么这样设计</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 Agent</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 运行平台 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">工具 Tools</h1>
+            <p class="part-desc">工具是智能体的"手"。今天读 <code>tools/base_tool.py</code>：一个工具 = 名字 + 描述 + pydantic 参数 + _execute，看它怎么定义、怎么被 LLM 调用。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工具四要素</h1></div>
+            <div class="card">
+                <p><code>BaseTool</code>（<code>tools/base_tool.py:76</code>）——记住四个字段就懂了一个工具：</p>
+<pre><code class="language-python">class BaseTool(BaseModel):
+    name: str                       # ① 名字：LLM 靠它"点名"调用
+    description: str                # ② 描述：告诉 LLM 这工具能干嘛、何时用
+    args_schema: Type[BaseModel]    # ③ 参数表：pydantic 声明需要哪些参数
+    permission_required: bool = True
+    # ④ _execute（抽象方法）：子类实现，真正干活</code></pre>
+                <div class="four">
+                    <span class="b"><b>name</b>工具名</span>
+                    <span class="b"><b>description</b>说明书</span>
+                    <span class="b"><b>args_schema</b>参数表</span>
+                    <span class="b"><b>_execute</b>干活</span>
+                </div>
+                <div class="baby"><span class="t">四要素直觉</span>
+                <strong>name</strong>=工具叫什么（"Write File"）；<strong>description</strong>=自然语言说明书（会拼进 LLM 提示，是 LLM 选工具的唯一依据，所以写好坏很关键）；<strong>args_schema</strong>=用 pydantic 声明"要填哪些参数、什么类型"；<strong>_execute</strong>=真正执行的代码。<strong>和 AutoGPT/eino/OpenHands 的工具三/四件套完全同构——天下工具一个样。</strong></p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>最简工具精读</h1></div>
+            <div class="card">
+                <p><code>WriteFileTool</code>（<code>tools/file/write_file.py:13</code>）——最干净的范例：</p>
+<pre><code class="language-python">class WriteFileInput(BaseModel):
+    file_name: str = Field(..., description="要写的文件名")   # ... 表示必填
+    content: str = Field(..., description="文件内容")
+
+class WriteFileTool(BaseTool):
+    name: str = "Write File"
+    args_schema = WriteFileInput
+    description: str = "Writes text to a file"
+    resource_manager: Optional[FileManager] = None      # 框架注入（Day 12）
+
+    def _execute(self, file_name: str, content: str):
+        return self.resource_manager.write_file(file_name, content)</code></pre>
+                <div class="anno">读法：<b><code>WriteFileInput</code> 用 <code>Field(..., description=...)</code> 声明两个必填参数，<code>_execute</code> 只有一行——把活儿委托给注入进来的 <code>resource_manager</code>。</b>注意 <code>_execute</code> 的形参名（file_name/content）和 schema 字段一一对应——框架靠这个把 LLM 填的参数对上号。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>execute 模板方法</h1></div>
+            <div class="card">
+                <p>外界调 <code>execute()</code>（<code>base_tool.py:128</code>），它固定流程、把业务留给 <code>_execute</code>：</p>
+<pre><code class="language-python">def execute(self, tool_input, **kwargs):
+    parsed_input = self._parse_input(tool_input)          # 用 args_schema 校验
+    tool_args, tool_kwargs = self._to_args_and_kwargs(parsed_input)
+    observation = self._execute(*tool_args, **tool_kwargs)  # 调子类实现
+    return observation</code></pre>
+                <div class="anno">读法：<b>典型的模板方法模式——父类 <code>execute</code> 固定"解析校验输入 → 拆参数 → 调 _execute"这套骨架，子类只写 <code>_execute</code> 业务钩子。</b><code>_parse_input</code> 用 <code>args_schema.parse_obj</code> 把 LLM 传来的 dict 校验成对象。</div>
+                <div class="baby"><span class="t">"校验"这一步为什么重要？</span>
+                LLM 填的参数可能格式错、缺字段、类型不对。<code>execute</code> 在调 <code>_execute</code> 前先用 pydantic schema <strong>校验</strong>——不合法直接报错，不会带着脏参数去执行。<strong>这道校验是"LLM 不可靠输出"和"确定性代码执行"之间的安全阀。</strong>和 AutoGPT 的 _execute 生命周期校验（Day 06）同理。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>参数 schema 的双重作用</h1></div>
+            <div class="card">
+                <p><code>args</code> 属性（<code>base_tool.py:86</code>）把 <code>args_schema</code> 转成 JSON schema 的 properties——就是喂给 LLM 的参数清单。</p>
+                <div class="baby"><span class="t">pydantic schema 一举两得</span>
+                同一份 <code>args_schema</code>：① <strong>对上（面向 LLM）</strong>——转成 JSON schema，作为"这个工具要填什么参数"的说明喂给模型（模型据此填参）；② <strong>对下（面向执行）</strong>——校验模型填回的参数是否合法，合法才 <code>_execute</code>。<strong>一份声明，既当"给 LLM 的参数文档"，又当"执行前的校验器"——不重复、不会不一致。</strong>这是用 pydantic 做工具参数的精妙之处（AutoGPT/eino 的工具也这么干）。</div>
+                <div class="glossary"><code>max_token_limit</code>（<code>base_tool.py:99</code>，默认 600）限制工具输出别撑爆上下文——工具作者要主动管 token（LLM 上下文有限且按 token 计费）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工具也能用 LLM</h1></div>
+            <div class="card">
+                <p>工具不只是"调外部 API"，也可以"用 LLM 做一次子任务"。<code>ThinkingTool</code>（<code>tools/thinking/tools.py:22</code>）：</p>
+<pre><code class="language-python">class ThinkingTool(BaseTool):
+    llm: Optional[BaseLlm] = None       # 工具自己持有一个 LLM
+    name = "ThinkingTool"
+    def _execute(self, task_description: str):
+        prompt = ...填充 thinking.txt 模板...
+        result = self.llm.chat_completion([{"role":"system","content":prompt}], ...)
+        return result["content"]</code></pre>
+                <div class="anno">读法：<b>工具可以有 <code>llm</code> 字段，在 <code>_execute</code> 里再调一次大模型。</b>ThinkingTool 就是"让 LLM 专门做一次推理思考"的工具。搜索类工具（如 <code>DuckDuckGoSearchTool</code>）更复杂——搜索 + 抓网页 + <strong>用 LLM 总结</strong>，是"外部调用 + LLM"的复合工具。</div>
+                <div class="baby"><span class="t">"工具里用 LLM"意味着什么？</span>
+                智能体的主循环调 LLM 决定"用哪个工具"，而某些工具内部<strong>又</strong>调 LLM 干具体活（思考、总结）。<strong>于是形成"LLM 套 LLM"——主 LLM 做决策，工具 LLM 做子任务。</strong>这让工具能封装"需要智能的操作"（如总结长文），而不只是机械动作。<code>llm</code> 字段由框架注入（Day 12），工具不自己创建。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Toolkit 工具箱</h1></div>
+            <div class="card">
+                <p>相关工具打包成 <code>BaseToolkit</code>（<code>base_tool.py:232</code>）。文件工具箱（<code>tools/file/file_toolkit.py:13</code>）：</p>
+<pre><code class="language-python">class FileToolkit(BaseToolkit):
+    name = "File Toolkit"
+    def get_tools(self):     # 这个工具箱包含哪些工具
+        return [AppendFileTool(), DeleteFileTool(), ListFileTool(), ReadFileTool(), WriteFileTool()]
+    def get_env_keys(self):  # 需要哪些配置/密钥（文件工具箱不需要 → 空）
+        return []</code></pre>
+                <div class="baby"><span class="t">为什么要工具箱？</span>
+                一个"能力域"往往由多个工具组成——文件读/写/删/列共 5 个工具，它们共享同一组配置/密钥。<strong>Toolkit 把"一组工具 + 一组配置声明"封装在一起</strong>，方便按工具箱粒度授权、安装（工具市场）、配置。需要密钥的工具箱（如 Google 搜索）在 <code>get_env_keys()</code> 里声明 <code>ToolConfiguration</code>（key 名、类型、是否必填、是否敏感）——前端据此知道"该让用户填哪些字段、哪些要加密存"。<strong>工具箱是工具市场（Day 12）的组织单位。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么这样设计</h1></div>
+            <div class="card">
+                <p>LLM 只会输出文本，不能直接调 Python 函数。SuperAGI 的工具机制搭起了桥：</p>
+                <ol>
+                    <li>把每个工具的 <code>name+description+args_schema</code> 转成"工具说明书"喂给 LLM。</li>
+                    <li>LLM 输出一段 JSON（选哪个工具 + 参数）。</li>
+                    <li>框架按 name 找到工具、用 pydantic 校验参数、调 <code>_execute</code>。</li>
+                    <li>结果作为"观察"存回 Feed（Day 02），喂回下一轮。</li>
+                </ol>
+                <div class="glossary"><b>这就是"让 LLM 使用工具"的通用范式</b>——你在 eino、OpenHands、CrewAI、AutoGPT 都见过。SuperAGI 用 <code>BaseTool</code>（模板方法）+ pydantic schema（双重作用）+ Toolkit（组织）+ 依赖注入（Day 12）实现。<strong>五个框架的工具机制惊人一致——因为"把 LLM 的文本决策转成结构化工具调用"就这一条正道。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>工具四要素是什么？description 为什么关键？</li>
+                    <li>execute 模板方法怎么工作？校验为什么重要？</li>
+                    <li>pydantic schema 的双重作用（对上/对下）？</li>
+                    <li>工具怎么在内部用 LLM？</li>
+                    <li>Toolkit 为什么存在？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/tools
+sed -n '76,153p' $P/base_tool.py | head -50      # BaseTool + execute
+sed -n '13,50p' $P/file/write_file.py            # 最简工具
+sed -n '22,72p' $P/thinking/tools.py             # 工具用 LLM
+sed -n '13,25p' $P/file/file_toolkit.py          # Toolkit</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：概念够了，跑起来！<strong>运行平台</strong>——docker compose 六服务、两个 entrypoint 脚本揭示的启动步骤、startup seeding。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 Agent</a>
+                <a href="superagi-day04.html" style="color:var(--accent-green);">Day 04 · 运行平台 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
