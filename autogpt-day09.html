@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Block 成本计量 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#8b5cf6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#a855f7);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Block 成本计量 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · credit 钱包</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BlockCost 六种类型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 静态 vs 动态成本</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · cost_filter 按参数定价</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 成本总表 BLOCK_COSTS</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 向上取整防漏费</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 成本估算校准</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 凭证</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 SDK &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 Block 系统</span>
+            <h1 class="part-title">Block 成本计量</h1>
+            <p class="part-desc">AutoGPT Platform 是计量收费 SaaS——每个 Block 执行都扣 credit。今天讲 Block 怎么定价：六种成本类型、静态/动态、按参数定价。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>credit 钱包</h1></div>
+            <div class="card">
+                <p>平台内部货币叫 <strong>credit（积分）</strong>，<code>1 credit = 1 美分</code>。用户有余额，每次 Block 执行按价格表扣费，用 Stripe 充值（Day 16）。</p>
+                <div class="baby"><span class="t">为什么要计量收费？（呼应 Day 01 转型）</span>
+                因为平台替用户<strong>真金白银地调用付费 API</strong>（OpenAI、各种第三方服务都要钱）。如果不计费，用户随便跑，平台就得倒贴。<strong>把每个 Block 的成本明码标价、按用量扣用户的 credit——这是 SaaS 化的商业地基。</strong>这也是它和经典 AutoGPT（单机、用你自己的 key）的关键区别：平台可以托管 key、替你付费、再按 credit 向你收费（加一点毛利）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BlockCost 六种类型</h1></div>
+            <div class="card">
+                <p><code>BlockCostType</code>（<code>blocks/_base.py:99</code>）——一个 Block 可以按六种方式之一计价：</p>
+                <table class="k">
+                    <tr><th>类型</th><th>怎么算</th><th>例</th></tr>
+                    <tr><td><code>RUN</code></td><td>每次运行固定扣 N 分</td><td>普通块</td></tr>
+                    <tr><td><code>BYTE</code></td><td>按输入字节数</td><td>处理大文件</td></tr>
+                    <tr><td><code>SECOND</code></td><td>按运行秒数（N分/M秒）</td><td>E2B 代码执行</td></tr>
+                    <tr><td><code>ITEMS</code></td><td>按返回条目数</td><td>Apollo 搜索</td></tr>
+                    <tr><td><code>COST_USD</code></td><td>按供应商实际美元花费折算</td><td>Jina 网页搜索</td></tr>
+                    <tr><td><code>TOKENS</code></td><td>按 LLM token 数查表</td><td>LLM 块</td></tr>
+                </table>
+                <div class="baby"><span class="t">为什么要这么多计价方式？</span>
+                因为不同 Block 的<strong>真实成本结构不同</strong>：LLM 按 token 收费、代码沙箱按运行时间收费、搜索 API 按调用次数或返回条数收费、大文件处理成本和字节数相关。<strong>用统一的"每次固定价"会不公平（跑 1 秒和跑 10 分钟一个价？）。六种类型让每个 Block 都能按它真实的成本结构定价</strong>——用得多付得多，公平且可持续。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>静态 vs 动态成本</h1></div>
+            <div class="card">
+                <p>六种类型分两组（<code>_base.py:113</code>）：</p>
+                <ul>
+                    <li><strong>静态成本</strong>（<code>RUN</code>/<code>BYTE</code>）：<strong>执行前就能算准</strong>（跑一次就是固定价、字节数已知）。</li>
+                    <li><strong>动态成本</strong>（<code>SECOND</code>/<code>ITEMS</code>/<code>COST_USD</code>/<code>TOKENS</code>）：<strong>执行后才知道</strong>（不跑完不知道用了几秒、几个 token）。<code>is_dynamic=True</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">动态成本怎么办？（Day 05 的预扣+对账在这兑现）</span>
+                动态成本执行前算不准，所以：<strong>执行前用历史平均值<em>估算</em>预扣一笔（pre-flight），执行后用真实统计<em>结算</em>（post-flight），多退少补。</strong>比如 LLM 块：执行前按该模型的历史平均 token 预扣，执行后按真实 token 数对账。<strong>这就是 Day 05 讲的"预扣+对账"的根源——因为动态成本天生算不准，必须两阶段计费。</strong>静态成本则执行前一次算准即可。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>cost_filter：按参数定价</h1></div>
+            <div class="card">
+                <p><code>BlockCost</code> 有个 <code>cost_filter</code>——让"同一个 Block、不同输入参数"能有不同价格。看真实例子（<code>block_cost_config.py:580</code>）：</p>
+<pre><code class="language-python">SearchTheWebBlock: [
+    BlockCost(cost_amount=150, cost_type=BlockCostType.COST_USD,
+              cost_filter={"credentials": {"id": jina_credentials.id, ...}}),
+]
+# Ideogram：V2 收 12 分、V3 收 14 分（block_cost_config.py:607）——靠 cost_filter 按 model 区分</code></pre>
+                <div class="anno">读法：<b><code>cost_filter</code> 是"子集匹配"条件——只有当 Block 的输入包含这些键值时，这条价格才生效。</b>于是同一个"生成图片"块，用 V2 模型收 12 分、V3 收 14 分——靠 cost_filter 匹配 <code>model</code> 字段来区分。匹配逻辑在 <code>executor/utils.py:286</code> 的 <code>_is_cost_filter_match</code>（递归子集匹配）。</div>
+                <div class="baby"><span class="t">为什么需要"按参数定价"？</span>
+                一个 LLM 块能选不同模型（GPT-4 贵、mini 便宜），一个图像块能选不同画质档。<strong>它们是同一个 Block，但成本因参数而异。</strong>cost_filter 让一个 Block 挂多条价格规则，执行时根据实际输入参数匹配到对应的价。<strong>灵活精准——不用为每个模型/档位造一个单独的 Block。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>成本总表 BLOCK_COSTS</h1></div>
+            <div class="card">
+                <p><code>BLOCK_COSTS</code>（<code>block_cost_config.py:535</code>）是总表：<code>dict[Block类, list[BlockCost]]</code>。相关的还有 <code>MODEL_COST</code>（每模型每次扁平价）、<code>TOKEN_COST</code>（每模型每百万 token 费率）、<code>LLM_COST</code>（按 provider 批量生成）。</p>
+                <div class="glossary"><b>token 计费的细节</b>（<code>compute_token_credits</code>，<code>:319</code>）：post-flight 用真实 token 数 × 费率；pre-flight 或未登记模型则回落到扁平 <code>MODEL_COST</code>。费率注释说明是在<strong>供应商实际价基础上加 1.5x margin</strong>（1 credit ≈ $0.01）——平台的毛利来源。<strong>⚠️ 一个坑</strong>：<strong>没登记在 BLOCK_COSTS 里的 Block = 免费</strong>（从钱包视角，<code>if not block_costs: return 0</code>）。加新块别忘了配成本。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>向上取整防漏费</h1></div>
+            <div class="card">
+                <p><code>block_usage_cost()</code>（<code>executor/utils.py:123</code>）算成本时，<code>SECOND</code>/<code>ITEMS</code> 用 <code>math.ceil(units/divisor)*amount</code>——<strong>向上取整</strong>（<code>utils.py:174</code>）。</p>
+                <div class="baby"><span class="t">为什么向上取整？</span>
+                假设定价"每 10 秒 1 credit"。如果一个执行跑了 3 秒——<strong>向下取整就是 0 credit（不足一档 = 免费）</strong>，用户可以疯狂跑几秒的任务白嫖。向上取整 = "不足 10 秒也算 1 档，收 1 credit"。<strong>防止"不足一档 = 0 收费"的漏费漏洞。</strong>这种对计费边界的严谨，是计量 SaaS 的钱袋子保护——差之毫厘，规模化后就是大漏洞。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>成本估算校准</h1></div>
+            <div class="card">
+                <p>动态成本 pre-flight 要给个"估算值"，从哪来？<code>block_cost_analytics.py</code>（<code>compute_block_cost_estimates</code>，<code>:66</code>）——跑 SQL 聚合过去最多 90 天的真实扣费记录，算出每个 Block 的 mean/p50/p95，生成 <code>block_preflight_estimates.json</code>。</p>
+                <div class="baby"><span class="t">这是什么运维智慧？</span>
+                动态成本块执行前显示"预计花费"，如果一律显示 0（因为算不准），用户体验差、也没预扣保护。<strong>用历史真实数据算出"这个块平均花多少"，作为 pre-flight 估算——执行前显示合理预估、预扣合理金额，执行后只结算小差额。</strong>这个分析是<strong>离线校准</strong>（不参与实时计费），定期跑，让估算越来越准。<strong>"用历史数据校准估算"——数据驱动的成本预测。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>credit 是什么？为什么要计量收费？</li>
+                    <li>BlockCost 六种类型？为什么要这么多？</li>
+                    <li>静态 vs 动态成本的区别？动态为什么要预扣+对账？</li>
+                    <li>cost_filter 怎么实现"按参数定价"？</li>
+                    <li>为什么向上取整？成本估算怎么校准？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '99,158p' $P/blocks/_base.py                  # BlockCostType + BlockCost
+sed -n '535,620p' $P/data/block_cost_config.py | head -40   # BLOCK_COSTS
+sed -n '123,210p' $P/executor/utils.py | head -50    # block_usage_cost + 向上取整</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>SDK 与自定义 Block</strong>——开发者如何用 SDK 写一个新 Block、ProviderBuilder 声明第三方集成、AutoRegistry 自动注册。收官 Block 系统。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 凭证</a>
+                <a href="autogpt-day10.html" style="color:var(--accent-green);">Day 10 · SDK &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

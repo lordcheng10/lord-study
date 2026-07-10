@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Block 凭证系统 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .two .c{border:1px solid var(--border-color);border-radius:9px;padding:13px;background:var(--bg-secondary)}
+        .two .c h4{margin:0 0 6px;font-size:13px} .two .c.a h4{color:#6366f1} .two .c.b h4{color:#f59e0b} .two .c li{font-size:11.5px;color:var(--text-secondary);margin:3px 0}
+        @media(max-width:768px){.two{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#a855f7);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">Block 凭证系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 凭证难题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 引用 vs 实体两层</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CredentialsField 声明</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · discriminator 智能推断</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 命名强约束</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 执行时注入与加锁</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · OAuth 刷新</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 真实 Block</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 成本计量 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Block 系统</span>
+            <h1 class="part-title">Block 凭证系统</h1>
+            <p class="part-desc">Block 常需要 API Key/OAuth 才能调外部服务。今天讲凭证怎么被安全地声明、存储、注入——"引用 vs 实体"两层设计是安全的核心。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>凭证难题</h1></div>
+            <div class="card">
+                <p>Block 要调 OpenAI 需要 API Key、要发 GitHub PR 需要 OAuth token。这些<strong>敏感凭证</strong>怎么管，既安全又好用？难点：① 不能明文存在图里（图会导出/分享）；② 不能硬编码在 Block 代码里；③ OAuth token 会过期需刷新；④ 多个执行并发用同一凭证要防冲突。</p>
+                <div class="baby"><span class="t">核心矛盾</span>
+                <strong>凭证既要"能用"（执行时 Block 得拿到真 key 去调 API）又要"安全"（别处不该出现明文）。</strong>AutoGPT 的解法是"引用 vs 实体分离"——平时到处流转的只是"引用"（指针），真正的密钥只在执行瞬间"实体化"注入。下面拆解。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>引用 vs 实体两层（核心安全设计）</h1></div>
+            <div class="card">
+                <div class="two">
+                    <div class="c a"><h4>引用 CredentialsMetaInput</h4>
+                        <ul><li>只有 <code>id/title/provider/type</code></li><li><b>不含密钥本身</b></li><li>图里、DB 里、前端流转的都是它</li><li>只是指向凭证库某条记录的指针</li></ul>
+                    </div>
+                    <div class="c b"><h4>实体 APIKeyCredentials/OAuth2</h4>
+                        <ul><li>含真实 <code>api_key: SecretStr</code> / token</li><li><b>只在执行瞬间</b>由执行器解析出</li><li>以 kwarg 注入 Block 的 run()</li><li>用完即释放</li></ul>
+                    </div>
+                </div>
+                <div class="anno">读法：<b>引用（<code>data/model.py:514</code>）是"指针"——只说"用哪条凭证"，不含密钥。实体（<code>model.py:357</code>）才是真密钥，只在执行时短暂出现。</b>密钥用 <code>SecretStr</code> 包裹，序列化时才解包（防止意外打印/日志泄漏）。</div>
+                <div class="baby"><span class="t">为什么这个分离是安全关键？</span>
+                你导出一个 Agent 图分享给别人时，图里只有凭证<strong>引用</strong>（"用 id=xxx 的凭证"），<strong>没有真密钥</strong>——别人拿到图也拿不到你的 key。真密钥只在<strong>你自己的执行</strong>、<strong>执行的那一瞬间</strong>、从<strong>你自己的加密凭证库</strong>解出来注入 Block。<strong>"图里存指针、执行时才实体化"——密钥的暴露面被压缩到极致。</strong>这和 OpenHands 的密钥按需下发（Day 09）是同一安全哲学。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CredentialsField 声明</h1></div>
+            <div class="card">
+                <p>Block 声明凭证字段用 <code>CredentialsField</code>（<code>data/model.py:743</code>）。LLM 块的封装（<code>blocks/llm.py:90</code>）：</p>
+<pre><code class="language-python">def AICredentialsField() -> AICredentials:
+    return CredentialsField(
+        description="LLM 供应商的 API key",
+        discriminator="model",   # ★ 根据用户选的 model 字段...
+        discriminator_mapping={m.value: m.metadata.provider for m in LlmModel},  # ...自动决定用哪个 provider 的凭证
+    )</code></pre>
+                <div class="anno">读法：<b>声明一个凭证字段，告诉框架"这个字段需要凭证"。</b>前端看到凭证字段就弹出"连接账号/填 API Key"的 UI。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>discriminator：智能推断该用哪个凭证</h1></div>
+            <div class="card">
+                <p>上面 <code>discriminator="model"</code> 是个精妙设计——凭证类型<strong>由另一个字段的值决定</strong>：</p>
+                <div class="baby"><span class="t">怎么工作的？</span>
+                LLM 块有个 <code>model</code> 下拉（选 GPT-4 / Claude / ...）。<code>discriminator="model"</code> + mapping 表让框架自动推断：<strong>用户选了某个 Anthropic 模型 → 前端就自动知道要连 Anthropic 的凭证</strong>，而不是让用户再手动选一次"我要用哪家的 key"。<strong>你选了模型，凭证类型就定了——少一步操作，且不会选错（选了 GPT 模型却填 Claude key）。</strong>这种"一个字段的值决定另一个字段的行为"的联动，让可视化界面更智能、更防错。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>命名强约束（回扣 Day 02）</h1></div>
+            <div class="card">
+                <p>Day 02 提到的自动校验（<code>_base.py:337</code>）在这里发挥作用：<strong>名为 <code>credentials</code> 或 <code>*_credentials</code> 的字段必须是凭证类型，反之亦然</strong>（双向绑定）。</p>
+                <div class="baby"><span class="t">强约束换来什么？</span>
+                因为命名规范被强制，<strong>前端只要看字段名就知道"这是个凭证字段，该弹连接账号 UI"</strong>——不用额外标记。而且防止开发者写错（把凭证字段起个普通名字，或把普通字段误标成凭证类型）。一个 Block 可以有多个凭证字段（如 <code>openai_credentials</code> + <code>e2b_credentials</code>，同时用两个服务），但 webhook 类块只允许一个（<code>_base.py:616</code>）。<strong>约定命名 + 强制校验 = 前端能自动识别、开发者不易出错。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>执行时注入与加锁</h1></div>
+            <div class="card">
+                <p>Day 05 见过执行时的凭证注入（<code>executor/manager.py:263</code>），核心是 <code>creds_manager.acquire</code>：</p>
+<pre><code class="language-python">credentials, lock = await creds_manager.acquire(user_id, credentials_meta.id)
+extra_exec_kwargs[field_name] = credentials    # 注入到 run 的 kwarg
+# ... block.execute(...) ...
+# finally: 释放所有凭证锁</code></pre>
+                <div class="anno">读法：<b><code>acquire</code> 做两件事：① 从凭证库取出<strong>已解密、已刷新</strong>的真实凭证实体；② 拿一把 <strong>Redis 分布式锁</strong>——保证"同一套凭证同一时刻只被一个 Block 用"。</b>执行完 finally 里释放锁。</div>
+                <div class="baby"><span class="t">为什么凭证要加锁？</span>
+                想象两个执行同时用同一个 OAuth 凭证，而这个凭证恰好过期需要刷新。如果两个执行同时刷新，可能<strong>互相覆盖 token、导致混乱</strong>。加锁保证"同一凭证同一时刻只有一个使用者"——刷新、使用都串行化，避免竞态。<strong>共享的可变资源（凭证）+ 并发访问 = 必须加锁。</strong>锁 key 形如 <code>user:{id}/credentials:{id}</code>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>OAuth 刷新</h1></div>
+            <div class="card">
+                <p>OAuth token 会过期。<code>IntegrationCredentialsManager</code>（<code>integrations/creds_manager.py:74</code>）的 <code>get()</code> 取凭证时，若是 OAuth2 且快过期就 <code>refresh_if_needed()</code>——加锁调对应 provider 的 <code>oauth_handler.refresh_tokens()</code> 换新 token 再存回。</p>
+                <div class="glossary">每个第三方一个 OAuth handler（<code>integrations/oauth/</code>：<code>google.py</code>/<code>github.py</code>/<code>discord.py</code>/<code>notion.py</code>...），都继承 <code>BaseOAuthHandler</code>（提供 <code>get_login_url</code>/<code>exchange_code_for_tokens</code>/<code>refresh_tokens</code>）。<strong>自动刷新让用户"连一次账号，长期可用"——不用每次 token 过期就重新授权。</strong>这套凭证管理（引用/实体分离 + 加锁 + 自动刷新）是 Day 17 集成系统的核心，Day 17 会从平台视角再看一遍。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>凭证管理的核心矛盾是什么？</li>
+                    <li>引用 vs 实体两层为什么是安全关键？</li>
+                    <li>discriminator 怎么智能推断凭证类型？</li>
+                    <li>命名强约束换来什么？</li>
+                    <li>执行时凭证为什么要加锁？OAuth 怎么自动刷新？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '327,360p' $P/data/model.py                  # 凭证实体
+grep -n 'class CredentialsMetaInput\|def CredentialsField' $P/data/model.py
+sed -n '85,100p' $P/blocks/llm.py                    # AICredentialsField + discriminator
+grep -n 'def acquire\|def refresh_if_needed' $P/integrations/creds_manager.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>Block 成本计量</strong>——每个 Block 怎么定价（BlockCost 六种类型）、静态 vs 动态成本、cost_filter 按参数匹配价格。这是计量 SaaS 的地基。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 真实 Block</a>
+                <a href="autogpt-day09.html" style="color:var(--accent-green);">Day 09 · 成本计量 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
