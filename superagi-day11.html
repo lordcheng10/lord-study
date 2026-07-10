@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · 工具体系深入 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">工具体系深入 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 回顾四要素</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 复合工具：搜索</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 工具作者管 token</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ToolConfiguration</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · @tool 装饰器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 配置读取分层</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · permission_required</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 LLM</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 工具市场 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 工具/记忆/资源</span>
+            <h1 class="part-title">工具体系深入</h1>
+            <p class="part-desc">Day 03 建立了工具的基本概念，今天深入：复合工具、工具作者的 token 管理、ToolConfiguration 配置声明、@tool 装饰器把普通函数变工具。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>回顾四要素</h1></div>
+            <div class="card">
+                <p>复习 Day 03：一个工具 = <strong>name（名字）+ description（说明书）+ args_schema（pydantic 参数）+ _execute（干活）</strong>。<code>execute()</code>（模板方法）负责校验输入、调 <code>_execute</code>。</p>
+                <div class="glossary">今天看更复杂的真实工具、工具作者要注意的细节（token 管理）、以及配置声明和快捷定义方式。这些让你能真正读懂/写好一个工具。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>复合工具：DuckDuckGoSearch</h1></div>
+            <div class="card">
+                <p><code>DuckDuckGoSearchTool</code>（<code>tools/duck_duck_go/duck_duck_go_search.py:28</code>）是"搜索 + 抓取 + LLM 总结"的复合工具：</p>
+<pre><code class="language-python">def _execute(self, query: str) -> tuple:
+    search_results = self.get_raw_duckduckgo_results(query)  # 抓搜索结果
+    webpages = self.get_content_from_url(links)              # 抓网页正文
+    results = self.get_formatted_webpages(...)               # 组装
+    summary = self.summarise_result(query, results)          # ★ 用 LLM 总结
+    return summary + "\n\nLinks:\n" + ...</code></pre>
+                <div class="anno">读法：<b>一个"搜索"工具内部其实做了四件事：搜 → 抓网页 → 组装 → 用 LLM 总结。</b><code>summarise_result</code>（<code>:176</code>）里 <code>self.llm.chat_completion(...)</code> 就是通过统一 LLM 接口（Day 10）总结——<strong>工具内部也能用 LLM</strong>（Day 03 讲过）。</div>
+                <div class="baby"><span class="t">为什么搜索工具要"总结"？</span>
+                原始搜索结果 + 多个网页正文可能几万字，直接塞回智能体上下文会撑爆、也没重点。<strong>工具内部先用 LLM 把搜索结果总结成精炼的一段，再返回给智能体——省 token、抓重点。</strong>这体现工具可以封装"复杂的、需要智能的操作"，对智能体暴露一个简单接口（"搜索并总结"）。<strong>好工具替智能体处理脏活，只返回它需要的干净结果。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>工具作者管 token</h1></div>
+            <div class="card">
+                <p>上面 <code>get_formatted_webpages</code>（<code>:98</code>）里用 <code>TokenCounter.count_text_tokens(...) > 3000</code> 控制喂给 LLM 的内容量。</p>
+                <div class="baby"><span class="t">工具作者的责任</span>
+                LLM 上下文有限（Day 10）。<strong>工具如果返回超长内容，会撑爆智能体的上下文。</strong>所以工具作者要主动管 token——比如"抓来的网页内容超 3000 token 就截断/总结"。<code>BaseTool.max_token_limit</code>（默认 600，Day 03）也是这个用途。<strong>写工具不只是"实现功能"，还要考虑"输出别太大"——这是 Agent 工具开发和普通函数开发的重要区别。</strong>返回给 LLM 的东西，多一个 token 都是钱和上下文空间。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ToolConfiguration：声明需要的密钥</h1></div>
+            <div class="card">
+                <p>需要密钥的工具箱（如 Google 搜索）在 <code>get_env_keys()</code> 里声明 <code>ToolConfiguration</code>（<code>tools/google_search/google_search_toolkit.py:16</code>）：</p>
+<pre><code class="language-python">def get_env_keys(self):
+    return [
+        ToolConfiguration(key="GOOGLE_API_KEY", key_type=STRING, is_required=True, is_secret=True),
+        ToolConfiguration(key="SEARCH_ENGINE_ID", ...)
+    ]</code></pre>
+                <div class="anno">读法：<b><code>ToolConfiguration</code>（<code>base_tool.py:207</code>）描述一个配置项：key 名、类型、是否必填、<strong>是否敏感（is_secret）</strong>。</b>工具箱声明"我需要哪些密钥"，前端据此知道"该让用户填哪些字段、哪些要加密存"。</div>
+                <div class="baby"><span class="t">为什么工具箱要"声明"自己需要什么密钥？</span>
+                Google 搜索工具需要 API key，但平台不知道该问用户要什么——除非工具自己声明。<strong><code>get_env_keys()</code> 让工具箱告诉平台"我需要 GOOGLE_API_KEY（必填、敏感）和 SEARCH_ENGINE_ID"。</strong>于是前端自动生成对应的输入框（敏感的打码存），运行时把用户填的值注入给工具。<strong>"工具声明所需配置，平台负责收集和注入"——这让工具即插即用。</strong>文件工具箱不需密钥就返回空。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>@tool 装饰器</h1></div>
+            <div class="card">
+                <p>除了写完整的 Tool 类，还能用 <code>@tool</code> 装饰器（<code>base_tool.py:186</code>）把一个<strong>普通函数</strong>直接包成工具：</p>
+<pre><code class="language-python">@tool
+def my_func(a: int, b: int) -> int:
+    """把两个数相加"""   # docstring 当 description
+    return a + b
+# 用函数签名自动生成 schema（create_function_schema, :47）</code></pre>
+                <div class="baby"><span class="t">@tool 的便利</span>
+                写完整 Tool 类要定义 Input/Output/name/description——对简单函数太啰嗦。<strong><code>@tool</code> 装饰器一行搞定：用函数的 <strong>docstring 当 description</strong>、用 <strong>函数签名（参数类型注解）自动生成 args_schema</strong>。</strong>包成 <code>FunctionalTool</code>（<code>:156</code>）。<strong>这和 eino 的 InferTool、AutoGPT 的 @tool 装饰器一模一样——给"轻量自定义函数工具"的快捷入口。</strong>五个框架都提供了这种"函数 → 工具"的糖。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>配置读取分层</h1></div>
+            <div class="card">
+                <p>工具运行时通过 <code>get_tool_config(key)</code>（<code>base_tool.py:152</code>）读配置，委托给 <code>toolkit_config</code>。默认从 config.yaml 读（<code>BaseToolkitConfiguration.get_tool_config</code>，<code>:67</code>），但真跑起来时被替换成<strong>数据库版</strong> <code>DBToolkitConfiguration</code>（Day 12），从 DB 读并解密密钥。</p>
+                <div class="baby"><span class="t">为什么配置读取要"分层可替换"？</span>
+                开发时配置放 config.yaml 文件方便。但生产/多租户时，<strong>不同组织的工具配置（密钥）不同、且要加密存数据库</strong>——不能都放一个文件。<strong>所以 <code>toolkit_config</code> 是可替换的：默认读文件，运行时替换成读数据库的版本。</strong>工具代码里只调 <code>get_tool_config(key)</code>，不管配置从哪来——又是"面向接口"的解耦。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>permission_required</h1></div>
+            <div class="card">
+                <p><code>BaseTool</code> 有个 <code>permission_required: bool = True</code>（<code>base_tool.py</code>）——标记这个工具执行前是否需要人工确认。</p>
+                <div class="baby"><span class="t">又见 Human-in-the-loop</span>
+                有些工具危险（发邮件、删文件、发推文），有些安全（ThinkingTool 只是思考，<code>permission_required=False</code>）。<strong>标了 <code>permission_required=True</code> 的工具，在受限模式下执行前会停下、等用户批准（Day 06 的 WAITING_FOR_PERMISSION）。</strong>这和 eino/OpenHands/CrewAI/AutoGPT 的 HITL 完全一致——<strong>能执行危险操作的智能体，关键动作必须能停下等人。五个框架第 N 次印证这条铁律。</strong>ThinkingTool 设 <code>permission_required=False</code>——纯思考无副作用，不用问。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>复合工具（搜索）内部做了哪几件事？为什么要总结？</li>
+                    <li>工具作者为什么要主动管 token？</li>
+                    <li>ToolConfiguration 声明什么？为什么工具箱要声明所需密钥？</li>
+                    <li>@tool 装饰器怎么把函数变工具？和别的框架像吗？</li>
+                    <li>配置读取为什么分层可替换？permission_required 干嘛？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/tools
+sed -n '28,110p' duck_duck_go/duck_duck_go_search.py | head -50   # 复合工具
+sed -n '16,20p' google_search/google_search_toolkit.py           # ToolConfiguration
+sed -n '156,205p' base_tool.py                                    # @tool + FunctionalTool</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>tool_manager 与工具市场</strong>——工具怎么从 GitHub 下载、DB 登记、ToolBuilder 反射加载、依赖注入。"工具市场"的完整链路。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 LLM</a>
+                <a href="superagi-day12.html" style="color:var(--accent-green);">Day 12 · 工具市场 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

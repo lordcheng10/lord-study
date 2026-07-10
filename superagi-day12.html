@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · tool_manager 与工具市场 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .chain{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:11.5px}
+        .chain .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 10px;background:var(--bg-secondary);text-align:center}
+        .chain .n b{display:block;color:#8b5cf6;font-size:10px} .chain .a{color:#10b981;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">tool_manager 与工具市场 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工具市场链路</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · tool_manager 下载</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Tool 表存代码定位</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ToolBuilder 反射加载</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 依赖注入</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 为什么用反射</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 完整链路串联</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 工具深入</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 向量记忆 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 工具/记忆/资源</span>
+            <h1 class="part-title">tool_manager 与工具市场</h1>
+            <p class="part-desc">工具怎么从 GitHub 下载、DB 登记、运行时反射加载、注入依赖？今天串起"工具市场"的完整链路——这是插件化工具的基础。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工具市场链路</h1></div>
+            <div class="card">
+                <div class="chain">
+                    <span class="n"><b>市场下载</b>GitHub zipball</span><span class="a">→</span>
+                    <span class="n"><b>落本地目录</b>marketplace_tools</span><span class="a">→</span>
+                    <span class="n"><b>DB 登记</b>Tool 表</span><span class="a">→</span>
+                    <span class="n"><b>反射加载</b>ToolBuilder</span><span class="a">→</span>
+                    <span class="n"><b>注入依赖</b>llm/resource</span><span class="a">→</span>
+                    <span class="n" style="border-color:#22c55e"><b>Agent 使用</b></span>
+                </div>
+                <div class="baby"><span class="t">"工具市场"是什么？</span>
+                像手机的应用商店——SuperAGI 有个工具市场，你能浏览、安装第三方工具（发 Slack、操作 Jira、查天气…），不用自己写。<strong>整条链路：从 GitHub 下载工具代码 → 放到本地目录 → 在数据库登记这个工具 → 智能体运行时动态加载它 → 注入依赖 → 用。</strong>今天逐段看。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>tool_manager 下载</h1></div>
+            <div class="card">
+                <p><code>tool_manager.py</code> 负责从 GitHub 下载工具：</p>
+<pre><code class="language-python"># tool_manager.py
+# load_tools_config (:101) 读 superagi/tools.json 里登记的工具 URL
+# download_and_extract_tools (:121)：市场工具解压到 tools/marketplace_tools
+#                                    外部工具解压到 tools/external_tools/<name>
+# download_marketplace_tool / download_tool (:17)：通过 GitHub zipball API 下载解压
+# load_marketplace_tools (:108)：从官方仓库 TransformerOptimus/SuperAGI-Tools 拉列表</code></pre>
+                <div class="anno">读法：<b>工具代码托管在 GitHub，<code>tool_manager.py</code> 用 GitHub 的 zipball API 下载、解压到本地目录。</b>Day 04 的 <code>entrypoint.sh</code> 启动时就跑 <code>python tool_manager.py</code> 先把工具下载好。三个目录（tools/external_tools/marketplace_tools）就是工具代码的存放处。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Tool 表存"代码定位"</h1></div>
+            <div class="card">
+                <p><code>Tool</code> 模型（<code>models/tool.py:8</code>）——关键：它存的是"代码在哪"而非逻辑本身：</p>
+<pre><code class="language-python">class Tool(DBBaseModel):
+    name = Column(String)
+    folder_name = Column(String)   # 工具代码所在目录
+    class_name = Column(String)    # 工具类名
+    file_name = Column(String)     # 工具文件名
+    toolkit_id = Column(Integer)   # 归属哪个 Toolkit</code></pre>
+                <div class="anno">读法：<b>数据库里的 Tool 记录不存工具逻辑，只存"这个工具的代码在 <code>folder_name/file_name</code> 里的 <code>class_name</code> 类"。</b>就像一个"地址簿"——记着"这个工具的代码放在哪、类叫什么"。运行时靠这个定位信息去动态加载（L04）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ToolBuilder 反射加载</h1></div>
+            <div class="card">
+                <p><code>ToolBuilder.build_tool</code>（<code>agent/tool_builder.py:50</code>）用 Python 反射<strong>动态导入并实例化</strong>工具类：</p>
+<pre><code class="language-python">module_name = ".".join([...tools_dir..., tool.folder_name, file_name])
+module = importlib.import_module(module_name)      # 动态导入模块
+obj_class = getattr(module, tool.class_name)       # 按类名取出类
+new_object = obj_class()                           # 实例化
+new_object.toolkit_config = DBToolkitConfiguration(session=..., toolkit_id=...)</code></pre>
+                <div class="anno">读法：<b>根据 DB 里 Tool 记录的 folder/file/class 名，用 <code>importlib.import_module</code> + <code>getattr</code> 在运行时把工具类找出来、实例化。</b>再把 <code>toolkit_config</code> 换成数据库版（<code>DBToolkitConfiguration</code>，从 DB 读配置并 <code>decrypt_data</code> 解密密钥，Day 11）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>依赖注入</h1></div>
+            <div class="card">
+                <p><code>set_default_params_tool</code>（<code>tool_builder.py:84</code>）用一串 <code>hasattr</code> 判断，把运行时依赖注入进工具实例：</p>
+<pre><code class="language-python">if hasattr(tool, 'llm'):
+    tool.llm = get_model(model=..., api_key=..., ...)   # 注入 LLM（Day 10 工厂）
+if hasattr(tool, 'resource_manager'):
+    tool.resource_manager = FileManager(...)            # 注入文件管理器
+if hasattr(tool, 'tool_response_manager'): ...
+# 还注入 goals / instructions / agent_id / memory 等</code></pre>
+                <div class="anno">读法：<b>工具类里声明可选字段（llm、resource_manager…），框架构建时按 <code>hasattr</code> 判断"这工具需要啥"、按需塞进去。</b>所以 Day 03 的 <code>WriteFileTool.resource_manager</code>、<code>ThinkingTool.llm</code> 都不是自己创建的，而是被框架注入。</div>
+                <div class="baby"><span class="t">依赖注入的好处</span>
+                工具不自己 new LLM/FileManager——它<strong>声明"我需要这些"，由框架注入</strong>。好处：① 工具与"具体用哪个 LLM、哪个数据库会话"<strong>解耦</strong>（同一工具能用不同模型）；② 好测试（测试时注入假 LLM）；③ 工具代码更纯粹（只管业务，不管依赖从哪来）。<strong>这和 AutoGPT 执行时注入凭证、eino 的 DI 一个道理——依赖注入是解耦的利器。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>为什么用反射</h1></div>
+            <div class="card">
+                <p>为什么不直接 import 工具类，而要用反射动态加载？</p>
+                <div class="baby"><span class="t">反射 = 插件化的基础</span>
+                如果工具类都要在代码里显式 <code>import</code>，那<strong>加一个新工具就得改核心代码</strong>（加一行 import、注册到某个列表）。<strong>用反射（<code>importlib</code> + <code>getattr</code>）：新工具只需在数据库登记"文件夹/文件/类名"，框架运行时就能动态找到并加载——核心代码<strong>一行不用改</strong>。</strong>这正是"工具市场/插件化"的技术基础：从市场下载一个工具、登记进 DB，它就能被智能体用，无需重新部署。<strong>反射让"运行时动态扩展"成为可能——和 AutoGPT 的 AutoRegistry、Day 02 的自动发现异曲同工。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>完整链路串联</h1></div>
+            <div class="card">
+                <p>把今天和前面串起来——一个工具从市场到被智能体使用：</p>
+                <ol>
+                    <li><strong>下载</strong>（tool_manager）：从 GitHub 下载工具代码到本地目录。</li>
+                    <li><strong>登记</strong>：在 DB Tool 表记下 folder/file/class 名。</li>
+                    <li><strong>反射加载</strong>（ToolBuilder.build_tool）：运行时按 DB 记录动态 import 实例化。</li>
+                    <li><strong>注入依赖</strong>（set_default_params_tool）：塞进 llm/resource_manager 等。</li>
+                    <li><strong>进提示</strong>（Day 08）：工具的 name/desc/schema 拼进 LLM 提示。</li>
+                    <li><strong>被调用</strong>（Day 06/09）：LLM 选中它 → 解析动作 → execute → _execute。</li>
+                </ol>
+                <div class="glossary"><strong>从"市场里的一个工具"到"智能体正在用它"，这条链路完全动态、可扩展——这就是 SuperAGI 工具生态繁荣的基础。</strong>你（或社区）写个新工具、发到市场、别人一键安装即用，无需改平台代码。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>工具市场的完整链路（下载→登记→加载→注入→使用）？</li>
+                    <li>Tool 表为什么存"代码定位"而非逻辑？</li>
+                    <li>ToolBuilder 怎么用反射动态加载工具？</li>
+                    <li>依赖注入怎么工作？好处是什么？</li>
+                    <li>为什么用反射？它和"插件化"什么关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+grep -n 'def download_and_extract_tools\|def load_marketplace_tools' $P/tool_manager.py
+sed -n '8,28p' $P/models/tool.py                       # Tool 表
+sed -n '50,123p' $P/agent/tool_builder.py | head -50   # 反射加载 + 依赖注入</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>向量记忆 vector store</strong>——给智能体"长期记忆"：Pinecone/Chroma/Qdrant/Redis、embedding、add/get_matching_text 的 RAG 闭环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 工具深入</a>
+                <a href="superagi-day13.html" style="color:var(--accent-green);">Day 13 · 向量记忆 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
