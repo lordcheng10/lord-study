@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · ToolNode 与 tools_condition — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">ToolNode 与 tools_condition · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ToolNode 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 读 tool_calls</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 并行执行</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ToolMessage</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 错误处理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · tools_condition</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 注入状态</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 ReAct Agent</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 流式 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 应用层</span>
+            <h1 class="part-title">ToolNode 与 tools_condition</h1>
+            <p class="part-desc">Day 16 的 tools 节点里到底发生了什么？<code>ToolNode</code> 怎么并行跑多个工具、处理报错、把结果包成 ToolMessage；<code>tools_condition</code> 怎么做通用路由。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ToolNode 是什么</h1></div>
+            <div class="card">
+                <p><code>ToolNode</code>（<code>libs/prebuilt/tool_node.py</code>）是一个<strong>预制节点</strong>：拿到 LLM 产生的 tool_calls，找到对应工具、执行、把结果包成 ToolMessage 追加回 messages。</p>
+                <div class="baby"><span class="t">ToolNode = "工具执行车间"</span>
+                Day 16 里 agent 节点（模型）只是<strong>说</strong>"我要调 search，参数是北京"——它不真的执行。<strong>真正干活的是 ToolNode：它读懂模型的调用请求，去调对应的 Python 函数，拿到返回值，再包装好塞回对话历史，让模型下一轮能看到结果。</strong>模型负责"决策调什么"，ToolNode 负责"实际执行并回填结果"——分工明确。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>读 tool_calls</h1></div>
+            <div class="card">
+                <p>ToolNode 从 state 里最后一条 AIMessage 取出 <code>tool_calls</code>（模型可能一次要调多个工具）：</p>
+<pre><code class="language-python">last = state["messages"][-1]
+for call in last.tool_calls:
+    # call = {"name": "search", "args": {"q": "北京"}, "id": "call_1"}
+    tool = self.tools_by_name[call["name"]]   # 按名字找到工具</code></pre>
+                <div class="anno">读法：<b>ToolNode 内部维护 <code>tools_by_name</code>（名字→工具的字典），按模型给的 name 精确找到要执行的工具。</b>每个 tool_call 有唯一 <code>id</code>——结果 ToolMessage 用它对应回去。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>并行执行</h1></div>
+            <div class="card">
+                <p>若模型一次要调多个工具，ToolNode <strong>并行执行</strong>它们（异步 gather / 线程池），不逐个串行等。</p>
+                <div class="baby"><span class="t">一次调多个，同时跑</span>
+                模型可能一口气说"帮我查北京天气 + 上海天气 + 算个数"。<strong>ToolNode 不会一个查完再查下一个，而是三个同时发出去——总耗时约等于最慢那一个，而不是三者相加。</strong>对有网络 IO 的工具（查天气、搜索）提速明显。这和 Day 10 的节点并行是同一种"能并则并"的思路，只是这里并行的是<strong>工具调用</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ToolMessage</h1></div>
+            <div class="card">
+                <p>每个工具的返回值被包成 <code>ToolMessage</code>（带 <code>tool_call_id</code> 对应上请求），追加进 messages：</p>
+<pre><code class="language-python">return {"messages": [
+    ToolMessage(content=str(result), tool_call_id=call["id"], name=call["name"])
+]}   # add_messages 追加（Day 03）→ 下一轮模型能看到工具结果</code></pre>
+                <div class="anno">读法：<b><code>tool_call_id</code> 是关键——它把"结果"和模型发出的"请求"配对。</b>模型下一轮（回到 agent 节点）看到 ToolMessage，就知道"我上次要的 search 结果是这个"，据此继续推理。这是 ReAct 闭环的"结果回填"步。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>错误处理</h1></div>
+            <div class="card">
+                <p>ToolNode 有 <code>handle_tool_errors</code> 参数：工具抛异常时，默认<strong>捕获错误、包成 ToolMessage 返回给模型</strong>（而不是崩掉整个图），让模型看到报错、自行重试或换方案。</p>
+                <div class="baby"><span class="t">让 AI 自己看到错误、自己纠正</span>
+                传统程序里函数报错就崩了。<strong>但 Agent 场景更聪明：工具报错（比如参数写错了）→ 把错误信息当成"工具结果"喂回给模型 → 模型看到"哦参数格式不对"→ 下一轮自己改对再调。</strong>这让 Agent 有了"试错-纠正"的韧性。当然可配置成严格模式（报错就抛），生产中按需选择。<strong>这是 Agent 工程里"把错误也当上下文"的典型设计。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>tools_condition</h1></div>
+            <div class="card">
+                <p><code>tools_condition</code>（<code>tool_node.py</code>）是 Day 16 <code>should_continue</code> 的官方通用版——一个开箱即用的条件边函数：</p>
+<pre><code class="language-python">from langgraph.prebuilt import tools_condition
+# 最后一条 AIMessage 有 tool_calls → 返回 "tools"，否则 → END
+builder.add_conditional_edges("agent", tools_condition)</code></pre>
+                <div class="anno">读法：<b>你自己搭 ReAct 图时（不用 create_react_agent），直接用 <code>ToolNode</code> + <code>tools_condition</code> 两个预制件就能拼出核心循环。</b>它们是"比 create_react_agent 低一层、比手搓高一层"的中间层积木。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>注入状态 / Store</h1></div>
+            <div class="card">
+                <p>工具可通过 <code>InjectedState</code> / <code>InjectedStore</code> 注解拿到图状态或长期记忆（Day 15），而这些参数<strong>不暴露给模型</strong>（模型不该填它们）：</p>
+<pre><code class="language-python">from langgraph.prebuilt import InjectedState
+
+def my_tool(query: str, state: Annotated[dict, InjectedState]):
+    # query 由模型填；state 由框架注入（模型看不到这个参数）
+    ...</code></pre>
+                <div class="anno">读法：<b>InjectedState/Store 让工具能读到"当前对话状态/用户长期记忆"，但对模型透明——模型只需填业务参数（query）。</b>框架在执行时把 state/store 悄悄注入。这解决了"工具需要上下文但又不能让模型乱填"的矛盾。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ToolNode 干什么？和 agent 节点怎么分工？</li>
+                    <li>多个 tool_call 怎么执行？</li>
+                    <li>ToolMessage 的 tool_call_id 有什么用？</li>
+                    <li>工具报错默认怎么处理？为什么这样设计？</li>
+                    <li>tools_condition 是什么？InjectedState 解决什么问题？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/prebuilt/langgraph/prebuilt
+grep -n 'class ToolNode\|def tools_condition\|handle_tool_errors\|InjectedState' $P/tool_node.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>流式输出</strong>——怎么边跑边吐 token/状态更新？读 stream_mode（values/updates/messages/debug/custom），理解 Day 08 驱动循环里的 yield 怎么变成用户看到的流。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 ReAct Agent</a>
+                <a href="langgraph-day18.html" style="color:var(--accent-green);">Day 18 · 流式输出 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

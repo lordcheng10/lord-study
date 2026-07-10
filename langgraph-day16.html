@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · create_react_agent — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">create_react_agent · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一行造 Agent</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ReAct 回顾</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 内部图结构</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · agent 节点</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · should_continue</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 参数一览</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 站在零件之上</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 序列化</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 ToolNode &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 应用层</span>
+            <h1 class="part-title">create_react_agent</h1>
+            <p class="part-desc">前三周你手搓了引擎。现在看官方预制：一行 <code>create_react_agent</code> 造一个完整 Agent。读 <code>libs/prebuilt/chat_agent_executor.py</code>——它是前三周所有零件的"成品样板"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一行造 Agent</h1></div>
+            <div class="card">
+<pre><code class="language-python">from langgraph.prebuilt import create_react_agent
+
+agent = create_react_agent(
+    model="anthropic:claude-sonnet-4",
+    tools=[search, calculator],           # 你的工具列表
+)
+agent.invoke({"messages": [("user", "北京天气如何，再算 3*7")]})</code></pre>
+                <div class="anno">读法：<b><code>create_react_agent</code>（<code>chat_agent_executor.py:278</code>）返回一个<strong>已编译的 CompiledStateGraph</strong>——就是前 15 天讲的那种图，只不过结构是预置好的 ReAct 循环。</b>拿到就能 invoke/stream，也能加 checkpointer/interrupt（前三周能力全部可用）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ReAct 回顾</h1></div>
+            <div class="card">
+                <p>ReAct = <strong>Reasoning + Acting</strong> 交替：LLM 思考 → 决定调工具 → 执行工具 → 拿结果再思考 → …… → 觉得够了就给最终答案。</p>
+                <div class="baby"><span class="t">ReAct 就是"边想边做"的循环</span>
+                人解决复杂问题也是这样：想一下 → 查个资料 → 根据结果再想 → 再算一下 → …… → 得出结论。<strong>ReAct Agent 让 LLM 也这么干：模型不是一次性吐答案，而是可以说"我需要先查天气"→ 系统真的去查 → 把结果喂回给模型 → 模型接着想。</strong>循环直到模型不再要求调工具（它认为信息够了）。<strong>这是最主流的 Agent 范式，几乎所有框架（eino/crewAI/AutoGPT/OpenHands）核心都是它的变体。</strong>LangGraph 把它做成一张固定结构的图。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>内部图结构</h1></div>
+            <div class="card">
+                <p>create_react_agent 内部就是构建这样一张 StateGraph（Day 02-04 的手法）：</p>
+<pre><code class="language-python"># 简化示意
+builder = StateGraph(AgentState)
+builder.add_node("agent", call_model)      # LLM 思考节点
+builder.add_node("tools", ToolNode(tools)) # 工具执行节点（Day 17）
+builder.add_edge(START, "agent")
+builder.add_conditional_edges("agent", should_continue)  # 要调工具→tools，否则→END
+builder.add_edge("tools", "agent")         # 工具跑完回到 agent 继续想
+return builder.compile(...)</code></pre>
+                <div class="anno">读法：<b>就是一个 <code>agent ⇄ tools</code> 的环 + 条件边决定"继续调工具还是结束"。</b>这正是 Day 04 的条件边路由 + Day 06 的超步循环的组合。<strong>你完全能自己手搓出来——create_react_agent 只是帮你把这个常见结构封装好。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>agent 节点（call_model）</h1></div>
+            <div class="card">
+                <p><code>agent</code> 节点把当前 messages（+可选 system prompt）喂给<strong>已绑定工具的模型</strong>，返回 AIMessage（可能含 tool_calls）：</p>
+<pre><code class="language-python">model = model.bind_tools(tools)   # 告诉模型有哪些工具可用
+response = model.invoke(state["messages"])
+return {"messages": [response]}   # add_messages 追加（Day 03）</code></pre>
+                <div class="anno">读法：<b><code>bind_tools</code> 把工具的 schema 塞进请求，模型才知道能调什么、参数长啥样。</b>返回的 AIMessage 若带 <code>tool_calls</code>，说明模型想调工具；否则是最终回答。返回值走 add_messages 追加进历史。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>should_continue（路由）</h1></div>
+            <div class="card">
+                <p>条件边函数检查最后一条 AIMessage 有没有 tool_calls：</p>
+<pre><code class="language-python">def should_continue(state):
+    last = state["messages"][-1]
+    if last.tool_calls:       # 模型要调工具
+        return "tools"
+    return END                # 没有 → 结束，返回最终答案</code></pre>
+                <div class="anno">读法：<b>这就是 ReAct 循环的"开关"：模型还想调工具就转去 tools 节点、否则结束。</b>Day 17 讲的 <code>tools_condition</code> 就是这个函数的官方通用版。<strong>整个 ReAct 的"智能"其实在模型——图只负责"模型想调工具就让它调、调完再问模型"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>参数一览</h1></div>
+            <div class="card">
+                <p><code>create_react_agent</code> 常用参数（<code>chat_agent_executor.py:278</code> 起）：</p>
+                <ul>
+                    <li><code>model</code>：字符串或 BaseChatModel。</li>
+                    <li><code>tools</code>：工具列表或 ToolNode。</li>
+                    <li><code>prompt</code>：system prompt（字符串/函数/可调用）。</li>
+                    <li><code>checkpointer</code>：加了它就有记忆（Day 12）。</li>
+                    <li><code>store</code>：长期记忆（Day 15）。</li>
+                    <li><code>interrupt_before/after</code>：加断点/人在环（Day 13-14）。</li>
+                    <li><code>state_schema</code> / <code>response_format</code>：自定义状态 / 结构化输出。</li>
+                </ul>
+                <div class="anno">读法：<b>前三周学的每一样能力，都是这里的一个参数。</b>create_react_agent 是"把前三周零件组装好的成品"，但每个零件仍可通过参数替换/增强。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>站在零件之上</h1></div>
+            <div class="card">
+                <div class="glossary"><b>为什么先学引擎再学预制？</b>很多人从 create_react_agent 入门，结果它一"不够用"就束手无策。<strong>你反过来：先懂了 StateGraph、通道、检查点、人在环，现在看 create_react_agent 一眼就穿——它不是魔法，是你已理解的零件的标准组装。</strong>需要定制时（换路由、加节点、改状态），你能直接下沉到 StateGraph 手搓，而不是被预制封装困住。<strong>这正是这门课把引擎放在应用前面讲的原因。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>create_react_agent 返回什么？（一张编译好的图）</li>
+                    <li>ReAct 循环是什么？靠什么范式驱动？</li>
+                    <li>内部图的两个节点 + 一条条件边分别干嘛？</li>
+                    <li>bind_tools 的作用？should_continue 怎么判断结束？</li>
+                    <li>前三周能力对应哪些参数？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/prebuilt/langgraph/prebuilt
+sed -n '278,420p' $P/chat_agent_executor.py | head -80
+grep -n 'def create_react_agent\|def should_continue\|bind_tools' $P/chat_agent_executor.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>ToolNode 与 tools_condition</strong>——工具节点怎么并行执行多个 tool_call、怎么处理报错、把结果包成 ToolMessage 喂回；tools_condition 的通用路由实现。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 序列化</a>
+                <a href="langgraph-day17.html" style="color:var(--accent-green);">Day 17 · ToolNode &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

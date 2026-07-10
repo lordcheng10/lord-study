@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · 序列化与长期记忆 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">序列化与长期记忆 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要序列化</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SerializerProtocol</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · JsonPlusSerializer</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 短期 vs 长期记忆</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · BaseStore</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 命名空间</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 语义检索</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 人在环</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day16.html" class="nav-link" style="color:var(--accent-green);">Day 16 ReAct Agent &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">序列化与长期记忆</h1>
+            <p class="part-desc">检查点要存进数据库，messages、自定义对象怎么变成字节？跨会话的长期记忆又怎么存？读 SerializerProtocol 和 BaseStore。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要序列化</h1></div>
+            <div class="card">
+                <p>Day 12 的 Sqlite/Postgres Saver 要把 Day 11 的 Checkpoint（含 messages、任意 Python 对象）写进数据库——但数据库只认字节/字符串。<strong>序列化（serialization）= 把 Python 对象转成可存储的字节；反序列化 = 读回来还原成对象。</strong></p>
+                <div class="baby"><span class="t">序列化 = "打包/拆包"</span>
+                你的状态里有 <code>HumanMessage</code>、<code>datetime</code>、自定义类等活生生的 Python 对象。<strong>数据库存不了"对象"，只能存字节。序列化就是把对象"打包"成字节存进去；下次读出来再"拆包"还原成一模一样的对象。</strong>难点在于：不光基础类型（数字、字符串），LangChain 的 Message、时间、甚至你自定义的类都要能正确打包/拆包。这就是需要一个专门 serializer 的原因。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SerializerProtocol</h1></div>
+            <div class="card">
+                <p><code>SerializerProtocol</code>（<code>checkpoint/serde/base.py</code>）定义序列化器接口：</p>
+<pre><code class="language-python">class SerializerProtocol(Protocol):
+    def dumps_typed(self, obj) -> tuple[str, bytes]: ...   # 对象 → (类型标签, 字节)
+    def loads_typed(self, data: tuple[str, bytes]): ...    # (类型标签, 字节) → 对象</code></pre>
+                <div class="anno">读法：<b>又是接口/实现分离（Day 12 老朋友）：Saver 只依赖这个抽象接口，具体怎么序列化交给实现。</b><code>dumps_typed</code> 返回<strong>带类型标签</strong>的字节——反序列化时靠标签知道该还原成什么类型。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>JsonPlusSerializer</h1></div>
+            <div class="card">
+                <p>默认实现 <code>JsonPlusSerializer</code>（<code>serde/jsonplus.py</code>）——"JSON 加强版"：</p>
+                <ul>
+                    <li>基础类型走标准 JSON。</li>
+                    <li>LangChain 对象（Message 等）、dataclass、pydantic、datetime、UUID、Enum 等有专门编解码。</li>
+                    <li>兜底用 pickle（并标记类型），保证几乎任何对象都能存。</li>
+                </ul>
+                <div class="anno">读法：<b>"JSON 优先、特殊类型特判、pickle 兜底"——既保证常见对象存成可读 JSON，又不会因为遇到怪对象就崩。</b>这是"实用主义序列化"的典型设计。你几乎不用关心它，但知道 messages 能安全落库靠的是它。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>短期 vs 长期记忆</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th></th><th>短期记忆（Checkpoint）</th><th>长期记忆（Store）</th></tr>
+                    <tr><td>范围</td><td>单个 thread（一次会话）</td><td>跨所有 thread（跨会话）</td></tr>
+                    <tr><td>内容</td><td>本次对话的完整状态</td><td>用户画像、事实、偏好</td></tr>
+                    <tr><td>接口</td><td>BaseCheckpointSaver</td><td>BaseStore</td></tr>
+                </table>
+                <div class="baby"><span class="t">两种记忆的区别（很关键）</span>
+                <strong>短期记忆（检查点）：像"这次通话的记录"</strong>——挂了电话（换 thread）就翻篇。<strong>长期记忆（Store）：像"客户档案"</strong>——不管打几次电话，"这个用户对花生过敏"永远记着。前者按 thread_id 隔离（Day 12），后者<strong>刻意跨 thread 共享</strong>。一个成熟 Agent 两者都要：用检查点记住"当前在聊什么"，用 Store 记住"这个用户是谁、有什么长期偏好"。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>BaseStore</h1></div>
+            <div class="card">
+                <p><code>BaseStore</code>（<code>checkpoint/store/base.py</code>）是长期记忆的抽象接口，键值风格：</p>
+<pre><code class="language-python">store.put(namespace, key, value)   # 存
+store.get(namespace, key)          # 取
+store.search(namespace, query=...) # 搜（可语义检索）
+# 编译时传入，节点里通过 get_store() 或注入参数访问
+graph = builder.compile(checkpointer=..., store=InMemoryStore())</code></pre>
+                <div class="anno">读法：<b>Store 和 Saver 平行——同样"抽象接口 + 多后端实现（InMemory/Postgres）"，同样 compile 时插入。</b>节点函数可拿到 store，跨会话读写用户级数据。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>命名空间（namespace）</h1></div>
+            <div class="card">
+                <p>Store 用<strong>命名空间元组</strong>组织数据，天然支持多用户隔离：</p>
+<pre><code class="language-python">namespace = ("user-42", "memories")    # 按用户/类别分层
+store.put(namespace, "diet", {"allergy": "peanuts"})
+store.get(("user-42", "memories"), "diet")   # → {"allergy": "peanuts"}</code></pre>
+                <div class="anno">读法：<b>namespace 像文件夹路径，把不同用户、不同类别的长期记忆分门别类隔离。</b>和 checkpointer 的 thread_id 是两套独立维度：thread_id 隔离"会话"，namespace 隔离"用户的长期知识"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>语义检索</h1></div>
+            <div class="card">
+                <p>Store 的 <code>search</code> 可配 embedding，支持<strong>语义检索</strong>：存记忆时算向量，查询时按相似度返回相关记忆——这就是给 Agent 做"记忆库/RAG"的基础设施。</p>
+                <div class="anno">读法：<b>不只是精确 key 查找，还能"找出和当前问题相关的历史记忆"。</b>Agent 每轮把相关长期记忆检索出来塞进 prompt → 实现"越用越懂你"。<strong>Store + 语义检索 = LangGraph 内建的记忆层，不用你自己接向量库。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 3 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周（持久化与人在环）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 11</strong> Checkpoint 结构：channel_values / versions_seen / pending_writes</li>
+                    <li><strong>Day 12</strong> CheckpointSaver 接口 + thread_id 会话隔离 + 三种后端</li>
+                    <li><strong>Day 13</strong> 时间旅行（读档重跑/改写/fork）+ 静态断点</li>
+                    <li><strong>Day 14</strong> 人在环 interrupt()/Command(resume) + 重放原理 + 四模式</li>
+                    <li><strong>Day 15</strong> 序列化（JsonPlusSerializer）+ 长期记忆 Store + 命名空间/语义检索</li>
+                </ul>
+                <p style="margin-top:10px;">这一周所有能力都建立在 Day 08 那一行"每步存检查点"上。你现在理解了 LangGraph 作为<strong>生产级 Agent 运行时</strong>的全部工程内核。第 4 周回到应用层：预制的 create_react_agent、流式、部署与六框架总对比。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">C=libs/checkpoint/langgraph
+grep -rn 'class JsonPlusSerializer\|class SerializerProtocol' $C/checkpoint/serde/
+grep -rn 'class BaseStore' $C/store/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 16（第4周开始）</strong>：<strong>create_react_agent</strong>——官方预制的 ReAct Agent，一行创建。读 <code>libs/prebuilt/chat_agent_executor.py</code>，看它怎么用前三周所有零件拼出一个开箱即用的 Agent。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 人在环</a>
+                <a href="langgraph-day16.html" style="color:var(--accent-green);">Day 16 · create_react_agent &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
