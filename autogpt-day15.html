@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · WebSocket 实时更新 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
+        .flow2 .n b{display:block;color:#06b6d4;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">WebSocket 实时更新 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 实时进度需求</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 独立 WS 进程</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 鉴权</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 订阅消息路由</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Redis→WS 转发链</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 完整推送链路</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么 WS 而非 SSE</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 Scheduler</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day16.html" class="nav-link" style="color:var(--accent-green);">Day 16 Credits &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 执行引擎（收官）</span>
+            <h1 class="part-title">WebSocket 实时更新</h1>
+            <p class="part-desc">第3周收官。执行过程如何实时推送到前端画布——你看到节点一个个亮起、数据流动的原理。读 <code>api/ws_api.py</code> + <code>conn_manager.py</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>实时进度需求</h1></div>
+            <div class="card">
+                <p>你在画布上点"运行"后，想<strong>实时</strong>看到：哪个节点在跑、哪个完成了、数据是什么、有没有报错——而不是干等到全部跑完才看结果。这需要后端把执行进度<strong>实时推</strong>给前端。HTTP 请求-响应模型做不到"服务器主动推"，所以用 WebSocket。</p>
+                <div class="baby"><span class="t">HTTP 的局限</span>
+                普通 HTTP 是"客户端问、服务器答"——服务器<strong>不能主动</strong>给客户端发消息。但执行进度是服务器端不断产生的、需要<strong>主动推</strong>给你。<strong>WebSocket 是"全双工长连接"——建立后双方都能随时发消息。</strong>于是执行引擎每有进度，就通过 WebSocket 推给前端，画布实时更新。这是所有"实时看进度"UI 的技术基础。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>独立 WS 进程</h1></div>
+            <div class="card">
+                <p>WebSocket 是<strong>独立进程/独立 app</strong>（<code>api/ws_api.py:55</code>），不跟 REST 混在一起。唯一端点 <code>@app.websocket("/ws")</code>（<code>:230</code>）。（Day 04 提过 REST 服务显式 <code>ws="none"</code>，把 WS 交给这个独立进程。）</p>
+                <div class="baby"><span class="t">为什么 WS 要独立进程？</span>
+                WebSocket 是<strong>长连接</strong>——每个在线用户占一个连接、可能挂很久。REST 是<strong>短请求</strong>——来了就走。两者的资源特性、伸缩需求完全不同：<strong>WS 进程要扛"大量长连接"，REST 进程要扛"高频短请求"。</strong>分开进程，各自按自己的特性优化和伸缩（比如 WS 进程可以配更多内存扛连接数）。<strong>不同性质的负载分进程——和 Day 04 拆执行/REST 一个道理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>鉴权</h1></div>
+            <div class="card">
+                <p><code>authenticate_websocket()</code>（<code>ws_api.py:75</code>）从 query 参数取 JWT <code>token</code>，解析出 <code>user_id</code>，失败就 <code>websocket.close(code=4001/4002/4003)</code>。</p>
+                <div class="baby"><span class="t">WebSocket 怎么鉴权？（和 HTTP 不同）</span>
+                HTTP 每个请求带 Authorization header。但 WebSocket 建连时浏览器 API 不方便带自定义 header，所以常见做法是<strong>把 token 放在连接 URL 的 query 参数里</strong>（<code>ws://.../ws?token=xxx</code>）。连上后立刻验 token、解析出是哪个用户——验不过直接关连接（4001/4002/4003 是自定义关闭码，区分不同失败原因）。<strong>鉴权是必须的——否则任何人都能订阅别人的执行进度（泄漏）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>订阅消息路由</h1></div>
+            <div class="card">
+                <p>客户端连上后发消息，<code>_MSG_HANDLERS</code>（<code>ws_api.py:219</code>）字典分发四种方法：</p>
+                <ul>
+                    <li><code>HEARTBEAT</code>：心跳 pong（保活）。</li>
+                    <li><code>SUBSCRIBE_GRAPH_EXEC</code>：订阅<strong>单次</strong>执行的进度。</li>
+                    <li><code>SUBSCRIBE_GRAPH_EXECS</code>：订阅<strong>某个图的所有</strong>执行。</li>
+                    <li><code>UNSUBSCRIBE</code>：取消订阅。</li>
+                </ul>
+                <div class="baby"><span class="t">"订阅"是什么模式？</span>
+                前端说"我要看执行 xxx 的进度"（SUBSCRIBE），服务器就把这个执行的所有事件推给它，直到它 UNSUBSCRIBE。<strong>这是发布-订阅：客户端订阅感兴趣的"话题"（某次执行/某个图），服务器只推它订阅的。</strong>心跳（HEARTBEAT）则是长连接的保活机制——定期 ping-pong，确认连接还活着（否则网络中断了双方都不知道）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Redis → WebSocket 转发链</h1></div>
+            <div class="card">
+                <p>推送机制在 <code>api/conn_manager.py</code> 的 <code>ConnectionManager</code>。订阅时 <code>subscribe_graph_exec</code>（<code>:249</code>）打开一个 <strong>Redis Pub/Sub 订阅</strong>；<code>_pump()</code>（<code>:115</code>）<code>listen()</code> 收到 Redis 事件后 <code>_forward_exec_event</code>（<code>:315</code>）转发给对应 WebSocket 客户端。</p>
+                <div class="anno">读法：<b>关键链条：executor 进程 publish 事件到 Redis（Day 12 的事件总线）→ WS 进程订阅 Redis → 收到后转发给前端 WebSocket。</b>Redis 是 executor 和 WS 两个进程之间的"中间人"。</div>
+                <div class="baby"><span class="t">为什么要经过 Redis 中转？</span>
+                因为 executor（跑图的）和 WS 进程（连着前端的）是<strong>两个不同的进程，甚至不同机器</strong>。executor 产生的事件怎么送到"连着你浏览器的那个 WS 进程"？<strong>用 Redis Pub/Sub 做中转：executor 发到 Redis 频道，所有 WS 进程都订阅，谁连着相关用户谁就转发。</strong>这解耦了"产生事件"和"推送事件"——executor 不用知道用户连在哪个 WS 进程上，只管发到 Redis。<strong>Redis 事件总线是跨进程通信的桥。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>完整推送链路（一图流）</h1></div>
+            <div class="card">
+                <div class="flow2">
+                    <span class="n"><b>executor</b>节点状态变化</span><span class="a">→</span>
+                    <span class="n"><b>Redis</b>publish 到频道</span><span class="a">→</span>
+                    <span class="n"><b>WS 进程</b>订阅收到</span><span class="a">→</span>
+                    <span class="n"><b>WebSocket</b>转发</span><span class="a">→</span>
+                    <span class="n" style="border-color:#22c55e"><b>前端画布</b>节点亮起</span>
+                </div>
+                <div class="glossary">这就是你在画布上看到"节点一个个变绿、数据在连线上流动"的完整技术链路。<strong>从 executor 的一行 <code>publish</code>，到你眼前的动画——中间隔着 Redis 中转和 WS 转发，但对你透明。</strong>历史数据（刷新页面重进）则走 REST 从 DB 拉（Day 18），实时 + 历史拼成完整体验。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么用 WebSocket 而非 SSE</h1></div>
+            <div class="card">
+                <p>OpenHands 教程（Day 16）里也讨论过这个。AutoGPT 用 WebSocket 而非 SSE，原因：</p>
+                <ul>
+                    <li><strong>双向</strong>：前端不只"收进度"，还要"发订阅/取消订阅/心跳"——需要双向通信。SSE 只能服务器单向推。</li>
+                    <li><strong>多路复用</strong>：一个 WS 连接能订阅多个执行、动态增减订阅——比每个执行开一个 SSE 连接高效。</li>
+                </ul>
+                <div class="baby"><span class="t">对比 OpenHands 的选择</span>
+                有意思的是：OpenHands 前端也用 WebSocket（Day 16），理由一致（双向）。<strong>凡是"前端既要收实时数据、又要发控制指令"的场景，WebSocket 都是首选；纯服务器单向推（如股票行情）才用 SSE。</strong>三个 Agent 平台（AutoGPT/OpenHands 的实时通道都是 WS）殊途同归——因为交互式 Agent 天然需要双向实时通信。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 3 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 3 周（Day 11-15）你已吃透执行引擎</h3>
+                <ul>
+                    <li><b>Day 11</b> Graph 模型：三层、计算字段、校验、版本/子图</li>
+                    <li><b>Day 12</b> 执行引擎：MQ+线程池+事件总线、调度循环、分布式锁</li>
+                    <li><b>Day 13</b> 数据流：输出喂下游、攒齐输入才入队、fan-in</li>
+                    <li><b>Day 14</b> Scheduler：定时、持久化、cron 兼容、自愈</li>
+                    <li><b>Day 15</b> WebSocket：实时进度推送链路</li>
+                </ul>
+                <p style="margin-top:8px">你已理解"图怎么被执行、进度怎么实时展示"。下周（Day 16-20）进入 <strong>平台底座 + 起源</strong>：计费、凭证/OAuth、REST API、经典 AutoGPT、收官。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+grep -n 'def authenticate_websocket\|_MSG_HANDLERS\|websocket(' $P/api/ws_api.py | head
+grep -n 'def subscribe_graph_exec\|def _pump\|_forward_exec_event' $P/api/conn_manager.py</code></pre>
+                <div class="tip"><strong>下周预告 · Day 16</strong>：进入平台底座——<strong>Credits 积分计费</strong>深入：两阶段扣费（预扣+对账）、原子 SQL 保证余额正确、Stripe 充值闭环、余额预警。这是计量 SaaS 的钱袋子。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 Scheduler</a>
+                <a href="autogpt-day16.html" style="color:var(--accent-green);">Day 16 · Credits &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
