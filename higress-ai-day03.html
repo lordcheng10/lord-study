@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · Ingress 控制器核心 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">Ingress 控制器核心 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 只读 ConfigStore</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · IngressTranslation 门面</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · IngressConfig 中枢</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 六大子控制器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 挂进 Environment</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 通用控制器泛型</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Run/HasSynced</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 启动流程</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day04.html" class="nav-link" style="color:#06b6d4;">Day 04 配置翻译 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 全景与控制器</span>
+            <h1 class="part-title">Ingress 控制器核心</h1>
+            <p class="part-desc">Higress 自己写的心脏是 <code>IngressConfig</code>——它<strong>实现了 Istio 的 ConfigStore 接口</strong>（只读），聚合 6 个子控制器（Ingress/Gateway/McpBridge/WasmPlugin/Http2Rpc/ConfigMap）。今天看这个中枢怎么组装。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>只读 ConfigStore</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Higress 的 ConfigStore 是"只读"的</span>
+                回想 Istio 课 Day 03：<code>ConfigStore</code> 是"配置的 CRUD 抽象"。<strong>Higress 实现了这个接口，但它的 <code>Create/Update/Delete</code> 全部返回 <code>ErrUnsupportedOp</code>——它是<strong>只读</strong>的！</strong>为什么？<strong>因为 Higress 的配置不是"存进去"的，而是<strong>从 K8s Ingress/CRD/注册中心实时"算"出来的</strong>——istiod 来 <code>List</code> 时现场翻译生成，不能被 istiod 反写。</strong>好比一个"计算属性"——你不能直接改它，只能改它的输入（Ingress），它自动算出新值。<strong>这是关键心智：Higress 的 ConfigStore 是"输入的投影"，不是"存储"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>IngressTranslation 门面</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/translation/translation.go:33 接口断言
+var _ istiomodel.ConfigStoreController = ...  // 实现 Istio 的 ConfigStore
+var _ istiomodel.IngressStore = ...
+// 结构（:38）：内含 ingressConfig（K8s Ingress）+ kingressConfig（Knative Ingress）
+// List（:163）：只接受 6 种类型，聚合 ingress + kingress
+// Create/Update/Delete（:194）：全返回 ErrUnsupportedOp（只读）</code></pre>
+                <div class="anno">读法：<b><code>IngressTranslation</code> 是门面层——对 istiod 表现为一个标准 ConfigStore，内部聚合 K8s Ingress 和 Knative Ingress 两套。<code>List</code> 只返回 6 种 Istio 类型（Gateway/VirtualService/DestinationRule/EnvoyFilter/ServiceEntry/WasmPlugin）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>IngressConfig 中枢</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/config/ingress_config.go:104 IngressConfig（心脏）
+type IngressConfig struct {
+  mcpbridgeController   ...   // McpBridge CRD（注册中心，Day 07）
+  wasmPluginController  ...   // WasmPlugin CRD（Day 14）
+  http2rpcController    ...   // Http2Rpc CRD（HTTP→Dubbo/gRPC）
+  configmapMgr          ...   // higress-config ConfigMap（全局配置）
+  RegistryReconciler    ...   // 注册中心对账（Day 07）
+  xxxHandlers []EventHandler  // istiod 传来的回调
+  XDSUpdater            ...   // 触发推送
+}</code></pre>
+                <div class="anno">读法：<b><code>IngressConfig</code> 是 Higress 独有代码的核心——它持有所有子控制器 + 各类型的 handler + <code>XDSUpdater</code>（配置变了通知 istiod）。<code>NewIngressConfig</code>（<code>:189</code>）逐个 new 子控制器并 <code>AddEventHandler</code> 绑回调。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>六大子控制器</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Ingress 控制器</strong>：watch K8s Ingress（Day 04 翻译）。</li>
+                    <li><strong>Gateway 控制器</strong>：watch Gateway API（可选）。</li>
+                    <li><strong>McpBridge 控制器</strong>（<code>:215</code>）：watch McpBridge CRD → 注册中心（Day 07）。</li>
+                    <li><strong>WasmPlugin 控制器</strong>（<code>:220</code>）：watch WasmPlugin CRD（Day 14）。</li>
+                    <li><strong>Http2Rpc 控制器</strong>（<code>:225</code>）：watch Http2Rpc CRD（HTTP→RPC 转换）。</li>
+                    <li><strong>ConfigMap 管理器</strong>（<code>:230</code>）：watch higress-config（全局 tracing/gzip 等 → EnvoyFilter）。</li>
+                </ul>
+                <div class="baby"><span class="t">六个控制器 = 六种配置来源</span>
+                Higress 的配置来自多处：标准 K8s <strong>Ingress</strong>、<strong>Gateway API</strong>、以及 Higress 自己的三个 <strong>CRD</strong>（McpBridge/WasmPlugin/Http2Rpc）、还有一个全局 <strong>ConfigMap</strong>。<strong>每种来源一个子控制器，各自 watch 对应资源、转成 Istio 配置。IngressConfig 把它们聚合起来，统一通过 <code>List</code> 暴露给 istiod。</strong>这是"多源聚合"——用一个中枢屏蔽多种输入的差异（和 Istio 的聚合注册表、OpenClaw 的渠道注册表同思想）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>挂进 Environment</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/server.go initConfigController（:220）
+ingressConfig := translation.NewIngressTranslation(s.kubeClient, s.xdsServer, ns, options)
+s.configStores = append(s.configStores, ingressConfig)
+aggregateConfigController, _ := configaggregate.MakeCache(s.configStores)  // Istio 的聚合缓存
+s.environment.ConfigStore = aggregateConfigController  // ★ 挂进 Istio Environment</code></pre>
+                <div class="baby"><span class="t">这一行是 Higress 和 istiod 的"接线"</span>
+                <strong><code>s.environment.ConfigStore = aggregateConfigController</code>（内含 IngressConfig）——这一行把 Higress 的配置源挂进了 Istio 的 <code>Environment</code>。</strong>还记得 Istio 课 Day 05 吗？istiod 的 Generator 生成配置时调 <code>c.Environment.List(gvk.X, ...)</code>——现在这个 <code>List</code> 就落到 Higress 的 IngressConfig 上了！<strong>所以 istiod 要 VirtualService 时，实际是问 Higress 的 IngressConfig 要，IngressConfig 现场从 Ingress 翻译出来给它。</strong>这就是"Higress 成为 istiod 配置源"的代码落点。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>通用控制器泛型</h1></div>
+            <div class="card">
+                <p>三个 CRD 控制器（McpBridge/WasmPlugin/Http2Rpc）复用一个泛型基类 <code>CommonController[lister]</code>（<code>pkg/ingress/kube/controller/model.go:46</code>）——基于 client-go informer + Istio 的工作队列（最多重试 5 次）。</p>
+                <div class="anno">读法：<b>三个 CRD 控制器逻辑几乎一样（watch → 变更入队 → 调 handler），用 Go 泛型 <code>CommonController[T]</code> 复用，各自只传自己的 lister 类型。<code>onEvent</code>（<code>model.go:97</code>）从 lister 取对象、NotFound 走删除、否则走更新。</b>又是"泛型消除重复"（Istio 课 Day 03 的 SubscriptionBase 同思路）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Run / HasSynced</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ingress_config.go Run（:2001）：goroutine 并发启动全部子控制器
+// HasSynced（:2016）：所有子控制器都 synced 才 ready</code></pre>
+                <div class="anno">读法：<b><code>Run</code> 并发启动 6 个子控制器（各自 watch）。<code>HasSynced</code> 要全部同步好才算就绪——对应 Day 02 的 <code>waitForCacheSync</code>。</b>只有所有配置源都加载完，Higress 才对 istiod 提供服务（否则喂不完整配置，和 istiod 的 ready 门禁一个道理）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Higress 的 ConfigStore 是只读的？</li>
+                    <li>IngressTranslation 门面聚合了什么？List 返回哪 6 种类型？</li>
+                    <li>IngressConfig 中枢持有什么？</li>
+                    <li>六大子控制器对应哪六种配置来源？</li>
+                    <li><code>environment.ConfigStore = ...</code> 这一行为什么关键？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'ErrUnsupportedOp\|ConfigStoreController' pkg/ingress/translation/translation.go
+grep -n 'type IngressConfig struct\|func NewIngressConfig\|func.*Run\|func.*HasSynced' pkg/ingress/config/ingress_config.go
+sed -n '220,262p' pkg/bootstrap/server.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>配置翻译</strong>——重头戏！Higress 怎么把一个 K8s Ingress（+ 注解）翻译成 Istio 的 VirtualService/Gateway？<code>ConvertHTTPRoute</code> 逐行 + "通知/生成解耦"的事件模型。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 启动流程</a>
+                <a href="higress-ai-day04.html" style="color:#06b6d4;">Day 04 · 配置翻译 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

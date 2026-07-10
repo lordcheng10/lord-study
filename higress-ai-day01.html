@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Higress 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三大组件</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 寄生在 Istio 上</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · MCP over xDS</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · configSources</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 完整数据流</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么要 Higress</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day02.html" class="nav-link" style="color:#06b6d4;">Day 02 启动流程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 全景与控制器</span>
+            <h1 class="part-title">项目全景：AI 云原生网关</h1>
+            <p class="part-desc">欢迎来到 Higress——higress-group 系列第 3 站。学完 Envoy（数据面）和 Istio（控制面），现在看它们怎么组装成一个产品级 AI 网关。第一天的"题眼"：Higress 怎么"寄生"在 Istio 之上。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Higress 是什么</h1></div>
+            <div class="card">
+                <p><strong>Higress</strong> 是阿里开源的<strong>AI 原生 API 网关</strong>（Go 编写，<code>README.md:35</code>）。它<strong>基于 Istio + Envoy</strong>，可用 Go/Rust/JS 写 Wasm 插件扩展。定位：面向"API 网关/Ingress"（南北向流量），比 Istio 的服务网格（东西向）更适合做网关入口。</p>
+                <div class="baby"><span class="t">"站在巨人肩膀上做产品"</span>
+                Higress 没有从零造网关——它<strong>复用了 Envoy（成熟的数据面）+ Istio istiod（成熟的 xDS 生成）</strong>，自己加了三样：①一个更友好的用户接口（用 K8s Ingress + 注解就能配，不用写复杂的 Istio CRD）；②多注册中心服务发现（Nacos/ZK/Consul，不止 K8s）；③丰富的 Wasm 插件生态 + AI 网关能力。<strong>好比在成熟的发动机（Envoy）和变速箱（Istio）上，造一辆好开的整车（Higress）。你前两站学了发动机和变速箱，现在看整车怎么组装。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三大组件</h1></div>
+            <div class="card">
+                <p><code>docs/architecture.md:19-71</code> 定义三大组件：</p>
+                <ul>
+                    <li><strong>Higress Controller（控制器）</strong>：内含 ① Discovery（就是 Istio 的 istiod）+ ② Higress Core（Higress 自己写的，核心是 Ingress Config + Cert Server）。</li>
+                    <li><strong>Higress Gateway（网关/数据面）</strong>：就是 Envoy。</li>
+                    <li><strong>Higress Console（控制台）</strong>：Web 管理界面（本系列下一站单独讲）。</li>
+                </ul>
+                <div class="anno">读法：<b>关键：Higress Controller <strong>内嵌了 istiod</strong>（Discovery），再加自己的 Core。Core 才是 Higress 独有的代码（本课主角），istiod 就是你 Istio 课学的那个。</b>数据面 Gateway 就是 Envoy 课学的 Envoy。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>寄生在 Istio 上</h1></div>
+            <div class="card">
+                <div class="glossary"><b>核心协作模型（整门课的"题眼"，architecture.md:47-71）</b>：<br>
+                istiod 支持 4 种配置来源：Kubernetes / <strong>MCP</strong> / Memory / File。<br>
+                MCP（Mesh Configuration Protocol）是<strong>基于 xDS 协议的配置管理协议</strong>。istiod 作为 <strong>MCP 客户端（ADS client）</strong>，任何实现 MCP Server 的都能给它下发 Istio 配置。<br>
+                <strong>Higress Core 实现了 MCP-over-xDS 的 Server——于是它成为 istiod 的配置来源。</strong></div>
+                <div class="baby"><span class="t">回想 Istio 课 Day 20 的"反转"</span>
+                Istio 课结尾讲过：<strong>正常 istiod 是"xDS 服务端"（给 Envoy 发配置），但在 Higress 里有个反转——istiod 变成"MCP 客户端"，Higress Core 是服务端，给 istiod 发配置！</strong>今天正式坐实这个反转。为什么这么设计？<strong>因为这样 Higress 不用重写 istiod 复杂的 xDS 生成逻辑——它只需把自己的配置（从 Ingress/CRD/注册中心来）翻译成 Istio 配置对象，通过标准 MCP 协议"喂"给 istiod，剩下的 xDS 生成交给成熟的 istiod。</strong>复用 + 扩展，事半功倍。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>MCP over xDS</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">MCP = "用 xDS 协议传配置"</span>
+                你在 Istio/Envoy 课学的 xDS 是"控制面给数据面发配置"。<strong>MCP 复用了同一套 xDS 协议机制，但用途不同——它是"配置源给 istiod 发 Istio 配置对象"（VirtualService/Gateway 等）。</strong>好比同一条快递网络，既能送外卖（xDS 给 Envoy 发运行配置），也能送公文（MCP 给 istiod 发配置定义）。<strong>因为 MCP 和 xDS 底层都是 gRPC 流式协议，Higress 能<strong>直接复用 istiod 的 DiscoveryServer</strong>（Istio 课 Day 06）来当 MCP Server——只需替换"某类资源怎么生成"的 Generator。</strong>（Day 05 详讲。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>configSources</h1></div>
+            <div class="card">
+                <p>Higress Core 和 istiod 通过 <code>higress-config</code> ConfigMap 的 <code>mesh.configSources</code> 关联（<code>architecture.md:56-71</code>）：</p>
+<pre><code class="language-yaml">configSources:
+  - address: xds://127.0.0.1:15051   # 指向 Higress Core 的 MCP Server
+  - address: k8s://</code></pre>
+                <div class="anno">读法：<b><strong>端口 15051</strong> 就是 Higress Core 起的 MCP/xDS 服务，istiod 连它拉取 Gateway/VirtualService/DestinationRule/EnvoyFilter/ServiceEntry/WasmPlugin 六类配置。<code>k8s://</code> 表示 istiod 也直接从 K8s 读一部分。</b>记住 15051——这是 Higress Core 和 istiod 的接口（就像 15012 是 istiod 和 Envoy 的接口）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>完整数据流</h1></div>
+            <div class="card">
+<pre><code class="language-bash">K8s Ingress + Higress CRD + 外部注册中心（Nacos…）
+  → Higress Core 翻译成 Istio 配置对象（VirtualService/Gateway/…）
+    → 经 MCP-over-xDS(:15051) 下发给 istiod（istiod 是客户端！）
+      → istiod 合并后经标准 xDS(:15012) 下发给 Envoy（Istio 课）
+        → Envoy 执行 + Wasm 插件处理（Envoy 课）</code></pre>
+                <div class="anno">读法：<b>这条链把三站串起来了：<strong>Higress Core（本课）生成配置 → istiod（Istio 课）转 xDS → Envoy（Envoy 课）执行</strong>。你三站都学，就能看到从"用户写 Ingress"到"Envoy 转发流量"的完整链路。</b>本课聚焦第一段：Higress Core 怎么翻译并喂配置。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么要 Higress</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Istio 已经很强，为什么还要 Higress？</span>
+                Istio 面向"服务网格"——管集群内服务间（东西向）流量，配置用 VirtualService/DestinationRule 等，功能强但对"做个 API 网关"来说偏复杂。<strong>Higress 面向"API 网关/Ingress"——管从外部进集群（南北向）的流量：①让你用简单的 K8s Ingress + 注解就能配路由/限流/鉴权，不用写 Istio CRD；②支持从 Nacos 等注册中心发现服务（微服务迁移友好）；③Wasm 插件生态开箱即用；④专门的 AI 能力（LLM 代理、Token 限流）。</strong>它把 Istio 的能力"产品化"成一个易用的网关。<strong>这就是"平台 vs 产品"的区别——Istio 是平台，Higress 是基于平台做的产品。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Higress 是什么？它基于什么？</li>
+                    <li>三大组件？Controller 内部的 Discovery vs Core？</li>
+                    <li>Higress 怎么"寄生"在 Istio 上？istiod 在这里是什么角色？</li>
+                    <li>MCP 是什么？15051 端口的意义？</li>
+                    <li>完整数据流的四段？为什么在 Istio 上再套 Higress？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+sed -n '1,114p' docs/architecture.md
+head -40 README.md
+ls pkg/ingress/ pkg/bootstrap/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>启动流程</strong>——Higress Controller 怎么 boot：<code>cmd/higress/main.go → NewServer → initFuncList</code>（一串初始化函数）。看它怎么把 istiod 和自己的 Core 装配起来。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="higress-ai-day02.html" style="color:#06b6d4;">Day 02 · 启动流程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · xDS-over-MCP — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">xDS-over-MCP · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · MCP Generator</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Generate 实现</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · config→MCP Resource</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · unknown fields 技巧</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 15051 gRPC</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 变更触发推送</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 全链路复盘</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 配置翻译</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day06.html" class="nav-link" style="color:#3b82f6;">Day 06 多注册中心 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">xDS-over-MCP</h1>
+            <p class="part-desc">翻译好的 Istio 配置怎么"喂"给 istiod？今天看 MCP Generator 怎么把 <code>config.Config</code> 打包成 MCP Resource，通过 15051 的 gRPC 流下发给 istiod。这是 Higress→istiod 的接口，收官第 1 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>MCP Generator</h1></div>
+            <div class="card">
+                <p>Day 02 讲过：Higress 复用 istiod 的 <code>DiscoveryServer</code>，只替换六类资源的 Generator（<code>pkg/ingress/mcp/generator.go</code>）：<code>GatewayGenerator</code>/<code>VirtualServiceGenerator</code>/<code>DestinationRuleGenerator</code>/<code>EnvoyFilterGenerator</code>/<code>ServiceEntryGenerator</code>/<code>WasmPluginGenerator</code>。</p>
+                <div class="baby"><span class="t">Generator = "被拉取时的生成逻辑"</span>
+                回想 Istio 课 Day 06-07：istiod 的 <code>DiscoveryServer</code> 用 Generator 生成配置。<strong>Higress 复用了整个 DiscoveryServer 框架（收发、ACK/NACK、推送队列都不用重写），只替换了"某类资源被请求时怎么生成"的 Generator。</strong>当作为客户端的 istiod（Day 01）发 MCP 请求要 VirtualService 时，就调用 Higress 的 <code>VirtualServiceGenerator.Generate</code>——它从 Higress 的 IngressConfig（Day 03-04 翻译出来的）取配置、打包成 MCP 格式返回。<strong>这是"复用框架 + 定制生成"的教科书案例。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Generate 实现</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/mcp/generator.go VirtualServiceGenerator.Generate（:82）
+virtualServices := c.Environment.List(gvk.VirtualService, model.NamespaceAll)  // 从 ConfigStore 拉
+return generate(proxy, virtualServices, w, updates, keepLabels, keepAnnotations)</code></pre>
+                <div class="anno">读法：<b>每个 Generator 只做两步：①<code>c.Environment.List(gvk.X, ...)</code>——从配置源拉配置（这个 <code>List</code> 就落到 Day 03-04 的 IngressConfig 现场翻译！）；②<code>generate</code> 打包成 MCP 格式。<code>ServiceEntryGenerator</code>（<code>:49</code>）还额外排序保证 IP 分配确定性。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>config → MCP Resource</h1></div>
+            <div class="card">
+<pre><code class="language-go">// generator.go generate（:185）：每个 config.Config 转成 mcp.Resource
+cfg.ToProto(config.Spec)                    // config.Spec → proto body
+// 填 Metadata.Name = namespace/name、CreateTime、Labels/Annotations
+anypb.New(resource)                          // 打包进 discovery.Resource（:224）返回给 xDS 框架</code></pre>
+                <div class="baby"><span class="t">MCP Resource = "带元信息的配置信封"</span>
+                <code>config.Config</code>（Higress 内部格式，Day 04 翻译产物）要变成 MCP 协议认的 <code>mcp.Resource</code>（<code>istio.io/api/mcp/v1alpha1</code>）：<strong>把 Spec（VirtualService proto）当 body，加上 name/namespace/时间/标签，再用 <code>anypb.New</code> 包成 xDS 框架认的 <code>discovery.Resource</code>。</strong>然后 DiscoveryServer 框架把它通过 gRPC 流发给 istiod。<strong>istiod 收到后拆包，就得到一个标准 Istio VirtualService——和它从 K8s 直接读的没区别。</strong>这就是 MCP 的本质：用 xDS 的信封传 Istio 配置对象。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>unknown fields 技巧</h1></div>
+            <div class="card">
+                <p>一个巧思：<code>addExtraToUnknownFields</code>（<code>generator.go:240</code>）——用 proto 未定义的字段号 <strong>100</strong> 把额外 JSON（<code>config.Extra</code>）塞进 unknown fields，绕过 MCP Resource proto 只有 field 1/2 的限制。</p>
+                <div class="baby"><span class="t">怎么"偷偷"传额外信息？</span>
+                MCP Resource 的 proto 定义只有 field 1（metadata）和 field 2（body）——但 Higress 有些额外信息想传给 istiod。<strong>protobuf 有个特性：不认识的字段号会被当作"unknown fields"保留而非报错。Higress 就用字段号 100 塞进自己的额外 JSON——对标准 MCP 解析无害，但 Higress 定制的 istiod 能读出来。</strong>这是一个"在不破坏协议兼容性的前提下扩展协议"的黑科技。<strong>教程里点出这种技巧，能让学员理解"协议扩展"的实战手法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>15051 gRPC</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/server.go initGrpcServer（:369）
+grpc.NewServer(...) → s.xdsServer.Register(s.grpcServer)  // 把 ADS/xDS 服务注册进 gRPC
+// Start（:273）：net.Listen("tcp", ":15051") + grpcServer.Serve</code></pre>
+                <div class="anno">读法：<b>Higress 在 15051 端口起 gRPC 服务，<code>xdsServer.Register</code> 把（复用的）DiscoveryServer 的 ADS 服务注册进去。istiod 通过 <code>configSources: xds://127.0.0.1:15051</code>（Day 01）连它。<strong>这是 Higress Core 和 istiod 的物理连接点。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>变更触发推送</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/server.go initRegistryEventHandlers（:198）
+// 对每种资源注册 configHandler：变更时 s.xdsServer.ConfigUpdate(pushReq)（Full push）
+// ingress_config.go notifyXDSFullUpdate（:2195）：
+//   m.XDSUpdater.ConfigUpdate(&PushRequest{Full:true,...})</code></pre>
+                <div class="anno">读法：<b>Ingress/CRD/注册中心变了 → 触发 <code>ConfigUpdate</code> → 复用的 DiscoveryServer 走它的推送流程（Istio 课 Day 09 的 debounce/PushQueue）→ 通过 15051 推给 istiod。<strong>因为复用了 istiod 的 DiscoveryServer，连推送机制都是现成的。</strong></b>Day 04 的 <code>AlwaysPushLabel</code> 保证强制推送。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>全链路复盘</h1></div>
+            <div class="card">
+                <div class="glossary"><b>第 1 周大串讲：一条 Ingress 的旅程</b>：<br>
+                ① 用户 <code>kubectl apply</code> 一个 Ingress（Day 03 的 Ingress 控制器 watch 到）<br>
+                ② <code>onEvent</code> 发通知（不生成），触发 <code>ConfigUpdate</code>（Day 04 通知/生成解耦）<br>
+                ③ 复用的 DiscoveryServer debounce 后，istiod（客户端）发 MCP 请求要配置<br>
+                ④ Higress 的 <code>VirtualServiceGenerator.Generate</code> → <code>Environment.List</code> → IngressConfig 现场翻译 Ingress→VirtualService（Day 04）<br>
+                ⑤ <code>generate</code> 打包成 MCP Resource → 15051 gRPC 发给 istiod（今天）<br>
+                ⑥ istiod 拿到 VirtualService，走它的正常 xDS 生成（Istio 课）→ 推给 Envoy（Envoy 课）<br>
+                <strong>三站在这里完整贯通！Higress 生成配置 → istiod 转 xDS → Envoy 执行。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 1 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周（全景与控制器）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 01</strong> AI 网关全景、寄生在 Istio 上、MCP-over-xDS、15051</li>
+                    <li><strong>Day 02</strong> 启动流程、initFuncList、复用 istiod 的 DiscoveryServer</li>
+                    <li><strong>Day 03</strong> IngressConfig 只读 ConfigStore、六大子控制器、挂进 Environment</li>
+                    <li><strong>Day 04</strong> 配置翻译 Ingress→VirtualService、注解体系、金丝雀、通知/生成解耦</li>
+                    <li><strong>Day 05</strong> MCP Generator、config→MCP Resource、unknown fields、全链路复盘</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Higress 的核心——它怎么把用户友好的 Ingress/注解翻译成 Istio 配置，通过 xDS-over-MCP 喂给复用的 istiod。第 2 周进入 Higress 的另一大特色：多注册中心服务发现。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'func.*Generate\|func generate\|addExtraToUnknownFields' pkg/ingress/mcp/generator.go
+grep -n 'initGrpcServer\|initRegistryEventHandlers' pkg/bootstrap/server.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 06（第2周开始）</strong>：<strong>多注册中心概览</strong>——Higress 不止从 K8s 发现服务，还能从 Nacos/ZK/Eureka/Consul/DNS 发现。统一的 <code>Watcher</code> 抽象怎么屏蔽这些异构注册中心。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 配置翻译</a>
+                <a href="higress-ai-day06.html" style="color:#3b82f6;">Day 06 · 多注册中心概览 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

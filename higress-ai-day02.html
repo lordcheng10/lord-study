@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 启动流程 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">启动流程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 入口 main</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · serve 命令</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 关键端口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Server 结构</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · initFuncList</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 复用 istiod</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Start 与就绪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day03.html" class="nav-link" style="color:#06b6d4;">Day 03 控制器核心 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 全景与控制器</span>
+            <h1 class="part-title">启动流程</h1>
+            <p class="part-desc">Higress Controller 怎么 boot？今天追启动链：<code>cmd/higress/main.go → serve → bootstrap.NewServer → initFuncList</code>。看它怎么把 istiod（复用）和自己的 Core 装配起来。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>入口 main</h1></div>
+            <div class="card">
+<pre><code class="language-go">// cmd/higress/main.go:25
+func main() {
+  log.EnableKlogWithCobra()
+  cmd.GetRootCommand().Execute()   // cobra 根命令
+}
+// pkg/cmd/root.go:21 higress 根命令挂 serve + version 子命令</code></pre>
+                <div class="anno">读法：<b>和 istiod（pilot-discovery，Istio 课 Day 02）一样的极简 cobra main。核心是 <code>serve</code> 子命令。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>serve 命令</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/cmd/server.go getServerCommand RunE（:68）
+server, _ := serverProvider(args)   // → bootstrap.NewServer(args)
+server.Start(stop)
+waitForMonitorSignal(stop)           // 阻塞等信号</code></pre>
+                <div class="anno">读法：<b>又是"构造 → Start → 等信号"的启动三段（和 Envoy/Istio 课一致）。<code>serverProvider</code> 指向 <code>bootstrap.NewServer</code>。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>关键端口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/cmd/server.go 默认参数（:89-103）：
+GrpcAddress: ":15051"       // ★ istiod 连接的 MCP/xDS 端口（Day 01）
+HttpAddress: ":8888"        // debug/ready
+CertHttpAddress: ":8889"    // 证书 ACME
+NativeIstio: true
+// flag（:105）：ingressClass 默认 higress、gatewayHttpPort=80、gatewayHttpsPort=443…</code></pre>
+                <div class="baby"><span class="t">15051 是 Higress Core 的"对外接口"</span>
+                回想 Day 01：<strong>15051 是 Higress Core 起的 MCP Server 端口，istiod 连它拉配置。</strong>就像 istiod 用 15012 对 Envoy 服务（Istio 课 Day 02），Higress Core 用 15051 对 istiod 服务。<strong>三个端口串起三层：Higress Core(15051) → istiod(15012) → Envoy。</strong>8888 是就绪探针（Day 07）、8889 是证书 ACME 挑战（Day 10）。<code>ingressClass=higress</code> 决定 Higress 只处理标了这个 class 的 Ingress。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Server 结构</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/server.go:136 Server
+type Server struct {
+  environment      *model.Environment          // Istio 的！
+  configController  model.ConfigStoreController // Higress 的 IngressConfig
+  xdsServer        *xds.DiscoveryServer         // 直接复用 Istio 的 DiscoveryServer！
+  certServer       *cert.Server
+  ...
+}</code></pre>
+                <div class="anno">读法：<b>关键：<code>Server</code> 内嵌的 <code>environment</code>、<code>xdsServer</code> <strong>都是 Istio 的类型</strong>（<code>model.Environment</code>、<code>xds.DiscoveryServer</code>）——Higress 直接复用它们！Higress 自己写的是 <code>configController</code>（IngressConfig，Day 03）和 <code>certServer</code>。</b>这坐实了"寄生"：Higress 借用 Istio 的骨架。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>initFuncList</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/server.go NewServer（:152）核心：初始化函数列表（:169）
+initFuncList := []func() error{
+  s.initKubeClient, s.initXdsServer, s.initHttpServer,
+  s.initConfigController, s.initRegistryEventHandlers,
+  s.initAuthenticators, s.initAutomaticHttps,
+}</code></pre>
+                <div class="baby"><span class="t">initFuncList = "装配清单"</span>
+                <code>NewServer</code> 按这个列表顺序初始化各模块——这是理解 Higress 启动的最佳骨架。<strong>①initKubeClient（连 K8s）②initXdsServer（复用 istiod 的 DiscoveryServer + 换 Generator，Day 05）③initHttpServer ④initConfigController（建 IngressConfig，Day 03）⑤initRegistryEventHandlers（配置变更触发推送）⑥initAuthenticators（认证 istiod 客户端）⑦initAutomaticHttps（证书，Day 10）。</strong>每个 init 函数对应后面某一天的主题。<strong>这种"init 函数列表"是 Go 项目常见的清晰装配方式（Istio 课 Day 02 也是）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>复用 istiod</h1></div>
+            <div class="card">
+<pre><code class="language-go">// initXdsServer（server.go:342）：
+s.xdsServer = xds.NewDiscoveryServer(s.environment, ...)  // Istio 的 xDS server
+// 逐类型注册 Higress 自己的 MCP Generator（:346）：
+s.xdsServer.Generators[gvk.Gateway.String()]        = &mcp.GatewayGenerator{...}
+s.xdsServer.Generators[gvk.VirtualService.String()] = &mcp.VirtualServiceGenerator{...}
+// … 六类：Gateway/VirtualService/DestinationRule/EnvoyFilter/ServiceEntry/WasmPlugin
+s.xdsServer.ProxyNeedsPush = func(...) { return req, true }  // 永远推送（下游是 istiod）</code></pre>
+                <div class="anno">读法：<b>Higress <strong>不重写 xDS 协议栈</strong>——直接 new 一个 Istio 的 <code>DiscoveryServer</code>，只<strong>替换六类资源的 Generator</strong>（改成从 Higress 的 ConfigStore 生成 MCP Resource，Day 05）。<code>ProxyNeedsPush</code> 改成"永远推"——因为下游是 istiod（一个客户端）而非成千 Envoy，不需要 proxy 级裁剪。</b>这是"复用框架 + 定制生成逻辑"的极致体现。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Start 与就绪</h1></div>
+            <div class="card">
+                <p><code>Start()</code>（<code>server.go:273</code>）：<code>net.Listen("tcp", ":15051")</code> + <code>grpcServer.Serve</code>（对 istiod 服务）。就绪探针 <code>readyHandler</code>（<code>:454</code>）在 <code>:8888/ready</code>，探测 xDS server ready。<code>HasSynced</code> 要所有子控制器同步才 ready。</p>
+                <div class="anno">读法：<b>和 istiod 的 ready 门禁（Istio 课 Day 02）一个道理——所有配置控制器（Ingress/CRD/注册中心）都同步好了，才对 istiod 提供服务，否则会喂不完整的配置。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>启动链 main → serve → NewServer 的结构？</li>
+                    <li>15051/8888/8889 各是什么端口？</li>
+                    <li>Server 结构里哪些是 Istio 的、哪些是 Higress 的？</li>
+                    <li>initFuncList 的七个 init 函数各干什么？</li>
+                    <li>Higress 怎么"复用 istiod 的 DiscoveryServer"？ProxyNeedsPush 为什么改成永远推？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+sed -n '25,31p' cmd/higress/main.go
+grep -n 'GrpcAddress\|initFuncList\|func.*NewServer' pkg/cmd/server.go pkg/bootstrap/server.go
+sed -n '342,367p' pkg/bootstrap/server.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>Ingress 控制器核心</strong>——Higress 自己的心脏 <code>IngressConfig</code>：它是一个只读的 Istio ConfigStore，聚合了 6 个子控制器（Ingress/Gateway/McpBridge/WasmPlugin/Http2Rpc/ConfigMap）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="higress-ai-day03.html" style="color:#06b6d4;">Day 03 · Ingress 控制器核心 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

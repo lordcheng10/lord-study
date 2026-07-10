@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 配置翻译 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">配置翻译 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 聚合入口 List</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 解析注解</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · convertGateways</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ConvertHTTPRoute</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 金丝雀/权重</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Http2Rpc/EnvoyFilter</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 通知/生成解耦</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 控制器核心</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day05.html" class="nav-link" style="color:#06b6d4;">Day 05 xDS-over-MCP &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 全景与控制器</span>
+            <h1 class="part-title">配置翻译（重头戏）</h1>
+            <p class="part-desc">Higress 怎么把一个 K8s Ingress（+ 一堆注解）翻译成 Istio 的 VirtualService/Gateway？今天读翻译核心 <code>ConvertHTTPRoute</code>，以及一个精妙的"通知/生成解耦"事件模型。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>聚合入口 List</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/config/ingress_config.go List（:288）
+// 对每种类型：listFromIngressControllers + listFromGatewayControllers
+//   中间对每个 config 跑 templateProcessor.ProcessConfig（模板/Secret 引用替换）
+// listFromIngressControllers（:324）分发中心：
+//   ingressController.List() 收集 Ingress → SortIngressByCreationTime 排序
+//   → createWrapperConfigs 包装 → 按类型 switch 到 convertGateways/convertVirtualService/…</code></pre>
+                <div class="anno">读法：<b>istiod 来 <code>List(gvk.VirtualService)</code> 时，触发这条翻译链：收集所有 Ingress → 排序（保证确定性）→ 包装 → 按目标类型翻译。<strong>配置是"现场翻译"的（Day 03 只读 ConfigStore）——不预存，istiod 要时才算。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>解析注解</h1></div>
+            <div class="card">
+                <p><code>createWrapperConfigs</code>（<code>:387</code>）把每个 Ingress 的 annotations 用 <code>annotationHandler.Parse</code> 解析成结构化的 <code>annotations.Ingress</code>，打包成 <code>WrapperConfig</code>。注解解析器在 <code>pkg/ingress/kube/annotations/</code>（canary/auth/cors/retry/rewrite/header_control/ip_access_control/local_rate_limit…）。</p>
+                <div class="baby"><span class="t">注解 = Higress 的"简易配置语言"</span>
+                Istio 要配限流/鉴权/重写，得写复杂的 VirtualService/EnvoyFilter。<strong>Higress 让你用 K8s Ingress 的<strong>注解（annotation）</strong>就能配——比如 <code>higress.io/canary-weight: "20"</code> 做金丝雀、<code>higress.io/enable-cors: "true"</code> 开 CORS。</strong>每个注解对应 <code>annotations/</code> 里一个解析器，把注解翻译成内部结构。<strong>这就是 Higress"比 Istio 易用"的关键——用注解隐藏了 Istio CRD 的复杂性。</strong>解析出的结构后续应用到 VirtualService/DestinationRule。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>convertGateways</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ingress_config.go convertGateways（:433）
+// 遍历 wrapperConfigs → ingressController.ConvertGateway
+// 为每个 host 产出 config.Config{GroupVersionKind: gvk.Gateway, Spec: gateway.Gateway}
+// ConvertGateway（ingressv1/controller.go:339）：为每条 rule 的 host 构造 Gateway
+//   加 Selector（gatewaySelectorKey/Value）、HTTP/HTTPS Server、端口、SSLPassthrough</code></pre>
+                <div class="anno">读法：<b>Ingress 的每个 host 翻译成一个 Istio <code>Gateway</code>（Istio 课 Day 03 的 Gateway CRD）——定义"在哪个端口、什么协议、什么 host、什么 TLS 暴露"。<code>Selector</code> 把 Gateway 绑定到 Higress 网关 Pod。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ConvertHTTPRoute（路由核心）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/kube/ingressv1/controller.go ConvertHTTPRoute（:531）
+// 逐 rule.host 建 WrapperVirtualService（:590）
+// 逐 path 建 WrapperHTTPRoute{HTTPRoute: &networking.HTTPRoute{}}（:605）
+// PathType 映射（:612）：正则/Exact/Prefix → 内部 PathType
+//   generateHttpMatches 生成 HTTPMatchRequest（:637）
+// backendToRouteDestination（:664）：K8s backend service → Istio HTTPRouteDestination
+// 冲突路由检测（definedRules/Route2Ingress，:645-691）</code></pre>
+                <div class="baby"><span class="t">这就是"Ingress → VirtualService"的翻译现场</span>
+                一条 Ingress 规则（"host=api.foo.com, path=/v1 → service=backend:8080"）被翻译成 Istio VirtualService 的一条 HTTPRoute：<strong>①host 对应 VirtualService；②path + PathType（精确/前缀/正则）翻译成 <code>HTTPMatchRequest</code>（匹配条件）；③backend service 翻译成 <code>HTTPRouteDestination</code>（转发目标）。</strong>还检测路由冲突（两条 Ingress 定义了同样的路由）。<strong>翻译完的 VirtualService 就是 Istio 课 Day 08 里 istiod 拿去生成 Envoy Route 的输入——两站在这里对接：Higress 生成 VirtualService，istiod 把它变成 Envoy 配置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>金丝雀 / 权重</h1></div>
+            <div class="card">
+                <p><code>convertVirtualService</code>（<code>ingress_config.go:486</code>）在翻译后还做：<code>annotationHandler.ApplyRoute</code> 应用注解、<code>applyCanaryIngresses</code> 处理金丝雀、<code>normalizeWeightedCluster</code> 归一化权重到 100、<code>ApplyDefaultBackend</code> 默认后端。</p>
+                <div class="baby"><span class="t">金丝雀发布怎么实现？</span>
+                你有一个主 Ingress 指向 v1，再建一个带 <code>canary-weight: "20"</code> 注解的 Ingress 指向 v2。<strong><code>applyCanaryIngresses</code> 把它们<strong>合并</strong>成一条 VirtualService，路由带权重（v1: 80%、v2: 20%）。<code>normalizeWeightedCluster</code> 保证权重加起来是 100。</strong>于是 20% 流量走 v2——金丝雀发布。<strong>用户只需加个注解，Higress 帮你翻译成 Istio 的加权路由（Istio 课 Day 08 的 route 权重）。</strong>这就是注解体系（L02）的威力——复杂能力，简单配置。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Http2Rpc / EnvoyFilter</h1></div>
+            <div class="card">
+                <p>Higress 的高级能力通过生成 EnvoyFilter 实现：<code>constructHttp2RpcEnvoyFilter</code>（<code>:1576</code>，HTTP→Dubbo/gRPC 协议转换）、<code>constructMcpSseStatefulSessionEnvoyFilter</code>（<code>:2102</code>，MCP SSE 会话保持）、<code>configmapMgr.ConstructEnvoyFilters</code>（全局 tracing/gzip）。</p>
+                <div class="anno">读法：<b>Istio 高层 CRD 覆盖不到的能力（HTTP 转 Dubbo、SSE 会话保持、全局 tracing），Higress 用 <strong>EnvoyFilter</strong>（Istio 课 Day 17 的逃生舱）直接 patch Envoy 配置实现。<code>Http2Rpc</code> CRD 让你声明"HTTP 请求怎么映射到 Dubbo 方法参数"，翻译成 EnvoyFilter。</b>这呼应 Istio 课 Day 17——EnvoyFilter 是 Higress 加高级功能的主要手段之一。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>通知/生成解耦</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ingressv1/controller.go onEvent（:154）：
+// Ingress 变更时，并不直接生成配置！
+// 而是对 dr/vs/ef/gateway 四类构造带 constants.AlwaysPushLabel:"true" 的空 config.Meta
+// 调用对应 handler（:219）触发 istiod 重新拉取</code></pre>
+                <div class="baby"><span class="t">"通知"和"生成"分开——一个巧妙设计</span>
+                Ingress 变了，Higress <strong>不立即翻译生成配置</strong>，而是发一个"喂，配置变了，你来重新拉"的通知给 istiod。<strong>istiod 收到通知 → 发 xDS/MCP 请求要配置 → Higress 的 Generator 调 <code>List()</code> → <strong>此时才现场翻译</strong>（L01-06）→ 返回给 istiod。</strong>为什么这样？<strong>因为"生成"是按需的、带 proxy 上下文的（Istio 课 Day 01 的"带 Proxy 翻译"）——提前生成没意义。<code>AlwaysPushLabel</code> 强制 istiod 跳过差异比较直接推。</strong>这是"事件驱动 + 惰性生成"的解耦：变更只管通知，生成等到被拉取时才做。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>List 触发的翻译链？为什么是"现场翻译"？</li>
+                    <li>注解体系是什么？举例它怎么隐藏 Istio 复杂性？</li>
+                    <li>ConvertHTTPRoute 把 Ingress 的哪三部分翻译成 VirtualService 的什么？</li>
+                    <li>金丝雀发布怎么用注解实现？</li>
+                    <li>Http2Rpc 等高级能力用什么实现？通知/生成解耦是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'func.*ConvertHTTPRoute\|func.*ConvertGateway\|func.*onEvent' pkg/ingress/kube/ingressv1/controller.go
+grep -n 'convertVirtualService\|applyCanaryIngresses\|AlwaysPushLabel' pkg/ingress/config/ingress_config.go | head
+ls pkg/ingress/kube/annotations/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：<strong>xDS-over-MCP</strong>——翻译好的 Istio 配置怎么"喂"给 istiod？MCP Generator 怎么把 <code>config.Config</code> 打包成 MCP Resource，通过 15051 端口的 gRPC 流下发。这是 Higress→istiod 的接口。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 控制器核心</a>
+                <a href="higress-ai-day05.html" style="color:#06b6d4;">Day 05 · xDS-over-MCP &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
