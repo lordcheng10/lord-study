@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 运行平台 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">运行平台 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · docker compose 启动</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 多进程编排</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 各服务分工</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 为什么拆这么多进程</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 中间件三件套</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Redis/RabbitMQ 角色</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 前端与 API 生成</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 Graph</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 执行旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">运行平台</h1>
+            <p class="part-desc">概念够了，让它跑起来。AutoGPT Platform 是个生产级 SaaS，由一堆进程和中间件组成。今天用 docker compose 启动它，看这套多进程架构。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>docker compose 启动</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># autogpt_platform/README.md:14
+cd AutoGPT/autogpt_platform
+cp .env.default .env
+docker compose up -d
+# 浏览器打开 http://localhost:3000  ← 可视化构建器
+
+# 或分开跑（开发）：
+make start-core       # 只起 Supabase + Redis + RabbitMQ
+make run-backend      # 后端
+make run-frontend     # 前端</code></pre>
+                <div class="anno">读法：<b>一条 <code>docker compose up</code> 拉起整个平台——后端服务群 + 前端 + 数据库 + 队列 + 认证全家桶。</b>打开 3000 端口就是可视化画布，能拖 Block 搭 Agent。</div>
+                <div class="baby"><span class="t">为什么用 docker compose？</span>
+                因为平台<strong>依赖一堆外部服务</strong>：Postgres（存图/执行记录）、Redis（缓存/事件）、RabbitMQ（任务队列）、Supabase（认证）。手动一个个装配置极其麻烦。docker compose 用一个 yml 文件把所有服务的镜像、配置、网络、依赖关系声明好，一键拉起。<strong>对开发者，这是"生产级多服务应用"的标准启动方式。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>多进程编排</h1></div>
+            <div class="card">
+                <p>后端不是单个进程，而是一群。<code>app.py:34</code> 的 <code>main()</code> 用 <code>run_processes()</code> 一次拉起所有子进程（<code>app.py:49</code>）：</p>
+<pre><code class="language-python"># app.py:49 —— 一次启动所有后端进程
+run_processes(
+    DatabaseManager(),      # 数据库访问
+    Scheduler(),            # 定时任务（Day 14）
+    NotificationManager(),  # 通知
+    WebsocketServer(),      # 实时推送（Day 15）
+    AgentServer(),          # REST API（Day 18）
+    ExecutionManager(),     # 执行引擎（Day 12）★核心
+    # ... CoPilot 相关进程
+)</code></pre>
+                <div class="anno">读法：<b>后端被拆成多个独立进程，各管一摊：REST 服务、执行引擎、WebSocket、定时器、通知……</b>它们通过 Redis/RabbitMQ 通信（L06）。docker-compose 里对应 <code>rest_server</code>、<code>executor</code>、<code>websocket_server</code>、<code>scheduler_server</code> 等服务。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>各服务分工</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>进程/服务</th><th>职责</th><th>本教程</th></tr>
+                    <tr><td><code>rest_server</code></td><td>FastAPI REST API（建图/执行/商店）</td><td>Day 18</td></tr>
+                    <tr><td><code>executor</code></td><td>执行引擎——真正跑 Graph</td><td>Day 12-13</td></tr>
+                    <tr><td><code>websocket_server</code></td><td>实时推送执行进度到前端</td><td>Day 15</td></tr>
+                    <tr><td><code>scheduler_server</code></td><td>定时/周期执行</td><td>Day 14</td></tr>
+                    <tr><td><code>database_manager</code></td><td>集中数据库访问</td><td>—</td></tr>
+                    <tr><td><code>notification_server</code></td><td>邮件/Discord 通知</td><td>—</td></tr>
+                    <tr><td><code>redis / rabbitmq</code></td><td>缓存/事件 & 任务队列</td><td>L06</td></tr>
+                    <tr><td><code>Supabase(kong/auth/db/studio)</code></td><td>认证 + Postgres</td><td>—</td></tr>
+                    <tr><td><code>frontend</code></td><td>Next.js 可视化构建器</td><td>L07</td></tr>
+                    <tr><td><code>clamav</code></td><td>上传文件病毒扫描</td><td>—</td></tr>
+                </table>
+                <div class="glossary">连"病毒扫描"（clamav）都有——因为用户能上传文件，得防恶意文件。<strong>这份服务清单说明它是个认真的生产平台，考虑了安全、扩展、可观测的方方面面。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>为什么拆这么多进程</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>独立伸缩</strong>：执行引擎（executor）是最吃资源的，可以单独多开几个实例扛并发；REST 服务开一两个就够。分开进程才能各自伸缩。</li>
+                    <li><strong>故障隔离</strong>：某个执行卡死/崩溃，不影响 REST 服务继续接请求。</li>
+                    <li><strong>职责单一</strong>：每个进程干一件事，代码清晰、易维护。</li>
+                    <li><strong>异步解耦</strong>：REST 收到"执行请求"后不自己跑，而是丢进队列（RabbitMQ），executor 进程去消费——REST 立刻返回，执行在后台进行。</li>
+                </ul>
+                <div class="baby"><span class="t">"接单"和"干活"分开</span>
+                想象一个餐厅：<strong>服务员（REST）</strong>接单后不亲自做菜，把订单贴到<strong>出单口（RabbitMQ 队列）</strong>，<strong>厨师（executor）</strong>取单做菜。这样服务员能快速接很多单（不被做菜阻塞），厨师忙不过来就多雇几个。<strong>"请求"和"执行"通过队列解耦——这是高并发 SaaS 的标准架构。</strong>你在前端点"运行"，REST 秒回"已排队"，executor 在后台慢慢跑，进度通过 WebSocket 实时推给你。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>中间件三件套</h1></div>
+            <div class="card">
+                <p>REST app（<code>api/rest_api.py:208</code>）装了几个中间件：</p>
+                <ul>
+                    <li><strong>SecurityHeadersMiddleware</strong>：加安全响应头。</li>
+                    <li><strong>GZip 压缩</strong>：响应 &gt;50KB 才压——专为 <code>/api/blocks</code>（列出 300+ 块，响应很大）优化。</li>
+                    <li><strong>CORS</strong>：跨域控制（前端和后端不同端口）。</li>
+                </ul>
+                <div class="glossary"><b>统一异常映射</b>（<code>rest_api.py:309</code>）值得一提：把各种内部异常映射成合适的 HTTP 状态码——NotFound→404、NotAuthorized→403、<strong><code>UserPaywalledError</code>→402（付费墙）</strong>、PreconditionFailed→428。402 这个状态码很少见，正是"你余额不够，请充值"的信号——呼应它是<strong>计量收费平台</strong>（Day 16）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Redis / RabbitMQ 的角色</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>RabbitMQ（任务队列）</strong>：REST 把"图执行请求"发到队列，executor 进程消费。保证任务不丢（executor 挂了消息重回队列）、不超载（一个 executor 只取它能跑的量）。</li>
+                    <li><strong>Redis（缓存 + 事件总线）</strong>：① 缓存（如 Block 清单）；② <strong>事件总线</strong>——executor 每次节点状态变化就 publish 事件到 Redis，WebSocket 进程订阅后转发给前端（Day 15）；③ 分布式锁（保证同一执行不被两个进程重复跑）。</li>
+                </ul>
+                <div class="baby"><span class="t">队列 vs 事件总线，别混</span>
+                <strong>RabbitMQ 队列</strong>："任务分发"——一个任务只被一个 worker 消费（谁抢到谁干）。<strong>Redis 事件总线（Pub/Sub）</strong>："消息广播"——一个事件被所有订阅者收到（进度推给所有看这个执行的前端）。<strong>队列用于"派活"（一对一），事件总线用于"广播进度"（一对多）——两种不同的通信模式，各司其职。</strong>这和 OpenHands、CrewAI 的事件系统思路一致。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>前端与 API 生成</h1></div>
+            <div class="card">
+                <p>前端是 Next.js + TypeScript 的可视化构建器（Day 03 讲过画布对应 Graph 模型）。有个工程细节：<strong>前端的 API 客户端是自动生成的</strong>——后端出 OpenAPI 规范，前端用 Orval 工具生成 TS 客户端（<code>pnpm generate:api</code>）。</p>
+                <div class="baby"><span class="t">为什么自动生成 API 客户端？</span>
+                后端有几十个 API 端点。如果前端手写每个请求的调用代码（URL、参数、返回类型），既费力又容易和后端不一致（后端改了个字段，前端忘了同步就出 bug）。<strong>从后端的 OpenAPI 规范自动生成前端客户端</strong>——后端一改，重新生成，前端类型自动同步。<strong>"单一真相来源 + 代码生成"消除前后端不一致——大型全栈项目的标配。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>怎么启动平台？为什么用 docker compose？</li>
+                    <li>后端为什么拆成多进程？各进程职责？</li>
+                    <li>"接单"和"干活"为什么要分开（队列解耦）？</li>
+                    <li>RabbitMQ 和 Redis 各扮演什么角色？</li>
+                    <li>402 状态码意味着什么？前端 API 客户端为什么自动生成？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform
+sed -n '14,70p' $P/README.md                          # 启动方式
+grep -n 'run_processes\|ExecutionManager\|WebsocketServer' $P/backend/backend/app.py
+grep -nE 'rest_server|executor|rabbitmq|redis|clamav' $P/docker-compose.yml | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：把前四天串成故事线——<strong>一次执行的完整旅程</strong>：从前端点"运行"→ REST 扣费/入队 → executor 拓扑执行各 Block → 数据流动 → WebSocket 实时推进度 → 返回结果。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 Graph</a>
+                <a href="autogpt-day05.html" style="color:var(--accent-green);">Day 05 · 执行旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
