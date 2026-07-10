@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · 前端实时展示 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .card2{display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap;justify-content:center}
+        .card2 .c{border:1px solid var(--border-color);border-radius:9px;padding:10px 13px;font-size:12px;background:var(--bg-secondary);min-width:150px}
+        .card2 .c.before{border-color:#f59e0b} .card2 .c.after{border-color:#22c55e} .card2 .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">前端实时展示 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 前端的任务</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · WebSocket 连接</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 收到消息怎么分发</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 类型守卫 type-guards</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 观察替换动作</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 流式增量合并</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 历史加载与降级</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 CodeAct</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 安全 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 前端/安全/生态</span>
+            <h1 class="part-title">前端实时展示</h1>
+            <p class="part-desc">第 1 周的 Action/Observation 事件模型，如何变成你看到的聊天界面？今天读前端真实代码：WebSocket 连接、事件分发、类型守卫，和那条"观察替换动作"的核心渲染规则。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>前端的任务</h1></div>
+            <div class="card">
+                <p>前端（React）要做的事：<strong>接收事件流 → 判断每个事件是什么 → 渲染成对应的 UI 卡片</strong>，并让你能下任务、暂停、确认。核心目录 <code>frontend/src/</code>。</p>
+                <div class="baby"><span class="t">前端本质是"事件流的可视化器"</span>
+                后端（Agent）产出的是一串 Action/Observation 事件（Day 03）。前端做的就是把这串抽象数据"翻译成人看得懂的画面"：一个 bash Action → 一个终端命令卡片；一个文件编辑 Observation → 一个 diff 视图；一个截图 Observation → 一张网页图片。<strong>你在界面上看到的一切，本质都是某个事件的可视化。理解了事件模型（第1周），前端逻辑就一通百通。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>WebSocket 连接</h1></div>
+            <div class="card">
+                <p>前端<strong>直连沙箱里 agent-server 的 WebSocket</strong>（Day 05 讲过为什么直连）。地址由 <code>websocket-url.ts:78</code> 的 <code>buildWebSocketUrl()</code> 拼成：</p>
+<pre><code class="language-typescript">// ws(s)://{host}:{port}[/前缀]/sockets/events/{conversationId}
+// 连接参数带 resend_all: true（重连时重发所有事件）+ session_api_key（鉴权）</code></pre>
+                <div class="anno">读法：<b>每个会话一个 WebSocket 连接，URL 里带会话 id。</b>连接管理中枢是 <code>conversation-websocket-context.tsx</code>（约 1000 行）的 <code>ConversationWebSocketProvider</code>——它用 <code>useWebSocket</code> hook 建连，还支持"主对话 + planning 子 agent"两条并行连接（Day 11 的规划型 Agent）。</div>
+                <div class="glossary"><b>为什么用 WebSocket 而不是 SSE？</b> 项目里 grep 不到 <code>EventSource</code>（SSE），实时通道就是原生 WebSocket。因为 WebSocket 是<strong>双向</strong>的——前端既要"收事件"（看 Agent 干活），也要"发消息"（给 Agent 下指令、暂停）。SSE 只能服务端单向推，不够用。<code>resend_all:true</code> 让你刷新/重连时能重新拿到全部事件、重建界面。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>收到消息怎么分发</h1></div>
+            <div class="card">
+                <p>收到 WebSocket 消息时，<code>handleMainMessage</code>（<code>conversation-websocket-context.tsx:365</code>）做几件事：</p>
+<pre><code class="language-typescript">const event = JSON.parse(messageEvent.data);   // WS 传来的是 JSON 字符串
+if (!isV1Event(event)) return;                  // 校验是合法事件
+addEvent(event);                                // 存进 event store
+// 再按类型分发副作用：
+//   bash 输出 → 终端 appendOutput
+//   浏览器截图 → browser store
+//   状态更新 → setExecutionStatus
+//   错误 → error store</code></pre>
+                <div class="anno">读法：<b>先 <code>JSON.parse</code> 解析、校验、存进统一的事件仓库，再根据事件类型触发对应的"副作用"（更新终端/浏览器/状态面板）。</b>发消息则通过 <code>sendMessage</code>（<code>:878</code>）<code>currentSocket.send(JSON.stringify(...))</code>。</div>
+                <div class="baby"><span class="t">为什么要先"存"再"分发"？</span>
+                统一存进 event store，好处是：① 事件有<strong>单一可信来源</strong>（所有 UI 都从 store 读，不会各存一份导致不一致）；② 能回放、能调试（store 里就是完整历史）。分发副作用则是"顺便通知各个专门视图更新自己"。<strong>"单一数据源 + 派生视图"是现代前端状态管理的黄金模式。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>类型守卫 type-guards</h1></div>
+            <div class="card">
+                <p>WebSocket 传来的是 <code>JSON.parse</code> 出的 <code>unknown</code>——得先判断它到底是哪种事件才能安全使用。<code>type-guards.ts</code> 提供一整套守卫函数：</p>
+<pre><code class="language-typescript">// type-guards.ts
+isActionEvent(e)       // :103 source==="agent" && "action" in e && "kind" in e.action
+isObservationEvent(e)  // :58  source==="environment" && "action_id" in e && "observation" in e
+isMessageEvent(e), isUserMessageEvent(e)
+isExecuteBashActionEvent(e), isBrowserObservationEvent(e)  // 更细粒度</code></pre>
+                <div class="anno">读法：<b>每个守卫函数检查事件的关键字段，确认它是某种类型，让后续代码能安全地访问对应字段。</b>注意 <code>isObservationEvent</code> 靠 <code>source==="environment"</code>（Day 03 讲过观察永远来自环境）+ 有 <code>action_id</code> 和 <code>observation</code> 字段来判断——正是我们前面学的事件结构。</div>
+                <div class="baby"><span class="t">类型守卫为什么必要？</span>
+                TypeScript 在编译期检查类型，但 WebSocket 传来的数据是运行时才到的 <code>unknown</code>，编译器不知道它是啥。类型守卫是"运行时的类型检查"——检查完，TypeScript 就<strong>收窄</strong>了类型，你能安全地 <code>event.action.command</code> 而不会因为字段不存在报错。<strong>不信任外部数据、先校验再使用，是健壮前端的基本纪律。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>核心规则：观察替换动作</h1></div>
+            <div class="card">
+                <p>最能体现"事件流→UI"的是 <code>handleEventForUI</code>（<code>utils/handle-event-for-ui.ts:293</code>）。它有条核心规则（<code>:404</code>）：</p>
+<pre><code class="language-typescript">// ObservationEvent 到达时，用 action_id 找到之前那条 ActionEvent，原地替换
+const actionIndex = newUiEvents.findIndex((ui) => ui.id === event.action_id);
+if (actionIndex !== -1) newUiEvents[actionIndex] = event;</code></pre>
+                <div class="card2">
+                    <span class="c before">⏳ ActionEvent<br>「要运行 pytest」</span>
+                    <span class="a">观察到达<br>action_id 配对 →</span>
+                    <span class="c after">✅ ObservationEvent<br>「pytest 输出：5 passed」</span>
+                </div>
+                <div class="anno">读法：<b>这就是 Day 03 埋的伏笔的兑现——观察靠 <code>action_id</code> 找到对应动作卡片，原地替换。</b>所以界面上是"一张卡片先显示意图、再变成结果"，不是两张卡片。<strong>例外</strong>（<code>:390</code>）：<code>ThinkObservation</code> 和 <code>FinishObservation</code> 不加入 UI——因为思考/结束语的内容已经在对应 Action 里显示过了，避免重复。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>流式增量合并</h1></div>
+            <div class="card">
+                <p><code>handleEventForUI</code> 的其余逻辑（<code>:299-374</code>）主要在处理 Day 03 的 <code>StreamingDeltaEvent</code>——把一小段段流式 token 合并成"正在生成的消息气泡"，等最终的完整 <code>MessageEvent</code> 到达时，用它<strong>取代</strong>那个预览气泡。</p>
+                <div class="baby"><span class="t">"打字机效果"的实现原理</span>
+                大模型流式吐字（Day 14），每个 delta 事件带一小段文本。前端把它们<strong>累加</strong>到一个"临时预览气泡"里——你就看到文字一个个冒出来（打字机）。等生成完，后端发一个完整的 <code>MessageEvent</code>（这个才持久化，Day 03），前端用它<strong>替换</strong>预览气泡（对账，确保最终显示的是权威版本）。<strong>预览求快、最终求准——两者对账，既流畅又正确。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>历史加载与降级</h1></div>
+            <div class="card">
+                <p>两个健壮性设计：</p>
+                <ul>
+                    <li><strong>历史加载</strong>：连接打开时先调 REST（<code>EventService.getEventCount</code>、<code>useConversationHistory</code>）从 <strong>app_server</strong> 拉历史事件（Day 08 的只读接口），重建界面——这样刷新页面/重进会话不会丢历史。</li>
+                    <li><strong>发送降级</strong>：WebSocket 没连上时，<code>sendMessage</code> 降级为 REST 队列 <code>PendingMessageService.queueMessage</code>（<code>:894</code>）——消息先排队，连上了再发，不丢消息。</li>
+                </ul>
+                <div class="glossary"><b>两条数据通道各司其职（呼应 Day 05/08）</b>：<strong>实时</strong>走 WebSocket 直连沙箱（低延迟）；<strong>历史</strong>走 REST 从 app_server 拉（可靠存档）。前端把两者拼起来——历史 + 实时 = 完整体验。降级到 REST 队列则保证了网络抖动时消息不丢。<strong>好前端不仅要"正常时好用"，还要"异常时不崩、不丢数据"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>前端的本质任务是什么？（事件流可视化）</li>
+                    <li>为什么用 WebSocket 而非 SSE？resend_all 干嘛？</li>
+                    <li>收到消息为什么"先存再分发"？</li>
+                    <li>类型守卫为什么必要？isObservationEvent 靠什么判断？</li>
+                    <li>"观察替换动作"规则是什么？为什么 Think/Finish 观察不入 UI？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '78,95p' frontend/src/utils/websocket-url.ts
+grep -n 'handleMainMessage\|addEvent\|sendMessage\|queueMessage' frontend/src/contexts/conversation-websocket-context.tsx | head
+sed -n '58,112p' frontend/src/types/v1/type-guards.ts
+grep -n 'action_id\|findIndex\|ThinkObservation\|FinishObservation' frontend/src/utils/handle-event-for-ui.ts | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>安全与权限</strong>——把散落各处的安全机制汇总：沙箱隔离、confirmation mode 人工确认、security_risk 风险评估、密钥按需下发、路径前缀隔离。看 OpenHands 如何"敢把执行权交给 AI"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 CodeAct</a>
+                <a href="openhands-day17.html" style="color:var(--accent-green);">Day 17 · 安全与权限 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
