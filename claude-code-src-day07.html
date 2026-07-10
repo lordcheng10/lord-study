@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 工具系统 Tool 接口 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .twolayer{display:flex;flex-direction:column;gap:0;margin:8px 0}
+        .tl{padding:14px 16px;border:1px solid var(--border-color)} .tl:first-child{border-radius:9px 9px 0 0}.tl:last-child{border-radius:0 0 9px 9px}
+        .tl.p{background:rgba(6,182,212,.06)} .tl.p h4{color:var(--accent-cyan)} .tl.h{background:rgba(245,158,11,.06)} .tl.h h4{color:var(--accent-orange)}
+        .tl h4{font-size:14px;margin:0 0 4px} .tl .f{font-size:11px;font-family:monospace;color:var(--text-muted)} .tl p{font-size:12.5px;color:var(--text-secondary);margin:5px 0 0}
+        .pipe{display:flex;flex-direction:column;gap:5px}
+        .ps{display:flex;gap:10px;align-items:center;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:9px 12px}
+        .ps .n{flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--accent-purple);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+        .ps p{margin:0;font-size:12.5px;color:var(--text-secondary)} .ps p b{color:var(--text-primary)}
+        .ps.hot{border-color:var(--accent-green)} .ps.hot .n{background:var(--accent-green)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">工具系统 Tool 接口 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工具是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两层接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 一个工具要实现什么</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · buildTool 默认值</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 注册与发现</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 暴露给模型</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 执行管线全景</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 QueryEngine</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 内置工具 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 核心引擎</span>
+            <h1 class="part-title">工具系统 Tool 接口</h1>
+            <p class="part-desc">Agent 的"手脚"。今天讲一个工具必须实现什么、怎么注册、怎么变成发给模型的 tool 定义，以及执行一次工具经过哪些关卡。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工具是什么：让模型能"动手"的接口</h1></div>
+            <div class="card">
+                <p>Day 01 说过 Agent = 模型 + 工具 + 循环。工具就是"模型能调用去改变世界的能力"——读文件、写文件、跑命令、搜代码、上网。模型本身只会输出文字；是"工具"让它能真正干活。</p>
+                <p>流程上（Day 03 讲过）：模型在回复里输出一个 <code>tool_use</code> 块（"我要调 Read，参数是这个文件路径"）→ 系统执行对应工具 → 把结果作为 <code>tool_result</code> 回给模型。所以"工具"在代码里要解决三件事：<strong>①怎么告诉模型有这个工具（定义/schema）②怎么判断这次调用能不能执行（权限）③怎么真执行并返回结果（call）</strong>。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两层接口：协议层 vs 宿主层</h1></div>
+            <div class="card">
+                <p>理解工具系统，先搞清它有<strong>两层定义</strong>——这是最容易懵的地方：</p>
+                <div class="twolayer">
+                    <div class="tl p"><h4>① 协议层 CoreTool（宿主无关）</h4><div class="f">packages/agent-tools/src/types.ts</div><p>一个"纯类型 + 零运行时依赖"的最小内核接口。只约定工具的本质：name、inputSchema、call、权限。不关心 React/UI。</p></div>
+                    <div class="tl h"><h4>② 宿主层 Tool（Claude Code 实际用）</h4><div class="f">src/Tool.ts</div><p>在协议层之上，加了一大堆 UI 渲染方法（怎么在终端里画这个工具的调用/结果）。宿主工具"结构上满足"协议层接口。</p></div>
+                </div>
+                <div class="glossary"><b>为什么分两层？</b> <code>packages/agent-tools</code>（协议层）零依赖，能被任何环境复用——比如子代理、SDK、测试。<code>src/Tool.ts</code>（宿主层）才绑定终端 UI。这样"工具是什么"（协议）和"工具在这个 CLI 里怎么显示"（宿主）解耦了。你写业务逻辑只关心协议层；写终端渲染才碰宿主层。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>一个工具要实现什么</h1></div>
+            <div class="card">
+                <p>宿主层 <code>Tool</code>（<code>src/Tool.ts:372</code>）的核心契约。必须实现的：</p>
+                <table>
+                    <thead><tr><th>字段/方法</th><th>作用</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>name</code></td><td>工具名（模型看到的）</td></tr>
+                        <tr><td><code>inputSchema</code></td><td>输入参数的 <strong>zod schema</strong>，用于校验 + 转成给模型的 JSON Schema</td></tr>
+                        <tr><td><code>call(args, ctx, canUseTool, ...)</code></td><td>★ 真正执行，返回 <code>ToolResult</code>（<code>:389</code>）</td></tr>
+                        <tr><td><code>prompt(options)</code></td><td>★ <strong>发给模型的工具说明</strong>（<code>:528</code>）——注意不是 description！</td></tr>
+                        <tr><td><code>description(input, opts)</code></td><td>给 UI/权限对话框看的描述（<code>:396</code>）</td></tr>
+                        <tr><td><code>checkPermissions(input, ctx)</code></td><td>返回三态权限结果（<code>:510</code>）</td></tr>
+                        <tr><td><code>isReadOnly / isConcurrencySafe / isDestructive</code></td><td>行为标志（能否并发、是否只读、是否破坏性）</td></tr>
+                        <tr><td><code>maxResultSizeChars</code></td><td>结果超过这个字符数就落盘，模型只看预览+文件路径</td></tr>
+                        <tr><td><code>mapToolResultToToolResultBlockParam</code></td><td>把结果映射成 API 的 <code>tool_result</code> 块</td></tr>
+                    </tbody>
+                </table>
+                <p>权限结果是<strong>三态</strong>（<code>types.ts:87</code>）：</p>
+<pre><code class="language-typescript">type PermissionResult =
+  | { behavior: 'allow'; updatedInput }    // 放行（可改写入参）
+  | { behavior: 'deny'; message }          // 拒绝
+  | { behavior: 'passthrough' }            // 交给通用权限系统裁决</code></pre>
+                <div class="glossary"><b>zod 是什么？</b> 一个 TypeScript 的"运行时数据校验"库。你用 <code>z.object({ file_path: z.string() })</code> 声明"输入长这样"，它既能在运行时校验模型传来的参数合不合法，又能自动转成 JSON Schema 发给模型当"参数说明"。<strong>一处声明，同时管校验和文档</strong>——这是本工具系统的基石。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>buildTool：安全默认值（fail-closed）</h1></div>
+            <div class="card">
+                <p>你读工具代码会发现很多工具<strong>没写 <code>checkPermissions</code>/<code>isReadOnly</code></strong>。因为它们都通过 <code>buildTool()</code>（<code>Tool.ts:767</code>）导出，工厂帮它们填了<strong>"往安全一侧靠"的默认值</strong>：</p>
+<pre><code class="language-typescript">const TOOL_DEFAULTS = {
+  isEnabled: () =&gt; true,
+  isConcurrencySafe: () =&gt; false,   // ← 默认假设"不可并发"（保守）
+  isReadOnly: () =&gt; false,          // ← 默认假设"会写"（保守）
+  isDestructive: () =&gt; false,
+  checkPermissions: (input) =&gt; ({ behavior: 'allow', updatedInput: input }),
+  // ...
+}
+export function buildTool(def) {
+  return { ...TOOL_DEFAULTS, userFacingName: () =&gt; def.name, ...def }
+}</code></pre>
+                <div class="glossary"><b>fail-closed（默认保守）</b>：安全设计原则——不确定时选"更安全"的默认。这里默认"不可并发、会写"，工具只有<strong>主动声明</strong> <code>isReadOnly: () =&gt; true</code> 才会被当只读、才能并发执行。这样漏写标志的工具会被当成"危险的写工具"串行执行，而不是被误当只读并发跑坏。<strong>忘记声明的代价是"慢一点"而不是"出事"</strong>——这就是 fail-closed 的价值。</div>
+                <p>所有工具都用 <code>buildTool({...})</code> 导出，如 <code>FileReadTool</code>、<code>BashTool</code>。Day 08 精读几个时你会反复看到这个模式。</p>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>注册与发现</h1></div>
+            <div class="card">
+                <p>工具从"全部候选"到"这次能给模型用的"，经过几道过滤（<code>src/tools.ts</code>）：</p>
+                <div class="pipe">
+                    <div class="ps"><div class="n">1</div><p><b>getAllBaseTools()</b>（<code>tools.ts:218</code>）：返回当前环境所有可能的工具（受 <code>process.env</code>/<code>feature()</code> 门控）</p></div>
+                    <div class="ps"><div class="n">2</div><p><b>getTools(permissionContext)</b>（<code>tools.ts:304</code>）：去掉被整工具 deny 的、被 REPL 包裹的、<code>isEnabled()===false</code> 的</p></div>
+                    <div class="ps"><div class="n">3</div><p><b>assembleToolPool</b>（<code>tools.ts:378</code>）：内置工具 + MCP 工具合并、<strong>按名排序</strong>、去重（内置优先）</p></div>
+                </div>
+                <div class="glossary"><b>为什么要"按名排序"？</b> 因为工具定义会被放进发给模型的 prompt，而 Anthropic 有 <b>prompt 缓存</b>——完全相同的 prompt 前缀能命中缓存、省钱省时间。如果工具顺序每次都变，prompt 字节就变，缓存永远命中不了。排序保证工具列表<strong>稳定</strong>，从而缓存稳定。这种"为了缓存稳定而排序"的细节在本项目随处可见。</div>
+                <p>还有个提前过滤：<code>filterToolsByDenyRules</code>（<code>tools.ts:295</code>）在把工具给模型<strong>之前</strong>就剔除被整工具 deny 的（包括 MCP <code>mcp__server</code> 前缀级 deny）——被禁的工具模型<strong>根本看不到</strong>，而不是"看到了但调用时被拒"。</p>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>暴露给模型：一个反直觉点</h1></div>
+            <div class="card">
+                <p>工具怎么变成 Anthropic API 的 tool 定义？靠 <code>toolToAPISchema</code>（<code>src/utils/api.ts:119</code>）：</p>
+<pre><code class="language-typescript">// api.ts:169 —— 产出发给模型的工具定义
+base = {
+  name: tool.name,
+  description: await tool.prompt({...}),   // ← ★ 用 prompt() 不是 description()！
+  input_schema,                            // ← zod 转 JSON Schema
+}</code></pre>
+                <div class="card warn-card" style="border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.05);">
+                    <p style="margin:0;color:var(--text-secondary);">⚠️ <strong>反直觉但很重要</strong>：发给模型的工具"描述"字段，取自 <code>tool.prompt()</code>，<strong>不是</strong> <code>tool.description()</code>。<code>description()</code> 是给<strong>界面/权限弹窗</strong>看的（简短），<code>prompt()</code> 才是给<strong>模型</strong>看的（详细的使用说明，教模型什么时候、怎么用这个工具）。看工具代码时别搞混——想知道"模型看到的工具说明"，去读 <code>prompt()</code>。</p>
+                </div>
+                <p>schema 来源二选一（<code>api.ts:157</code>）：内置工具用 <code>zodToJsonSchema(tool.inputSchema)</code> 把 zod 转成 JSON Schema；MCP 工具直接用它原始的 <code>inputJSONSchema</code>。</p>
+                <div class="glossary"><b>延迟加载工具（deferred）</b>：有些不常用的工具（Artifact、LSP、NotebookEdit 等）标了 <code>shouldDefer: true</code>，它们的 schema <strong>不发给模型</strong>（省 prompt 空间）。模型需要时先调 <code>SearchExtraTools("select:工具名")</code> 发现它们、再用 <code>ExecuteExtraTool</code> 调用（<code>claude.ts:1187</code>）。这就是你在系统提示里偶尔看到"deferred tools"的由来——工具太多，按需加载。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>执行管线全景：一次工具调用过哪些关卡</h1></div>
+            <div class="card">
+                <p>模型说"调 Edit"后，到真正执行、返回结果，中间过一条流水线（<code>src/services/tools/toolExecution.ts</code>）。<strong>唯一的 <code>tool.call()</code> 调用点在 <code>:1256</code></strong>，它前后被一堆关卡包着：</p>
+                <div class="pipe">
+                    <div class="ps"><div class="n">1</div><p><b>找工具</b> findToolByName（支持别名，如老 KillShell→TaskStop）</p></div>
+                    <div class="ps"><div class="n">2</div><p><b>zod schema 校验</b>（<code>:657</code>）：参数不合法 → InputValidationError</p></div>
+                    <div class="ps"><div class="n">3</div><p><b>validateInput</b>（<code>:725</code>）：工具自定义的业务校验</p></div>
+                    <div class="ps"><div class="n">4</div><p><b>backfill 可观察输入</b>（<code>:826</code>）：把 file_path 展开成绝对路径给 hook/权限看（防绕过）</p></div>
+                    <div class="ps"><div class="n">5</div><p><b>PreToolUse hooks</b>（<code>:842</code>）：可拦截/改输入/直接放行或拒绝（Day 14）</p></div>
+                    <div class="ps"><div class="n">6</div><p><b>权限检查</b>：走 canUseTool（Day 09）</p></div>
+                    <div class="ps hot"><div class="n">7</div><p><b>★ tool.call() 真执行</b>（<code>:1256</code>）——唯一执行点</p></div>
+                    <div class="ps"><div class="n">8</div><p><b>结果映射</b>（<code>:1367</code>）+ <b>超大结果落盘</b>（<code>:1478</code>，按 maxResultSizeChars）</p></div>
+                    <div class="ps"><div class="n">9</div><p><b>PostToolUse hooks</b>（<code>:1558</code>）：可改写结果/追加消息（Day 14）</p></div>
+                </div>
+                <div class="glossary"><b>并发分区</b>（<code>toolOrchestration.ts:106</code>）：一批工具调用会被分成"连续的只读工具"（并发跑，上限 10）和"写工具"（串行跑），依据就是 L04 讲的 <code>isConcurrencySafe</code>。所以模型一次要读 5 个文件，它们会<strong>并发</strong>执行；但要改 3 个文件，会<strong>串行</strong>——避免写冲突。这是 fail-closed 默认值直接影响性能与安全的地方。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>工具解决哪三件事？（定义/schema、权限、执行）</li>
+                    <li>协议层 vs 宿主层的区别？</li>
+                    <li>buildTool 的 fail-closed 默认值是什么、为什么这么设？</li>
+                    <li>发给模型的工具说明用 prompt() 还是 description()？（prompt！）</li>
+                    <li>执行管线有哪些关卡？唯一的 call() 在哪？并发怎么分区？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读两层接口
+sed -n '80,135p' packages/agent-tools/src/types.ts   # 协议层 CoreTool
+sed -n '372,540p' src/Tool.ts                        # 宿主层 Tool（挑关键看）
+
+# 2. 读 buildTool 默认值
+sed -n '767,802p' src/Tool.ts
+
+# 3. 读注册与暴露给模型
+sed -n '218,400p' src/tools.ts
+sed -n '119,200p' src/utils/api.ts                   # toolToAPISchema
+
+# 4. 读执行管线（找唯一 call 点）
+grep -n "tool.call\|checkPermissionsAndCallTool\|partitionToolCalls" src/services/tools/*.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：接口讲清了，Day 08 打开 <code>packages/builtin-tools</code> 精读几个真实工具——Read（只读范例）、Edit（写范例）、Bash（最复杂权限）、Agent（子代理）。看它们各自怎么填这套接口。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 QueryEngine</a>
+                <a href="claude-code-src-day08.html" style="color:var(--accent-green);">Day 08 · 内置工具精读 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

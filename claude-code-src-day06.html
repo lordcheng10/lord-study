@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · QueryEngine 深入 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .switch-list{display:flex;flex-direction:column;gap:6px}
+        .sw{display:flex;gap:12px;align-items:flex-start;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:10px 13px}
+        .sw code{color:var(--accent-orange);font-size:12px;font-weight:700;white-space:nowrap} .sw p{font-size:12.5px;color:var(--text-secondary);margin:0}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">QueryEngine 深入 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三层再定位</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一会话一实例</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · submitMessage 主生成器</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 消息类型 switch</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · queryLoop 的 State</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 依赖注入与可测试</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · usage/成本统计</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 完整旅程</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 工具系统 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 核心引擎</span>
+            <h1 class="part-title">QueryEngine 深入</h1>
+            <p class="part-desc">从宏观进入微观。Day 03 讲了循环"是什么"，今天钻进 <code>QueryEngine.ts</code> 和 <code>query.ts</code> 源码，看那个驱动 turn 的生成器到底怎么写的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三层再定位</h1></div>
+            <div class="card">
+                <p>复习 Day 03 的三层（今天聚焦前两层）：</p>
+                <table>
+                    <thead><tr><th>层</th><th>文件</th><th>职责</th></tr></thead>
+                    <tbody>
+                        <tr><td>会话层</td><td><code>QueryEngine.ts</code></td><td>一会话一实例，跨 turn 保持状态，产出对外 SDK 消息</td></tr>
+                        <tr><td>循环层</td><td><code>query.ts</code></td><td><code>queryLoop</code> 的 <code>while(true)</code>，真正的 agent loop</td></tr>
+                        <tr><td>API 层</td><td><code>services/api/claude.ts</code></td><td>打 Anthropic API、流式累积（Day 03 讲过）</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary"><b>还有个便捷入口 <code>ask()</code></b>（<code>QueryEngine.ts:1256</code>）：它只是 QueryEngine 的一次性包装——<code>new QueryEngine(...)</code> 然后 <code>yield* engine.submitMessage(...)</code>。适合"问一句拿一次结果"的场景（比如 headless 模式）。交互式 REPL 则复用同一个 QueryEngine 实例跨多轮对话。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一会话一实例：状态跨 turn 保持</h1></div>
+            <div class="card">
+                <p>类定义在 <code>QueryEngine.ts:192</code>。它的注释点明了设计哲学（<code>:188</code>）："One QueryEngine per conversation. Each submitMessage() call starts a new turn... State persists across turns."</p>
+<pre><code class="language-typescript">class QueryEngine {
+  mutableMessages: Message[]        // 跨 turn 持久的完整消息历史
+  abortController: AbortController  // 用于中断（Esc/Ctrl+C）
+  totalUsage: Usage                 // 累计 token 用量
+  readFileState: ...                // 读过哪些文件（去重用）
+  // ...
+}</code></pre>
+                <div class="glossary"><b>为什么"一会话一实例"？</b> 因为一次对话里，多个 turn 要共享同一份消息历史、同一个中断控制器、累计的 token 统计。把这些做成实例字段，<code>submitMessage()</code> 每次调用就是"在同一个 engine 上开一个新 turn"，状态自然延续。这比"每次都传一大堆参数"干净得多。<b>AbortController</b> 是 JS 标准的"取消信号"——你按 Esc，它 <code>abort()</code>，正在进行的 API 请求和工具就被取消。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>submitMessage：驱动一个 turn 的主生成器</h1></div>
+            <div class="card">
+                <p><code>async *submitMessage(prompt, options)</code>（<code>QueryEngine.ts:217</code>）是核心。开头做准备，然后进入消费循环层的 for-await：</p>
+<pre><code class="language-typescript">async *submitMessage(prompt, options) {
+  // 1. 处理 slash 命令/附件，push 进 mutableMessages
+  const messages = await processUserInput(prompt, ...)   // QueryEngine.ts:426
+  this.mutableMessages.push(...)                          // :441
+  yield { type: 'system', subtype: 'init', ... }          // :551 先吐一条 init
+
+  // 2. ★ 消费循环层的全部产出
+  for await (const message of query({                     // :688
+    messages, systemPrompt, canUseTool: wrappedCanUseTool,
+    maxTurns, taskBudget, ...
+  })) {
+    switch (message.type) { ... }   // 见 L04
+  }
+
+  // 3. 循环结束，产出最终 result
+  yield { type: 'result', subtype: 'success', ... }       // :1194
+}</code></pre>
+                <div class="glossary"><b><code>async function*</code>（异步生成器）</b>：能"边算边一个个吐结果、且中间可以 await"的函数。<code>submitMessage</code> 是异步生成器，所以 UI 能用 <code>for await (const msg of engine.submitMessage(...))</code> 实时拿到每条消息更新界面——不用等整个 turn 跑完。这是"流式"能从最底层 API 一路传到界面的根本机制。</div>
+                <p>注意 <code>wrappedCanUseTool</code>（<code>:253</code>）——它包装了权限回调（Day 09），顺便记录被拒绝的工具到 <code>permissionDenials</code>，最终进 result。这就是权限系统接进循环的地方。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>消息类型 switch：把内部消息转成对外消息</h1></div>
+            <div class="card">
+                <p>循环体是一个大 <code>switch(message.type)</code>（<code>QueryEngine.ts:772</code>）。它的核心工作是<strong>把循环层产出的"内部 Message"分类，转成对外的 SDK 消息，并顺手维护统计</strong>：</p>
+                <div class="switch-list">
+                    <div class="sw"><code>assistant</code><p>捕获 stop_reason、push 进 mutableMessages、<code>yield* normalizeMessage(msg)</code> 转成对外 SDK 消息（<code>:776</code>）</p></div>
+                    <div class="sw"><code>stream_event</code><p>维护 usage/成本：message_start 重置、message_delta 累加、message_stop 累进 totalUsage；仅当调用方要"打字机"才透传原始事件（<code>:813</code>）</p></div>
+                    <div class="sw"><code>user</code><p>turnCount++（<code>:768</code>）——数这是第几轮</p></div>
+                    <div class="sw"><code>attachment</code><p>提取结构化输出；处理 max_turns_reached → 产出 error_max_turns result（<code>:886</code>）</p></div>
+                    <div class="sw"><code>system</code><p>处理 compact_boundary（上下文压缩边界，Day 10）、api_error → api_retry（<code>:939</code>）</p></div>
+                </div>
+                <div class="glossary"><b>为什么要"内部消息 → 对外 SDK 消息"这层转换？</b> 循环层内部的 Message 格式是干活用的（带各种中间状态）；而对外（给 UI、给 SDK 调用方）需要一个稳定、干净的格式。<code>normalizeMessage</code> 做这个翻译。这种"内外格式分离"让内部实现能自由演进而不破坏外部契约——是好 API 设计的通例。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>queryLoop 的 State：每轮整体替换</h1></div>
+            <div class="card">
+                <p>钻进循环层 <code>query.ts</code>。<code>queryLoop</code> 的 <code>while(true)</code>（<code>:460</code>）每轮迭代维护一个可变的 <code>State</code>（<code>query.ts:261</code>）。一个值得学的写法——<strong>每次 continue 用整体替换而非分散赋值</strong>：</p>
+<pre><code class="language-typescript">// query.ts:2043 —— 构造下一轮完整 state，整体替换
+const next: State = {
+  messages: messagesForQuery.concat(assistantMessages, toolResults),
+  turnCount: nextTurnCount,
+  // ... 所有字段一次性给全
+}
+state = next   // 而不是 state.messages = ...; state.turnCount = ...（9 处分散赋值）
+continue</code></pre>
+                <div class="glossary"><b>为什么整体替换？</b> 循环里有 7 个不同的 <code>continue</code> 点（对应 7 种"继续"原因，见 <code>transitions.ts</code> 的 <code>Continue</code> 类型）。如果每处都去改 state 的 9 个字段，很容易漏改一个、留下上一轮的脏值。改成"每处都构造一个完整的新 state 整体赋值"，就不可能漏——要么全给、要么编译报错。<strong>这是用"不可变整体替换"消除"部分更新遗漏"这类 bug 的典型手法。</strong></div>
+                <p>Day 03 讲的检测 tool_use（<code>:1090</code>）、跑工具（<code>:1671</code>）、停止判断（<code>:1349</code> 的 <code>!needsFollowUp</code>）都在这个 while 体里。今天你能把它们和 State 的流转对上了。</p>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>依赖注入：为什么可测试</h1></div>
+            <div class="card">
+                <p><code>query.ts</code> 没把"调模型""压缩上下文"这些写死，而是抽成可注入的依赖 <code>QueryDeps</code>（<code>src/query/deps.ts:21</code>）：</p>
+<pre><code class="language-typescript">// deps.ts:21
+interface QueryDeps {
+  callModel: ...      // 生产实现 = queryModelWithStreaming
+  microcompact: ...   // 微压缩
+  autocompact: ...    // 大摘要
+  uuid: ...
+}
+// deps.ts:33
+function productionDeps(): QueryDeps { return { callModel: queryModelWithStreaming, ... } }
+
+// query.ts:416
+const deps = params.deps ?? productionDeps()   // 没传就用生产实现</code></pre>
+                <div class="glossary"><b>依赖注入（DI）</b>：不在函数内部直接创建它依赖的东西，而是"从外面传进来"。这里 <code>query</code> 默认用 <code>productionDeps()</code>（真调 API），但测试时可以传一个假的 <code>callModel</code>（返回预设响应）——于是能测整个循环逻辑而<strong>不真调 Anthropic API、不花钱、结果可复现</strong>。同理 <code>QueryConfig</code>（<code>config.ts</code>）把各种 feature gate 在入口快照成不可变配置。这跟 gov-agents 教程里的 <code>get_llm</code>/FakeLLM 是同一种"为可测试性做依赖注入"的思想。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>usage / 成本统计怎么攒起来</h1></div>
+            <div class="card">
+                <p>你退出时看到的"本次花了 $0.03"是怎么算的？靠流式事件里的 usage 一路累加（Day 17 细讲，这里看在 QueryEngine 的接线）：</p>
+                <ul>
+                    <li>每条 assistant 消息的 <code>message_start</code> 重置本条 usage、<code>message_delta</code> 累加、<code>message_stop</code> 把本条累进 <code>this.totalUsage</code>（<code>QueryEngine.ts:817-848</code>）。</li>
+                    <li>累加函数 <code>updateUsage</code> / <code>accumulateUsage</code> 在 <code>claude.ts</code>。</li>
+                    <li>实时计费发生在流式增量处：<code>calculateUSDCost(model, usage)</code> → <code>addToTotalSessionCost</code>（<code>claude.ts:2357</code>）。</li>
+                </ul>
+                <div class="glossary"><b>为什么在流式过程中就算成本，而不是等结束？</b> 因为如果 turn 中途被中断（你按了 Esc），已经消耗的 token 也得算钱。边流边累加保证"消耗多少就记多少"，中断也不丢账。<b>usage</b> 指 API 返回的 token 用量（输入/输出/缓存读写各多少 token），乘以单价就是花费——Day 17 讲定价表。</div>
+                <p>QueryEngine 还有几个"硬停"：USD 预算超限 → <code>error_max_budget_usd</code>（<code>:1023</code>）、结构化输出重试超限 → <code>error_max_structured_output_retries</code>（<code>:1058</code>，默认 5 次）。这些是会话层独有的保护，循环层管不到。</p>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么"一会话一 QueryEngine 实例"？跨 turn 保持了什么？</li>
+                    <li>submitMessage 为什么是 async generator？带来什么？</li>
+                    <li>消息类型 switch 在干什么？为什么要"内部消息→SDK 消息"转换？</li>
+                    <li>queryLoop 为什么"整体替换 State"而非分散赋值？</li>
+                    <li>依赖注入 QueryDeps 怎么让循环可测试？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读 QueryEngine 类定义与设计注释
+sed -n '188,260p' src/QueryEngine.ts
+
+# 2. 读主生成器的消费循环 + 消息 switch
+sed -n '688,700p' src/QueryEngine.ts
+sed -n '772,870p' src/QueryEngine.ts
+
+# 3. 读循环层 State 整体替换
+sed -n '261,275p' src/query.ts
+sed -n '2032,2056p' src/query.ts
+
+# 4. 读依赖注入
+cat src/query/deps.ts
+
+# 5. 跑相关测试（若有）
+grep -rl "QueryEngine\|queryLoop" src/__tests__ 2&gt;/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：循环的"大脑"钻透了。接下来是"手脚"——<strong>工具系统</strong>。Day 07 讲一个工具必须实现什么接口、怎么注册、怎么变成发给模型的 tool 定义（有个反直觉点：发给模型的说明用的是 <code>prompt()</code> 不是 <code>description()</code>）。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 完整旅程</a>
+                <a href="claude-code-src-day07.html" style="color:var(--accent-green);">Day 07 · 工具系统 Tool 接口 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
