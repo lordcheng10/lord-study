@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · 典型插件精读 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">典型插件 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三个代表</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · limit-count 结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 三种限流策略</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · limit-count access</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · proxy-rewrite</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · register_var 复习</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ai-proxy</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day16.html" class="nav-link" style="color:#ec4899;">Day 16 服务发现 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 插件系统</span>
+            <h1 class="part-title">典型插件精读</h1>
+            <p class="part-desc">第 3 周收官。把前面学的插件机制落到实处——精读三个代表性插件：limit-count（限流，最经典）、proxy-rewrite（改写请求）、ai-proxy（AI 代理，呼应上一站）。看真实插件怎么写。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三个代表</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>limit-count</strong>：限流——"access 阶段拦截超限请求"的典型，还展示了"本地/Redis 多策略"。</li>
+                    <li><strong>proxy-rewrite</strong>：改写——"rewrite 阶段修改请求（uri/header/host）后转发"的典型。</li>
+                    <li><strong>ai-proxy</strong>：AI 代理——把请求转成各家 LLM 格式，呼应上一站 Higress ai-proxy。</li>
+                </ul>
+                <div class="anno">读法：<b>选这三个是因为它们分别代表插件的三类典型行为：<strong>拦截（limit-count）、改写（proxy-rewrite）、代理转发（ai-proxy）</strong>。读懂它们，其他 100 个插件都是同样的套路。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>limit-count 结构</h1></div>
+            <div class="card">
+                <p><code>plugins/limit-count.lua</code> 是薄封装（<code>priority = 1002</code>），真正逻辑在 <code>plugins/limit-count/</code> 目录：</p>
+<pre><code class="language-bash">plugins/limit-count.lua          # 入口（priority/schema/access）
+plugins/limit-count/
+  init.lua                       # 核心逻辑，按 policy 选实现
+  limit-count-local.lua          # 本地计数（单机，共享内存）
+  limit-count-redis.lua          # Redis 计数（分布式）
+  limit-count-redis-cluster.lua  # Redis 集群</code></pre>
+                <div class="anno">读法：<b><code>init.lua:26-34</code> 按 <code>policy</code> 配置 <code>require</code> 对应实现（local / redis / redis-cluster）。<strong>又是"策略模式"——限流算法固定（滑动窗口计数），存计数的地方可换（本地内存 / Redis）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>三种限流策略</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">本地 vs Redis：单机快 vs 全局准</span>
+                <strong>本地（local）：计数存在本 worker 的共享内存里——极快，但每个节点各算各的（3 个节点各限 100 = 实际 300）。Redis：计数存 Redis——所有节点共享一个计数器，全局精确限流，但每次要访问 Redis（略慢）。</strong>你按需选：单机部署或能接受不精确用 local；多节点要精确全局限流用 redis。<strong>这正好呼应上一站 wasm-go Day 15 说的"全局限流必须用 Redis 因为 VM 各自独立"——APISIX 的 worker 之间也是同理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>limit-count access</h1></div>
+            <div class="card">
+                <p><code>limit-count.lua:36</code> 的 <code>access</code>（简化逻辑）：</p>
+<pre><code class="language-lua">function _M.access(conf, ctx)
+    -- 按 key（如客户端 IP / consumer 名）取限流器
+    -- 对这个 key 的计数 +1，检查是否超过 conf.count（在 conf.time_window 窗口内）
+    local delay, remaining = lim:incoming(key, ...)
+    if not delay then
+        -- 超限了
+        return conf.rejected_code or 503, conf.rejected_msg   -- Day 12 的"返回 code 即拦截"
+    end
+    -- 没超限：设响应头 X-RateLimit-Remaining 等，放行
+    core.response.set_header("X-RateLimit-Remaining", remaining)
+end</code></pre>
+                <div class="baby"><span class="t">限流的本质：计数 + 阈值</span>
+                <strong>"每分钟最多 100 次" = 对某个 key（IP/consumer/自定义）在时间窗口内计数，到 100 就拒。</strong>超限时 <code>return 429/503</code>（Day 12 的拦截机制）。没超限就放行，还贴心地在响应头告诉客户端"你还剩几次"。<strong>key 可以是 IP（每 IP 限）、consumer 名（每用户限，配合 Day 14 的鉴权）、或路由——非常灵活。</strong>这是最经典、最能体现"access 阶段拦截"的插件。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>proxy-rewrite</h1></div>
+            <div class="card">
+                <p><code>plugins/proxy-rewrite.lua</code>：在 rewrite 阶段修改"发给上游的请求"。schema（<code>:53+</code>）支持改 <code>uri</code>、<code>regex_uri</code>（正则替换）、<code>host</code>、<code>headers</code>、<code>method</code> 等。</p>
+<pre><code class="language-lua">-- rewrite 阶段（简化）：
+if conf.uri then req_set_uri(conf.uri) end              -- 改路径
+if conf.regex_uri then ... end                          -- 正则替换路径
+if conf.host then ctx.var.upstream_host = conf.host end  -- 改发给上游的 Host
+-- 改 headers ...</code></pre>
+                <div class="baby"><span class="t">"改写"是网关常用能力</span>
+                <strong>后端 API 路径和对外暴露的不一样（对外 <code>/api/v1/users</code>、后端 <code>/users</code>）——proxy-rewrite 把 uri 改了再转发。或者给上游加个内部 header、改 Host 做多租户。</strong>它在 rewrite 阶段（转发前）改 <code>ctx.var</code> 里的请求属性。<strong>注意改 uri/host 可能影响路由——但这已经匹配完路由了（rewrite 在 access 里、路由匹配之后），改的是"发给上游"的，不影响已匹配的路由。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>register_var 复习</h1></div>
+            <div class="card">
+                <p><code>proxy-rewrite.lua:46-48</code> 用了 Day 05 的 <code>register_var</code>：</p>
+<pre><code class="language-lua">core.ctx.register_var("proxy_rewrite_regex_uri_captures", function(ctx)
+    return ctx.proxy_rewrite_regex_uri_captures
+end)</code></pre>
+                <div class="anno">读法：<b>回收 Day 05 伏笔——插件注册自定义变量 <code>$proxy_rewrite_regex_uri_captures</code>（正则改写捕获的分组），之后能在其他配置/日志里用。<strong>这展示了插件怎么优雅地"暴露自己算出的值"给 APISIX 变量系统。</strong>真实插件里 register_var 用得不少。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ai-proxy</h1></div>
+            <div class="card">
+                <p><code>plugins/ai-proxy.lua</code> + <code>plugins/ai-proxy/</code> + <code>plugins/ai-drivers/</code>：把请求代理到各家 LLM（OpenAI/通义/Claude…），统一协议。还有一大批 AI 插件：<code>ai-prompt-guard</code>、<code>ai-prompt-template</code>、<code>ai-rag</code>、<code>ai-proxy-multi</code>、<code>ai-aliyun-content-moderation</code> 等。</p>
+                <div class="baby"><span class="t">又见 AI 网关</span>
+                <strong>这和上一站 Higress 的 ai-proxy 是同一类东西——用 <code>ai-drivers/</code> 里的各家"驱动"把统一请求转成各厂商格式、代理调用、统一响应。</strong>APISIX 也全面拥抱了 AI 网关（README 标题就有"AI Gateway"）。<strong>它可能在 access 阶段直接调 LLM 并返回（不走普通上游转发）——回想上一站 wasm-go 里 "ai-proxy 直接用 http client 调上游、bypass nginx upstream"，APISIX 的 <code>bypass_nginx_upstream</code>（init.lua:490）就是干这个。</strong>两大网关在 AI 能力上殊途同归。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 3 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周你应该能回答</h3>
+                <ul>
+                    <li>limit-count 怎么用 access + 返回 code 实现拦截？本地 vs Redis 策略？</li>
+                    <li>proxy-rewrite 在哪个阶段、改什么？会影响路由吗？</li>
+                    <li>ai-proxy 和上一站 Higress ai-proxy 的共性？bypass_nginx_upstream 是什么？</li>
+                    <li>三类插件行为（拦截/改写/代理）各自的典型阶段？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+ls apisix/plugins/limit-count/
+sed -n '36,60p' apisix/plugins/limit-count.lua
+sed -n '44,80p' apisix/plugins/proxy-rewrite.lua
+ls apisix/plugins/ | grep -i ai</code></pre>
+                <div class="tip"><strong>下周预告 · 第 4 周</strong>：<strong>高级子系统与运维</strong>——服务发现（动态获取上游）、Admin/control API（配置管理入口）、stream 子系统（L4 TCP/UDP）、SSL/secret/wasm，最后部署 + 三种网关大对比收官。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day14.html" style="color:var(--accent-cyan);">&larr; Day 14</a>
+                <a href="apisix-day16.html" style="color:#ec4899;">Day 16 · 服务发现 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

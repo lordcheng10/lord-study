@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · 插件机制全景 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">插件机制 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 插件是 APISIX 的灵魂</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一个插件的结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · plugin.load 加载</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · priority 排序</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 阶段方法</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · filter 选插件</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 启用/禁用/自定义排序</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day12.html" class="nav-link" style="color:#f59e0b;">Day 12 插件运行 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 插件系统</span>
+            <h1 class="part-title">插件机制全景</h1>
+            <p class="part-desc">第 3 周进入 APISIX 的灵魂——插件系统。104 个插件（鉴权/限流/可观测/AI）都是同一套机制。今天看 <code>plugin.lua</code> 怎么加载插件、按 priority 排序、以及 <code>filter</code> 怎么为一个请求选出该跑的插件。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>插件是 APISIX 的灵魂</h1></div>
+            <div class="card">
+                <p><code>apisix/plugins/</code> 有 104 个插件。网关的几乎所有功能（key-auth 鉴权、limit-count 限流、prometheus 监控、proxy-rewrite 改写、ai-proxy AI 代理…）都是插件。</p>
+                <div class="baby"><span class="t">"内核小、插件多"的哲学</span>
+                <strong>APISIX 核心只做"路由 + 把请求交给插件链 + 转发上游"，具体能力全靠插件。这样内核稳定精简，功能靠插件无限扩展。</strong>你只启用需要的插件，不用的零开销。<strong>这和 Envoy 的 filter 链、Higress 的 Wasm 插件是同一思想——网关都走"插件化"路线。</strong>区别是 APISIX 插件是纯 Lua（改起来快、热加载），Envoy 是 C++/Wasm。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一个插件的结构</h1></div>
+            <div class="card">
+                <p>每个插件是一个 Lua 模块，标准结构：</p>
+<pre><code class="language-lua">local _M = {
+    version  = 0.1,
+    priority = 1002,          -- 优先级（越大越先跑）
+    name     = "limit-count",
+    schema   = schema,         -- 配置校验 schema（Day 09）
+}
+function _M.check_schema(conf) ... end       -- 校验配置
+function _M.rewrite(conf, ctx) ... end       -- rewrite 阶段逻辑
+function _M.access(conf, ctx) ... end        -- access 阶段逻辑
+function _M.header_filter(conf, ctx) ... end -- 响应头阶段
+function _M.log(conf, ctx) ... end           -- 日志阶段
+return _M</code></pre>
+                <div class="anno">读法：<b>插件就是"一个带 priority/name/schema + 若干阶段方法的 Lua 表"。<strong>它想在哪个 Nginx 阶段做事，就实现对应的方法（<code>access</code>/<code>header_filter</code>…）。</strong>这和上一站 wasm-go 的"填阶段钩子"如出一辙——只是这里是 Lua 函数、那里是 Go 回调。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>plugin.load 加载</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:342-374</code> 的 <code>load</code>：从配置读出要启用的插件名列表，逐个 <code>require</code> 进来，存到 <code>local_plugins</code>。</p>
+<pre><code class="language-lua">function _M.load(config)
+    local ignored, http_plugin_names, stream_plugin_names = get_plugin_names(config)
+    -- http 子系统：加载 http_plugin_names（+ wasm 插件）
+    load(http_plugin_names, wasm_plugin_names)
+    -- stream 子系统：加载 stream 插件
+    load_stream(stream_plugin_names)
+    return local_plugins
+end</code></pre>
+                <div class="baby"><span class="t">只加载"启用"的插件</span>
+                <strong>104 个插件不是全部加载——你在 config.yaml 的 <code>plugins:</code> 列表里写要启用哪些，APISIX 只 <code>require</code> 这些。</strong>没启用的插件不占内存、不影响性能。<strong>启用列表变了（改 config），<code>load</code> 会重新加载——插件也能"热更新"（配合 Admin 的 reload 接口）。</strong>还支持 stream 子系统的插件（Day 18）和 wasm 插件。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>priority 排序</h1></div>
+            <div class="card">
+                <p>加载后，插件按 <code>priority</code> 排序（越大越先执行）。<code>local_plugins</code> 是排好序的插件对象列表。</p>
+                <div class="baby"><span class="t">priority 决定谁先跑，很关键</span>
+                <strong>插件有执行顺序——比如"鉴权"必须在"限流"之前（先确认身份再按身份限流）、"改写请求"要在"转发"之前。priority 就定这个顺序。</strong>鉴权类插件 priority 很高（如 key-auth 2500）、改写类中等、日志类较低。<strong>你自己的项目里有一张"插件优先级表"（本博客还有 <code>apisix-plugin-order.html</code> 专门讲）——理解顺序才能理解插件如何协作。</strong>filter 选出插件后，它们就按这个全局顺序跑。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>阶段方法</h1></div>
+            <div class="card">
+                <p>插件通过实现不同阶段方法，在请求生命周期的不同点介入（对应 Day 02 的 Nginx 阶段）：</p>
+                <ul>
+                    <li><code>rewrite</code> / <code>access</code>：请求处理阶段（鉴权、限流、改写——决策类）</li>
+                    <li><code>before_proxy</code>：转发上游前最后一改</li>
+                    <li><code>header_filter</code> / <code>body_filter</code>：改响应</li>
+                    <li><code>log</code>：记录/上报</li>
+                </ul>
+                <div class="anno">读法：<b>一个插件不必实现所有阶段——只实现它需要的。<strong>limit-count 主要在 access（拦截超限请求）；prometheus 主要在 log（上报指标）；proxy-rewrite 在 rewrite（改请求）。</strong>Day 12 看这些方法怎么被 <code>run_plugin</code> 在各阶段调起。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>filter 选插件</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:469-520</code> 的 <code>filter</code>（Day 04 access 阶段调它）：从"全局加载的插件"里，挑出"这个路由启用了的"：</p>
+<pre><code class="language-lua">function _M.filter(ctx, conf, plugins, route_conf, phase)
+    local user_plugin_conf = conf.value.plugins   -- 路由/服务配置里的 plugins
+    if not user_plugin_conf then return ... end
+    for _, plugin_obj in ipairs(local_plugins) do  -- 遍历所有已加载插件（按 priority 序）
+        local plugin_conf = user_plugin_conf[plugin_obj.name]
+        if type(plugin_conf) ~= "table" then goto continue end  -- 这条路由没配这个插件
+        if check_disable(plugin_conf) then goto continue end     -- 显式禁用
+        core.table.insert(plugins, plugin_obj)    -- 选中：插件对象
+        core.table.insert(plugins, plugin_conf)   -- + 它的配置（成对存）
+        ::continue::
+    end
+    return plugins
+end</code></pre>
+                <div class="baby"><span class="t">"成对存"的巧思</span>
+                <strong>结果 <code>plugins</code> 是 <code>{插件对象1, 配置1, 插件对象2, 配置2, ...}</code>——插件和它的配置成对相邻存。</strong>这样 <code>run_plugin</code> 遍历时 <code>plugins[i]</code> 是对象、<code>plugins[i+1]</code> 是配置，一步到位（Day 12 会看到 <code>for i=1,#plugins,2</code>）。<strong>因为按 <code>local_plugins</code>（已按 priority 排序）的顺序遍历，选出的 plugins 天然也是 priority 序。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>启用/禁用/自定义排序</h1></div>
+            <div class="card">
+                <p><code>filter</code> 里还有几个细节：</p>
+                <ul>
+                    <li><code>check_disable</code>：插件配置里可写 <code>_meta.disable=true</code> 临时禁用（保留配置但不跑）。</li>
+                    <li><code>run_policy == "prefer_route"</code>：某些插件路由级配置优先于 consumer 级（<code>:494-500</code>）。</li>
+                    <li><code>_meta.priority</code>（<code>:513</code>）：单个插件实例可覆盖默认 priority，此时 <code>custom_sort</code> 重排。</li>
+                </ul>
+                <div class="anno">读法：<b>这些让插件编排更灵活：能临时禁用、能针对某路由调整顺序。<strong><code>_meta.priority</code> 的自定义排序会临时 fetch table 重排（<code>:522+</code>）——又用了 tablepool。</strong>Day 13 讲配置合并时会再见到这些优先级规则。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么说插件是 APISIX 的灵魂？"内核小插件多"的好处？</li>
+                    <li>一个插件的标准结构（priority/name/schema/阶段方法）？</li>
+                    <li>priority 决定什么？为什么鉴权 priority 要高？</li>
+                    <li>filter 怎么选插件？"成对存"有什么好处？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '342,374p' apisix/plugin.lua
+sed -n '469,520p' apisix/plugin.lua
+grep -n "priority" apisix/plugins/key-auth.lua apisix/plugins/limit-count.lua</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>插件运行</strong>——<code>run_plugin</code> 怎么在每个阶段遍历选中的插件、调它们的阶段方法、处理插件返回的"提前结束"（拦截）；以及 global_rules 全局插件怎么跑。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day10.html" style="color:var(--accent-cyan);">&larr; Day 10</a>
+                <a href="apisix-day12.html" style="color:#f59e0b;">Day 12 · 插件运行 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

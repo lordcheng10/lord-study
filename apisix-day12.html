@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 插件运行 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">插件运行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · run_plugin 总览</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 成对遍历</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 提前结束（拦截）</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 两类阶段的差异</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · rewrite_in_consumer</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · meta_filter 条件执行</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · run_global_rules</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day13.html" class="nav-link" style="color:#f59e0b;">Day 13 配置合并 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 插件系统</span>
+            <h1 class="part-title">插件运行 run_plugin</h1>
+            <p class="part-desc">昨天 filter 选好了插件，今天看它们怎么被"跑起来"——<code>run_plugin</code>（<code>plugin.lua:1161</code>）在每个阶段遍历插件、调方法、处理"插件想提前结束请求"（拦截）。这是插件链执行的心脏。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>run_plugin 总览</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1161</code>：<code>run_plugin(phase, plugins, api_ctx)</code>——给定阶段名，遍历 plugins，调每个插件该阶段的方法。Day 04 里 <code>run_plugin("rewrite"/"access")</code>、Day 02 里 <code>common_phase</code> 调 <code>run_plugin("header_filter"/"log")</code>——都是它。</p>
+                <div class="anno">读法：<b>一个函数处理所有阶段，靠 <code>phase</code> 参数区分。它把"插件链在某阶段的执行"统一收口——这是 APISIX 请求处理的执行引擎。<strong>Day 04 的整个 access 处理，本质就是几次 <code>run_plugin</code> 调用。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>成对遍历</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1178+</code>：用 <code>for i = 1, #plugins, 2</code> 每次跳 2（回收 Day 11 的"成对存"）：</p>
+<pre><code class="language-lua">for i = 1, #plugins, 2 do
+    local phase_func = plugins[i][phase]   -- plugins[i] 是插件对象，取它的阶段方法
+    local conf = plugins[i + 1]            -- plugins[i+1] 是该插件的配置
+    if phase_func then
+        local code, body = phase_func(conf, api_ctx)  -- 调用！传配置和上下文
+        -- ... 处理返回值（下一节）
+    end
+end</code></pre>
+                <div class="baby"><span class="t">为什么步长是 2？</span>
+                <strong>因为 filter 把插件存成 <code>{对象, 配置, 对象, 配置...}</code>。步长 2 遍历，每轮拿到一对：<code>plugins[i]</code> 对象、<code>plugins[i+1]</code> 配置。</strong>调 <code>plugins[i][phase]</code>（比如 <code>limit-count.access</code>）时传入 <code>conf</code>（这条路由给 limit-count 的配置）和 <code>api_ctx</code>。<strong>插件方法签名永远是 <code>(conf, ctx)</code>——配置 + 上下文，够用了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>提前结束（拦截）</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1196-1219</code>：插件方法返回 <code>code, body</code> 表示"我要直接返回响应，别往下跑了":</p>
+<pre><code class="language-lua">local code, body = phase_func(conf, api_ctx)
+if code or body then
+    if code >= 400 then
+        core.log.warn(plugins[i].name, " exits with http status code ", code)
+        if conf._meta and conf._meta.error_response then
+            body = conf._meta.error_response   -- 用配置的错误消息，不泄露真实原因
+        end
+    end
+    core.response.exit(code, body)   -- 直接返回，终止后续插件和转发
+end</code></pre>
+                <div class="baby"><span class="t">插件怎么"拦截"请求？</span>
+                <strong>鉴权插件发现 key 无效、限流插件发现超限——它们 <code>return 401</code> 或 <code>return 429, "rate limit"</code>。run_plugin 看到返回了 code，就 <code>core.response.exit</code> 直接把响应发回客户端，不再跑后面的插件、不转发上游。</strong>这就是"拦截"。<strong><code>error_response</code> 那段是安全设计：可以用配置的通用错误消息覆盖真实原因，不让攻击者从错误里探测系统。</strong>回想 Day 02 的 request-block（wasm-go）——同样是"返回响应即拦截"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>两类阶段的差异</h1></div>
+            <div class="card">
+                <p><code>run_plugin</code> 里分两段（<code>:1173</code> 和 <code>:1224</code>）：</p>
+                <ul>
+                    <li><strong>决策阶段</strong>（rewrite/access…）：插件<strong>能</strong>返回 code/body 提前结束（拦截）。</li>
+                    <li><strong>响应/日志阶段</strong>（header_filter/body_filter/log）：插件<strong>不能</strong>拦截（响应已在发送/请求已结束），只处理不中断。</li>
+                </ul>
+                <div class="anno">读法：<b>为什么日志阶段不能拦截？因为请求已经处理完了，"拦"没意义。<strong>决策阶段（access 等）才有"放不放行"的语义。</strong>所以 <code>run_plugin</code> 对这两类阶段用不同的遍历逻辑——决策阶段检查返回值，响应/日志阶段只调方法不管返回。细致的区分。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>rewrite_in_consumer</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1180-1184</code>：处理 Day 04 那个"consumer 二次 rewrite":</p>
+<pre><code class="language-lua">if phase == "rewrite_in_consumer" and plugins[i + 1]._skip_rewrite_in_consumer then
+    goto CONTINUE   -- 跳过已经在第一轮 rewrite 跑过的插件
+end
+local phase_func = phase == "rewrite_in_consumer" and plugins[i]["rewrite"]
+                   or plugins[i][phase]  -- consumer 轮实际调的还是 rewrite 方法</code></pre>
+                <div class="baby"><span class="t">回收 Day 04 的伏笔</span>
+                <strong>Day 04 说过：先跑一轮 rewrite（含鉴权识别 consumer）→ 合并 consumer 配置 → 补跑 <code>rewrite_in_consumer</code>。但已经跑过 rewrite 的插件不能再跑一遍（会重复执行副作用）。</strong>所以 filter 里给已跑过的打了 <code>_skip_rewrite_in_consumer</code> 标记（Day 11 的 <code>:507</code>），这里跳过它们，只跑"consumer 新引入的插件"的 rewrite。<strong>这个细节保证了两轮 rewrite 不重复执行。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>meta_filter 条件执行</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1187, 1233</code>：每个插件跑之前先过 <code>meta_filter</code>——插件配置可带一个 <code>_meta.filter</code> 表达式，只有当前请求满足条件才跑这个插件。</p>
+                <div class="baby"><span class="t">"按条件跑插件"</span>
+                <strong>比如"只对 POST 请求限流""只对某个 header 的请求跑这个插件"。<code>_meta.filter</code> 是个 vars 表达式，meta_filter 求值——真才跑、假就跳过。</strong>这让一个插件配置能"条件生效",更灵活。<code>run_meta_pre_function</code> 还能在插件跑前执行元函数。<strong>这些 <code>_meta.*</code> 机制（disable/priority/filter/error_response）是 APISIX 给所有插件的通用增强。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>run_global_rules</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:1266</code> 的 <code>run_global_rules</code>：跑"全局规则"（Day 08 的 Global Rule）里的插件——它们对所有请求生效，不绑路由。Day 04 里"匹配路由前后都跑 global_rules"就是它。</p>
+                <div class="anno">读法：<b>全局插件（如全站 prometheus、全站限流）通过 global_rules 运行，独立于路由级插件。<strong>它在路由匹配前（未匹配也要跑）和匹配后各跑一次相关阶段。</strong>机制和 run_plugin 类似，只是插件来源是 global_rules 而非路由。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>run_plugin 怎么用步长 2 成对遍历插件+配置？</li>
+                    <li>插件怎么"拦截"请求（返回 code/body）？error_response 的安全意义？</li>
+                    <li>为什么决策阶段能拦截、日志阶段不能？</li>
+                    <li>rewrite_in_consumer 怎么避免重复执行？meta_filter 干什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '1161,1240p' apisix/plugin.lua
+sed -n '1266,1300p' apisix/plugin.lua</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>插件配置合并</strong>——<code>merge_service_route</code> / <code>merge_consumer_route</code> 怎么把 service、consumer 的插件配置合并进路由，优先级怎么定，让"复用 + 定制"两全。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day11.html" style="color:var(--accent-cyan);">&larr; Day 11</a>
+                <a href="apisix-day13.html" style="color:#f59e0b;">Day 13 · 配置合并 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

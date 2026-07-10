@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 插件配置合并 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">配置合并 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要合并</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · merge_service_route</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 合并缓存</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 合并规则</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · merge_consumer_route</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 优先级链</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · conf_version 缓存键</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day14.html" class="nav-link" style="color:#f59e0b;">Day 14 鉴权 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 插件系统</span>
+            <h1 class="part-title">插件配置合并</h1>
+            <p class="part-desc">Day 04/08 说过路由可引用 service/consumer 复用配置。今天看这个"合并"具体怎么做：<code>merge_service_route</code> / <code>merge_consumer_route</code> 的规则、优先级、以及合并结果如何缓存以避免每请求重算。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要合并</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"复用 + 定制"的矛盾靠合并解决</span>
+                <strong>你想复用（100 条路由共享一个 service 的配置），又想定制（某条路由单独加个插件、某个 consumer 有专属限流）。这就需要"分层配置 + 合并"：service 是基础层、route 覆盖它、consumer 再覆盖。</strong>运行时把这些层<strong>合并</strong>成一份"当前请求的最终配置"。<strong>合并的核心问题是：同一个插件在多层都配了，用谁的？——答案是"越具体的层优先"（下面细讲）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>merge_service_route</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:647-656</code>：把 service 的配置合并进 route。Day 04 access 阶段调它。</p>
+<pre><code class="language-lua">function _M.merge_service_route(service_conf, route_conf)
+    local route_service_key = route_conf.value.id .. "#"
+        .. route_conf.modifiedIndex .. "#" .. service_conf.modifiedIndex
+    return merged_route(route_service_key, service_conf,
+                        merge_service_route, service_conf, route_conf)
+end</code></pre>
+                <div class="anno">读法：<b><code>route_service_key</code> 是缓存键（下一节）——由 route id + 两者的 <code>modifiedIndex</code>（etcd 版本）拼成。<code>merged_route</code> 用这个 key 缓存合并结果。<strong>真正的合并逻辑在内部的 <code>merge_service_route</code> 函数里。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>合并缓存</h1></div>
+            <div class="card">
+                <p><code>merged_route</code> 用 lrucache 缓存合并结果——同一个 (route, service) 组合只合并一次，之后直接取缓存。</p>
+                <div class="baby"><span class="t">合并不能每请求都做</span>
+                <strong>合并涉及深拷贝、遍历插件——如果每个请求都合并一次，性能损失大。所以缓存：第一次请求合并并缓存，后续相同 (route,service) 直接用缓存结果。</strong>缓存键带 <code>modifiedIndex</code>（版本号）——route 或 service 一改，版本变、缓存键变、自动重新合并。<strong>"缓存 + 版本号失效"是 APISIX 里反复出现的模式（Day 05 变量缓存、Day 09 schema 编译缓存）——用版本号保证缓存和源数据一致。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>合并规则</h1></div>
+            <div class="card">
+                <p>看 <code>merge_service_stream_route</code>（<code>plugin.lua:658-686</code>，规则清晰）体会合并思路：</p>
+<pre><code class="language-lua">local new_conf = core.table.deepcopy(route_conf)   -- 以 route 为基础
+if service_conf.value.plugins then
+    for name, conf in pairs(service_conf.value.plugins) do
+        if not new_conf.value.plugins[name] then
+            new_conf.value.plugins[name] = conf   -- ★ route 没配的插件，才用 service 的
+        end
+    end
+end
+if not new_conf.value.upstream and service_conf.value.upstream then
+    new_conf.value.upstream = service_conf.value.upstream  -- route 没上游才用 service 的
+end</code></pre>
+                <div class="baby"><span class="t">核心规则：route 优先，service 补充</span>
+                <strong>以 route 为基础，service 只"填补 route 没有的"——route 配了 limit-count 就用 route 的，route 没配 service 有就用 service 的。上游同理。</strong>这就是"具体覆盖通用":route（具体）优先于 service（通用）。<strong>注意是"插件级"覆盖（按插件名），不是"整个 plugins 字段"覆盖——两边的插件会合并到一起，冲突时 route 赢。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>merge_consumer_route</h1></div>
+            <div class="card">
+                <p><code>plugin.lua:741</code>：识别出 consumer 后，把 consumer（和 consumer group）的插件配置合并进 route。返回 <code>route, changed</code>——changed 表示合并后是否有变化（Day 04 据此决定要不要补跑 rewrite）。</p>
+                <div class="baby"><span class="t">consumer 的配置优先级最高</span>
+                <strong>consumer 是"针对具体调用方"的定制——比 route/service 更具体，所以优先级最高。给 alice 单独配的限流会覆盖 route 上的通用限流。</strong>合并后如果插件集变了（<code>changed</code>），Day 04 会重新 filter + 补跑 rewrite_in_consumer（Day 12）。<strong>consumer group 是"一组 consumer 共享的配置",介于 consumer 和 route 之间。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>优先级链</h1></div>
+            <div class="card">
+<pre><code class="language-bash">最终配置 = 合并（从低到高优先级覆盖）：
+  Plugin Config（可复用插件套餐）
+    < Service（插件+上游套餐）
+      < Route（本路由）
+        < Consumer Group（消费者组）
+          < Consumer（具体调用方，最高优先级）</code></pre>
+                <div class="anno">读法：<b>越往右越具体、优先级越高、越后合并（覆盖前面的）。<strong>这是 APISIX 配置系统的"层叠"模型——像 CSS 的选择器优先级、面向对象的方法覆盖。</strong>理解这条链，你就知道"为什么我在 consumer 配的限流生效了、route 的没生效"。Day 04 的合并顺序正是按这条链走的。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>conf_version 缓存键</h1></div>
+            <div class="card">
+                <p>Day 04 里合并 service 后设 <code>api_ctx.conf_version = route.modifiedIndex .. "&" .. service.modifiedIndex</code>。<code>plugin.conf_version(conf)</code>（<code>plugin.lua:876</code>）用它做各种缓存的键。</p>
+                <div class="baby"><span class="t">版本号是缓存一致性的钥匙</span>
+                <strong>合并结果、编译的插件配置、picker 等都以 conf_version 为缓存键。只要 route 或 service 在 etcd 里改了，modifiedIndex 变、conf_version 变、所有相关缓存自动失效重建。</strong>这保证了"改配置立即生效"——热更新（Day 07）+ 版本化缓存的组合拳。<strong>不用手动清缓存，版本号一变全自动。</strong>这是 APISIX 又快又动态的深层机制。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要合并配置？解决什么矛盾？</li>
+                    <li>合并的核心规则（route 优先、service 补充）？</li>
+                    <li>优先级链从低到高是什么？consumer 为什么最高？</li>
+                    <li>合并结果怎么缓存？conf_version 怎么保证一致性？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '647,690p' apisix/plugin.lua
+sed -n '741,800p' apisix/plugin.lua
+grep -n "conf_version\|modifiedIndex" apisix/init.lua | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>鉴权与 consumer</strong>——鉴权插件（key-auth）怎么在 rewrite 阶段识别出 consumer、<code>find_consumer</code> 怎么按 key 查找、<code>attach_consumer</code> 怎么把身份挂到 ctx 上供后续用。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day12.html" style="color:var(--accent-cyan);">&larr; Day 12</a>
+                <a href="apisix-day14.html" style="color:#f59e0b;">Day 14 · 鉴权 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

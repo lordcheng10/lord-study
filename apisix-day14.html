@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 鉴权与 consumer — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">鉴权与 consumer · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 鉴权的位置</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · consumer 的 init_worker</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · key-auth rewrite</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · find_consumer</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · attach_consumer</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 匿名 consumer</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 其他鉴权插件</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day15.html" class="nav-link" style="color:#f59e0b;">Day 15 典型插件 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 插件系统</span>
+            <h1 class="part-title">鉴权与 consumer</h1>
+            <p class="part-desc">"谁能访问我的 API"是网关核心能力。今天串起鉴权全流程：consumer 数据怎么加载、key-auth 插件怎么在 rewrite 阶段识别身份、<code>attach_consumer</code> 怎么把 consumer 挂到 ctx 上触发 Day 04 的二次合并。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>鉴权的位置</h1></div>
+            <div class="card">
+                <p>鉴权插件（key-auth/jwt-auth/basic-auth…）都实现 <code>rewrite</code> 方法（priority 很高，如 key-auth），在 Day 04 的第一轮 rewrite 就跑——早早确认身份。</p>
+                <div class="baby"><span class="t">为什么鉴权在 rewrite 且 priority 高？</span>
+                <strong>鉴权是"门禁"——必须在其他处理（限流、改写、转发）之前完成，否则会给未授权请求做无用功、甚至泄露。所以鉴权插件 priority 排在最前（Day 11），在 rewrite 阶段最先跑。</strong>而且鉴权识别出 consumer 后，后续插件才能"按身份定制"（Day 04 的二次合并）——顺序上必须靠前。<strong>这就是 priority 设计的意义：保证插件按正确顺序协作。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>consumer 的 init_worker</h1></div>
+            <div class="card">
+                <p><code>consumer.lua:300</code> 的 <code>init_worker</code> watch etcd 的 <code>/consumers</code>（Day 07），把所有 consumer 同步进内存。<code>consumers_kv</code>（<code>:263</code>）按"插件名 + key 字段"建索引，方便按 key 快速查。</p>
+                <div class="anno">读法：<b>consumer 数据在内存里按 <code>(plugin_name, key)</code> 组织成查找表——比如 key-auth 的所有 consumer 按它们的 key 值建索引。<strong>这样请求带一个 key 来，能 O(1) 查到对应 consumer。</strong>存入前还会 <code>check_consumer</code>（<code>:284</code>）用 schema 校验（Day 09）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>key-auth rewrite</h1></div>
+            <div class="card">
+                <p><code>plugins/key-auth.lua:104-122</code>：</p>
+<pre><code class="language-lua">function _M.rewrite(conf, ctx)
+    local consumer, consumer_conf, err = find_consumer(ctx, conf)  -- 按请求里的 key 查
+    if not consumer then
+        if not conf.anonymous_consumer then
+            return 401, { message = err}     -- 没找到且不允许匿名 → 拦截 401
+        end
+        -- 允许匿名：降级到匿名 consumer
+        consumer, consumer_conf, err = consumer_mod.get_anonymous_consumer(conf.anonymous_consumer)
+        if not consumer then return 401, { message = "Invalid user authorization"} end
+    end
+    consumer_mod.attach_consumer(ctx, consumer, consumer_conf)   -- 识别成功，挂到 ctx
+end</code></pre>
+                <div class="baby"><span class="t">鉴权的三种结局</span>
+                <strong>① 找到 consumer → attach（成功，请求带上身份继续）；② 没找到 + 不允许匿名 → 返回 401（拦截，Day 12 的"返回 code 即拦截"）；③ 没找到 + 允许匿名 → 用匿名 consumer 继续（给未登录用户一个受限身份）。</strong>key-auth 的 key 从请求头/query 取（schema 里配 header/query 名）。<strong>其他鉴权插件（jwt/basic/hmac）流程一样，只是"怎么验凭据"不同。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>find_consumer</h1></div>
+            <div class="card">
+                <p><code>consumer.lua:271-282</code>：</p>
+<pre><code class="language-lua">function _M.find_consumer(plugin_name, key, key_value)
+    local consumer_conf = _M.plugin(plugin_name)         -- 该鉴权插件的所有 consumer
+    if not consumer_conf then return nil, nil, "Missing related consumer" end
+    local consumers = _M.consumers_kv(plugin_name, consumer_conf, key)  -- 按 key 建的索引
+    local consumer = consumers[key_value]                -- 用请求带的 key 值查
+    return consumer, consumer_conf
+end</code></pre>
+                <div class="anno">读法：<b>纯内存查找——从"按 key 索引的 consumer 表"里用 <code>key_value</code>（请求带来的实际 key）直接取。<strong>不查 etcd、不查数据库，内存 O(1)。</strong>这就是为什么 consumer 要在 init_worker 时建好索引（L02）。查到就是认证成功。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>attach_consumer</h1></div>
+            <div class="card">
+                <p><code>consumer.lua:213</code> 的 <code>attach_consumer(ctx, consumer, conf)</code>：把识别出的 consumer 挂到 <code>ctx.consumer</code>（和 consumer_name/group_id 等）。</p>
+                <div class="baby"><span class="t">这一挂，触发 Day 04 的连锁反应</span>
+                <strong>回想 Day 04：第一轮 rewrite 跑完后，代码检查 <code>if api_ctx.consumer then ...</code>——就是这里 attach 的。一旦挂上 consumer，就触发"合并 consumer 专属配置 + 补跑 rewrite_in_consumer"（Day 12-13）。</strong>所以鉴权插件的职责就是"识别身份并 attach",之后的"按身份定制"由框架自动接管。<strong>attach 后，后续插件（限流等）和日志都能拿到 <code>ctx.consumer</code> 知道"这是谁"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>匿名 consumer</h1></div>
+            <div class="card">
+                <p><code>consumer.lua:335</code> 的 <code>get_anonymous_consumer</code>：为"没带凭据"的请求提供一个预设的匿名身份。</p>
+                <div class="baby"><span class="t">匿名 consumer 的用途</span>
+                <strong>有些 API 想"登录用户走高配额、匿名用户走低配额"而不是直接拒绝匿名。配了 <code>anonymous_consumer</code> 后，没凭据的请求不返回 401，而是当成匿名 consumer——它可以有自己的限流等配置（比如匿名 10 QPS、登录 100 QPS）。</strong>这比"要么全拒要么全放"灵活。<strong>本质还是走 consumer 那套（匿名也是个 consumer），复用同一机制。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>其他鉴权插件</h1></div>
+            <div class="card">
+                <p>APISIX 的鉴权插件家族（都在 <code>plugins/</code>，都实现 rewrite + attach_consumer 套路）：</p>
+                <ul>
+                    <li><strong>key-auth</strong>：API Key（最简单）</li>
+                    <li><strong>jwt-auth</strong>：JWT token 验证</li>
+                    <li><strong>basic-auth</strong>：HTTP Basic 用户名密码</li>
+                    <li><strong>hmac-auth</strong>：HMAC 签名</li>
+                    <li><strong>ldap-auth / openid-connect</strong>：对接 LDAP / OIDC</li>
+                </ul>
+                <div class="anno">读法：<b>它们的差异只在"怎么验凭据"（Day 09 各有自己的 schema 和验证逻辑），识别出 consumer 后都调 <code>attach_consumer</code>——后续流程完全一致。<strong>回想上一站 Higress Console 只支持 key-auth（Day 13），APISIX 的鉴权生态丰富得多。</strong>这体现了"内核统一（consumer 机制）+ 插件多样（各种验证方式）"的插件化威力。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么鉴权在 rewrite 且 priority 高？</li>
+                    <li>find_consumer 怎么内存 O(1) 查？consumer 何时建索引？</li>
+                    <li>attach_consumer 触发了 Day 04 的什么连锁反应？</li>
+                    <li>匿名 consumer 的用途？多种鉴权插件的共性与差异？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '104,122p' apisix/plugins/key-auth.lua
+sed -n '213,300p' apisix/consumer.lua
+ls apisix/plugins/ | grep -E "auth"</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：<strong>典型插件精读</strong>——挑三个代表性插件读透：limit-count（限流）、proxy-rewrite（改写）、ai-proxy（AI 代理），看它们怎么把前面学的机制落地成真实功能。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day13.html" style="color:var(--accent-cyan);">&larr; Day 13</a>
+                <a href="apisix-day15.html" style="color:#f59e0b;">Day 15 · 典型插件 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
