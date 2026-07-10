@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 启动流程 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .step{display:flex;gap:12px;align-items:flex-start;margin:9px 0}
+        .step .n{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#14a085,#6366f1);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0}
+        .step .c{flex:1;font-size:13px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14a085,#6366f1);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">启动流程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · bin/apisix 命令</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · CLI 目录</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 生成 nginx.conf</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · http_init</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · http_init_worker</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 子系统 init_worker</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 启动时序图</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day04.html" class="nav-link" style="color:#14a085;">Day 04 请求生命周期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 全景与请求生命周期</span>
+            <h1 class="part-title">启动流程：从命令到就绪</h1>
+            <p class="part-desc">今天看 APISIX 怎么"开机":从 <code>apisix start</code> 命令，到根据 config.yaml 生成 nginx.conf，再到 OpenResty 拉起后在 init/init_worker 阶段初始化各子系统。理解启动，才知道请求处理时那些对象是何时准备好的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>bin/apisix 命令</h1></div>
+            <div class="card">
+                <p>你用 <code>apisix start / stop / reload / test</code> 管理 APISIX。这个命令背后是 <code>apisix/cli/apisix.lua</code>——一个用 LuaJIT 直接跑的脚本。<code>apisix.lua:26-31</code> 设置 Lua 包路径（找到 <code>deps/</code> 里的依赖）。</p>
+                <div class="baby"><span class="t">CLI 和"网关本体"是两回事</span>
+                <strong>别混淆：<code>apisix/cli/</code> 是"管理命令行"（生成配置、启停 OpenResty），它只在你敲命令时跑一下；真正处理请求的是 OpenResty 加载的 <code>apisix/init.lua</code> 等（长期运行）。</strong>CLI 的活是"准备好配置文件、然后把 OpenResty 拉起来"，之后就退出了。好比"点火开关"（CLI）和"发动机"（OpenResty + init.lua）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>CLI 目录</h1></div>
+            <div class="card">
+<pre><code class="language-bash">apisix/cli/
+  apisix.lua    入口（设包路径 → 调 ops）
+  ops.lua       start/stop/reload/test 等操作实现
+  ngx_tpl.lua   nginx.conf 模板（Lua 字符串模板）
+  config.lua    读取合并 conf/config.yaml
+  schema.lua    校验 config.yaml
+  etcd.lua      启动时初始化 etcd（建目录、写默认值）
+  env.lua / file.lua / ip.lua / util.lua   辅助</code></pre>
+                <div class="anno">读法：<b>核心是 <code>ops.lua</code>（操作逻辑）+ <code>ngx_tpl.lua</code>（配置模板）。启动时：读 config.yaml → 校验 → 渲染 ngx_tpl 生成 nginx.conf → 初始化 etcd → 用 <code>openresty</code> 命令拉起。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>生成 nginx.conf</h1></div>
+            <div class="card">
+                <p>关键一步：<code>ngx_tpl.lua</code> 是一个大的 Nginx 配置模板，启动时用 config.yaml 的值填充，生成真正的 <code>conf/nginx.conf</code>。模板里包含昨天说的阶段绑定：</p>
+<pre><code class="language-lua">-- ngx_tpl.lua 里（简化）
+init_by_lua_block { require("apisix").http_init() }
+init_worker_by_lua_block { require("apisix").http_init_worker() }
+access_by_lua_block { require("apisix").http_access_phase() }
+header_filter_by_lua_block { require("apisix").http_header_filter_phase() }
+body_filter_by_lua_block { require("apisix").http_body_filter_phase() }
+log_by_lua_block { require("apisix").http_log_phase() }</code></pre>
+                <div class="baby"><span class="t">"配置即代码"的生成</span>
+                <strong>APISIX 不让你手写 nginx.conf——它根据你的 config.yaml（简单的 YAML）自动生成完整的 nginx.conf。</strong>你只关心"用哪个 etcd、监听哪个端口、开哪些功能",复杂的 Nginx 配置由模板生成。<strong>生成的 nginx.conf 里把每个 Nginx 阶段绑到 <code>apisix</code> 模块的对应函数——这就是昨天说的"Lua 挂到阶段"的落地。</strong>你可以 <code>apisix test</code> 只生成配置不启动，去 <code>conf/nginx.conf</code> 看生成结果。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>http_init（master 一次）</h1></div>
+            <div class="card">
+                <p><code>init.lua:85-104</code>：</p>
+<pre><code class="language-lua">function _M.http_init(args)
+    core.resolver.init_resolver(args)   -- DNS 解析器
+    core.id.init()                       -- 生成/读取实例 id
+    core.env.init()                      -- 环境变量
+    local process = require("ngx.process")
+    process.enable_privileged_agent()    -- 特权 agent 进程（做需要 root 的活）
+    if core.config.init then
+        core.config.init()               -- 初始化配置中心（etcd）
+    end
+    xrpc.init()                          -- stream 的 RPC 框架
+end</code></pre>
+                <div class="anno">读法：<b>master 阶段只做"全局一次性"准备：DNS、实例 id、环境、配置中心连接、特权 agent。<strong>特权 agent 是 OpenResty 的一个特殊进程，用来干"需要特权/只需一个进程干"的活（比如证书自动续期）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>http_init_worker（每 worker）</h1></div>
+            <div class="card">
+                <p><code>init.lua:107-140</code> 逐个初始化子系统（每个 worker 都跑）：</p>
+<pre><code class="language-lua">function _M.http_init_worker()
+    math.randomseed(seed)                        -- 随机种子
+    require("apisix.events").init_worker()
+    discovery.init_worker()                       -- 服务发现（Day 16）
+    require("apisix.balancer").init_worker()      -- 负载均衡
+    require("apisix.admin.init").init_worker()    -- Admin API（Day 17）
+    require("apisix.timers").init_worker()        -- 定时器框架
+    core.config.init_worker()                     -- 配置中心 worker（etcd watch）
+    plugin.init_worker()                          -- 插件系统（Day 11）
+    router.http_init_worker()                     -- 路由（Day 06）
+    require("apisix.consumer").init_worker()      -- 消费者（Day 14）
+    -- global_rules / upstream / control_api ... 逐个 init_worker
+    plugin.init_prometheus()                      -- 放最后确保所有 worker 就绪
+end</code></pre>
+                <div class="baby"><span class="t">这是 APISIX 的"零件清单"</span>
+                <strong>这个函数几乎列全了 APISIX 的所有子系统——router、plugin、consumer、discovery、balancer、admin、timers…每个都在 worker 启动时 <code>init_worker</code> 一下（建立 etcd watch、起后台定时任务）。</strong>本课后面每一天，几乎都在讲这里初始化的某个子系统。<strong>读懂这个函数，就有了整个 APISIX 的"目录"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>子系统 init_worker 干什么</h1></div>
+            <div class="card">
+                <p>各子系统的 <code>init_worker</code> 通常做两件事：</p>
+                <ul>
+                    <li><strong>建立 etcd watch</strong>：订阅自己关心的配置（router 订阅 <code>/routes</code>、consumer 订阅 <code>/consumers</code>…），配置变了内存里更新。</li>
+                    <li><strong>起后台定时任务</strong>：健康检查、指标上报、配置轮询兜底等（用 <code>timers</code> 框架）。</li>
+                </ul>
+                <div class="anno">读法：<b>这就是"全动态"的实现——<strong>每个子系统在 worker 里 watch 自己那部分 etcd 数据，配置一变立刻在内存生效。</strong>Day 07 会深入 <code>config_etcd</code> 看 watch 机制。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>启动时序图</h1></div>
+            <div class="card">
+                <div class="step"><div class="n">1</div><div class="c"><code>apisix start</code> → cli/ops.lua：读 config.yaml + 校验</div></div>
+                <div class="step"><div class="n">2</div><div class="c">渲染 ngx_tpl.lua → 生成 conf/nginx.conf（含阶段绑定）</div></div>
+                <div class="step"><div class="n">3</div><div class="c">初始化 etcd（建目录/默认配置）→ 用 openresty 命令拉起</div></div>
+                <div class="step"><div class="n">4</div><div class="c">OpenResty master：<code>init_by_lua</code> → <code>http_init</code>（全局初始化）</div></div>
+                <div class="step"><div class="n">5</div><div class="c">每个 worker：<code>init_worker_by_lua</code> → <code>http_init_worker</code>（各子系统 watch etcd + 起定时器）</div></div>
+                <div class="step"><div class="n">6</div><div class="c">就绪，开始接请求 → <code>http_access_phase</code>（Day 04）</div></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CLI（cli/）和网关本体（init.lua）的区别？</li>
+                    <li>nginx.conf 是怎么来的？阶段绑定在哪定义？</li>
+                    <li><code>http_init</code> vs <code>http_init_worker</code> 各做什么？</li>
+                    <li>子系统的 <code>init_worker</code> 通常干哪两件事？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+ls apisix/cli/
+sed -n '85,104p' apisix/init.lua
+sed -n '107,140p' apisix/init.lua
+grep -n "_by_lua" apisix/cli/ngx_tpl.lua | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>请求生命周期总览</strong>——精读 <code>http_access_phase</code>（init.lua:602），逐段看一个请求怎么创建 ctx、匹配路由、合并 service/consumer 配置、选并跑插件、交给上游。这是全课最核心的一天。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day02.html" style="color:var(--accent-cyan);">&larr; Day 02</a>
+                <a href="apisix-day04.html" style="color:#14a085;">Day 04 · 请求生命周期 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

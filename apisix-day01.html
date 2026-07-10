@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#14a085}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14a085,#6366f1);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · APISIX 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · OpenResty 内核</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · etcd 全动态</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 目录结构</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 六大抽象对象</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 和 Envoy/Higress 对照</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 一句话数据流</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day02.html" class="nav-link" style="color:#14a085;">Day 02 Nginx 阶段 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 全景与请求生命周期</span>
+            <h1 class="part-title">项目全景：Lua/OpenResty API 网关</h1>
+            <p class="part-desc">欢迎来到 Apache APISIX。如果你学过 higress-group 系列，这是"另一条网关技术路线"——不用 C++/xDS，而是 Lua/OpenResty + etcd。第一天先建立整体印象，看清它"快"和"动态"从哪来。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>APISIX 是什么</h1></div>
+            <div class="card">
+                <p><code>README.md</code> 标题就是"Apache APISIX API Gateway ｜ AI Gateway"——一个 Apache 顶级项目，<strong>动态、实时、高性能的云原生 API 网关</strong>。它处理"南北向流量"（外部请求进入你的服务），提供路由、负载均衡、鉴权、限流、可观测、AI 代理等能力。</p>
+                <div class="baby"><span class="t">"API 网关"是干嘛的？</span>
+                <strong>你有一堆后端服务，不能让客户端直接连——中间需要一个"总入口"统一处理：谁能访问（鉴权）、每秒多少次（限流）、请求转发到哪个服务（路由/负载均衡）、记录日志、监控……这个总入口就是 API 网关。</strong>APISIX 就是这样一个网关，特点是<strong>用 Lua 写、性能极高、配置全动态</strong>。它和 Higress/Envoy 解决同一类问题，但技术路线不同。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>OpenResty 内核</h1></div>
+            <div class="card">
+                <p>APISIX 建立在 <strong>OpenResty</strong> 之上——OpenResty = <strong>Nginx + LuaJIT</strong>。整个 <code>apisix/</code> 目录几乎全是 <code>.lua</code> 文件。</p>
+                <div class="baby"><span class="t">OpenResty 是什么？为什么用它？</span>
+                <strong>Nginx 是世界上最流行的高性能 Web 服务器（C 写的，快）。但 Nginx 的配置是静态的、扩展要写 C 模块很难。OpenResty 在 Nginx 里嵌入了 LuaJIT（一个超快的 Lua 解释器），让你能<strong>用 Lua 脚本在 Nginx 的各个处理阶段编程</strong>。</strong>于是你既有 Nginx 的 C 级性能，又有 Lua 的开发灵活性。<strong>APISIX = 用 Lua 在 OpenResty 上写出来的一整套网关逻辑。</strong>这就是它"快"的根源：底层是 Nginx，热点路径靠 LuaJIT 即时编译。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>etcd 全动态</h1></div>
+            <div class="card">
+                <p>APISIX 用 <strong>etcd</strong>（一个分布式键值存储）当配置中心。所有配置（路由、上游、插件、证书）都存 etcd，每个 APISIX 节点 <strong>watch</strong> etcd 的变化。</p>
+                <div class="baby"><span class="t">"全动态"到底多方便？</span>
+                <strong>传统 Nginx 改配置要编辑 nginx.conf 然后 <code>nginx -s reload</code>——reload 有开销、有风险。APISIX 完全不用：你调 Admin API 把新路由写进 etcd，所有网关节点秒级 watch 到、内存里更新，<strong>立即生效、零 reload、零重启</strong>。</strong>加一条路由、改一个插件参数、换一张证书——都是瞬时的。这对"频繁变更"的云原生环境（微服务动态上下线）至关重要。<strong>"OpenResty 给性能，etcd 给动态"是 APISIX 的两大支柱。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>目录结构</h1></div>
+            <div class="card">
+<pre><code class="language-bash">apisix/
+  init.lua        ★ 请求生命周期总控（各 Nginx 阶段的 Lua 入口）
+  plugin.lua      ★ 插件系统（加载/过滤/运行）
+  router.lua      ★ 路由（radixtree）
+  core/           基础设施：ctx/config_etcd/schema/json/log/lrucache...
+  plugins/        104 个插件（.lua）
+  balancer/       负载均衡算法
+  discovery/      服务发现（nacos/consul/dns/eureka/kubernetes）
+  admin/          Admin API（增删改配置）
+  control/        control API（健康检查等运维接口）
+  stream/         L4（TCP/UDP）代理子系统
+  ssl/ secret/ pubsub/ wasm.lua   其他子系统
+  cli/            启动命令行（bin/apisix 背后）</code></pre>
+                <div class="anno">读法：<b>三个核心文件先记住：<code>init.lua</code>（请求怎么走）、<code>plugin.lua</code>（插件怎么跑）、<code>router.lua</code>（路由怎么匹配）。<code>core/</code> 是它们依赖的基础设施。<strong>本课主线就在这几个文件里游走。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>六大抽象对象</h1></div>
+            <div class="card">
+                <p>APISIX 用几个核心对象描述配置（都存在 etcd，Day 08 详讲）：</p>
+                <table>
+                    <tr><th>对象</th><th>作用</th></tr>
+                    <tr><td>Route（路由）</td><td>匹配规则（uri/host/method）+ 绑定插件/上游</td></tr>
+                    <tr><td>Service（服务）</td><td>可复用的插件+上游配置，多个 Route 共享</td></tr>
+                    <tr><td>Upstream（上游）</td><td>后端服务集群 + 负载均衡策略</td></tr>
+                    <tr><td>Consumer（消费者）</td><td>API 调用方 + 鉴权凭据</td></tr>
+                    <tr><td>Plugin Config（插件配置）</td><td>可复用的一组插件配置</td></tr>
+                    <tr><td>Global Rule（全局规则）</td><td>对所有请求生效的插件</td></tr>
+                </table>
+                <div class="anno">读法：<b>核心是 Route——它把"什么请求（匹配）→ 怎么处理（插件）→ 转发到哪（上游）"串起来。Service/Upstream/Plugin Config 是"可复用的零件",避免每条路由重复配。<strong>这套对象模型和上一站 Higress Console 的路由/服务/插件概念相通——网关的共性。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>和 Envoy/Higress 对照</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th></th><th>Envoy/Higress</th><th>APISIX</th></tr>
+                    <tr><td>语言</td><td>C++（数据面）</td><td>Lua（OpenResty）</td></tr>
+                    <tr><td>配置分发</td><td>控制面生成 xDS 下发</td><td>直接 watch etcd</td></tr>
+                    <tr><td>架构</td><td>控制面 + 数据面分离</td><td>单体（每节点自给自足）</td></tr>
+                    <tr><td>扩展</td><td>Wasm 插件 / C++ filter</td><td>Lua 插件（也支持 Wasm）</td></tr>
+                </table>
+                <div class="baby"><span class="t">两条路线各有取舍</span>
+                <strong>Envoy/Higress："控制面算好配置、下发 xDS 给数据面"——适合超大规模、多语言扩展，但架构复杂（要 istiod）。APISIX："每个网关节点自己连 etcd 取配置"——架构简单、部署轻、Lua 上手快，但节点自己扛更多逻辑。</strong>没有绝对优劣，看场景。<strong>学过 higress-group 再学 APISIX，你就理解了业界两大网关流派的设计哲学差异。</strong>Day 20 会做完整对比。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>一句话数据流</h1></div>
+            <div class="card">
+<pre><code class="language-bash">请求进入（Nginx access 阶段 → init.lua http_access_phase）
+  → router 匹配路由（radixtree）
+    → 识别 consumer（鉴权）+ plugin.filter 选出该跑的插件
+      → 各阶段跑插件（rewrite/access/header_filter/body_filter/log）
+        → balancer 选一个上游实例 → 转发
+          （配置全程来自 etcd，watch 到变化即热更新）</code></pre>
+                <div class="anno">读法：<b>这条链就是本课主线。第 1 周走通它（今天全景 + 后面 Nginx 阶段/启动/生命周期/ctx）；第 2 周展开路由/配置/上游；第 3 周深入插件；第 4 周讲子系统。<strong>核心入口是 <code>init.lua</code> 的 <code>http_access_phase</code>（Day 04 精读）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>APISIX 是什么？OpenResty = 什么 + 什么？</li>
+                    <li>"快"和"动态"分别从哪来（OpenResty / etcd）？</li>
+                    <li>六大抽象对象，Route 怎么串起匹配/插件/上游？</li>
+                    <li>APISIX 和 Envoy/Higress 两条路线的核心差异？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '20,40p' README.md
+ls apisix/
+ls apisix/plugins/ | wc -l          # 插件数量
+ls apisix/core/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>OpenResty 与 Nginx 阶段</strong>——理解 Nginx 处理一个请求的"阶段"（init/init_worker/access/header_filter/body_filter/log/balancer），APISIX 就是在这些阶段挂上 Lua 逻辑。这是读懂 <code>init.lua</code> 的前提。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="apisix-day02.html" style="color:#14a085;">Day 02 · Nginx 阶段 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
