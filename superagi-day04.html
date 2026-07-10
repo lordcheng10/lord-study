@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 运行平台 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .steps{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+        .steps .s{display:flex;gap:10px;align-items:center;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .steps .s .n{width:22px;height:22px;border-radius:50%;background:#10b981;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#0ea5e9);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">运行平台 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一键启动</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 六个服务</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · API 容器启动步骤</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Celery 容器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · startup seeding</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Nginx 反向代理</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 配置文件</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 工具</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 完整旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">运行平台</h1>
+            <p class="part-desc">让它跑起来。SuperAGI 是六服务的完整平台，今天用 docker compose 启动它，并从两个 entrypoint 脚本看清启动步骤。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一键启动</h1></div>
+            <div class="card">
+<pre><code class="language-bash">cd SuperAGI
+cp config_template.yaml config.yaml   # 填 OPENAI_API_KEY 等
+docker compose up --build
+# 浏览器打开 http://localhost:3000</code></pre>
+                <div class="anno">读法：<b>一条命令拉起整个平台，3000 端口就是 GUI，能可视化创建智能体。</b>先在 <code>config.yaml</code> 填好至少一个 LLM 的 key（OpenAI 等）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>六个服务（Day 01 复习+深化）</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># docker-compose.yaml 六服务
+backend         # FastAPI（等 Postgres 就绪后启动）
+celery          # 同镜像，跑 Celery worker（后台执行智能体）★
+gui             # Next.js 前端
+super__redis    # redis-stack-server（broker + 向量存储）
+super__postgres # postgres:15（库 super_agi_main）
+proxy           # nginx，ports "3000:80"（用户入口）</code></pre>
+                <div class="anno">读法：<b><code>super__redis</code> 用的是 <strong>redis-stack-server</strong>——不只是普通 Redis，还带向量搜索能力（既做 Celery 消息队列，也能当向量库，Day 13）。</b><code>proxy</code>(Nginx) 是唯一对外暴露的端口。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>API 容器启动步骤</h1></div>
+            <div class="card">
+                <p><code>entrypoint.sh</code> 揭示了 backend 容器的启动顺序：</p>
+                <div class="steps">
+                    <div class="s"><span class="n">1</span><code>python superagi/tool_manager.py</code> —— 下载工具</div>
+                    <div class="s"><span class="n">2</span><code>install_tool_dependencies.sh</code> —— 装工具依赖</div>
+                    <div class="s"><span class="n">3</span><code>alembic upgrade head</code> —— 跑数据库迁移</div>
+                    <div class="s"><span class="n">4</span><code>uvicorn main:app --port 8001 --reload</code> —— 起 API</div>
+                </div>
+                <div class="baby"><span class="t">为什么启动前要下工具、跑迁移？</span>
+                ① <strong>下工具</strong>：智能体要用的工具代码得先下载到本地（工具市场，Day 12）。② <strong>跑迁移</strong>：<code>alembic upgrade head</code> 把数据库表结构升级到最新——否则新版本的字段没建，代码会报错。<strong>这些是"服务能正常工作的前提"，必须在起 API 之前就绪。</strong>和 AutoGPT/OpenHands 的启动迁移一个道理。<code>wait-for-it.sh super__postgres:5432</code> 确保先等数据库起来。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Celery 容器</h1></div>
+            <div class="card">
+                <p><code>entrypoint_celery.sh</code>：下工具/装依赖后跑 <code>celery -A superagi.worker worker --beat --loglevel=info</code>。</p>
+                <div class="baby"><span class="t">注意 <code>--beat</code></span>
+                <code>--beat</code> 表示这个 Celery 进程既是 <strong>worker</strong>（执行任务）又是 <strong>beat</strong>（定时调度器）。<strong>beat 负责周期性触发任务（Day 17）</strong>——比如每 5 分钟检查有没有到点的定时智能体、每 2 分钟唤醒等待中的工作流。<strong>backend（接单）和 celery（干活+定时）分成两个容器，同一个镜像</strong>——回忆 Day 01 的"接单快、干活慢"分离。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>startup seeding</h1></div>
+            <div class="card">
+                <p><code>main.py</code> 的 <code>@app.on_event("startup")</code>（<code>main.py:194</code>）在启动时做初始化播种：注册本地/市场工具（<code>register_toolkits</code>），并用 <code>AgentWorkflowSeed</code>/<code>IterationWorkflowSeed</code> 内置几套工作流（Goal Based、Fixed/Dynamic Task、Sales、Recruitment、SuperCoder）。</p>
+                <div class="baby"><span class="t">为什么要"播种"内置工作流？</span>
+                新用户第一次打开平台，如果什么都没有（没工具、没工作流），无从下手。<strong>启动时自动"播种"一批预置工作流和工具——新用户开箱就能选"目标驱动"工作流、就有搜索/文件等工具用。</strong>这些内置工作流（Day 07 讲）定义了智能体"按什么流程干活"的几种模式。<strong>好产品让新用户"零配置就能开始"——seeding 就是为此。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Nginx 反向代理</h1></div>
+            <div class="card">
+                <p><code>nginx/default.conf</code>：对外暴露 3000 端口（映射到容器 80），把 <code>/api</code> 转给 backend、其余转给 GUI。</p>
+                <div class="baby"><span class="t">为什么要反向代理？</span>
+                前端（GUI）和后端（API）是两个服务、不同端口。如果让浏览器直接分别访问两个端口，会有跨域问题、也不优雅。<strong>Nginx 作为"统一入口"：所有请求都打 3000，Nginx 看路径分发——<code>/api/*</code> 给后端、其余给前端。</strong>于是对浏览器来说只有一个地址（同源，无跨域），部署也只暴露一个端口。<strong>反向代理是多服务 Web 应用的标准前置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>配置文件</h1></div>
+            <div class="card">
+                <p><code>config_template.yaml</code>（复制成 <code>config.yaml</code>）集中放所有配置：各家 LLM key（OPENAI/PALM/REPLICATE/HUGGING）、<code>MODEL_NAME</code>、<code>MAX_MODEL_TOKEN_LIMIT</code>、DB/Redis 连接、存储类型（FILE/S3）、<code>TOOLS_DIR</code>、JWT/加密 key、各工具凭据（Google 搜索、邮件、GitHub、Jira、Slack…）。</p>
+                <div class="glossary"><b>配置集中化</b>：一个 yaml 管所有——换模型改 <code>MODEL_NAME</code>、换存储改 <code>STORAGE_TYPE</code>、接工具填对应凭据。<strong>Day 19 会深入配置和部署变体（本地 LLM、GPU 等）。</strong>今天记住：所有可调的旋钮都在 config.yaml。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>怎么启动平台？六个服务各是什么？</li>
+                    <li>API 容器启动前为什么要下工具、跑迁移？</li>
+                    <li>Celery 的 --beat 是什么？为什么 backend/celery 分开？</li>
+                    <li>startup seeding 为什么重要？</li>
+                    <li>Nginx 反向代理解决什么？配置在哪？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -nE '(backend|celery|gui|super__|proxy):' docker-compose.yaml
+cat entrypoint.sh entrypoint_celery.sh
+sed -n '194,247p' main.py | head -40      # startup seeding
+grep -nE 'API_KEY|MODEL_NAME|STORAGE_TYPE|REDIS_URL|DB_URL' config_template.yaml | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：把前四天串成故事线——<strong>一次 agent 运行的完整旅程</strong>：从 GUI 创建 → API 建 Execution 入队 → Celery worker 一步步自主循环 → Feed 流回 GUI。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 工具</a>
+                <a href="superagi-day05.html" style="color:var(--accent-green);">Day 05 · 完整旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次 agent 运行的完整旅程 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .journey{display:flex;flex-direction:column;gap:0;margin:16px 0}
+        .journey .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-left:2px solid var(--border-color);padding-left:16px;margin-left:8px;position:relative}
+        .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#10b981}
+        .journey .step .num{font-size:10px;font-weight:800;color:#10b981;flex-shrink:0;margin-top:2px}
+        .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#0ea5e9);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">完整旅程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 旅程全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① 创建智能体</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② 入队 Celery</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ worker 跑一步</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④ 自我重排续跑</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤ Feed 流回 GUI</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么这样最好</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 运行</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 执行循环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次 agent 运行的完整旅程</h1>
+            <p class="part-desc">把前四天串成故事线：你在 GUI 创建并运行一个智能体，到它自主完成，数据在整个平台里怎么流动。这是理解 SuperAGI 全局的关键一天。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>旅程全景</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">①</span><div class="b"><b>GUI → API</b>：创建智能体（目标+工具+LLM），建 AgentExecution</div></div>
+                    <div class="step"><span class="num">②</span><div class="b"><b>API → Celery</b>：<code>execute_agent.delay()</code> 入 Redis 队列，API 立即返回</div></div>
+                    <div class="step"><span class="num">③</span><div class="b"><b>worker 跑一步</b>：按 current_step 分派 handler，调 LLM 选工具、执行、观察</div></div>
+                    <div class="step"><span class="num">④</span><div class="b"><b>自我重排</b>：这一步完成后，再排一个任务给自己（2秒后）跑下一步 ↺</div></div>
+                    <div class="step"><span class="num">⑤</span><div class="b"><b>Feed 流回</b>：每步产出写 Feed，GUI 轮询实时展示，直到完成</div></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① 创建智能体</h1></div>
+            <div class="card">
+                <p>GUI 调 <code>POST /agents/create</code>（<code>controllers/agent.py:60</code>）：校验 project 和 tools → <code>Agent.create_agent_with_config</code> 落库 → 立刻建一条 <code>AgentExecution</code>（status='CREATED'）→ 把 goal/tools/model 写进 <code>AgentExecutionConfiguration</code>。</p>
+                <div class="anno">读法：<b>"在 GUI 点 Create Agent"背后就是这个接口。</b>它同时创建"定义"（Agent + 配置）和"第一次运行"（AgentExecution）。此刻智能体还没跑，只是记录已建好。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② 入队 Celery</h1></div>
+            <div class="card">
+                <p><code>POST /agentexecutions/add</code>（<code>controllers/agent_execution.py:65</code>）发起运行：把 status 从 CREATED 改成 RUNNING，然后关键一步（<code>:148</code>）：</p>
+<pre><code class="language-python">execute_agent.delay(db_agent_execution.id, datetime.now())  # 丢进 Celery 队列
+# API 到此立即返回，不阻塞</code></pre>
+                <div class="anno">读法：<b><code>.delay()</code> 把"运行这个智能体"作为 Celery 任务推给 Redis 队列，API 立刻返回。</b>真正的执行由后台 worker 领走（Day 04 的 celery 容器）。这就是"接单/干活分离"的落地——回忆 AutoGPT 的 MQ 入队、OpenHands 的双进程，同一模式。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ worker 跑一步</h1></div>
+            <div class="card">
+                <p>Celery worker 领取 <code>execute_agent</code> 任务（<code>worker.py:66</code>）→ <code>AgentExecutor.execute_next_step</code>（<code>jobs/agent_executor.py:39</code>）：</p>
+<pre><code class="language-python"># 按当前 workflow step 的 action_type 分派 handler（agent_executor.py:105）
+if action_type == "TOOL":              AgentToolStepHandler(...).execute_step()
+elif action_type == "ITERATION_WORKFLOW": AgentIterationStepHandler(...).execute_step()  # think→选工具→执行→观察
+elif action_type == "WAIT_STEP":       AgentWaitStepHandler(...).execute_step()</code></pre>
+                <div class="anno">读法：<b>worker 只跑<strong>一步</strong>——按 <code>current_agent_step_id</code> 取当前工作流步，根据类型交给对应 handler。</b>迭代步（ITERATION_WORKFLOW）里才是经典的"think→选工具→执行→观察"循环（Day 06 精读）。注意：跑完这一步就退出，不是一路跑到底。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ 自我重排续跑（Day 02 的"啊哈"兑现）</h1></div>
+            <div class="card">
+                <p>跑完一步后，若没完成，<strong>再排一个任务给自己</strong>（<code>agent_executor.py:94</code>）：</p>
+<pre><code class="language-python">if agent_execution.status in ("COMPLETED", "WAITING_FOR_PERMISSION"):
+    return
+superagi.worker.execute_agent.apply_async((agent_execution_id, datetime.now()), countdown=2)</code></pre>
+                <div class="baby"><span class="t">"循环"就是这么转起来的</span>
+                worker 跑完第 1 步 → 排一个"跑下一步"的任务（2 秒后）→ 另一个 worker（或同一个）领走跑第 2 步 → 又排"跑第 3 步"…… <strong>"一步→入队→下一步→入队……"形成后台自主循环，直到 status 变 COMPLETED 或达到迭代上限。</strong>进度存在 DB（<code>current_agent_step_id</code>）、对话存在 Feed——<strong>这就是 Day 02 说的"循环在 DB 和队列里"</strong>。出错时 <code>countdown=15</code> 延迟重试（不丢任务）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ Feed 流回 GUI</h1></div>
+            <div class="card">
+                <p>每一步的思考、工具结果都写入 <code>AgentExecutionFeed</code>（<code>agent/output_handler.py:48</code>，Day 02）。GUI 轮询 <code>GET /agentexecutionfeeds</code>（<code>controllers/agent_execution_feed.py</code>）拿到每一步 feed，实时展示智能体在干嘛。</p>
+                <div class="baby"><span class="t">你在界面上看到的"智能体思考流"</span>
+                worker 在后台一步步跑，每步把"我想了啥、调了什么工具、得到什么结果"写进 Feed 表。GUI 每隔几秒轮询一次 feed 接口，把新的 feed 渲染到界面——<strong>于是你看到智能体的思考和行动"实时"滚动出来。</strong>（注意 SuperAGI 用轮询而非 WebSocket——GUI 定期问"有新进度吗"。）需要人工确认时，某步停在 <code>WAITING_FOR_PERMISSION</code>，GUI 显示批准/拒绝按钮。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么这样最好</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>不阻塞</strong>：API 秒回，智能体在后台慢慢跑，用户不用干等。</li>
+                    <li><strong>可扩展</strong>：多个 Celery worker 能同时跑多个智能体（并发）。</li>
+                    <li><strong>可恢复</strong>：每步状态持久化，进程崩了重启能从断点续跑（不丢进度）。</li>
+                    <li><strong>可暂停/审批</strong>：状态机支持 PAUSED/WAITING_FOR_PERMISSION，随时挂起恢复。</li>
+                </ul>
+                <div class="glossary"><b>核心心智模型（一句话）</b>：GUI 定义智能体 → API 建 Execution 入 Redis 队列 → Celery worker 逐步跑自主循环、每步自我重排、每步写 Feed → GUI 轮询展示。<strong>API 全程不阻塞，状态全持久化，worker 可水平扩展。这就是"把自主智能体做成可运维生产系统"的架构。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 1 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 1 周（Day 01-05）你已建立完整心智</h3>
+                <ul>
+                    <li><b>Day 01</b> 全景：平台架构、六服务、数据流</li>
+                    <li><b>Day 02</b> Agent：极简身份 + EAV 配置 + 循环在 DB/队列</li>
+                    <li><b>Day 03</b> 工具：name+描述+pydantic参数+_execute</li>
+                    <li><b>Day 04</b> 运行平台：docker 六服务、启动步骤、seeding</li>
+                    <li><b>Day 05</b> 完整旅程：创建→入队→逐步循环→Feed 流回</li>
+                </ul>
+                <p style="margin-top:8px">你现在理解了"一个智能体如何被自主运行"的全局。下周（Day 06-10）深入 <strong>Agent 执行</strong>：执行循环、工作流、提示词、输出解析、LLM。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：验证旅程</h3>
+<pre><code class="language-bash">P=superagi
+grep -n 'def create_agent_with_config\|execute_agent.delay' $P/controllers/agent.py $P/controllers/agent_execution.py | head
+grep -n 'def execute_next_step\|apply_async' $P/jobs/agent_executor.py | head
+sed -n '66,72p' $P/worker.py     # execute_agent 任务</code></pre>
+                <div class="tip"><strong>下周预告 · Day 06</strong>：深入 <strong>Agent 执行循环</strong>——迭代步 vs 工具步、经典的 think→choose tool→execute→observe 到底在哪一步发生。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 运行</a>
+                <a href="superagi-day06.html" style="color:var(--accent-green);">Day 06 · 执行循环 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
