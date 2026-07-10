@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 配置分层与模型/成本 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .layers{display:flex;flex-direction:column;gap:0}
+        .ly{padding:10px 15px;border:1px solid var(--border-color);display:flex;align-items:center;gap:12px} .ly:first-child{border-radius:8px 8px 0 0}.ly:last-child{border-radius:0 0 8px 8px}
+        .ly .idx{font-size:11px;font-weight:700;color:#fff;background:var(--c);border-radius:5px;padding:2px 8px;min-width:24px;text-align:center}
+        .ly b{font-family:monospace;font-size:12.5px} .ly span{font-size:11.5px;color:var(--text-muted)}
+        .ly.a{background:rgba(34,197,94,.05)} .ly.b{background:rgba(6,182,212,.05)} .ly.c{background:rgba(139,92,246,.05)} .ly.d{background:rgba(245,158,11,.05)} .ly.e{background:rgba(239,68,68,.06)}
+        .cost-flow{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px}
+        .cost-flow .b{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 12px;font-size:12px;text-align:center}
+        .cost-flow .b b{display:block;color:var(--accent-orange)} .cost-flow .a{color:var(--accent-purple);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">配置分层与模型/成本 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · settings 五层优先级</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 深合并与 policy</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 请求怎么到 Anthropic</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · /model 与默认模型</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 主模型 vs 小快模型</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 成本怎么算</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 多 Provider（扩展）</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 会话记忆</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 TUI 深入 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 平台化进阶</span>
+            <h1 class="part-title">配置分层与模型/成本</h1>
+            <p class="part-desc">settings.json 五层怎么合并、/model 怎么选模型、请求怎么到 Anthropic、那个"退出时告诉你花了多少钱"怎么算的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>settings 五层优先级</h1></div>
+            <div class="card">
+                <p>Claude Code 的配置来自五个来源，<strong>后者覆盖前者</strong>（<code>src/utils/settings/constants.ts:7</code> 的 <code>SETTING_SOURCES</code>）：</p>
+                <div class="layers">
+                    <div class="ly a"><span class="idx" style="--c:#22c55e">1</span><b>userSettings</b><span>~/.claude/settings.json（你的全局）</span></div>
+                    <div class="ly b"><span class="idx" style="--c:#06b6d4">2</span><b>projectSettings</b><span>.claude/settings.json（项目，进 git）</span></div>
+                    <div class="ly c"><span class="idx" style="--c:#8b5cf6">3</span><b>localSettings</b><span>.claude/settings.local.json（本机项目，不进 git）</span></div>
+                    <div class="ly d"><span class="idx" style="--c:#f59e0b">4</span><b>flagSettings</b><span>命令行旗标传的</span></div>
+                    <div class="ly e"><span class="idx" style="--c:#ef4444">5</span><b>policySettings</b><span>企业策略（managed，最高，覆盖一切）</span></div>
+                </div>
+                <div class="glossary"><b>为什么后者覆盖前者？</b> 越具体/越权威的越靠后、优先级越高。你的全局偏好（user）打底，项目约定（project）覆盖它，你在本机对这个项目的临时调整（local）再覆盖，命令行现场指定（flag）更高，企业强制策略（policy）最高——组织能强制某些设置，个人改不了。这套"分层 + 后覆盖前"跟 Day 09 权限、Day 12 MCP、Day 16 CLAUDE.md 完全一致——<strong>整个项目的配置哲学是统一的</strong>，学会一处，处处通。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>深合并与 policy 的特殊规则</h1></div>
+            <div class="card">
+                <p>合并逻辑（<code>src/utils/settings/settings.ts:657</code>）：先以插件 settings 作最低基座，再用 lodash <code>mergeWith</code> 按启用顺序<strong>深合并</strong>（递归合并嵌套对象，<code>:673</code>）。</p>
+                <p>但 <code>policySettings</code>（企业策略）走<strong>不同规则——"first-source-wins"（首个来源胜出）</strong>（<code>:677</code>）：remote → MDM（Windows 注册表/macOS plist）→ <code>managed-settings.json</code> → HKCU，按此顺序取第一个有值的。</p>
+                <div class="glossary"><b>为什么 policy 用"首个胜出"而非"深合并"？</b> 因为企业策略是"强制"性质的——不能让下层来源"部分覆盖"上层策略（那样就能绕过管控了）。用"首个来源胜出"保证一旦某个高优先级策略源定了值，就是它说了算，下面的完全不参与合并。<b>MDM</b>（移动设备管理）是企业统一下发配置的机制。<b>remote 策略源</b>（<code>src/services/remoteManagedSettings/</code>）从公司 API 拉策略——这是本 fork 的企业向扩展，官方没有。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>请求怎么抵达 Anthropic</h1></div>
+            <div class="card">
+                <p>Day 03/06 讲了循环怎么调 <code>callModel</code>。真正发 HTTP 到 Anthropic 的是 <code>src/services/api/claude.ts</code>：</p>
+                <ul>
+                    <li>客户端工厂 <code>getAnthropicClient</code>（<code>client.ts:84</code>）：构造 <code>new Anthropic({ apiKey })</code>（<code>:301</code>）。</li>
+                    <li>发流式请求：<code>anthropic.beta.messages.create({ ...params, stream: true })</code>（<code>claude.ts:1917</code>）。</li>
+                    <li>中枢生成器 <code>queryModel</code>（<code>:1048</code>）处理流式响应（Day 03 讲过）。</li>
+                </ul>
+                <div class="glossary"><b>为什么用官方 Anthropic SDK？</b> 因为 Day 01 说过——它是逆向重写，devDependency 里有官方 <code>@anthropic-ai/sdk</code>。它不重造 HTTP 层，直接用官方 SDK 发请求、拿流式响应，自己重写的是<strong>上面的一切</strong>（循环、工具、UI）。这很务实：底层协议对接用官方 SDK（稳定），业务逻辑自己实现（可控）。<b>beta.messages</b> 用 beta 端点是为了拿到一些较新的能力（如 prompt caching、部分工具特性）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>/model 与默认模型</h1></div>
+            <div class="card">
+                <p><code>/model</code> 命令（<code>src/commands/model/index.ts:5</code>，<code>type:'local-jsx'</code>，Day 11）弹一个模型选择面板。模型选择的优先级（<code>src/utils/model/model.ts:111</code> 的 <code>getMainLoopModel</code>）：</p>
+                <ol>
+                    <li>用户明确指定的（<code>ANTHROPIC_MODEL</code> 环境变量 或 <code>settings.model</code>）。</li>
+                    <li>否则按<strong>订阅档位</strong>给默认（<code>getDefaultMainLoopModelSetting</code>，<code>:260</code>）：Max/Team Premium → Opus，PAYG/Pro/Enterprise → Sonnet。</li>
+                </ol>
+                <p>模型 id 常量表在 <code>src/utils/model/configs.ts</code>（每个模型一个 config，含 firstParty + 各 provider 的映射）。</p>
+                <div class="glossary"><b>为什么按订阅档位定默认模型？</b> Opus 最强但最贵，Sonnet 性价比高。付费档位高的用户（Max）默认给最强的 Opus；普通档位默认给 Sonnet（够用又省）。这是"根据你付了多少钱给你配相应模型"的合理默认，你随时能用 <code>/model</code> 改。<code>/model</code> 是 local-jsx 命令，选完通过 onDone 把"已切换"消息插回对话（Day 11）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>主模型 vs 小快模型</h1></div>
+            <div class="card">
+                <p>Claude Code 其实<strong>同时用两个模型</strong>：</p>
+                <table>
+                    <thead><tr><th>模型</th><th>用途</th><th>怎么取</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>主模型</strong>（Opus/Sonnet）</td><td>主循环，干真活</td><td><code>getMainLoopModel</code></td></tr>
+                        <tr><td><strong>小快模型</strong>（Haiku）</td><td>摘要、侧查询等杂活</td><td><code>getSmallFastModel</code>（<code>model.ts:42</code>）</td></tr>
+                    </tbody>
+                </table>
+                <p>小快模型的调用入口 <code>queryHaiku</code>（<code>claude.ts:3396</code>，<code>thinking: disabled</code>）。Day 10 的 autocompact 摘要、各种后台判断都用它。</p>
+                <div class="glossary"><b>为什么要两个模型？</b> 主对话要强模型（复杂推理）；但很多"杂活"（把长历史压成摘要、判断个小问题）用便宜快的 Haiku 就够了，用 Opus 是浪费。<strong>把贵模型只用在真正需要的地方，杂活派给便宜模型</strong>——这跟 gov-agents 教程里的"省钱三档"（Sonnet/Haiku/规则）是完全一样的成本纪律。一个成熟的 AI 应用一定会做这种"模型分级"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>成本怎么算</h1></div>
+            <div class="card">
+                <p>退出时那句"本次花了 $0.xx"是这么来的（<code>src/cost-tracker.ts</code> + <code>src/utils/modelCost.ts</code>）：</p>
+                <div class="cost-flow">
+                    <span class="b"><b>流式返回 usage</b>各类 token 数</span><span class="a">→</span>
+                    <span class="b"><b>查定价表</b>modelCost.ts</span><span class="a">→</span>
+                    <span class="b"><b>calculateUSDCost</b>token×单价</span><span class="a">→</span>
+                    <span class="b"><b>累加</b>addToTotalSessionCost</span>
+                </div>
+                <ul>
+                    <li>定价表 <code>MODEL_COSTS</code>（<code>modelCost.ts:104</code>）：每个模型每百万 token 多少美元（输入/输出/缓存读写各不同价）。</li>
+                    <li>换算 <code>tokensToUSDCost</code>（<code>:131</code>）：各类 token ÷ 100万 × 对应单价，求和。</li>
+                    <li>实时计费发生在流式增量处（<code>claude.ts:2357</code>）：<code>calculateUSDCost(model, usage)</code> → <code>addToTotalSessionCost</code>。</li>
+                    <li>退出打印 hook <code>useCostSummary</code>（<code>src/costHook.ts:6</code>）在 <code>process.on('exit')</code> 打印 + 保存。</li>
+                </ul>
+                <div class="glossary"><b>为什么缓存 token 单独计价？</b> 因为 Anthropic 的 prompt caching（Day 07/12 提过）——命中缓存的 token 便宜很多（约 1 折），写入缓存的略贵。所以 usage 里区分"普通输入/缓存写/缓存读"，各按各的单价算，才准确。<strong>Day 06 讲的边流边累加 usage，就是为这里的实时计费服务的</strong>——中断也不丢账。成本状态还会随 <code>--continue</code> 恢复（Day 16），跨会话累计。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>多 Provider（本 fork 扩展）</h1></div>
+            <div class="card">
+                <p>官方 Claude Code 只走 Anthropic（含官方 Bedrock/Vertex）。<strong>本 fork 扩展了一大堆供应商</strong>——这是它"关闭封控、扩展能力"的体现，教程里作为"扩展"了解即可：</p>
+                <ul>
+                    <li><code>client.ts</code> 里有 Bedrock（<code>:153</code>）/ Azure Foundry（<code>:191</code>）/ Vertex（<code>:221</code>）分支。</li>
+                    <li>独立的非 Anthropic 供应商目录 <code>src/services/api/{openai,gemini,grok}/</code>。</li>
+                    <li>OpenAI 兼容多供应商注册表 <code>src/services/providerRegistry/</code>（<code>/provider use</code>，支持 cerebras/groq/deepseek 等）。</li>
+                    <li>甚至有 ChatGPT/Codex 模式（<code>chatgptModels.ts</code>）。</li>
+                </ul>
+                <div class="glossary"><b>为什么加这么多供应商？</b> 官方 Claude Code 绑定 Anthropic 模型。这个 fork 想让用户能用<strong>任意模型</strong>（OpenAI、Gemini、本地开源模型…）驱动同一套 Agent CLI。于是它在"发请求"这层做了抽象，能对接多家 API。<strong>判断"是不是官方功能"的窍门</strong>（Day 01 讲过）：看是不是 <code>feature('...')</code> 门控、包名是不是 <code>@claude-code-best/*</code>、文件是不是成片 stub。多 Provider 就属于这类扩展。核心的 Anthropic 调用、<code>/model</code>、成本追踪是官方真实机制。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>settings 五层优先级 + 为什么后者覆盖前者？</li>
+                    <li>policy 为什么用"首个胜出"而非深合并？</li>
+                    <li>请求怎么到 Anthropic？为什么用官方 SDK？</li>
+                    <li>/model 优先级 + 为什么按订阅档位定默认？</li>
+                    <li>主模型 vs 小快模型的分工（省钱纪律）？</li>
+                    <li>成本怎么算？缓存 token 为什么单独计价？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看 settings 五层
+sed -n '7,20p' src/utils/settings/constants.ts
+sed -n '657,680p' src/utils/settings/settings.ts
+
+# 2. 看请求发送与客户端
+grep -n "beta.messages.create\|getAnthropicClient" src/services/api/*.ts | head
+
+# 3. 看模型选择
+sed -n '111,130p' src/utils/model/model.ts
+sed -n '260,290p' src/utils/model/model.ts
+
+# 4. 看成本计价
+sed -n '104,180p' src/utils/modelCost.ts
+cat src/costHook.ts
+
+# 5. 实操：/model 换模型，退出看成本
+bun run dev   # 里面输入 /model，退出看花费</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：Day 04 讲了 TUI 骨架，Day 18 深入细节——输入框怎么做多行编辑/粘贴/自动补全、键位系统、vim 模式、对话框浮层的"优先级仲裁"。前端交互的精华都在这。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 会话记忆</a>
+                <a href="claude-code-src-day18.html" style="color:var(--accent-green);">Day 18 · TUI 深入 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
