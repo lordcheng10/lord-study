@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · pilot-agent — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">pilot-agent · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三大职责</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 入口 proxy 命令</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Agent.Run 启动</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 拉起 Envoy</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 本地 SDS</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · xDS 代理</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · status server</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 注入</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day13.html" class="nav-link" style="color:#4a7fd6;">Day 13 bootstrap &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 sidecar 与安全</span>
+            <h1 class="part-title">pilot-agent</h1>
+            <p class="part-desc">sidecar 容器里的 1 号进程不是 Envoy，而是 <strong>pilot-agent</strong>。它是 Istio 控制面（istiod）和你学过的 Envoy 之间的胶水层：拉起 Envoy、本地发证书、代理 xDS。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三大职责</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">pilot-agent = "Envoy 的贴身管家"</span>
+                <code>istio-proxy</code> 容器里，pilot-agent 是主进程，Envoy 是它拉起的子进程。管家干三件事：<strong>①<strong>拉起并托管 Envoy</strong>——生成启动配置、启动 envoy 进程、优雅关闭；②<strong>本地 SDS 服务器</strong>——给 Envoy 发 TLS 证书（Envoy 从不直接碰私钥文件）；③<strong>xDS 代理</strong>——坐在 istiod 和 Envoy 中间转发配置，顺便做本地增强（DNS、Wasm 缓存）。</strong>为什么 Envoy 不自己连 istiod？因为有个管家统一处理证书、连接、增强，更安全也更灵活。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>入口 proxy 命令</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/cmd/pilot-agent/main.go:32 main() → NewRootCommand（把 sds.NewServer 作为工厂注入）
+// pilot/cmd/pilot-agent/app/cmd.go newProxyCommand RunE（:101）启动主线：
+//   :109 ConstructProxyConfig
+//   :137 istioagent.NewAgent(proxyConfig, agentOptions, secOpts, envoyOptions)
+//   :144 按 StatusPort 启动 status server
+//   :155 agent.Run(ctx) 启动 SDS、DNS、xDS proxy 和 Envoy，返回 wait() 阻塞</code></pre>
+                <div class="anno">读法：<b>容器启动跑的是 <code>pilot-agent proxy sidecar ...</code>。<code>NewAgent</code> 构造 Agent，<code>agent.Run</code> 是启动总线。SDS 用工厂注入（便于替换实现，又是工厂模式）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Agent.Run 启动</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/istio-agent/agent.go:354 func (a *Agent) Run(ctx) (func(), error)
+//   :356 initLocalDNSServer()      // 可选本地 DNS 捕获
+//   :399 initSdsServer()           // 本地 SDS（L05）
+//   :403 initXdsProxy(a)           // xDS 代理（L06）
+//   :418 startFileWatcher          // 监控根证书变化，变了重建连接
+//   :426 initializeEnvoyAgent + go a.envoyAgent.Run(ctx)  // 拉起 Envoy（L04）</code></pre>
+                <div class="anno">读法：<b>启动顺序：DNS → SDS → xDS proxy → 文件监控 → Envoy。先把"给 Envoy 供证书、供配置"的基础设施起好，最后才拉 Envoy。</b><code>Agent struct</code>（<code>:128</code>）持有所有子系统。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>拉起 Envoy</h1></div>
+            <div class="card">
+<pre><code class="language-go">// agent.go:296 initializeEnvoyAgent
+//   :312 bootstrap.New(...).CreateFile()  // 生成 Envoy bootstrap JSON（Day 13）
+//   :337 envoy.NewProxy(a.envoyOpts)
+//   :344 envoy.NewAgent(...)  // 带优雅下线（drain）能力的 Envoy 托管器</code></pre>
+                <div class="baby"><span class="t">pilot-agent 怎么"拉起" Envoy？</span>
+                很直接：<strong>①先给 Envoy 写一个启动配置文件（bootstrap，Day 13 讲怎么生成）；②然后以子进程方式启动真正的 <code>envoy</code> 二进制，把配置文件路径传给它。</strong>之后 agent 一直盯着这个子进程：证书要轮转就通过 SDS 推给它、配置更新通过 xDS 代理转给它、要关闭时先让它 drain（优雅排空连接）再退出。<strong>这就是"托管"——agent 是 Envoy 的父进程和生命周期管理者。</strong>回想 Envoy 课 Day 02 的启动，那个 bootstrap 就是 agent 在这里生成的。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>本地 SDS</h1></div>
+            <div class="card">
+<pre><code class="language-go">// agent.go:448 initSdsServer
+//   :461 newSecretManager(createCaClient)   // 创建证书管理器
+//   :484 sdsServer = SDSFactory(secOpts, secretCache, ...)
+//   :485 secretCache.RegisterSecretHandler(sdsServer.OnSecretUpdate)  // 证书轮转回调推送
+// SDS 通过 UDS（Unix socket）把证书喂给本地 Envoy，证书以 InlineBytes 内联，不落盘</code></pre>
+                <div class="baby"><span class="t">为什么 Envoy 不自己管证书？</span>
+                安全。<strong>私钥是最敏感的东西——如果落盘或让 Envoy 直接管，泄露风险大。Istio 的设计：pilot-agent 跑一个本地 SDS（Secret Discovery Service）服务器，通过 Unix socket（不走网络）把证书<strong>内联</strong>推给 Envoy——私钥全程在内存、不落盘。</strong>证书快过期了，agent 自动重新申请、通过 <code>OnSecretUpdate</code> 推给 Envoy 热更新。<strong>Envoy 只管用证书，申请/轮转/存储全由 agent 代劳。</strong>Day 14-15 详讲证书怎么申请。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>xDS 代理</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/istio-agent/xds_proxy.go:79 type XdsProxy
+//   把 Envoy↔istiod 的所有 xDS 连接合并成单条 TCP + 多路 gRPC 流
+// :125 initXdsProxy：注册 NameTableType（DNS）、ProxyConfigType（PCDS）handler
+// :300 handleStream / :360 handleUpstream：Envoy 请求转发给 istiod、响应回传
+//   对 ECDS（Wasm）可 rewriteAndForward（:524）把远程加载改成本地文件</code></pre>
+                <div class="baby"><span class="t">xDS 代理：中间人的价值</span>
+                Envoy 不直接连 istiod，而是连本地的 agent xDS 代理，代理再连 istiod。为什么多这一跳？<strong>①<strong>合并连接</strong>——一个节点上多个 xDS 类型复用一条到 istiod 的连接；②<strong>mTLS</strong>——代理用工作负载证书对 istiod 做双向认证；③<strong>本地增强</strong>——代理能拦截并改写 xDS，比如把"从远程 URL 加载 Wasm 插件"改写成"从本地缓存文件加载"（更快更可靠）、注入本地 DNS 表、注入健康信息。</strong>Higress 还在这里加了 ECDS 版本单调性校验（<code>:722</code>），解决高频热更新 Wasm 时的版本乱序竞态。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>status server</h1></div>
+            <div class="card">
+                <p>agent 还跑一个 status server（<code>pilot/cmd/pilot-agent/status/server.go</code>，端口 15020）：<code>/healthz/ready</code>（<code>:66</code>）健康检查、<code>/app-health/</code>（<code>:94</code>）应用探针改写。</p>
+                <div class="baby"><span class="t">为什么要改写探针？</span>
+                开了 mTLS STRICT 模式后，所有到 Pod 的流量都要求 mTLS。<strong>但 kubelet 的健康探针不会带 Istio 证书——它会被 mTLS 拒绝，导致 Pod 一直"不健康"被重启。</strong>解决：注入时把业务容器的探针改写成打到 agent 的 15020，agent 再转发到业务真实探针。<strong>这样 kubelet 探针经 agent 中转绕过了 mTLS 要求。</strong>这是 sidecar 模式一个必须处理的细节——否则健康检查全挂。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>pilot-agent 的三大职责？为什么它是 1 号进程？</li>
+                    <li>Agent.Run 的启动顺序？</li>
+                    <li>agent 怎么拉起 Envoy？</li>
+                    <li>为什么证书由 agent 的 SDS 管而非 Envoy 自己？</li>
+                    <li>xDS 代理多这一跳的价值？为什么要改写健康探针？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func (a \*Agent) Run\|initSdsServer\|initXdsProxy\|initializeEnvoyAgent' pkg/istio-agent/agent.go
+grep -n 'type XdsProxy\|func initXdsProxy' pkg/istio-agent/xds_proxy.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>Envoy bootstrap 生成</strong>——agent 怎么生成 Envoy 的启动配置？text/template 渲染、node metadata 注入、必备 stats matcher，以及 Higress 定制的 bootstrap 模板。直接连回 Envoy 课。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 注入</a>
+                <a href="istio-day13.html" style="color:#4a7fd6;">Day 13 · Envoy bootstrap 生成 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

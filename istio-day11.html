@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · Sidecar 注入 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">Sidecar 注入 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是 sidecar 注入</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · MutatingWebhook</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Webhook Server</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 注入判定</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 模板渲染 + SMP</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 注入模板内容</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 手动注入</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day12.html" class="nav-link" style="color:#4a7fd6;">Day 12 pilot-agent &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 sidecar 与安全</span>
+            <h1 class="part-title">Sidecar 注入</h1>
+            <p class="part-desc">Istio 怎么把 Envoy"塞进"你的业务 Pod？靠 Kubernetes 的 MutatingWebhook——Pod 创建时拦截、返回一份 JSON Patch，Pod 就多了一个 Envoy sidecar 容器。今天读透注入机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是 sidecar 注入</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">sidecar = "跟班"</span>
+                sidecar（边车，摩托车挎斗）模式：给你的业务容器<strong>配一个"跟班"容器（Envoy）</strong>，它俩住在同一个 Pod 里、共享网络。<strong>业务容器的所有进出流量，都被悄悄改道，先经过这个 Envoy 跟班</strong>（靠 init 容器改 iptables 规则实现）。于是 Envoy 就能对流量做治理（路由/mTLS/遥测），而业务代码完全无感——它以为在直接收发，其实中间隔了个 Envoy。<strong>"注入"就是"自动给 Pod 加上这个 Envoy 跟班"的过程。</strong>你不用手动改每个 Deployment，Istio 自动帮你塞。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>MutatingWebhook</h1></div>
+            <div class="card">
+                <p>自动注入靠 K8s 的 <code>MutatingWebhookConfiguration</code>（<code>manifests/charts/istio-control/istio-discovery/templates/mutatingwebhook.yaml</code>）：</p>
+<pre><code class="language-yaml"># clientConfig（:15-27）：指向 istiod 的 /inject 路径、443
+# rules（:29-33）：operations:[CREATE], resources:[pods] —— 只在 Pod 创建时触发
+# namespaceSelector + objectSelector：按 istio.io/rev 标签或对象标签匹配
+#   且 sidecar.istio.io/inject != "false" 才注入</code></pre>
+                <div class="baby"><span class="t">MutatingWebhook = "K8s 的拦截钩子"</span>
+                Kubernetes 允许你注册一个"变更 webhook"：<strong>每当有人创建某类资源（这里是 Pod），API Server 先把这个资源发给你的 webhook，你可以返回一份"修改补丁"，API Server 应用后再真正创建。</strong>Istio 就注册了这么个钩子——Pod 创建时，K8s 把 Pod 发给 istiod 的 <code>/inject</code>，istiod 返回"加一个 Envoy 容器"的补丁。<strong>这就是"自动注入"的魔法：不改你的 YAML，在 Pod 落地前动态改。</strong>只对打了 Istio 标签的 namespace/Pod 生效。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Webhook Server</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/kube/inject/webhook.go
+// NewWebhook（:202）：237 行 p.Mux.HandleFunc("/inject", wh.serveInject) 注册处理器
+// serveInject（:1288）：解析 AdmissionReview，调 wh.inject
+// inject（:1104）：
+//   :1129 injectRequired(...) 判定是否需要注入（不需要直接放行）
+//   :1198 injectPod(params) 生成 patch
+//   :1204 返回 AdmissionResponse{Allowed:true, Patch, PatchType:"JSONPatch"}</code></pre>
+                <div class="anno">读法：<b>istiod 内跑着一个 HTTP server 处理 <code>/inject</code>。收到 Pod → 判断要不要注入 → 生成 JSON Patch 返回。配置（模板）从 ConfigMap <code>istio-sidecar-injector</code> 热加载（改了立即生效，不重启）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>注入判定</h1></div>
+            <div class="card">
+                <p><code>injectRequired</code>（<code>inject.go:199</code>）决策顺序：</p>
+<pre><code class="language-go">// 1. HostNetwork 的 Pod 跳过（iptables 会改宿主机路由，:207）
+// 2. 系统命名空间跳过（:212）
+// 3. 读 sidecar.istio.io/inject 注解/标签，label 优先（:223）
+// 4. 未显式指定 → 匹配 NeverInjectSelector / AlwaysInjectSelector（:243/:258）
+// 5. 最后按 config.Policy 综合出 required（:274）</code></pre>
+                <div class="anno">读法：<b>不是所有 Pod 都注入——有精细的判定规则。<code>HostNetwork</code> 的不能注入（会搞乱宿主机网络），系统 ns 不注入，用户可用注解/标签显式开关。</b>这套"多层判定 + 显式优先"避免误注入。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>模板渲染 + SMP</h1></div>
+            <div class="card">
+<pre><code class="language-go">// injectPod（webhook.go:463）核心：
+//   :473 RunTemplate(req) 渲染模板得到 mergedPod
+//   :488 createPatch 生成 JSON Patch
+// RunTemplate（inject.go:407）：
+//   :434 构造 SidecarTemplateData（ProxyConfig/MeshConfig/Values/ProxyImage/UID…）
+//   :456 遍历模板名，逐个 runTemplate 渲染再 applyOverlayYAML 叠加（Strategic Merge Patch）</code></pre>
+                <div class="baby"><span class="t">注入 = "渲染模板 + 策略合并补丁"</span>
+                注入的本质：<strong>①把一段 YAML 模板（描述 Envoy 容器长啥样）用当前 Pod 的信息渲染出来；②用 Kubernetes 的"策略化合并补丁（Strategic Merge Patch）"把渲染结果叠加到原 Pod 上；③原 Pod 和叠加后 Pod 的差异，就是要返回的 JSON Patch。</strong>SMP 比普通 patch 智能——它懂 K8s 资源结构（比如按容器 name 合并而非整个数组替换）。这样用户对 Envoy 容器的自定义（改资源限制等）能正确合并进去。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>注入模板内容</h1></div>
+            <div class="card">
+                <p>模板 <code>manifests/charts/istio-control/istio-discovery/files/injection-template.yaml</code>（542 行）注入两样：</p>
+                <ul>
+                    <li><strong>init 容器 <code>istio-init</code></strong>（<code>:80-179</code>）：跑 <code>istio-iptables</code>，配流量拦截规则——<code>-p 15001</code>（出站重定向）、<code>-z 15006</code>（入站）、<code>-u 1337</code>（proxy uid 绕过拦截）。</li>
+                    <li><strong><code>istio-proxy</code> 容器</strong>（<code>:184-405</code>）：跑 <code>pilot-agent + Envoy</code>，端口 15090（prom）；注入 <code>CA_ADDR</code>/<code>POD_NAME</code>/<code>SERVICE_ACCOUNT</code> 等 env；挂载 <code>istio-token</code>（SA JWT）/<code>istiod-ca-cert</code>（根证）等卷。</li>
+                </ul>
+                <div class="baby"><span class="t">init 容器的 iptables 是流量劫持的关键</span>
+                Envoy 怎么做到"业务容器的流量都先经过我"？<strong><code>istio-init</code> 这个 init 容器在 Pod 启动前跑一次，用 iptables 规则把 Pod 里所有出站流量重定向到 Envoy 的 15001 端口、所有入站到 15006。</strong>proxy 自己的流量用 uid 1337 标记以绕过（否则死循环）。<strong>于是业务容器一发包，内核就把它转给 Envoy——业务完全无感。</strong>这就是 sidecar 模式"透明劫持"的底层。挂载的卷（token/证书）则是 Day 14-15 mTLS 的材料。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>手动注入</h1></div>
+            <div class="card">
+                <p>除自动注入，还能手动：<code>istioctl kube-inject</code>（<code>istioctl/pkg/kubeinject/kubeinject.go:477</code>）在本地渲染并直接产出注入后的 YAML。</p>
+<pre><code class="language-bash">kubectl apply -f &lt;(istioctl kube-inject -f deployment.yaml)</code></pre>
+                <div class="anno">读法：<b>手动（istioctl 本地渲染）和自动（API Server 回调 istiod）<strong>共用同一套渲染引擎</strong>（<code>pkg/kube/inject</code>）。手动适合调试/不想开 webhook 的场景。istiod 侧的装配在 <code>pilot/pkg/bootstrap/sidecarinjector.go:43</code>。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>sidecar 模式是什么？"注入"注入了什么？</li>
+                    <li>MutatingWebhook 怎么实现自动注入？</li>
+                    <li>injectRequired 的判定规则？</li>
+                    <li>注入的本质（模板渲染 + SMP）？</li>
+                    <li>init 容器的 iptables 怎么劫持流量？手动 vs 自动区别？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'serveInject\|func (wh \*Webhook) inject\|injectPod' pkg/kube/inject/webhook.go | head
+grep -n 'func injectRequired\|func RunTemplate' pkg/kube/inject/inject.go
+sed -n '80,110p' manifests/charts/istio-control/istio-discovery/files/injection-template.yaml</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>pilot-agent</strong>——sidecar 容器里 1 号进程不是 Envoy，而是 pilot-agent。它负责拉起 Envoy、跑本地 SDS 发证书、做 xDS 代理。它是 Istio 控制面和你学过的 Envoy 之间的胶水。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="istio-day12.html" style="color:#4a7fd6;">Day 12 · pilot-agent &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
