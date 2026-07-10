@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 人在环 Human-in-the-loop — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">人在环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要人在环</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · interrupt()</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 暂停原理</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Command(resume)</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 恢复重放</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 完整例子</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 四种模式</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 时间旅行</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 序列化 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 持久化与人在环</span>
+            <h1 class="part-title">人在环 Human-in-the-loop</h1>
+            <p class="part-desc">Agent 落地最关键的能力之一：让 AI 在关键处停下来问人。今天看动态 <code>interrupt()</code> 怎么在节点内部暂停要输入，<code>Command(resume=...)</code> 怎么送回答案继续。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要人在环</h1></div>
+            <div class="card">
+                <p>纯自动 Agent 在高风险场景不可接受：转账、删数据、发邮件、医疗建议……需要<strong>人类在关键节点审批/补充信息</strong>。Day 13 的静态断点太粗（只能在节点边界停），<code>interrupt()</code> 提供节点内任意位置的动态暂停。</p>
+                <div class="glossary"><b>回到 Day 01 的主题</b>：LangGraph 的定位是"可控编排 + 局部 AI 自主"。人在环正是"可控"的极致体现——<strong>把人类判断力嵌进 AI 的执行流</strong>。这是 OpenHands、crewAI 等也都在做的能力，但 LangGraph 靠检查点做得最干净。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>interrupt()</h1></div>
+            <div class="card">
+                <p><code>interrupt(value)</code>（<code>langgraph/types.py</code>）在节点函数<strong>内部</strong>调用，暂停执行并把 <code>value</code> 抛给外部（作为"要问人的问题"）：</p>
+<pre><code class="language-python">from langgraph.types import interrupt
+
+def approve_node(state):
+    # 执行到这里暂停，把这个 dict 抛给调用方，等人回答
+    decision = interrupt({"question": "批准转账 $1000 吗？", "amount": 1000})
+    # ↓ 人回答后，从这里"接着"往下（decision = 人给的值）
+    if decision == "yes":
+        return {"status": "approved"}
+    return {"status": "rejected"}</code></pre>
+                <div class="anno">读法：<b><code>interrupt()</code> 像一个"魔法暂停点"：第一次执行到它 → 暂停、把问题抛出去；人回答后重新执行 → <code>interrupt()</code> 直接返回人给的值，代码接着往下。</b>写起来像普通函数调用，行为却是"跨越时间的暂停/恢复"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>暂停原理</h1></div>
+            <div class="card">
+                <p><code>interrupt()</code> 内部其实是<strong>抛出一个特殊异常 <code>GraphInterrupt</code></strong>。Pregel 捕获它 → 停止本超步、把 interrupt 的 value 存进检查点、invoke 返回一个含 <code>__interrupt__</code> 的结果。</p>
+                <div class="baby"><span class="t">"抛异常来暂停"——巧妙的实现</span>
+                怎么让一个普通函数"跑到一半停住、以后还能从原地继续"？Python 没有原生的可保存续体。<strong>LangGraph 的办法：interrupt() 抛一个特殊异常，把执行"弹"回引擎，引擎顺势存检查点。人回答后重跑这个节点——但这次 interrupt() 不抛异常，而是返回人给的值。</strong>因为节点函数是<strong>纯的、可重放的</strong>（相同输入相同结果），从头重跑到 interrupt 处、跳过前面已知的部分，效果就等价于"从暂停处继续"。<strong>这也是为什么 LangGraph 要求节点无副作用或副作用幂等——它可能被重放。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Command(resume=...)</h1></div>
+            <div class="card">
+                <p>人给出答案后，用 <code>Command(resume=值)</code> 作为 invoke 的输入恢复执行：</p>
+<pre><code class="language-python">from langgraph.types import Command
+
+# 第一次：跑到 interrupt 停下
+result = graph.invoke({...}, cfg)
+print(result["__interrupt__"])   # [{"question": "批准转账...", ...}]
+
+# 人决定后：把答案通过 Command(resume=...) 送回去
+graph.invoke(Command(resume="yes"), cfg)   # interrupt() 这次返回 "yes"</code></pre>
+                <div class="anno">读法：<b><code>Command(resume=x)</code> 告诉引擎"上次暂停的 interrupt，人给的答案是 x"。</b>重跑到那个 interrupt 时，它就返回 x。<code>Command</code> 还能带 <code>update</code>（改状态）、<code>goto</code>（跳节点）——是个统一的"控制指令"对象。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>恢复重放</h1></div>
+            <div class="card">
+                <p>恢复时（Day 11 恢复过程）：加载检查点 → 重跑被中断的节点 → 引擎把 <code>Command.resume</code> 的值喂给 <code>interrupt()</code> 让它返回 → 节点从暂停点"逻辑上继续"跑完 → 正常进入下一超步。</p>
+                <div class="anno">读法：<b>恢复 = 重放（replay）。一个节点里若有多个 interrupt，引擎按索引依次匹配 resume 值。</b>关键前提：<strong>interrupt 之前的代码会被重新执行一遍</strong>——所以别在 interrupt 前做"发邮件"这种不可重复的副作用（要放到 interrupt 之后，或确保幂等）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>完整例子</h1></div>
+            <div class="card">
+<pre><code class="language-python">from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import interrupt, Command
+
+def ask_human(state):
+    name = interrupt("你叫什么名字？")     # 暂停问人
+    return {"messages": [f"你好，{name}！"]}
+
+g = StateGraph(State).add_node("ask", ask_human)
+g.add_edge(START, "ask").add_edge("ask", END)
+app = g.compile(checkpointer=InMemorySaver())   # ★ 人在环必须有 checkpointer
+
+cfg = {"configurable": {"thread_id": "1"}}
+app.invoke({"messages": []}, cfg)          # → 暂停，抛出 "你叫什么名字？"
+app.invoke(Command(resume="小明"), cfg)     # → interrupt 返回 "小明"，输出 "你好，小明！"</code></pre>
+                <div class="anno">读法：<b>人在环<strong>必须</strong>配 checkpointer——因为暂停要靠检查点保存状态。没有它 interrupt 无处可存、无法恢复。</b>这把第 3 周三个主题串起来了：检查点（存）→ 时间旅行（读任意存档）→ 人在环（在存档点等人）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>四种常见模式</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Approve/Reject（审批）</strong>：interrupt 抛出待办操作，人回 yes/no。</li>
+                    <li><strong>Edit State（编辑）</strong>：人审查后用 <code>Command(update=...)</code> 修改状态再继续。</li>
+                    <li><strong>Provide Input（补充信息）</strong>：AI 缺信息时 interrupt 向人要（如上例问名字）。</li>
+                    <li><strong>Review Tool Call（工具审查）</strong>：LLM 想调危险工具，interrupt 让人先审工具参数。</li>
+                </ul>
+                <div class="anno">读法：<b>四种模式底层是同一个 interrupt + Command 机制，只是 value 内容和 resume 用法不同。</b>官方文档把它们列为标准 HITL 范式——你现在知道它们全是同一套检查点能力的应用。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>interrupt() 怎么用？它的返回值来自哪？</li>
+                    <li>暂停的底层实现是什么？（抛 GraphInterrupt + 重放）</li>
+                    <li>为什么 interrupt 之前不能放不可重复的副作用？</li>
+                    <li>Command(resume=...) 干什么？还能带什么？</li>
+                    <li>为什么人在环必须有 checkpointer？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph
+grep -n 'def interrupt\|class Command\|class GraphInterrupt' $P/types.py $P/errors.py 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>序列化与内存</strong>——检查点要存进数据库，怎么把 messages、自定义对象序列化？读 SerializerProtocol / JsonPlusSerializer，以及跨会话的长期记忆 Store。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 时间旅行</a>
+                <a href="langgraph-day15.html" style="color:var(--accent-green);">Day 15 · 序列化与内存 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

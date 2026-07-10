@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 时间旅行与断点 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">时间旅行与断点 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 时间旅行</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 定位历史点</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 从历史点重跑</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · update_state 改写</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · fork 分叉</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 断点 interrupt_before</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 断点恢复</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 Saver</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 人在环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 持久化与人在环</span>
+            <h1 class="part-title">时间旅行与断点</h1>
+            <p class="part-desc">既然每步都存了检查点、还能 list 出历史（Day 12），那就能"读档到任意一步重新出发"。今天看时间旅行（time travel）和执行断点（breakpoint）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>时间旅行是什么</h1></div>
+            <div class="card">
+                <p>时间旅行 = <strong>回到某个历史检查点，从那里重新执行</strong>（可选：改一下状态再重跑）。用途：调试、"如果当时选另一条路会怎样"、从错误决策点纠偏。</p>
+                <div class="baby"><span class="t">游戏读档 + 改档重打</span>
+                Day 11 说检查点像游戏存档。<strong>时间旅行就是"读取第 3 关的存档，重新从第 3 关打"——不是从头，也不是接着最新进度。</strong>更强的是：读档后你还能<strong>修改存档里的数据</strong>（比如给自己加满血）再重打（改写状态）。对 Agent 来说：LLM 在第 3 步做了个糟糕决策 → 回到第 3 步、手动改掉那个决策 → 让它从这里重新往下跑。<strong>这在传统"一次性跑完"的程序里根本做不到，是 LangGraph 检查点机制的独特红利。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>定位历史点</h1></div>
+            <div class="card">
+                <p>用 Day 12 的 <code>get_state_history</code> 列出所有历史检查点，每个 <code>StateSnapshot</code> 的 <code>config</code> 里带一个 <code>checkpoint_id</code>——这就是"存档编号"：</p>
+<pre><code class="language-python">history = list(graph.get_state_history(cfg))   # 新→旧
+target = history[3]        # 想回到的那一步
+target_cfg = target.config # {"configurable": {"thread_id":..., "checkpoint_id":"xxx"}}</code></pre>
+                <div class="anno">读法：<b>每个历史检查点都有唯一 <code>checkpoint_id</code>；带着它的 config 就是"指向那一步的地址"。</b>Day 11 说过 checkpoint_id 单调递增可排序，所以历史是有序时间线。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>从历史点重跑</h1></div>
+            <div class="card">
+                <p>把带 <code>checkpoint_id</code> 的 config 传给 invoke，图就从那一步的状态继续（而不是从最新）：</p>
+<pre><code class="language-python">graph.invoke(None, target_cfg)   # input=None：不给新输入，纯从该检查点续跑</code></pre>
+                <div class="anno">读法：<b>invoke 时 config 带了 checkpoint_id → 恢复阶段（Day 11 L07）加载的是<strong>那一个</strong>检查点而非最新 → 从那步的下一步开始跑。</b>input 传 None 表示"不加新输入，就从存档点继续"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>update_state 改写状态</h1></div>
+            <div class="card">
+                <p><code>update_state</code>（<code>main.py</code>）在恢复前手动修改状态——本质是<strong>写一个 source="update" 的新检查点</strong>（Day 11 metadata）：</p>
+<pre><code class="language-python">graph.update_state(target_cfg, {"messages": [AIMessage("改后的决策")]})
+# 走的是 reducer！所以 add_messages 是追加，不是覆盖（Day 03）
+graph.invoke(None, new_cfg)   # 从改写后的状态继续</code></pre>
+                <div class="baby"><span class="t">改写也走 reducer（重要细节）</span>
+                <code>update_state</code> 提供的更新<strong>不是简单粗暴地覆盖</strong>，而是像节点返回值一样<strong>经过 apply_writes → reducer 合并</strong>（Day 08）。所以对 messages（用 add_messages）来说，update_state 是<strong>追加</strong>一条，不是替换整个历史。<strong>要理解这点才不会踩坑：想替换就得用支持覆盖的 reducer 或专门手段。</strong>这保证了手动改写和正常执行的语义一致。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>fork 分叉</h1></div>
+            <div class="card">
+                <p>从历史检查点 update_state 会产生一个<strong>新分支</strong>：原时间线保留，新检查点的 <code>parents</code> 指向那个历史点。于是同一 thread 下可以有多条"平行宇宙"。</p>
+                <div class="anno">读法：<b>时间旅行不销毁历史——从旧点出发会 fork 出新分支（Day 11 的 parents 链记录父子关系）。</b>可以对比"原路线"和"改写后路线"的不同结果。适合 A/B 探索、Agent 决策对比。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>断点 interrupt_before / after</h1></div>
+            <div class="card">
+                <p>编译时可设静态断点，让图在某节点<strong>前/后暂停</strong>（Day 08 tick 里的 interrupt 检查）：</p>
+<pre><code class="language-python">graph = builder.compile(
+    checkpointer=InMemorySaver(),
+    interrupt_before=["tools"],   # 执行 tools 节点前暂停
+)
+graph.invoke(input, cfg)   # 跑到 tools 前停下、返回；状态已存检查点</code></pre>
+                <div class="baby"><span class="t">断点 = 让程序在指定地方"停下等你"</span>
+                和调试器打断点一个意思：<strong>图跑到 tools 节点前会自动暂停、把控制权交还给你</strong>（invoke 返回，此刻状态已存进检查点）。你可以检查状态、审批、甚至 update_state 改点东西，再让它继续。<strong>最经典的用途：工具调用前让人类审批（"AI 要执行删库操作，批准吗？"）。</strong>断点靠的还是检查点机制——能停能存能续，全是一套东西。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>断点恢复</h1></div>
+            <div class="card">
+                <p>暂停后，再次 <code>invoke(None, cfg)</code> 即从断点继续（可先 update_state 改状态）：</p>
+<pre><code class="language-python">state = graph.get_state(cfg)          # 看看停在哪、state.next 是啥
+# ...（人类审批 / 修改）...
+graph.invoke(None, cfg)               # 继续执行</code></pre>
+                <div class="anno">读法：<b>断点暂停 → 检查/干预 → invoke(None) 续跑，是"人在环"的静态版本。</b>Day 14 讲的 <code>interrupt()</code> 是更灵活的<strong>动态</strong>版本（在节点内部任意位置暂停并向人类要输入）。二者都建立在检查点之上。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>时间旅行是什么？靠什么实现？</li>
+                    <li>怎么定位到某个历史检查点？（checkpoint_id）</li>
+                    <li>update_state 为什么"走 reducer"很重要？</li>
+                    <li>从历史点改写会 fork 出什么？</li>
+                    <li>interrupt_before/after 怎么用？和 Day 14 的动态 interrupt 区别？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
+grep -n 'def get_state_history\|def update_state\|interrupt_before' $P/main.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>人在环（Human-in-the-loop）</strong>——动态 <code>interrupt()</code> 怎么在节点内部暂停、向人类要输入，<code>Command(resume=...)</code> 怎么把人的回答送回去继续。这是 Agent 落地最关键的能力之一。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 Saver</a>
+                <a href="langgraph-day14.html" style="color:var(--accent-green);">Day 14 · 人在环 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
