@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · Flow 装饰器 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#8b5cf6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">Flow 装饰器 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 装饰器只贴元数据</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · @start 入口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · @listen 监听</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · @router 分支</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · and_ / or_ 组合</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 懒加载接线</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · or_ 竞速</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 Flow</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 状态持久化 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
+            <h1 class="part-title">Flow 装饰器</h1>
+            <p class="part-desc">Flow 的"接线工具"。精读 @start / @listen / @router / and_ / or_——它们如何把普通方法连成事件驱动的图。核心洞察：装饰器只"贴元数据"，不含执行逻辑。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>装饰器只贴元数据（关键认知）</h1></div>
+            <div class="card">
+                <p>最重要的认知：<strong>这些装饰器不改变方法的运行时行为，只是在方法上盖一个"元数据章"</strong>。真正的"接线"发生在引擎启动时读取这些元数据。</p>
+                <p>每个装饰器把原函数包进一个 <code>FlowMethod</code> 子类（<code>flow_wrappers.py:48</code>）：<code>StartMethod</code>、<code>ListenMethod</code>、<code>RouterMethod</code>。它实现了描述符协议 <code>__get__</code>，所以包装后仍能像普通方法 <code>self.xxx()</code> 调用，同时携带 <code>__flow_method_definition__</code> 元数据。</p>
+                <div class="baby"><span class="t">"贴元数据"是什么意思？</span>
+                想象你在每个方法上贴一张便利贴：<code>@start</code> 贴"我是入口"、<code>@listen(A)</code> 贴"A 完成后叫我"、<code>@router</code> 贴"我会发射事件决定分支"。<strong>方法本身的代码没变，只是多了这些"说明标签"。</strong>Flow 引擎启动时把所有便利贴收集起来，画出"谁触发谁"的图，然后照图执行。<strong>装饰器 = 声明关系的便利贴，引擎 = 读便利贴干活的人。这种"声明 vs 执行分离"是 Flow 三段式架构的基础（Day 11）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>@start：入口点</h1></div>
+            <div class="card">
+<pre><code class="language-python"># dsl/_start.py:18
+def decorator(func):
+    wrapper = StartMethod(func)
+    _merge_flow_method_definition(wrapper, FlowMethodDefinition(
+        do=_method_action(func),
+        start=(条件 if condition else True),   # 无参 → start=True 无条件入口
+    ))
+    return wrapper</code></pre>
+                <div class="anno">读法：<b><code>@start()</code> 无参 → 该方法是"无条件入口"（Flow 一启动就跑它）。<code>@start("某事件")</code> → 满足某条件时才作为入口。</b>可以有多个 <code>@start</code>，它们会并行执行（Day 11）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>@listen：响应他人完成</h1></div>
+            <div class="card">
+<pre><code class="language-python"># dsl/_listen.py:18
+wrapper = ListenMethod(func)
+_merge_flow_method_definition(wrapper, FlowMethodDefinition(
+    do=_method_action(func),
+    listen=_to_definition_condition(condition),   # 监听的条件
+))</code></pre>
+                <div class="anno">读法：<b><code>@listen(condition)</code> 的 condition 可以是：方法名字符串、方法引用，或 <code>or_()/and_()</code> 的结果。</b><code>_to_definition_condition</code>（<code>dsl/_conditions.py:75</code>）把它归一化成 <code>str</code> 或 <code>{"or":[...]}</code>/<code>{"and":[...]}</code> 结构存进元数据。</div>
+                <div class="baby"><span class="t">监听单个 vs 监听组合</span>
+                <code>@listen(step_a)</code>：step_a 一完成就触发我。<code>@listen(and_(a, b))</code>：a 和 b <strong>都</strong>完成才触发我（等所有）。<code>@listen(or_(a, b))</code>：a 或 b <strong>任一</strong>完成就触发我（竞速）。这三种覆盖了工作流里"依赖前置步骤"的所有常见情况。<strong>用声明式的方式表达"我依赖谁"，比手写 if 判断清晰得多。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>@router：条件分支</h1></div>
+            <div class="card">
+                <p><code>@router</code>（<code>dsl/_router.py:97</code>）特殊在：它既 listen 触发，又把<strong>自己的返回值当成新的事件名</strong>发射出去，供下游 listen：</p>
+<pre><code class="language-python">@router(analyze)
+def decide(self, result):
+    if result.score > 0.8:
+        return "SUCCESS"      # ← 返回值变成事件名
+    return "RETRY"
+
+@listen("SUCCESS")           # 接住 router 发射的 "SUCCESS"
+def celebrate(self): ...
+@listen("RETRY")
+def try_again(self): ...</code></pre>
+                <div class="anno">读法：<b>router 根据逻辑返回不同字符串（如 "SUCCESS"/"RETRY"），这些字符串成为事件名，下游用 <code>@listen("SUCCESS")</code> 接住——实现分支。</b><code>emit</code> 列表（可能的返回值）可显式传，也可从返回类型注解 <code>Literal[...]</code> 或 Enum 自动推断。</div>
+                <div class="baby"><span class="t">router = 工作流的 if/else 岔路口</span>
+                普通 <code>@listen</code> 是"固定的边"（A 完成一定触发 B）。<code>@router</code> 是"<strong>运行时决定走哪条边</strong>"——看结果返回不同事件名，把流程导向不同分支。就像流程图里的菱形判断框。<strong>有了 router，Flow 就能表达"根据结果走不同路径"的复杂工作流。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>and_ / or_：组合触发条件</h1></div>
+            <div class="card">
+<pre><code class="language-python"># dsl/_conditions.py:22
+def or_(*triggers):  return _condition_tree(OR_CONDITION, triggers)   # 任一触发
+def and_(*triggers): return _condition_tree(AND_CONDITION, triggers)  # 全部触发
+# 生成 {"type":"OR"/"AND", "conditions":[...]} 的树，可嵌套</code></pre>
+                <div class="anno">读法：<b><code>or_</code>=任一前置完成即触发；<code>and_</code>=所有前置都完成才触发。</b>它们生成一棵条件树（可嵌套 <code>and_(a, or_(b, c))</code>），存进 listen 的元数据。</div>
+                <div class="baby"><span class="t">用汇聚场景理解</span>
+                <code>and_</code>：一个"汇总"步骤要等"研究"和"竞品分析"<strong>都完成</strong>才能开始（等齐所有输入）。<code>or_</code>：一个"通知"步骤只要"成功"或"失败"<strong>任一</strong>发生就触发（竞速，谁先来）。<strong>这两个组合子让 Flow 能表达并行分支的"汇聚"和"竞速"——真实工作流的常见形态。</strong>（呼应 eino Graph 的 AllPredecessor/AnyPredecessor 触发模式！同一个概念。）</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>懒加载接线</h1></div>
+            <div class="card">
+                <p>接线的时机很讲究：<strong>类定义时装饰器只贴元数据；首次访问 <code>Flow.flow_definition()</code> 时才扫描所有方法、构建成 <code>FlowDefinition</code></strong>（<code>runtime/__init__.py:469</code> → <code>build_flow_definition</code>）。</p>
+                <div class="baby"><span class="t">为什么"懒加载"（用到时才构建）？</span>
+                如果每次 import 这个 Flow 类都立刻解析所有装饰器、构建图，会拖慢导入速度（尤其你只是 import 但还没运行）。<strong>懒加载 = "第一次真要用（kickoff）时才构建图"，之后缓存。</strong>import 快、运行时才付出构建成本、且只付一次。<strong>"延迟到必要时才做重活"是常见的性能优化——和 crewAI 的 litellm 懒加载、很多框架的思路一致。</strong></div>
+                <div class="glossary">构建时 <code>_iter_flow_methods</code>（<code>dsl/_utils.py:385</code>）扫描类上所有带 <code>__flow_method_definition__</code> 的 wrapper，<code>_build_method_definition</code> 汇总成 <code>FlowDefinition</code>（Day 11 的"中间表示"）。这张纯数据的图，就是引擎执行的依据，也是能从 YAML 加载 Flow 的原因。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>or_ 竞速（进阶）</h1></div>
+            <div class="card">
+                <p><code>or_</code> 监听有个精细处理——<strong>竞速（racing）</strong>：多个事件都能触发同一个 <code>or_</code> 监听器时，只让<strong>最先到达</strong>的那个触发，其余取消（<code>_execute_racing_listeners</code>，<code>runtime/__init__.py:1116</code>）。</p>
+                <div class="baby"><span class="t">为什么要竞速？</span>
+                想象 <code>@listen(or_(success, failure))</code> 的"清理"步骤。如果 success 和 failure 都发生了（罕见但可能），你不希望清理跑<strong>两次</strong>。竞速保证"or_ 监听器只被最先到的事件触发一次"。<strong>这是并发编排里的细节——防止重复执行。</strong>条件判定 <code>_condition_met</code>（<code>:2860</code>）用一个"已见事件集合"<code>seen</code> 来跟踪：<code>and_</code> 等 seen 集齐所有、<code>or_</code> 见第一个就触发。</div>
+                <div class="glossary">回忆 Day 11 的 <code>max_method_calls</code> 防死循环——Flow 引擎处理了大量并发编排的边界情况（循环流、竞速、汇聚），这些是"事件驱动工作流引擎"的硬核部分。你不用手动处理这些，引擎替你兜住。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>装饰器"只贴元数据"是什么意思？为什么这样设计？</li>
+                    <li>@start / @listen / @router 各干什么？</li>
+                    <li>@router 怎么实现分支？（返回值变事件名）</li>
+                    <li>and_ / or_ 的语义？和 eino Graph 的触发模式像在哪？</li>
+                    <li>为什么"懒加载接线"？or_ 竞速防什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/flow
+sed -n '18,40p' $P/dsl/_start.py
+sed -n '18,40p' $P/dsl/_listen.py
+sed -n '86,130p' $P/dsl/_router.py
+sed -n '22,70p' $P/dsl/_conditions.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>Flow 状态管理与持久化</strong>——结构化 vs 非结构化 state、状态如何在步骤间共享、@persist 持久化（SQLite）、以及 @human_feedback 人在环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 Flow</a>
+                <a href="crewai-day13.html" style="color:var(--accent-green);">Day 13 · 状态与持久化 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

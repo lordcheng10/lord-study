@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · Flow 状态与持久化 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
+        .vs .c.a{border-color:#ef4444;background:rgba(239,68,68,.05)} .vs .c.b{border-color:#8b5cf6;background:rgba(139,92,246,.05)}
+        .vs .c h4{margin:0 0 6px;font-size:13px} .vs .c.a h4{color:#ef4444} .vs .c.b h4{color:#8b5cf6} .vs .c li{font-size:11.5px;color:var(--text-secondary);margin:4px 0}
+        @media(max-width:768px){.vs{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">Flow 状态与持久化 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 状态是共享字段</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 结构化 vs 非结构化</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 强制 id 字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 状态如何传递</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · @persist 持久化</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 恢复与检查点</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · @human_feedback</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 装饰器</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 工具 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
+            <h1 class="part-title">Flow 状态与持久化</h1>
+            <p class="part-desc">Flow 的各步骤如何共享数据、如何把进度存下来断点续跑、如何在关键步骤等人工反馈。今天收官 Flow 三部曲。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>状态是共享字段 self.state</h1></div>
+            <div class="card">
+                <p>Flow 的状态就是 <code>self.state</code>（<code>runtime/__init__.py:1659</code>）。所有步骤方法通过 <code>self.state</code> 读写<strong>同一个对象</strong>——状态在所有步骤间天然共享。</p>
+<pre><code class="language-python">class MyFlow(Flow):
+    @start()
+    def step1(self):
+        self.state["count"] = 1        # 写状态
+
+    @listen(step1)
+    def step2(self):
+        self.state["count"] += 1       # 读+写同一个状态（现在是 2）</code></pre>
+                <div class="baby"><span class="t">状态 = Flow 的"共享白板"</span>
+                想象 Flow 的各步骤围着一块白板工作：step1 在白板写"count=1"，step2 能看到并改成"count=2"。<strong><code>self.state</code> 就是这块所有步骤共享的白板。</strong>这和 eino Graph 的 State（Day 09）、OpenHands 的 Session 是同一个概念——跨步骤共享的可变状态。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>结构化 vs 非结构化 state</h1></div>
+            <div class="card">
+                <div class="vs">
+                    <div class="c a"><h4>非结构化（dict）</h4>
+                        <ul><li><code>Flow[dict]</code> 或不指定</li><li>状态是普通字典，随意加字段</li><li>灵活，但无类型检查、易打错字段名</li></ul>
+                    </div>
+                    <div class="c b"><h4>结构化（Pydantic）</h4>
+                        <ul><li><code>Flow[MyState]</code>，MyState 是 BaseModel</li><li>有类型校验、IDE 补全</li><li>规范、安全，推荐用于复杂 Flow</li></ul>
+                    </div>
+                </div>
+<pre><code class="language-python">class MyState(BaseModel):
+    count: int = 0
+    results: list[str] = []
+
+class MyFlow(Flow[MyState]):    # ★ 结构化状态
+    @start()
+    def step1(self):
+        self.state.count = 1     # 有类型、IDE 能补全、拼错字段会报错</code></pre>
+                <div class="baby"><span class="t">怎么选？和 Task 的结构化输出一个道理</span>
+                简单 Flow 用 dict（省事）；复杂 Flow 用 Pydantic 模型（<code>self.state.count</code> 有类型检查，拼错字段名 IDE 立刻飘红，比 dict 的 <code>self.state["cuont"]</code> 悄悄出 bug 强）。<strong>状态越复杂越该结构化——这和 Day 03 的 output_pydantic、Day 10 的 response_model 是同一哲学：能强类型就强类型。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>强制 id 字段</h1></div>
+            <div class="card">
+                <p>所有状态都强制带一个唯一 <code>id</code>。基类 <code>FlowState</code>（<code>runtime/__init__.py:360</code>）就是给结构化状态注入 id 用的；若你的 model 没继承 FlowState，引擎会动态合成 <code>class StateWithId(FlowState, 你的model)</code>（<code>:213</code>）。</p>
+                <div class="baby"><span class="t">为什么每个状态要有 id？</span>
+                因为持久化（L05）需要一个"钥匙"来标识"这是哪次 Flow 运行的状态"。<code>id</code> 就是这把钥匙——存状态时用它当 key，之后 <code>kickoff(inputs={"id": ...})</code> 就能按 id 加载回来（断点续跑）。<strong>没有唯一 id，就没法区分和恢复不同的运行。</strong>框架强制注入 id，让持久化和恢复成为可能。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>状态如何在步骤间传递</h1></div>
+            <div class="card">
+                <p>两种数据传递方式并存：</p>
+                <ul>
+                    <li><strong>共享状态</strong>：<code>self.state</code> 所有步骤都能读写（L01）——适合"贯穿整个 Flow 的数据"。</li>
+                    <li><strong>返回值传参</strong>：上游方法的返回值，作为参数传给下游监听器（<code>_execute_single_listener</code>，<code>runtime/__init__.py:2965</code>）——适合"直接的上下游数据"。</li>
+                </ul>
+<pre><code class="language-python"># :2965 —— 检查监听器方法有没有参数，有就把上游结果传入
+method_params = [p for p in sig.parameters.values() if p.name != "self"]
+if method_params:
+    result = await self._execute_method(listener_name, method, upstream_result)  # 传参
+else:
+    result = await self._execute_method(listener_name, method)                    # 不传</code></pre>
+                <div class="anno">读法：<b>引擎看下游方法的签名——有参数就把上游返回值传进去，没参数就不传。</b>所以你写 <code>def process(self, data)</code>，<code>data</code> 就是上游的返回值；写 <code>def process(self)</code> 就只靠 <code>self.state</code>。<strong>共享状态适合"全局数据"，返回值传参适合"直接的上下游数据"，两者按需混用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>@persist 持久化</h1></div>
+            <div class="card">
+                <p><code>@persist</code>（<code>persistence/decorators.py:147</code>）同样是"纯元数据盖章器"——不含逻辑，只标记"这个方法/这个类的状态要存盘"。真正落盘由引擎在方法完成后 <code>_persist_method_completion</code>（<code>runtime/__init__.py:2668</code>）驱动。默认后端是 SQLite。</p>
+<pre><code class="language-python">@persist   # 类级：所有方法完成后都存状态
+class MyFlow(Flow[MyState]):
+    @start()
+    def step1(self): ...   # 完成后自动把 state 存进 SQLite</code></pre>
+                <div class="baby"><span class="t">持久化解决什么？</span>
+                长 Flow 可能跑很久、中途可能崩溃或需要暂停（比如等人工反馈，L07）。<strong>@persist 把每步完成后的状态存盘</strong>——万一进程挂了、重启后能从存档恢复，不用从头重跑。取 <code>state.id</code> 当 key（L03 的 id 在这派上用场）。<strong>这和 OpenHands 的 CheckPoint、eino 的中断恢复是同一需求——让长任务能断点续跑。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>恢复与检查点</h1></div>
+            <div class="card">
+                <p>配套的恢复能力：</p>
+                <ul>
+                    <li><code>kickoff(inputs={"id": ...})</code>：按 id 加载已存状态继续（<code>runtime:2132</code>）。</li>
+                    <li><code>from_pending(id)</code>（<code>:1168</code>）：恢复"因等人工反馈而暂停"的 Flow。</li>
+                    <li><code>from_checkpoint</code> / <code>fork</code>（<code>:585</code>/<code>:635</code>）：从检查点恢复，或<strong>分叉</strong>出新分支。</li>
+                </ul>
+                <div class="baby"><span class="t">fork（分叉）是个有意思的能力</span>
+                <code>fork</code> = 从某个检查点<strong>复制一份</strong>状态，开出一条新的执行分支。用途：比如你想"从第 3 步的状态出发，试两种不同的后续方案"——fork 两份分别跑，对比结果。<strong>像 git 分支，但针对 Flow 的执行状态。</strong>注意：checkpoint 和 @persist 是两套独立系统，不能同用（<code>:1949</code> 会报错）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>@human_feedback：人在环</h1></div>
+            <div class="card">
+                <p><code>@human_feedback</code>（<code>dsl/_human_feedback.py:23</code>）标记某步需要人工反馈。引擎执行该方法后调 <code>_run_human_feedback_step</code>（<code>runtime:3197</code>）。反馈可异步：</p>
+<pre><code class="language-python"># 抛 HumanFeedbackPending 暂停 Flow、存 pending 状态、发 FlowPausedEvent
+# 之后：MyFlow.from_pending(id).resume(feedback) 继续（runtime:1254）</code></pre>
+                <div class="baby"><span class="t">又见 Human-in-the-loop（Day 09 也提过）</span>
+                某些步骤需要人拍板——比如"生成了营销文案，等人审核批准才发布"。<code>@human_feedback</code> 让 Flow 在这一步<strong>暂停、存现场、等人反馈、再从断点继续</strong>。这和 OpenHands 的 confirmation mode、eino 的 Interrupt/Resume 完全同构。<strong>"能自主行动的 AI 系统，必须能在关键点停下等人"——本系列第 N 次强调，因为它是敢部署 AI 的底线。</strong>若配了多个可能结局（emit），该步会被规范化成 router，用人类反馈经 LLM"坍缩"成一个结局标签来路由。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Flow 状态是什么？"共享白板"怎么理解？</li>
+                    <li>结构化 vs 非结构化 state 怎么选？</li>
+                    <li>为什么每个状态强制带 id？</li>
+                    <li>状态的两种传递方式？</li>
+                    <li>@persist 解决什么？@human_feedback 和别的框架哪里像？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/flow
+grep -n 'def state\|class FlowState\|_create_initial_state' $P/runtime/__init__.py | head
+sed -n '147,175p' $P/persistence/decorators.py    # @persist
+sed -n '23,60p' $P/dsl/_human_feedback.py         # @human_feedback</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：离开 Flow，进入<strong>工具体系</strong>——BaseTool、@tool 装饰器、工具参数 schema 怎么自动从函数签名生成、工具如何被 Agent 调用（原生 function-calling vs 文本解析两条路）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 装饰器</a>
+                <a href="crewai-day14.html" style="color:var(--accent-green);">Day 14 · 工具体系 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
