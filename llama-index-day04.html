@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 切块 NodeParser — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#a855f7,#f472b6);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">切块 NodeParser · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要切块</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · NodeParser 家族</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · SentenceSplitter</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · chunk_size / overlap</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 按边界切</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 切完设关系</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 其他 splitter</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day05.html" class="nav-link" style="color:#a855f7;">Day 05 Ingestion &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 RAG 全景与数据摄入</span>
+            <h1 class="part-title">切块 NodeParser</h1>
+            <p class="part-desc">Document 太大不能直接用——要切成小块（Node）。切块质量直接决定检索质量，是 RAG 里最影响效果的一环。今天精读 <code>SentenceSplitter</code>：怎么按 chunk_size 切、为什么要 overlap、为什么按句子边界。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要切块</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">切块是 RAG 效果的关键</span>
+                <strong>为什么不能整篇文档直接用？① 大模型上下文有限——塞不下整本书。② 检索精度——用户问"退款政策"，检索应返回"退款那一段",而不是整份 100 页的手册。③ 嵌入质量——一小段主题集中的文本，向量更能代表其语义；一整篇混杂多主题的，向量"糊"了。</strong>所以要把 Document 切成"大小合适、主题集中"的 Node。<strong>切得太大→检索不精准、塞不下；切得太小→丢失上下文、语义不完整。切块策略是 RAG 调优的重点。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>NodeParser 家族</h1></div>
+            <div class="card">
+                <p><code>node_parser/</code>：<code>interface.py</code>（基类 NodeParser/TextSplitter）+ <code>text/</code>（各种文本切分器）+ <code>relational/</code>（层级切分）+ <code>file/</code>（按文件结构，如 Markdown/HTML/JSON）。<code>text/</code> 下有：<code>sentence.py</code>、<code>token.py</code>、<code>sentence_window.py</code>、<code>semantic_splitter.py</code>、<code>code.py</code>。</p>
+                <div class="anno">读法：<b>切分器都继承 <code>TransformComponent</code>（<code>schema.py:191</code>）——统一的"转换"接口（输入 Node 列表、输出 Node 列表）。<strong>这让切块能像流水线一样和其他转换（Day 05 的 ingestion）串起来。</strong>最常用的是 <code>SentenceSplitter</code>（默认）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>SentenceSplitter</h1></div>
+            <div class="card">
+                <p><code>node_parser/text/sentence.py:34</code>：</p>
+<pre><code class="language-python">class SentenceSplitter(MetadataAwareTextSplitter):
+    chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE)      # 默认 1024（token）
+    chunk_overlap: int = Field(default=SENTENCE_CHUNK_OVERLAP) # 默认 200
+    def __init__(self, chunk_size=1024, chunk_overlap=200, ...):
+        if chunk_overlap > chunk_size:
+            raise ValueError("overlap 不能大于 chunk_size")   # :83 校验</code></pre>
+                <div class="baby"><span class="t">默认切分器，兼顾大小和句子完整</span>
+                <strong>SentenceSplitter 的目标：每块尽量接近 chunk_size（默认 1024 token），但<strong>尽量在句子边界切</strong>（不把一句话拦腰砍断）。</strong>它是"MetadataAware"的——切分时会考虑 metadata 占用的空间（回想 Day 02：metadata 会拼进文本给 LLM/嵌入），确保"文本 + metadata"不超 chunk_size。<strong>这比"每 1024 字符硬切"聪明得多——硬切会把句子切碎，语义受损。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>chunk_size / overlap</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">两个最关键的调优参数</span>
+                <strong>chunk_size（块大小）：每块多大。太大→检索不精准、塞不下；太小→上下文不足。默认 1024 token 是通用折中，实际按你的文档调（技术文档可小些、叙述性文本可大些）。<br>chunk_overlap（重叠）：相邻块重叠多少。默认 200 token。</strong>为什么要重叠？<strong>因为切块可能把"一个完整意思"切在两块边界上。让相邻块重叠一部分，保证边界处的信息不丢——即使答案跨块，至少有一块包含完整上下文。</strong>好比裁纸时每页留点重叠，接缝处的字不会丢。<strong>overlap 太大浪费存储、太小丢上下文——200 是常用值。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>按边界切（层层降级）</h1></div>
+            <div class="card">
+                <p>SentenceSplitter 用一组分隔符按优先级切：先按段落（<code>\n\n</code>）、再按句子（<code>. ! ?</code> 等）、再按单词、最后按字符。</p>
+                <div class="baby"><span class="t">"尽量在自然边界切"的层层降级</span>
+                <strong>理想是每块正好一个完整意思。SentenceSplitter 先试着按段落分——如果段落太长超过 chunk_size，就在段落内按句子分；句子还太长（罕见）就按词、按字符。</strong>层层降级，尽量在"越自然的边界"切。<strong>这样每个 Node 都是"完整的句子/段落集合",语义完整、检索准。</strong>底层用 tokenizer 数 token（因为大模型按 token 计费和限长，不是字符）。<code>semantic_splitter</code>（更高级）甚至用嵌入相似度找"语义断点"来切。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>切完设关系</h1></div>
+            <div class="card">
+                <p>切分后，<code>node_parser/node_utils.py</code> 的 <code>build_nodes_from_splits</code> 给每个新 Node 设置 metadata 和关系（Day 02）：SOURCE 指向原 Document、PREV/NEXT 串起同文档的块顺序、记录 start/end_char_idx。</p>
+                <div class="anno">读法：<b>回收 Day 02 的关系——切块时自动建立 SOURCE/PREV/NEXT。<strong>这样检索到某块时，能追溯原文档（SOURCE）、取相邻块补充上下文（PREV/NEXT）。</strong>切块不只是"切碎",还要"记住每块从哪来、和谁相邻"——这些关系是后续高级检索（sentence-window、auto-merging）的基础。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>其他 splitter</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>TokenTextSplitter</strong>（<code>token.py</code>）：纯按 token 数切（不管句子边界，最简单）。</li>
+                    <li><strong>SentenceWindowNodeParser</strong>（<code>sentence_window.py</code>）：每句一个 Node，但 metadata 存"前后几句窗口"——检索命中一句、给 LLM 时带上窗口。</li>
+                    <li><strong>SemanticSplitter</strong>（<code>semantic_splitter.py</code>）：用嵌入相似度找语义断点切（相邻句子语义突变处切）。</li>
+                    <li><strong>CodeSplitter</strong>（<code>code.py</code>）：按代码结构（函数/类）切。</li>
+                    <li><strong>HierarchicalNodeParser</strong>（<code>relational/</code>）：切成多层级（大块+小块，配 auto-merging 检索）。</li>
+                </ul>
+                <div class="baby"><span class="t">切块策略要按数据类型选</span>
+                <strong>普通文本用 SentenceSplitter；想"精准命中 + 丰富上下文"用 SentenceWindow；追求语义完整用 Semantic；切代码用 CodeSplitter；要层级检索用 Hierarchical。</strong>没有万能切法——<strong>切块策略是 RAG 调优最该实验的地方。</strong>它们都是 TransformComponent，可插进 ingestion 管道（明天）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要切块？切太大/太小分别有什么问题？</li>
+                    <li>chunk_size 和 chunk_overlap 各控制什么？overlap 为什么必要？</li>
+                    <li>SentenceSplitter 为什么"层层降级"按边界切？</li>
+                    <li>切完为什么要设 SOURCE/PREV/NEXT 关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '34,100p' node_parser/text/sentence.py
+ls node_parser/text/
+grep -n "build_nodes_from_splits\|NodeRelationship" node_parser/node_utils.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：<strong>摄入管道 Ingestion</strong>——把"读→切→嵌"串成一条可复用、可缓存的流水线。精读 <code>IngestionPipeline</code>：transformations 链、缓存机制（避免重复处理）、文档去重更新。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day03.html" style="color:var(--accent-cyan);">&larr; Day 03</a>
+                <a href="llama-index-day05.html" style="color:#a855f7;">Day 05 · Ingestion &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

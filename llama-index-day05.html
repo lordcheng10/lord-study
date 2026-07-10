@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 摄入管道 Ingestion — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .pipe{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .pipe .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;font-size:12px;text-align:center}
+        .pipe .n b{display:block;color:#a855f7}
+        .pipe .a{color:#f472b6;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#a855f7,#f472b6);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">摄入管道 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要管道</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · TransformComponent</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · run_transformations</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · IngestionPipeline</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 缓存机制</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 文档去重更新</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 直接存进向量库</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day06.html" class="nav-link" style="color:#f472b6;">Day 06 嵌入 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周 RAG 全景与数据摄入</span>
+            <h1 class="part-title">摄入管道 Ingestion</h1>
+            <p class="part-desc">第 1 周收官。前几天的"读→切→嵌"其实可以串成一条可复用、可缓存的流水线——<code>IngestionPipeline</code>。今天看它怎么把一串 transformation 串起来、怎么缓存避免重复处理、怎么增量更新文档。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要管道</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">把重复的处理步骤"打包"</span>
+                <strong>每次建库都要"切块 → 抽取元数据 → 嵌入"这几步。与其每次手写，不如定义一条"管道"（Pipeline）——列好要做哪些转换，一键跑完。</strong>更重要的是<strong>缓存</strong>：如果 1000 个文档里只改了 1 个，重新跑管道时，没变的 999 个直接用缓存（不重新切块/嵌入，省时省钱——嵌入是要花钱调 API 的！）。<strong>IngestionPipeline 把摄入流程工程化：可复用、可缓存、可增量。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>TransformComponent</h1></div>
+            <div class="card">
+                <p><code>schema.py:191</code> 的 <code>TransformComponent</code>——一切"转换"的统一接口：输入一批 Node、输出一批 Node。</p>
+<pre><code class="language-python">class TransformComponent(BaseComponent, DispatcherSpanMixin):
+    def __call__(self, nodes: List[BaseNode], **kwargs) -> List[BaseNode]: ...</code></pre>
+                <div class="baby"><span class="t">"转换"是可组合的乐高块</span>
+                <strong>切块器（SentenceSplitter）、元数据抽取器（TitleExtractor 等）、嵌入模型——它们都是 TransformComponent！都是"输入 Node 列表 → 输出 Node 列表"。</strong>因为接口统一，就能像乐高一样任意串联成管道。<strong>回想 APISIX/wasm-go 的"统一接口、可组合"——LlamaIndex 用 TransformComponent 实现同样的可组合性。切块、抽元数据、嵌入都是转换，串起来就是摄入流程。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>run_transformations</h1></div>
+            <div class="card">
+                <p><code>ingestion/pipeline.py:72-113</code> 的 <code>run_transformations</code>：</p>
+<pre><code class="language-python">def run_transformations(nodes, transformations, ...):
+    for transform in transformations:      # 依次应用每个转换
+        nodes = transform(nodes, **kwargs)  # 上一个的输出 = 下一个的输入
+    return nodes</code></pre>
+                <div class="pipe">
+                    <span class="n"><b>Documents</b>原始</span><span class="a">→</span>
+                    <span class="n"><b>SentenceSplitter</b>切块</span><span class="a">→</span>
+                    <span class="n"><b>Extractor</b>抽元数据</span><span class="a">→</span>
+                    <span class="n"><b>Embedding</b>向量化</span><span class="a">→</span>
+                    <span class="n"><b>Nodes</b>就绪</span>
+                </div>
+                <div class="anno">读法：<b>就是一个 for 循环——依次跑每个转换，前一个的输出喂给后一个。<strong>极简的"流水线"实现，因为每个转换接口统一（TransformComponent）。</strong>有 <code>arun_transformations</code>（<code>:115</code>）异步版（嵌入调 API 时并发加速）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>IngestionPipeline</h1></div>
+            <div class="card">
+<pre><code class="language-python">from llama_index.core.ingestion import IngestionPipeline
+pipeline = IngestionPipeline(transformations=[
+    SentenceSplitter(chunk_size=512),      # 切块（Day 04）
+    TitleExtractor(),                       # 抽标题当 metadata
+    OpenAIEmbedding(),                      # 嵌入（Day 06）
+])
+nodes = pipeline.run(documents=documents)   # 一键跑完，得到就绪的 Node</code></pre>
+                <div class="anno">读法：<b><code>IngestionPipeline</code> 把 transformations 列表 + 缓存 + 向量库封装在一起。<code>run</code> 就是调 <code>run_transformations</code> + 缓存逻辑。<strong>Day 01 的 <code>VectorStoreIndex.from_documents</code> 内部就在做类似的摄入。</strong>显式用 Pipeline 让你能精细控制每一步 + 复用缓存。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>缓存机制</h1></div>
+            <div class="card">
+                <p>IngestionPipeline 有个 <code>IngestionCache</code>：对每个转换，用"输入 Node 的 hash + 转换的配置"当缓存键，存转换结果。</p>
+                <div class="baby"><span class="t">缓存键 = 内容 hash + 转换配置（又见版本化缓存）</span>
+                <strong>再次跑管道时，某个 Node 经过某个转换前，先算"这个 Node + 这个转换"的 hash，查缓存——命中就直接用结果，不重跑。</strong>所以只改了 1 个文档，其余文档的切块/嵌入结果全从缓存拿——嵌入 API 调用大幅减少（省钱！）。<strong>回想 APISIX 的 conf_version 缓存、wasm-go 的规则备份——"用内容 hash 做缓存键"是通用手法。</strong>Node 的 <code>hash</code> 字段（Day 02，基于内容计算）正是为此。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>文档去重更新</h1></div>
+            <div class="card">
+                <p>IngestionPipeline 配 <code>docstore</code> 后支持 <code>docstore_strategy</code>（如 UPSERTS）——按 Document 的 <code>id_</code> + hash 判断"这个文档是新的/改了/没变"，只处理变化的。</p>
+                <div class="baby"><span class="t">增量更新：只处理变化的文档</span>
+                <strong>知识库不是一次性建好就不动——文档会新增/修改/删除。每次全量重建太浪费。UPSERTS 策略：对比 docstore 里已有的文档 hash，新文档 → 处理并入库；改过的（hash 变了）→ 重新处理并更新；没变的 → 跳过。</strong>这样维护知识库很高效。<strong>回想 Day 03 的 <code>filename_as_id</code>——用稳定 id 才能正确判断"是不是同一个文档"。</strong>去重更新是生产级 RAG 的必备。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>直接存进向量库</h1></div>
+            <div class="card">
+                <p>IngestionPipeline 可传 <code>vector_store</code>（Day 09）——跑完管道后，嵌入好的 Node 直接写进向量库，不用再手动建索引。</p>
+                <div class="anno">读法：<b>这让 Pipeline 成为"从原始文档到向量库"的完整摄入方案：<strong>run 一次 = 读好的 Documents 经切块+嵌入，直接进向量库，随时可检索。</strong>Day 07 的 VectorStoreIndex 也能这么用。<strong>第 1 周到此形成闭环：Reader（Day 03）→ NodeParser（Day 04）→ Pipeline 串起来 + Embedding + 存向量库——RAG 的"离线建库"阶段完整了。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 1 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周你应该能回答</h3>
+                <ul>
+                    <li>为什么需要摄入管道？它解决"重复处理"和"增量更新"什么问题？</li>
+                    <li>TransformComponent 为什么能让切块/嵌入/抽元数据可组合？</li>
+                    <li>缓存怎么用内容 hash 做键？为什么能省嵌入 API 钱？</li>
+                    <li>UPSERTS 怎么实现增量更新？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '72,140p' ingestion/pipeline.py
+grep -n "class IngestionPipeline\|class IngestionCache\|docstore_strategy\|def run" ingestion/pipeline.py | head
+sed -n '191,207p' schema.py     # TransformComponent</code></pre>
+                <div class="tip"><strong>下周预告 · 第 2 周</strong>：<strong>索引/嵌入/存储</strong>——嵌入怎么把文本变向量、VectorStoreIndex 怎么建、StorageContext 的三件套（docstore/index_store/vector_store）、向量库怎么做相似度检索。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day04.html" style="color:var(--accent-cyan);">&larr; Day 04</a>
+                <a href="llama-index-day06.html" style="color:#f472b6;">Day 06 · 嵌入 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

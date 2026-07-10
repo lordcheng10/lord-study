@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 核心数据结构 Node — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#a855f7,#f472b6);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">核心数据结构 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一切皆 Node</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseNode 字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · metadata 三种视图</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · TextNode</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Document</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Node 之间的关系</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · NodeWithScore</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day03.html" class="nav-link" style="color:#a855f7;">Day 03 Reader &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 RAG 全景与数据摄入</span>
+            <h1 class="part-title">核心数据结构 Node</h1>
+            <p class="part-desc">LlamaIndex 里流动的一切数据都是 Document/Node。今天精读 <code>schema.py</code>——BaseNode/TextNode/Document 的字段、metadata 的巧妙设计、以及 Node 之间的"关系"。这是全框架的数据基石。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一切皆 Node</h1></div>
+            <div class="card">
+                <p><code>schema.py</code> 定义了继承链：<code>BaseComponent</code>（<code>:81</code>）→ <code>BaseNode</code>（<code>:264</code>）→ <code>Node</code>（<code>:638</code>）/<code>TextNode</code>（<code>:765</code>）→ <code>ImageNode</code>/<code>IndexNode</code>/<code>Document</code>（<code>:1097</code>）。</p>
+                <div class="baby"><span class="t">Document 和 Node 的关系</span>
+                <strong>Document = 一份完整的原始文档（一个 PDF、一个网页）。Node = 从 Document 切出来的一小块（一段话）。</strong>有趣的是 <code>Document</code> 其实继承自 <code>Node</code>（<code>:1097</code> <code>class Document(Node)</code>）——它就是"一个特殊的大 Node"。<strong>整个 RAG 流程就是"Document → 切成一堆 Node → Node 向量化存储 → 检索出 Node → 喂给 LLM"。所以理解 Node 就是理解数据怎么流动。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseNode 字段</h1></div>
+            <div class="card">
+                <p><code>schema.py:264-302</code>：</p>
+<pre><code class="language-python">class BaseNode(BaseComponent):
+    id_: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 唯一 ID
+    embedding: Optional[List[float]] = None      # 向量（嵌入后填充）
+    metadata: Dict[str, Any] = Field(default_factory=dict, alias="extra_info")  # 元数据
+    excluded_embed_metadata_keys: List[str] = []  # 嵌入时排除的元数据键
+    excluded_llm_metadata_keys: List[str] = []     # 给 LLM 时排除的元数据键
+    relationships: Dict[NodeRelationship, RelatedNodeType] = {}  # 与其他 Node 的关系</code></pre>
+                <div class="anno">读法：<b>核心四样：<code>id_</code>（唯一标识）、<code>embedding</code>（向量，Day 06 填）、<code>metadata</code>（元数据，如来源文件名/页码）、<code>relationships</code>（Node 间关系，L06）。<strong>用 Pydantic（BaseModel）定义——类型安全、能序列化存储。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>metadata 三种视图（精妙）</h1></div>
+            <div class="card">
+                <p>那两个 <code>excluded_*_metadata_keys</code> 和 <code>MetadataMode</code>（<code>schema.py:242</code>：ALL/EMBED/LLM/NONE）配合，实现"同一份 metadata、不同场景看到不同内容"：</p>
+<pre><code class="language-python">class MetadataMode(str, Enum):
+    ALL = "all"; EMBED = "embed"; LLM = "llm"; NONE = "none"
+# node.get_content(metadata_mode=MetadataMode.EMBED)  → 嵌入时看到的文本（含部分 metadata）
+# node.get_content(metadata_mode=MetadataMode.LLM)    → 给 LLM 时看到的文本</code></pre>
+                <div class="baby"><span class="t">为什么 metadata 要分场景？</span>
+                <strong>一个 Node 的 metadata 里有很多字段（文件名、页码、创建时间、URL…）。但不同场景需要的不一样：<strong>嵌入（算向量）时</strong>可能只想带"标题"（帮助语义匹配），不想带"创建时间"（干扰）；<strong>给 LLM</strong> 时想带"文件名"（好溯源），不想带内部 ID。</strong>所以用 <code>excluded_embed_metadata_keys</code>/<code>excluded_llm_metadata_keys</code> 分别排除。<strong><code>get_content(metadata_mode=...)</code> 按场景生成"该看到的文本"——同一个 Node，嵌入模型、LLM、纯文本各看到不同版本。</strong>这是 LlamaIndex 对 metadata 的精细控制，直接影响检索质量。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>TextNode</h1></div>
+            <div class="card">
+                <p><code>schema.py:765-800</code>：最常用的 Node 类型，装文本：</p>
+<pre><code class="language-python">class TextNode(BaseNode):
+    text: str = ""                          # 文本内容
+    mimetype: str = "text/plain"
+    start_char_idx / end_char_idx           # 在原文档里的字符位置（切块后记录）
+    text_template: str = DEFAULT_TEXT_NODE_TMPL  # {metadata_str} + {content} 模板</code></pre>
+                <div class="baby"><span class="t">start/end_char_idx 有什么用？</span>
+                <strong>切块时记录"这块文本来自原文档的第几到第几个字符"。这样检索到某个 Node 后，能精确定位它在原文的位置——用于溯源、高亮、或取上下文。</strong><code>text_template</code> 定义"文本怎么和 metadata 拼在一起"（给 LLM 看的格式）。<strong>注意新版把内容存进 <code>text_resource</code>（MediaResource），TextNode 保留 <code>text</code> 属性做兼容（<code>:768-776</code>）——支持多模态（文本/图片/音频）的演进。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Document</h1></div>
+            <div class="card">
+                <p><code>schema.py:1097</code> <code>class Document(Node)</code>——一份原始文档。构造函数（<code>:1104+</code>）做了大量向后兼容：<code>doc_id</code>→<code>id_</code>、<code>extra_info</code>→<code>metadata</code>、<code>text</code>→<code>text_resource</code>。</p>
+                <div class="baby"><span class="t">为什么这么多兼容代码？</span>
+                <strong>LlamaIndex 迭代很快，早期用 <code>doc_id</code>/<code>extra_info</code>/<code>text</code>，新版改成 <code>id_</code>/<code>metadata</code>/<code>text_resource</code>（支持多模态）。但不能破坏老用户的代码——所以构造函数里"如果你传老字段名，自动转成新的 + 警告"。</strong>这是成熟框架的向后兼容责任（回想 wasm-go 的新旧 API、APISIX 的 v3_adapter）。<strong>Document 就是"你用 Reader 读进来的东西",接下来要被切成 Node。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Node 之间的关系</h1></div>
+            <div class="card">
+                <p><code>schema.py:207-224</code> 的 <code>NodeRelationship</code>：</p>
+<pre><code class="language-python">class NodeRelationship(str, Enum):
+    SOURCE    # 这个 Node 来自哪个 Document（溯源）
+    PREVIOUS  # 上一个 Node（同文档里的顺序）
+    NEXT      # 下一个 Node
+    PARENT    # 父 Node（层级结构）
+    CHILD     # 子 Node</code></pre>
+                <p><code>BaseNode</code> 提供 <code>source_node</code>/<code>prev_node</code>/<code>next_node</code>/<code>parent_node</code>/<code>child_nodes</code> 属性（<code>:398-445</code>）访问。</p>
+                <div class="baby"><span class="t">关系让 Node 不是"孤岛"</span>
+                <strong>切块后，Node 之间要保留联系：SOURCE 记住"我来自哪份文档"（溯源）；PREV/NEXT 记住"我在原文的前后块"（检索到一块时能取相邻块补充上下文，如 sentence-window 检索）；PARENT/CHILD 支持层级（大块套小块，如 auto-merging 检索）。</strong>这些关系用 <code>RelatedNodeInfo</code>（<code>:249</code>，存 node_id + type + hash）表达。<strong>高级检索策略（取上下文窗口、层级合并）全靠这些关系。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>NodeWithScore</h1></div>
+            <div class="card">
+                <p><code>schema.py:1035</code> 的 <code>NodeWithScore</code>：一个 Node + 一个相似度分数。检索器返回的就是它。</p>
+                <div class="anno">读法：<b>检索（Day 11）不只返回 Node，还带"这个 Node 和查询有多相关"的分数（相似度）。<code>NodeWithScore</code> = <code>{node, score}</code>。<strong>后处理（Day 14 重排/过滤）就是操作这些分数——比如"只保留 score > 0.7 的"、"按分数重新排序"。</strong>它是检索结果的标准载体。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Document 和 Node 的关系？为什么 Document 继承 Node？</li>
+                    <li>BaseNode 的核心四字段？</li>
+                    <li>metadata 为什么要分 EMBED/LLM 视图？怎么影响检索质量？</li>
+                    <li>五种 Node 关系各是什么？高级检索怎么用它们？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '264,310p' schema.py
+sed -n '207,262p' schema.py
+sed -n '765,800p' schema.py
+grep -n "def source_node\|def prev_node\|def get_content" schema.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>读取数据 Reader</strong>——数据怎么变成 Document？精读 <code>SimpleDirectoryReader</code>：怎么遍历目录、按文件类型选提取器、并行加载、生成 Document 列表。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day01.html" style="color:var(--accent-cyan);">&larr; Day 01</a>
+                <a href="llama-index-day03.html" style="color:#a855f7;">Day 03 · Reader &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
