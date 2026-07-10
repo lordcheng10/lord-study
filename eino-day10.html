@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · Workflow 字段级编排 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fm{display:flex;justify-content:center;gap:20px;flex-wrap:wrap;padding:18px 4px;align-items:center}
+        .fm .box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;min-width:150px}
+        .fm .box h5{margin:0 0 8px;font-size:12px;color:#8b5cf6} .fm .box .f{font-size:11.5px;padding:4px 8px;margin:3px 0;border-radius:6px;background:var(--bg-primary);border:1px solid var(--border-color)}
+        .fm .box .f.hi{border-color:#f59e0b;color:#f59e0b} .fm .arrow{color:#f59e0b;font-weight:800;font-size:13px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">Workflow 字段级编排 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Workflow 解决什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 字段映射一张图</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 真实 API 用法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · FieldMapping 源码</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 控制与数据分离</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 为什么必须 DAG</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三种编排如何选</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 编译执行</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 ADK &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 编排引擎（收官）</span>
+            <h1 class="part-title">Workflow 字段级编排</h1>
+            <p class="part-desc">第三种编排，也是最精细的：不再"整个输出喂给下一个"，而是"A 的某个字段 → B 的某个字段"。今天讲字段映射，并收官第 2 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Workflow 解决什么问题</h1></div>
+            <div class="card">
+                <p>Chain/Graph 传值是"<strong>整个输出 → 整个输入</strong>"。但真实场景常常是：上游产出一个结构体，下游只需要它<strong>其中一个字段</strong>；或者下游的输入要<strong>拼自好几个上游的不同字段</strong>。Workflow 就是为"字段级接线"而生。</p>
+                <div class="baby"><span class="t">举个例子</span>
+                节点 A（用户信息查询）输出 <code>{Name, Age, City, VIP等级}</code>。下游节点 B（生成问候语）只要 <code>Name</code>，节点 C（推荐商品）只要 <code>City</code> 和 <code>VIP等级</code>。用 Chain 你得写胶水代码手动拆字段；用 Workflow 你直接声明"A.Name → B.input"、"A.City → C.input.city"，框架自动搬运。<strong>Workflow = 声明式的"字段接线板"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>字段映射一张图</h1></div>
+            <div class="card">
+                <div class="fm">
+                    <div class="box"><h5>节点A 输出</h5>
+                        <div class="f hi">Name</div><div class="f">Age</div><div class="f hi">City</div><div class="f hi">VIP</div>
+                    </div>
+                    <span class="arrow">按字段<br>接线 →</span>
+                    <div class="box"><h5>节点B 输入</h5><div class="f hi">UserName ← A.Name</div></div>
+                    <div class="box"><h5>节点C 输入</h5><div class="f hi">City ← A.City</div><div class="f hi">Level ← A.VIP</div></div>
+                </div>
+                <div class="glossary">注意：字段名可以不一样（<code>A.Name → B.UserName</code>），Workflow 负责按你声明的映射把值搬过去。Age 没人要，就丢弃。这种精细控制是 Chain/Graph 给不了的。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>真实 API 用法</h1></div>
+            <div class="card">
+                <p><code>workflow.go</code> 的用法——加节点后用 <code>AddInput</code> 声明字段映射：</p>
+<pre><code class="language-go">wf := compose.NewWorkflow[InType, OutType]()
+wf.AddChatModelNode("model", cm)
+wf.AddLambdaNode("format", fmtLambda).
+   AddInput("model", compose.MapFields("Content", "Text"))
+   //         ↑从哪个节点取   ↑ model输出的Content字段 → format输入的Text字段
+wf.End().AddInput("format")   // format 的输出作为整个工作流的输出
+r, _ := wf.Compile(ctx)</code></pre>
+                <div class="anno">读法：<b><code>AddInput(上游节点key, 字段映射...)</code> 声明"我这个节点的输入，从哪个上游的哪些字段来"。</b><code>MapFields("Content","Text")</code> = 把上游的 Content 字段值放进我的 Text 字段。不写字段映射（如 <code>AddInput("format")</code>）就是整体传递。</div>
+                <div class="glossary"><b>几种映射助手</b>：<code>MapFields(from, to)</code> 字段到字段；<code>ToField(to)</code> 整个上游输出放进我的某字段；<code>FromField(from)</code> 取上游某字段作为我的整体输入。组合起来能表达几乎任意的"接线"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>FieldMapping 源码：怎么搬字段</h1></div>
+            <div class="card">
+                <p>每条字段映射是一个 <code>FieldMapping</code> 结构（<code>field_mapping.go</code>），记录"从哪个字段来、到哪个字段去"。编译时它变成一个真正搬数据的函数（反射按字段名取值/赋值）：</p>
+<pre><code class="language-go">// 概念示意
+type FieldMapping struct {
+    fromNodeKey string
+    from        string   // 上游字段名（空=整体）
+    to          string   // 下游字段名（空=整体）
+}
+// 运行时：用反射从上游输出取 from 字段值，塞进下游输入的 to 字段</code></pre>
+                <div class="anno">读法：<b>Workflow 用 Go 的反射（reflect）在运行时按字段名搬值。</b>编译期会检查字段是否存在、类型是否兼容——又是"错误前移"：字段名写错，Compile 就报错。</div>
+                <div class="glossary"><b>反射的代价</b>：反射比直接赋值慢一点，但字段映射只在节点交界处发生（不是热循环），且省去了你手写大量拆包/组包胶水代码——这个取舍很划算。字段名和类型检查放编译期，运行期只做搬运。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>控制与数据分离（Day 08 L05 的兑现）</h1></div>
+            <div class="card">
+                <p>Day 08 提到"控制边 vs 数据边可以分开"。Workflow 正是用它的地方：<code>AddInput</code> 声明"数据从哪来"（数据边），<code>AddDependency</code> 声明"等谁执行完"（控制边），两者可以是不同节点。</p>
+                <div class="baby"><span class="t">什么场景需要分开？</span>
+                比如："节点 D 必须等审计节点 Audit 跑完才能执行（合规要求），但 D 的输入数据来自节点 C"。这时 <code>D.AddInput("C")</code>（数据来自 C）+ <code>D.AddDependency("Audit")</code>（但要等 Audit）。控制和数据指向不同节点——这种精细依赖只有 Workflow 能优雅表达。<strong>这就是 Day 08 埋的伏笔。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>为什么 Workflow 必须是 DAG（不能循环）</h1></div>
+            <div class="card">
+                <p>Workflow 用 DAG 引擎（Day 09），<strong>不允许环</strong>。原因：字段映射是"静态接线"——编译时就确定"每个字段从哪来"。如果有环，就会出现"A 的字段依赖 B、B 的字段又依赖 A"的死结，无法确定求值顺序。</p>
+                <div class="glossary"><b>一句话</b>：需要循环（Agent）→ 用 Graph（Pregel）；需要精细字段接线的一次性流水线（数据处理、RAG 管道）→ 用 Workflow（DAG）。DAG 的 AllPredecessor 触发也正好契合"等所有依赖字段到齐才计算"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三种编排如何选（决策速查）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// 固定顺序、无循环、整体传值      → Chain（最省事）
+chain.AppendChatTemplate(t).AppendChatModel(m)
+
+// 有循环 / 复杂分支汇聚 / Agent    → Graph（最灵活，Pregel）
+g.AddEdge("tools","chat"); g.AddBranch("chat", ...)  // 回头边=循环
+
+// 精细字段接线、一次性 DAG 流水线  → Workflow（最精细，DAG）
+wf.AddLambdaNode("f",l).AddInput("model", MapFields("Content","Text"))</code></pre>
+                <div class="baby"><span class="t">新手建议</span>
+                <strong>先无脑用 Chain</strong>，写简单流程够了。等你要做 Agent（模型↔工具循环）自然会转向 <strong>Graph</strong>——事实上 Eino 的 ADK/ReAct（下周）内部就是用 Graph 搭的。<strong>Workflow</strong> 是进阶，等你有"多字段精细接线"的数据流水线需求再用。三者底层同一引擎，学会一个迁移到另一个很快。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🎓 第 2 周（Day 06-10）你已掌握 Eino 引擎</h3>
+                <ul>
+                    <li><b>Day 06</b> Runnable：统一插头 + 4 流式范式自动适配</li>
+                    <li><b>Day 07</b> Chain：自动连边的直线流水线</li>
+                    <li><b>Day 08</b> Graph：手动连边、可循环的图（Agent 基础）</li>
+                    <li><b>Day 09</b> 编译执行：Compile 五步、Pregel/DAG、channel、super-step、State</li>
+                    <li><b>Day 10</b> Workflow：字段级接线的 DAG</li>
+                </ul>
+                <p style="margin-top:8px">你现在理解了 Eino"怎么把一堆组件编排成能跑的流程"的完整机制。下周进入 <strong>ADK 智能体开发</strong>——用这些引擎搭真正的 Agent。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '1,80p' compose/workflow.go | head -50   # Workflow API
+sed -n '1,60p' compose/field_mapping.go          # FieldMapping
+grep -n 'AddInput\|AddDependency\|MapFields' compose/*.go | head</code></pre>
+                <div class="tip"><strong>下周预告 · Day 11</strong>：进入 ADK（Agent Development Kit）。Day 11 讲 <strong>Agent 抽象</strong>——Agent 接口、AgentInput/AgentEvent、Runner，以及 Agent 和上面编排引擎的关系。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 编译执行</a>
+                <a href="eino-day11.html" style="color:var(--accent-green);">Day 11 · ADK Agent 抽象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Graph 编译与执行 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .steps{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+        .steps .s{display:flex;gap:10px;align-items:flex-start;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 13px}
+        .steps .s b{color:#8b5cf6} .steps .num{background:#8b5cf6;color:#fff;border-radius:6px;min-width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0}
+        .steps .s p{margin:0;font-size:12.5px;color:var(--text-secondary)}
+        .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .two .c{border-radius:9px;padding:13px;border:1px solid var(--border-color);background:var(--bg-secondary)}
+        .two .c h4{margin:0 0 6px;font-size:13px} .two .c.p h4{color:#00ADD8} .two .c.d h4{color:#f59e0b} .two .c li{font-size:12px;color:var(--text-secondary);margin:3px 0}
+        @media(max-width:768px){ .two{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">编译与执行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要"编译"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Compile 五步（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 类型检查前移</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Pregel vs DAG 两种引擎</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · channel 怎么传值</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一步一步跑（super-step）</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · State 状态管理</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 Graph</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 Workflow &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 编排引擎</span>
+            <h1 class="part-title">Graph 编译与执行</h1>
+            <p class="part-desc">图搭好了怎么跑？今天讲 Compile 把图变成可执行的 runner、两种执行引擎（Pregel/DAG）、节点间用 channel 传值、一步步调度，以及 State 状态。这是 Eino 引擎最核心的一天。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要"编译"这一步</h1></div>
+            <div class="card">
+                <p>你 <code>AddNode</code>/<code>AddEdge</code> 得到的只是一张"描述图"（谁连谁的静态结构），它<strong>不能直接跑</strong>。<code>Compile(ctx)</code> 把这张描述图转换成一个真正能执行的 <strong>runner</strong>，并顺手做一堆检查。</p>
+                <div class="baby"><span class="t">类比：菜谱 vs 开火做菜</span>
+                建图 = 写菜谱（先放油、再下葱、然后……）。编译 = 检查食材齐不齐、步骤顺序合不合理，然后生成"可执行的做菜流程"。<strong>编译只做一次，之后可以反复高速执行（Invoke/Stream 很多遍）。</strong>把检查和准备放在编译期，运行期就只管快跑——这是 Eino 性能好的关键设计。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Compile 五步（真实代码）</h1></div>
+            <div class="card">
+                <p><code>generic_graph.go:158</code> 的 <code>Compile</code> 大致做五件事：</p>
+                <div class="steps">
+                    <div class="s"><span class="num">1</span><p><b>选引擎</b>：根据图类型选 Pregel（Graph，可循环）或 DAG（Workflow，不可循环）。</p></div>
+                    <div class="s"><span class="num">2</span><p><b>类型检查</b>：检查每条边"上游输出类型"能否喂给"下游输入类型"（L03）。</p></div>
+                    <div class="s"><span class="num">3</span><p><b>建 channel</b>：为节点间的数据传递准备"管道"（L05）。</p></div>
+                    <div class="s"><span class="num">4</span><p><b>算调度顺序</b>：确定谁先跑谁后跑（拓扑），检测有无非法环。</p></div>
+                    <div class="s"><span class="num">5</span><p><b>包成 Runnable</b>：生成 <code>composableRunnable</code> → 转成 Day 06 的 4 范式 Runnable 返回。</p></div>
+                </div>
+                <div class="glossary">编译产物是 <code>*runner</code>（<code>graph_run.go</code>），它实现了 Invoke/Stream/Collect/Transform 四个方法——所以编译完你直接拿到一个 Day 06 讲的完整 Runnable。<strong>"编译期做检查和准备、运行期只管跑"</strong>是贯穿全篇的思想。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>类型检查前移：编译期就报错</h1></div>
+            <div class="card">
+                <p>Eino 是强类型的。每条边编译时都检查<strong>上游输出类型 → 下游输入类型</strong>能否对上（<code>graph.go</code> 的类型对齐逻辑）。对不上就在 Compile 时报错，而不是等运行到一半才崩。</p>
+                <div class="baby"><span class="t">为什么这很重要？</span>
+                想象一个 Agent 图，跑到第 8 步才发现"这个节点输出 string，但下游要 []Message，类型不匹配"——运行时才崩，浪费了前 7 步的 token 和时间，还可能在生产环境半夜炸。Eino 把这类错误<strong>提前到编译期</strong>：你 Compile 的那一刻就报错，根本跑不起来。<strong>这就是 Day 01 讲的"fail-closed / 错误前移"哲学在引擎层的体现。</strong></div>
+                <div class="glossary"><b>类型对齐还有点智能</b>：如果上游输出的具体类型 <strong>实现了</strong>下游要的接口，也算匹配（Go 的接口赋值）；还支持一些自动的 map 字段映射（Workflow 用）。检查不了的边缘情况会留一个运行时兜底检查。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Pregel vs DAG：两种执行引擎</h1></div>
+            <div class="card">
+                <p>Eino 有两套执行引擎（<code>pregel.go</code> / <code>dag.go</code>），Compile 时根据你用的 API 自动选：</p>
+                <div class="two">
+                    <div class="c p"><h4>Pregel（Graph 默认）</h4>
+                        <ul>
+                            <li>触发模式：<b>AnyPredecessor</b>——任一前驱到达就触发</li>
+                            <li><b>允许环（循环）</b>✅</li>
+                            <li>按"一轮一轮"（super-step）推进</li>
+                            <li>适合 Agent 的模型↔工具循环</li>
+                        </ul>
+                    </div>
+                    <div class="c d"><h4>DAG（Workflow 默认）</h4>
+                        <ul>
+                            <li>触发模式：<b>AllPredecessor</b>——所有前驱到齐才触发</li>
+                            <li><b>不允许环</b>（有向无环图）❌</li>
+                            <li>按依赖拓扑并行推进</li>
+                            <li>适合精细的字段级数据流水线</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="glossary"><b>名字来历</b>：Pregel 是 Google 的图计算模型，特点就是"一轮轮迭代、允许回头"，天然适合循环。<b>关键差别一句话</b>：Pregel"任一前驱到就跑"（所以能循环），DAG"等所有前驱到齐才跑"（所以适合汇聚型任务但不能有环）。<strong>Agent 用 Pregel，Workflow 用 DAG</strong>。Day 08 那个"回头边"能成立，正是因为 Pregel 的 AnyPredecessor。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>节点之间怎么传值：channel</h1></div>
+            <div class="card">
+                <p>每个节点有个"收件箱"叫 <strong>channel</strong>（<code>channel.go</code>，别和 Go 原生 chan 混——这是 Eino 自己的数据容器）。上游节点算完，把结果<strong>写进下游节点的 channel</strong>；下游节点执行前，<strong>从自己的 channel 读齐输入</strong>。</p>
+<pre><code class="language-go">// 概念示意
+type channel interface {
+    update(values []any) error   // 上游把值写进来（可能多个上游）
+    get(...) (any, error)        // 下游取值当输入
+}</code></pre>
+                <div class="baby"><span class="t">为什么要 channel 这个中间层？</span>
+                因为一个节点可能有<strong>多个上游</strong>（比如汇聚节点，L06 的并行合并）。channel 就是它的"收件箱"：所有上游把各自结果投进来，节点执行时统一取。有多个值时，channel 负责按规则合并（比如流式场景把多个流合并）。<strong>这层抽象让"多入一出""并行汇聚"变得统一简单。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一步一步跑：super-step 调度</h1></div>
+            <div class="card">
+                <p>Pregel 引擎按"轮"（super-step）推进（<code>graph_run.go</code> 的运行循环）：</p>
+                <div class="steps">
+                    <div class="s"><span class="num">1</span><p>把输入写进 START 的下游 channel，得到"本轮要跑的节点集合"。</p></div>
+                    <div class="s"><span class="num">2</span><p><b>本轮的节点并发执行</b>（各自从 channel 取输入、算、把结果写进下游 channel）。</p></div>
+                    <div class="s"><span class="num">3</span><p>根据"谁的 channel 被写了"，算出<b>下一轮</b>要跑哪些节点。</p></div>
+                    <div class="s"><span class="num">4</span><p>回到第 2 步，直到 END 的 channel 被写入（拿到最终结果）或超过 <code>MaxRunSteps</code>。</p></div>
+                </div>
+                <div class="glossary"><b>循环就是在这里发生的</b>：Agent 图里，某轮"tools"节点执行完，把结果写进"chat"的 channel（回头边），于是下一轮"chat"又被安排执行——一轮轮转，直到某轮分支走了 END。<code>WithMaxRunSteps(n)</code> 限制最多多少轮，超了报 <code>ErrExceedMaxSteps</code> 防死循环。<strong>本轮多个节点是并发跑的（goroutine），这就是 Graph 局部并行的底层。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>State：跨节点共享的"便签本"</h1></div>
+            <div class="card">
+                <p>数据顺着边流，但有时你想要一个<strong>所有节点都能读写的共享状态</strong>（比如累计计数、缓存、整轮对话历史）。这就是 State——编译时用 <code>WithGenLocalState</code> 提供一个初始 state：</p>
+<pre><code class="language-go">r, _ := g.Compile(ctx,
+    compose.WithGenLocalState(func(ctx) *MyState { return &MyState{} }))
+// 节点里通过 ProcessState 安全读写：
+compose.ProcessState(ctx, func(ctx, s *MyState) error {
+    s.Count++          // 加锁保护，并发安全
+    return nil
+})</code></pre>
+                <div class="baby"><span class="t">State vs 数据流，怎么选？</span>
+                <strong>数据流（边）</strong>：一个节点的输出正好是下一个的输入——用边传，清晰。<strong>State（便签本）</strong>：需要"跨越多个节点、贯穿整个运行"的共享信息——用 State。比如"记录这次对话已经调用了几次工具""缓存第一步查到的用户档案供后面所有节点用"。State 每次运行独立（local state），并发读写自动加锁。<strong>别滥用 State——能用数据流表达的就用边，State 是给真正的全局共享用的。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要"编译"？（检查+准备放编译期，运行期只管快跑）</li>
+                    <li>Compile 五步？（选引擎/类型检查/建channel/算调度/包Runnable）</li>
+                    <li>Pregel 和 DAG 的关键差别？（Any vs All 前驱触发；能否有环）</li>
+                    <li>channel 是干嘛的？（节点的收件箱，处理多上游合并）</li>
+                    <li>super-step 怎么实现循环？State 什么时候用？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. Compile 入口（L02）
+sed -n '158,230p' compose/generic_graph.go | head -50
+
+# 2. 两种引擎
+ls compose/ | grep -E 'pregel|dag'
+sed -n '1,60p' compose/pregel.go
+
+# 3. channel（L05）
+sed -n '1,80p' compose/channel.go | head -50
+
+# 4. 运行循环 super-step（L06）
+grep -n 'MaxRunSteps\|ErrExceedMaxSteps\|super' compose/*.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10</strong>：第三种编排 <strong>Workflow</strong>——按字段连线（A 的 output.Name → B 的 input.UserName），DAG 引擎不可循环，最精细。Day 10 讲字段映射 FieldMapping 的真实代码，收官第 2 周编排引擎。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 Graph</a>
+                <a href="eino-day10.html" style="color:var(--accent-green);">Day 10 · Workflow &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
