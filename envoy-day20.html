@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 收官串讲 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#26a69a}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#26a69a,#e91e63);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">收官串讲 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 20 天全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三大性能支柱</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 一个请求的一生</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 可编程数据面</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 设计哲学</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 在 Istio/Higress</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 下一站 Istio</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 结业寄语</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day19.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 19 Buffer/Bazel</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 结业 🎓</span>
+            <h1 class="part-title">收官串讲</h1>
+            <p class="part-desc">恭喜走完 Envoy 20 天！今天把整条线串成一幅图，提炼三大性能支柱和设计哲学，并承上启下——引出 higress-group 的下一站 Istio（控制面）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>20 天全景</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>周</th><th>主题</th><th>核心收获</th></tr>
+                    <tr><td>W1</td><td>架构与线程</td><td>全景、启动、线程模型（无锁）、事件循环、请求入口</td></tr>
+                    <tr><td>W2</td><td>过滤器与请求</td><td>L4/L7 过滤器链、HCM、Router、Codec、端到端 11 步</td></tr>
+                    <tr><td>W3</td><td>xDS 与上游</td><td>xDS 动态配置、集群管理、负载均衡、健康检查、服务发现</td></tr>
+                    <tr><td>W4</td><td>扩展/可观测/构建</td><td>扩展机制、Wasm、stats/日志/追踪、Buffer 零拷贝、Bazel</td></tr>
+                </table>
+                <div class="anno">读法：<b>从"骨架引擎"（W1）到"请求处理"（W2）到"动态配置"（W3）到"扩展生态"（W4）——你已看遍 Envoy 的每一层。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三大性能支柱</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Envoy 为什么快？三根支柱（如果只记一件事）</b>：<br>
+                ① <strong>线程模型（Day 03）</strong>：主线程管配置、N worker 干活、线程本地存储 → <strong>热路径无锁</strong>，多核线性扩展。<br>
+                ② <strong>事件驱动（Day 04）</strong>：libevent 非阻塞 IO + 事件循环 → <strong>单线程扛海量连接</strong>，不为每连接开线程。<br>
+                ③ <strong>零拷贝 Buffer（Day 19）</strong>：Slice 三段模型 + move 转移所有权 → <strong>数据流转不复制字节</strong>。<br>
+                <strong>这三点相互配合，让 Envoy 在处理百万级并发时依然低延迟、稳定。这套设计模式（无锁 TLS + 事件驱动 + 零拷贝）可以带走用到任何高性能网络系统。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>一个请求的一生</h1></div>
+            <div class="card">
+<pre><code class="language-bash">下游连接 → Listener accept（worker 线程）
+ → 监听器过滤器（探测 SNI）→ 选过滤器链 → L4 网络过滤器
+ → HCM::onData → codec 解析 HTTP → 建 ActiveStream
+ → HCM 算路由（refreshCachedRoute）+ 建 L7 链
+ → L7 decode 链（认证/限流…）→ Router（终端）
+ → getThreadLocalCluster 选集群 → chooseHost 负载均衡选后端
+ → 连接池发上游 →（上游响应）→ Router 启动 encode 链
+ → L7 encode 链 → HCM → codec 编码 → 写回下游</code></pre>
+                <div class="anno">读法：<b>这条链贯穿了 W1（线程/入口）+ W2（过滤器/HCM/Router/codec）+ W3（集群/负载均衡）。<strong>能默画这张图，就真正理解了 Envoy。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>可编程数据面</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Envoy = "可编程的流量数据面"</span>
+                总结 Envoy 的本质：<strong>它是一个"可编程数据面"——转发逻辑（路由/负载均衡/过滤）不是写死的，而是<strong>可通过配置动态定义</strong>（xDS 热更新，W3）、<strong>可通过扩展/Wasm 无限增强</strong>（W4）。</strong>控制面（Istio/Higress）负责"编程"它——下发配置告诉它怎么转发。<strong>这就是现代服务网格/网关的核心范式：把"网络治理逻辑"从每个业务服务里抽出来，下沉到一个统一、可编程、可观测的数据面（Envoy），由控制面集中管理。</strong>你学的每一块都在服务这个范式。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>设计哲学（可带走的）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>接口/实现分离</strong>：<code>envoy/</code>（接口）vs <code>source/</code>（实现），无处不在的纯虚类。</li>
+                    <li><strong>工厂 + 注册表</strong>：扩展靠 <code>RegisterFactory</code> 静态注册、按名查找（Day 16）。</li>
+                    <li><strong>无锁并发</strong>：每线程副本 + 消息投递（post）代替共享内存加锁（Day 03/04）。</li>
+                    <li><strong>零拷贝</strong>：传递所有权而非复制字节（Day 19）。</li>
+                    <li><strong>可观测优先</strong>：一切皆有指标，且观测本身零开销（Day 18）。</li>
+                    <li><strong>可复现构建</strong>：Bazel 锁死依赖，任何环境一致（Day 19）。</li>
+                </ul>
+                <div class="anno">读法：<b>这些哲学跨语言通用——你在 LangGraph/OpenClaw（Python/TS）见过"接口/实现分离""工厂""事件钩子"，Envoy（C++）用不同语言实现了同样的思想，还叠加了 C++ 特有的极致性能追求。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>在 Istio / Higress 中</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Envoy 是数据面，但它不孤单</b>：<br>
+                • <strong>Istio</strong>：控制面（istiod）生成 xDS 配置下发给每个 Envoy sidecar——Envoy 只管执行，Istio 决定"怎么执行"。<br>
+                • <strong>Higress</strong>：基于 Envoy + Istio 的云原生/AI 网关，用 Wasm 插件（Day 17）扩展 Envoy，加上自己的控制面和插件市场。<br>
+                • <strong>wasm-go</strong>：写 Higress/Envoy Wasm 插件的 Go SDK——调用 Day 17 讲的 proxy-wasm ABI。<br>
+                <strong>你现在有了整个 higress 生态最底层、最硬核的地基。后面每个子项目都会不断回指到 Envoy 的概念（xDS、Wasm、过滤器）——今天学的一切都是投资。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>下一站：Istio</h1></div>
+            <div class="card">
+                <p>higress-group 系列 5 个子项目：<strong>Envoy（✅ 完成）→ Istio → higress → higress-console → wasm-go</strong>。</p>
+                <div class="anno">读法：<b>Envoy 是"数据面发动机"，接下来的 Istio 是"控制面大脑"——它怎么把用户的高层意图（VirtualService/DestinationRule）翻译成 Envoy 能懂的 xDS 配置。你在 Day 11-12 学的 xDS"接收端"，Istio 会讲"发送端"。</b>两者合起来才是完整的服务网格。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>结业寄语 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🎉 恭喜完成 Envoy 20 天！</h3>
+                <p>你啃下了整个系列里最硬的一块——一个 C++ 写的、扛百万连接的云原生代理。你现在理解了它为什么快（无锁线程 + 事件驱动 + 零拷贝）、怎么处理请求（过滤器链 + HCM + Router + codec）、怎么被动态配置（xDS）、怎么被扩展（工厂 + Wasm）。</p>
+                <p style="margin-top:10px;">更重要的是——<strong>这是 higress-group 系列的地基</strong>。C++ 代理不是终点，而是理解 Istio、Higress、Wasm 插件的钥匙。<strong>能读懂 Envoy 源码，你就具备了读懂几乎任何云原生基础设施的底气。</strong></p>
+                <p style="margin-top:10px;">下一站 Istio 见——去看控制面怎么"指挥"你今天学的这个数据面。🚀</p>
+            </div>
+            <div class="card">
+                <div class="tip"><strong>🏁 Envoy 教程全部完成</strong>——回到 <a href="envoy-tutorial.html" style="color:#e91e63;">20 天总目录</a> 或 <a href="index.html" style="color:var(--accent-cyan);">学习主页</a>。higress-group 系列继续：Istio → higress → higress-console → wasm-go。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day19.html" style="color:var(--accent-cyan);">&larr; Day 19 Buffer/Bazel</a>
+                <a href="envoy-tutorial.html" style="color:#e91e63;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

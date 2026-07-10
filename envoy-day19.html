@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · Buffer 零拷贝 + Bazel — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#26a69a,#e91e63);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">Buffer + Bazel · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么零拷贝</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Slice 三段模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · reserve/commit</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 零拷贝 move</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 水位缓冲背压</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 为什么用 Bazel</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 扩展裁剪机制</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 可观测</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day20.html" class="nav-link" style="color:#e91e63;">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 扩展/可观测/构建</span>
+            <h1 class="part-title">Buffer 零拷贝 + Bazel</h1>
+            <p class="part-desc">Envoy 快的最后一块拼图：<strong>零拷贝 Buffer</strong>——数据在系统里尽量不复制。再看它为什么用 Bazel 构建、以及扩展裁剪机制（Higress 定制 Envoy 的关键）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么零拷贝</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"拷贝"是性能杀手</span>
+                代理转发数据，数据要经手很多环节（读 socket → 过滤器 → 写 socket）。<strong>每次把数据从一块内存复制到另一块，都花 CPU + 内存带宽。海量流量下，反复拷贝会成为瓶颈。</strong>零拷贝（zero-copy）的目标：<strong>数据"移动"时尽量只传递"指针/所有权"，不真复制字节。</strong>好比搬家——能直接把箱子（整块内存）搬过去，就别把箱子里每样东西掏出来再装进新箱子。Envoy 的 Buffer 系统就是为此精心设计的。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Slice 三段模型</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/buffer/buffer_impl.h:37 Slice
+// 一块连续内存用四个偏移分成三段：
+//   [已排空 Drained | 有效数据 Data | 可写 Reservable]
+//   base_ / data_ / reservable_ / capacity_
+// OwnedImpl（:643）持有 SliceDeque slices_（:753，自定义环形队列，比 std::deque 快）</code></pre>
+                <div class="baby"><span class="t">Slice = "带三个游标的内存块"</span>
+                一块内存被三个游标分成三段：<strong>已读走的（Drained）| 待处理的有效数据（Data）| 还没用的可写空间（Reservable）。</strong>读走数据 <code>drain()</code> 只是把 data_ 游标往后移（O(1)，不删数据）；写数据只往 Reservable 段写。<strong>一个 Buffer 是多个 Slice 组成的队列（SliceDeque）——数据"多但不连续"也没关系，逻辑上是一整块。</strong>这种设计让"追加/排空"都是移游标而非搬数据。Envoy 嫌 <code>std::deque</code> 慢，自己写了带内联小环的 SliceDeque。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>reserve / commit</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// 读路径零拷贝：socket readv 直接写进预留内存
+// reserveForRead() 预留 RawSlice → readv 把数据直接写进去 → commit(实际字节数)
+// commit() 只做 reservable_ += len（buffer_impl.cc:472），零拷贝入队</code></pre>
+                <div class="anno">读法：<b>从 socket 读数据时，不是"读到临时 buffer 再拷进 Envoy buffer"，而是<strong>直接让内核把数据 <code>readv</code> 写进 Envoy 预留（reserve）的内存</strong>，然后 <code>commit</code> 一下（只移游标）——<strong>全程零拷贝</strong>。</b>这是"读路径零拷贝"的关键：数据从网卡到 Envoy buffer，中间不经过额外复制。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>零拷贝 move</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/buffer/buffer_impl.cc:334 move
+// coalesceOrAddSlice（:312）：
+//   小切片（< CopyThreshold 且尾片有空位）→ 拷贝合并（减碎片）
+//   否则 → slices_.emplace_back(std::move(other_slice)) 整体转移 Slice 所有权，底层字节不动</code></pre>
+                <div class="baby"><span class="t">move：把数据从一个 buffer "转移"给另一个</span>
+                过滤器链里，数据要从一个 buffer 传到下一个。<strong><code>move()</code> 不复制字节，而是把 Slice 的<strong>所有权</strong>整个转移过去（<code>std::move</code>）——底层那块内存原地不动，只是"归属"变了。</strong>只有很小的碎片才拷贝合并（减少碎片、提升后续访问效率），这是权衡后的优化。<strong>所以数据在 Envoy 内部多个组件间流转，绝大多数时候零拷贝——这是它能低延迟处理大流量的物理基础。</strong>加上 Day 03 无锁、Day 04 事件驱动、今天零拷贝，Envoy 高性能的三大支柱就齐了。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>水位缓冲背压</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/buffer/watermark_buffer.h:22 WatermarkBuffer : public OwnedImpl
+// 三回调：below_low_watermark_ / above_high_watermark_ / above_overflow_watermark_
+// setWatermarks（watermark_buffer.cc:119）：low = high/2（隐式滞回）
+// 越高水位 → 触发回调（通常暂停读/暂停上游）；排空到低水位 → 恢复</code></pre>
+                <div class="baby"><span class="t">背压（backpressure）= "下游堵了就叫上游慢点"</span>
+                如果下游（客户端）读得慢，而上游（后端）拼命发，Envoy 的 buffer 会越积越多，最终内存爆炸。<strong>水位缓冲的招数：设一个高水位线，buffer 积压超过它就触发回调——通常"暂停从上游读"（叫上游别发了）；等 buffer 排空到低水位线以下，再"恢复读"。</strong>就像水库：水太满就关闸，水位下去再开闸。<strong>低水位 = 高水位的一半（滞回，避免在阈值附近反复开关）。</strong>这就是流控/背压，防止快的一方压垮慢的一方——分布式系统的必备机制。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>为什么用 Bazel</h1></div>
+            <div class="card">
+                <p>Envoy 用 <strong>Bazel</strong>（Google 的构建系统）：<code>.bazelversion</code>=7.7.1，C++20，clang/libc++，静态大二进制（<code>envoy-static</code>）。</p>
+                <div class="baby"><span class="t">为什么不用 CMake，非要 Bazel？</span>
+                Envoy 依赖巨量 C++ 库（abseil、protobuf、gRPC、BoringSSL、V8、WAMR…），每个都要特定版本 + 打补丁。<strong>Bazel 的优势：①<strong>可复现</strong>——依赖用 URL+sha256+版本锁死，任何人任何机器构建出的二进制一致；②<strong>近 hermetic（封闭）</strong>——不依赖系统里装了什么，自带工具链；③管理巨大依赖图 + 增量构建快；④sanitizer/coverage/远程缓存一体化。</strong>代价是学习曲线陡。对 Envoy 这种"依赖地狱 + 要求极致可靠"的项目，Bazel 是合理选择。构建命令：<code>bazel build -c opt //source/exe:envoy-static</code>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>扩展裁剪机制（Higress 定制关键）</h1></div>
+            <div class="card">
+                <p><code>extensions_build_config.bzl</code>（275 条）= "规范名 → Bazel target"字典，决定编入哪些扩展。Envoy 把它当外部仓库 <code>@envoy_build_config</code>。<strong>下游（Higress/istio-proxy）只需在自己 WORKSPACE 里注册一个 <code>envoy_build_config</code> 指向自定义的 <code>extensions_build_config.bzl</code>，即可整体替换编入的扩展集——不改 Envoy 源码。</strong></p>
+                <div class="glossary"><b>这就是 Higress 怎么"定制 Envoy"的答案</b>：Higress 不 fork 改 Envoy 每个文件（那样难以跟上游同步），而是①用 <code>#if defined(HIGRESS)</code> 宏做少量必要的内核增强（你在 Day 07/08/17 见过）②通过这个裁剪机制换掉扩展集（去掉用不到的、加上 Higress 自己的）。<strong>加上 Day 17 的 Wasm（运行时动态加载插件），Higress 就能在不魔改 Envoy 的前提下，构建出一个功能定制、可扩展的 AI 网关数据面。</strong>Bazel 宏 <code>envoy_cc_library</code> 默认 <code>alwayslink=True</code>——保证 Day 16 的 <code>REGISTER_FACTORY</code> 静态注册不被链接器优化掉。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么"拷贝"是性能杀手？零拷贝的目标？</li>
+                    <li>Slice 三段模型？drain/commit 为什么是 O(1)？</li>
+                    <li>读路径怎么零拷贝？move 怎么零拷贝？</li>
+                    <li>水位缓冲背压解决什么？低水位为什么是高水位一半？</li>
+                    <li>为什么用 Bazel？Higress 怎么靠裁剪机制定制 Envoy？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '22,40p' source/common/buffer/buffer_impl.h    # Slice ASCII 图
+sed -n '119,150p' source/common/buffer/watermark_buffer.cc
+head -5 .bazelversion; grep -c '' extensions_build_config.bzl</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>收官串讲</strong>——Envoy 全景回顾、三大高性能支柱、它在 Istio/Higress 中的角色，以及承上启下引出下一个子项目 Istio（控制面）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 可观测</a>
+                <a href="envoy-day20.html" style="color:#e91e63;">Day 20 · 收官串讲 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

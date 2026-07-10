@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 可观测性 + Admin — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#26a69a}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#26a69a,#e91e63);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">可观测性 + Admin · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 可观测三支柱</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Stats 接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 无锁 stats</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SymbolTable</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 访问日志</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 分布式追踪</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Admin 接口</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 Wasm</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day19.html" class="nav-link" style="color:#e91e63;">Day 19 Buffer/Bazel &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 扩展/可观测/构建</span>
+            <h1 class="part-title">可观测性 + Admin</h1>
+            <p class="part-desc">"看不见就管不了。" Envoy 提供强大的可观测能力：指标（stats）、访问日志、分布式追踪，外加 Admin 接口内省运行状态。今天看它们怎么实现，尤其是 stats 的无锁设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>可观测三支柱</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Metrics / Logs / Traces</span>
+                可观测性有三大支柱：<strong>指标（Metrics）</strong>——聚合数字（请求数、错误率、延迟分位数），看趋势；<strong>日志（Logs）</strong>——每条请求的记录，看细节；<strong>追踪（Traces）</strong>——一个请求跨多个服务的完整链路，看瓶颈在哪。<strong>Envoy 三者都内建支持。</strong>作为流量必经之地，Envoy 是采集这些数据的绝佳位置——所有请求都过它，天然能统计和记录。这就是为什么用了 Envoy/Istio 后，服务的可观测性"免费"提升一大截。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Stats 接口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/stats/stats.h
+class Counter : public Metric {   // :126 只增不减（如"总请求数"）
+  void add(uint64_t);  void inc();  uint64_t value();  uint64_t latch();  // 取周期增量
+};
+class Gauge : public Metric { };  // :142 可增可减（如"当前活跃连接数"）
+class Histogram { void recordValue(uint64_t); };  // 分布（如延迟分位数）</code></pre>
+                <div class="anno">读法：<b>三种指标类型：<strong>Counter</strong>（累计只增，如请求总数）、<strong>Gauge</strong>（瞬时值可增减，如活跃连接）、<strong>Histogram</strong>（分布，如 P50/P99 延迟）。</b>Scope（<code>scope.h:56</code>）是指标的命名空间（如某集群的指标）。这套模型是 Prometheus 等监控系统的标准。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>无锁 stats</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/stats/allocator_impl.cc:140 CounterImpl
+std::atomic&lt;uint64_t&gt; value_;              // :166 永久累计
+std::atomic&lt;uint64_t&gt; pending_increment_;  // :167 周期增量
+void add(uint64_t) { value_ += ...; pending_increment_ += ...; }  // 原子累加
+uint64_t latch() { return pending_increment_.exchange(0); }       // 原子取出并清零
+
+// ThreadLocalStoreImpl（thread_local_store.h:161）：热路径无锁
+//   每线程 TlsCacheEntry 缓存指标指针，未命中才加锁访问 CentralCacheEntry</code></pre>
+                <div class="baby"><span class="t">指标统计怎么"不拖慢请求"？</span>
+                每个请求都要更新一堆指标（+1 请求数、记延迟…）。如果每次更新都加锁，热路径就废了。<strong>Envoy 两招：①用原子操作（<code>std::atomic</code>）——无锁地加数字；②又是线程本地存储（Day 03）——每线程缓存指标指针，避免每次都查全局表加锁。</strong>Counter 用两个原子变量：<code>value_</code> 永久累计、<code>pending_increment_</code> 供 sink 定期"取走"（<code>latch</code> 原子交换清零）。<strong>可观测性再重要，也不能拖慢数据面——这个无锁设计保证了"观测几乎零开销"。</strong>Histogram 每线程独立累积、刷新时合并。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SymbolTable</h1></div>
+            <div class="card">
+                <p>指标名很长（如 <code>cluster.user-service.upstream_cx_total</code>），成千上万个指标存完整字符串很费内存。<code>SymbolTable</code>（<code>symbol_table.h:76</code>）把点分名字按 token 驻留成整型 Symbol，变长编码。</p>
+                <div class="baby"><span class="t">SymbolTable = "字符串去重压缩"</span>
+                想象你有 1 万个指标，名字里都含 <code>cluster</code>、<code>upstream</code> 这些重复词。<strong>SymbolTable 把每个词（token）映射成一个短整数，指标名就存成"整数序列"而非完整字符串——大幅省内存。</strong>好比把常用词编号，说话时报编号而非全词。这就是为什么 Scope 的接口偏爱 <code>counterFromStatName</code>（用 SymbolTable 编码的名字）而废弃 <code>counterFromString</code>（原始字符串）。<strong>海量指标场景下，这个优化省下可观的内存。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>访问日志</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/access_log/access_log.h:81
+class Instance {
+  virtual void log(const LogContext&amp;, const StreamInfo&amp; stream_info) PURE;  // :91
+};
+// 格式化 FormatterImpl（substitution_formatter.h:85）：把 %START_TIME% %REQ(x)% 解析成 provider 序列
+// 扩展：access_loggers/ 下 file/grpc/stream/fluentd/open_telemetry/wasm</code></pre>
+                <div class="anno">读法：<b>访问日志记录每条请求（时间、方法、路径、响应码、延迟…）。格式用 <code>%START_TIME%</code>、<code>%REQ(header)%</code> 这样的占位符模板（<code>SubstitutionFormatter</code> 解析）。</b>输出目标（file/grpc/…）又是 Day 16 的工厂模式扩展。可配 JSON 格式方便机器解析。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>分布式追踪</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/tracing/trace_driver.h
+class Span {   // :61 一次操作的追踪跨度
+  void setTag(...);  void finishSpan();  void injectContext(...);  SpanPtr spawnChild(...);
+};
+class Driver { SpanPtr startSpan(...); };  // :167
+// 扩展 tracers/：zipkin / datadog / opentelemetry / skywalking / xray</code></pre>
+                <div class="baby"><span class="t">追踪：一个请求的"全程录像"</span>
+                一个用户请求可能穿过 10 个微服务。出了问题（慢/错），怎么知道卡在哪一环？<strong>分布式追踪给每个请求一个 traceId，每经过一个服务/组件就记一个"span"（带时间戳），最后串成一条完整调用链——像快递的物流轨迹。</strong>Envoy 在请求头里注入/传递 traceId（<code>injectContext</code>），并上报 span 给 Zipkin/Jaeger/SkyWalking 等后端。<strong>因为 Envoy 在每个服务边界都有，它能自动串起跨服务的链路——这是服务网格可观测性的杀手锏。</strong>又是工厂模式扩展（各追踪后端一个实现）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Admin 接口</h1></div>
+            <div class="card">
+                <p><code>AdminImpl</code>（<code>source/server/admin/admin.h:65</code>）在管理端口上提供内省端点：</p>
+                <table class="k">
+                    <tr><th>端点</th><th>作用</th></tr>
+                    <tr><td><code>/stats</code></td><td>所有指标（支持 text/json/prometheus 格式）</td></tr>
+                    <tr><td><code>/clusters</code></td><td>所有集群及其端点状态</td></tr>
+                    <tr><td><code>/config_dump</code></td><td>当前完整配置（各 xDS 子系统，脱敏）</td></tr>
+                    <tr><td><code>/server_info</code> <code>/ready</code></td><td>服务信息 / 就绪探针</td></tr>
+                    <tr><td><code>/logging</code> <code>/quitquitquit</code></td><td>动态改日志级别 / 优雅退出</td></tr>
+                </table>
+                <div class="anno">读法：<b>Admin 是运维/调试的窗口——线上 <code>curl localhost:港/config_dump</code> 就能看 Envoy 当前应用了什么配置（排查 xDS 下发问题神器），<code>/clusters</code> 看后端健康状态，<code>/stats/prometheus</code> 给监控系统抓取。</b>Admin 本身复用正常 HTTP 栈（<code>AdminImpl</code> 实现了 HTTP 相关接口）。<code>mutates_server_state_</code> 的端点必须 POST（防误操作）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>可观测三支柱各是什么？为什么 Envoy 是采集的好位置？</li>
+                    <li>Counter/Gauge/Histogram 各用于什么？</li>
+                    <li>stats 怎么做到无锁？（原子 + TLS）</li>
+                    <li>SymbolTable 优化什么？</li>
+                    <li>分布式追踪解决什么？Admin 的 /config_dump 有什么用？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '126,145p' envoy/stats/stats.h
+sed -n '140,170p' source/common/stats/allocator_impl.cc   # CounterImpl 原子
+grep -n 'handlers_{' source/server/admin/admin.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>Buffer 零拷贝 + Bazel</strong>——Envoy 的高性能内存管理（Slice 三段模型、零拷贝 move、水位缓冲背压）+ Bazel 构建系统为何选它。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 Wasm</a>
+                <a href="envoy-day19.html" style="color:#e91e63;">Day 19 · Buffer 零拷贝 + Bazel &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
