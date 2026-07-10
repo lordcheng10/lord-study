@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · Process 顺序与层级 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
+        .vs .c.a{border-color:#ef4444;background:rgba(239,68,68,.05)} .vs .c.b{border-color:#8b5cf6;background:rgba(139,92,246,.05)}
+        .vs .c h4{margin:0 0 6px;font-size:13px} .vs .c.a h4{color:#ef4444} .vs .c.b h4{color:#8b5cf6} .vs .c li{font-size:11.5px;color:var(--text-secondary);margin:4px 0}
+        @media(max-width:768px){.vs{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">Process 顺序与层级 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Process 只是标签</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两种流程对比</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 顺序执行源码</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 层级执行源码</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 经理 Agent 的创建</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 谁来执行任务</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 两种流程怎么选</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 执行循环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 Crew 编排深入</span>
+            <h1 class="part-title">Process：顺序 vs 层级</h1>
+            <p class="part-desc">Crew 支持两种执行流程。今天看它们的真实实现——你会发现两者<b>复用同一个执行引擎</b>，只在"谁来执行任务"和"有没有经理"上不同。设计极优雅。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Process 只是一个标签</h1></div>
+            <div class="card">
+                <p><code>process.py</code> 短得惊人——它只是个字符串枚举，<strong>不含任何逻辑</strong>：</p>
+<pre><code class="language-python">class Process(str, Enum):
+    sequential = "sequential"
+    hierarchical = "hierarchical"
+    # TODO: consensual = 'consensual'   # 共识制，尚未实现</code></pre>
+                <div class="anno">读法：<b>Process 只是"策略标签"——真正的执行逻辑写在 Crew 里，Crew 在 kickoff 时根据这个标签分发到不同方法。</b>这就是"策略模式"：用枚举选择算法，算法实现与选择分离。继承 <code>str</code> 让它能直接和字符串比较、序列化。</div>
+                <div class="baby"><span class="t">为什么把"策略"和"实现"分开？</span>
+                这样加新流程很干净——注释里预留的 <code>consensual</code>（共识制，多个 agent 投票决策）将来实现时，只需加一个枚举值 + 一个 <code>_run_consensual_process</code> 方法，kickoff 里加一个分支，<strong>完全不动现有的顺序/层级逻辑</strong>。"对扩展开放，对修改封闭"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两种流程对比</h1></div>
+            <div class="card">
+                <div class="vs">
+                    <div class="c a"><h4>➡️ sequential（顺序）</h4>
+                        <ul><li>任务像流水线一个接一个</li><li>每个 Task <b>必须自己指定 agent</b></li><li>数据顺次传递（上下文链）</li><li>适合步骤明确、依赖清晰的流程</li></ul>
+                    </div>
+                    <div class="c b"><h4>🏛️ hierarchical（层级）</h4>
+                        <ul><li>框架自动创建一个<b>经理 agent</b></li><li>Task 可不指定 agent，由经理动态分派</li><li>经理通过"委派工具"派活给下属</li><li>适合需要动态决策"由谁做"的场景</li></ul>
+                    </div>
+                </div>
+                <div class="baby"><span class="t">用团队打比方</span>
+                <strong>顺序</strong> = 一条明确的流水线，每道工序谁负责事先定好（研究员→写手→审稿）。<strong>层级</strong> = 有个项目经理，任务来了他看情况分派给哪个下属，下属做完汇报，经理再决定下一步。<strong>顺序适合固定流程，层级适合灵活调度。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>顺序执行源码</h1></div>
+            <div class="card">
+<pre><code class="language-python"># crew.py:1475
+def _run_sequential_process(self) -> CrewOutput:
+    return self._execute_tasks(self.tasks)   # 直接执行任务列表</code></pre>
+                <p>真正的循环在 <code>_execute_tasks</code>（<code>crew.py:1519</code>，Day 05 见过）：遍历 tasks，用 <code>_get_context</code> 把前序输出拼成上下文，逐个 <code>task.execute_sync</code>，异步任务并发。</p>
+                <div class="anno">读法：<b>顺序流程就是"按列表顺序跑任务 + 上下文链传递"，一句话的事。</b>它把复杂度都交给了通用的 <code>_execute_tasks</code>。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>层级执行源码（惊喜：复用同一引擎）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># crew.py:1479
+def _run_hierarchical_process(self) -> CrewOutput:
+    self._create_manager_agent()          # ★ 唯一的区别：先造一个经理
+    return self._execute_tasks(self.tasks)  # 然后……复用同一个 _execute_tasks！</code></pre>
+                <div class="anno">读法：<b>层级和顺序流程<strong>复用同一个 <code>_execute_tasks</code></strong>！唯一区别是层级模式先 <code>_create_manager_agent()</code> 创建一个经理。</b>这个设计太漂亮了——两种流程共享执行引擎，差异只在"是否有经理"和"任务分给谁"。</div>
+                <div class="baby"><span class="t">为什么能复用同一引擎？</span>
+                因为"遍历任务、传递上下文、收集输出"这套流程两种模式都一样。差异只在一个点：<strong>顺序模式下任务分给它自己指定的 agent，层级模式下所有任务名义上都分给经理</strong>（经理再委派）。这个"分给谁"的差异被收敛到一个方法 <code>_get_agent_to_use</code>（L06）里。<strong>找出共性、把差异隔离到最小的点——这是消除重复代码的高级功夫。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>经理 Agent 的创建</h1></div>
+            <div class="card">
+                <p><code>_create_manager_agent</code>（<code>crew.py:1484</code>）：</p>
+                <ul>
+                    <li>用户提供了 <code>manager_agent</code>：强制 <code>allow_delegation=True</code>，且<strong>经理不允许带工具</strong>（带了直接抛异常）。</li>
+                    <li>否则自动创建一个经理：角色="Crew Manager"、目标="用最佳方式管理团队完成任务"（取自 i18n 文案），并把 <code>AgentTools(agents=self.agents).tools()</code>（委派工具，Day 08）作为它的工具。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么经理不能带（普通）工具？</span>
+                因为经理的职责是"<strong>管理和分派</strong>"，不是"亲自干活"。它的"工具"应该只有"委派工具"（把活派给下属）。如果给经理配了搜索、写文件之类的普通工具，它可能自己动手而不分派，就违背了层级模式的设计。<strong>框架用"禁止经理带工具"强制它专注于管理。</strong>职责单一原则。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>谁来执行任务：差异的唯一落点</h1></div>
+            <div class="card">
+<pre><code class="language-python"># crew.py:1675
+def _get_agent_to_use(self, task: Task) -> BaseAgent | None:
+    if self.process == Process.hierarchical:
+        return self.manager_agent      # 层级：所有任务都先给经理
+    return task.agent                  # 顺序：任务给它自己指定的 agent</code></pre>
+                <div class="anno">读法：<b>这一个方法就是两种流程的"唯一实质差异"。</b>层级模式下，<code>_execute_tasks</code> 里每个任务都被交给经理，经理再通过委派工具（Day 08）分派给真正的下属；顺序模式下直接交给任务自己的 agent。<strong>整个层级 vs 顺序的复杂性，收敛成了这几行的一个 if。</strong></div>
+                <div class="glossary"><b>委派工具的注入</b>（<code>_prepare_tools</code>，<code>crew.py:1606</code>）：<code>allow_delegation=True</code> 的 agent 会被注入"委派工具"——层级模式给经理注入、顺序模式给声明了 delegation 的 agent 注入。这是 Day 08 的主题。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>两种流程怎么选</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>用 sequential</strong>：流程明确、依赖清晰、每步谁做很确定。大多数场景够用，简单可控。（默认就是它。）</li>
+                    <li><strong>用 hierarchical</strong>：任务多且"谁做哪个"需要动态判断、需要一个协调者统筹全局、任务可能需要来回协商。代价是多一层经理的 LLM 调用（更贵）、行为更不确定。</li>
+                </ul>
+                <div class="baby"><span class="t">新手建议</span>
+                <strong>先无脑用 sequential。</strong>它简单、可预测、便宜。等你遇到"任务分配需要智能判断"的复杂场景，再上 hierarchical。<strong>更复杂的确定性编排，其实该用 Flow（Day 11）——它比 hierarchical 更可控。</strong>层级模式是"让 AI 经理自主调度"，Flow 是"你自己精确画流程图"，两种思路。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Process 为什么"只是标签"？策略模式怎么体现？</li>
+                    <li>顺序 vs 层级的核心区别？</li>
+                    <li>两种流程为什么能复用同一个 _execute_tasks？</li>
+                    <li>经理 Agent 为什么不能带普通工具？</li>
+                    <li>_get_agent_to_use 为什么是差异的唯一落点？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+cat $P/process.py                              # 就几行
+sed -n '1475,1515p' $P/crew.py                 # 两个 _run_*_process
+sed -n '1484,1510p' $P/crew.py                 # _create_manager_agent
+sed -n '1675,1682p' $P/crew.py                 # _get_agent_to_use</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：深入单个 Agent 的大脑——<strong>ReAct 执行循环</strong>。读 <code>crew_agent_executor.py</code>：思考→用工具→观察→循环的真实实现，以及"原生函数调用"和"文本解析 ReAct"两种模式的分流。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a>
+                <a href="crewai-day07.html" style="color:var(--accent-green);">Day 07 · 执行循环 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

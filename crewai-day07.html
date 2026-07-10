@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · Agent 执行循环 ReAct — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .react{max-width:480px;margin:14px auto}
+        .react .turn{border:1px solid var(--border-color);border-radius:9px;padding:9px 13px;margin:7px 0;background:var(--bg-secondary);font-size:12.5px}
+        .react .turn .lbl{font-size:10px;font-weight:800;text-transform:uppercase;margin-bottom:3px}
+        .react .turn.t .lbl{color:#ef4444} .react .turn.a .lbl{color:#8b5cf6} .react .turn.o .lbl{color:#f59e0b} .react .turn.f .lbl{color:#22c55e}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">Agent 执行循环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ReAct 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两种执行模式分流</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 文本 ReAct 循环</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · parser 解析器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 原生函数调用循环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 出错与自愈</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 上限与降级</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 Process</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 委派 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 Crew 编排深入</span>
+            <h1 class="part-title">Agent 执行循环 ReAct</h1>
+            <p class="part-desc">Day 02 说 Agent 把活交给"执行器"跑 ReAct 循环。今天就拆开这个执行器，读 <code>crew_agent_executor.py</code> 的真实循环，看 AI 如何"思考→用工具→观察→再思考"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ReAct 是什么（一次运行轨迹）</h1></div>
+            <div class="card">
+                <p><strong>ReAct = Reasoning + Acting</strong>：让 AI 交替"思考"和"行动（用工具）"，用工具结果指导下一步。轨迹长这样：</p>
+                <div class="react">
+                    <div class="turn t"><div class="lbl">🤔 Thought 思考</div>我需要查一下 SF 的天气</div>
+                    <div class="turn a"><div class="lbl">🔧 Action 行动</div>调用 search 工具，输入 "SF weather"</div>
+                    <div class="turn o"><div class="lbl">👀 Observation 观察</div>工具返回："SF 今天 18°C"</div>
+                    <div class="turn t"><div class="lbl">🤔 Thought</div>我知道了，可以回答了</div>
+                    <div class="turn f"><div class="lbl">✅ Final Answer 最终答案</div>SF 今天 18 度</div>
+                </div>
+                <div class="glossary">这套范式在 eino、OpenHands 教程里都见过——它是工具型 Agent 的通用骨架。CrewAI 的实现在 <code>agents/crew_agent_executor.py</code> 的 <code>CrewAgentExecutor</code>（<code>:98</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两种执行模式分流</h1></div>
+            <div class="card">
+                <p><code>invoke</code>（<code>crew_agent_executor.py:208</code>）进入 <code>_invoke_loop</code>，一开始就分流（<code>:318</code>）：</p>
+<pre><code class="language-python">use_native_tools = (
+    self.llm.supports_function_calling()   # 模型支持"原生函数调用"吗？
+    and self.original_tools)
+if use_native_tools:
+    return self._invoke_loop_native_tools()   # 现代模型：用 LLM 原生 function calling
+return self._invoke_loop_react()              # 老模型：文本解析 ReAct</code></pre>
+                <div class="anno">读法：<b>现代模型（GPT-4、Claude）支持结构化"函数调用"，就走原生模式（更可靠）；不支持的老模型就把工具说明塞进 prompt、靠解析文本来调工具（传统 ReAct）。</b>两条路都能用，向后兼容。</div>
+                <div class="baby"><span class="t">"原生函数调用" vs "文本 ReAct" 的区别</span>
+                <strong>文本 ReAct</strong>：让模型按 <code>Thought:/Action:/Action Input:</code> 的<strong>文本格式</strong>输出，框架用正则解析出"要调哪个工具"。缺点：模型可能格式写错、解析容易失败。<strong>原生函数调用</strong>：模型直接返回<strong>结构化</strong>的 tool_call（模型训练时就学过这个格式），框架直接读，不用解析文本。<strong>原生更可靠，是现代首选；文本 ReAct 是老模型的兜底。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>文本 ReAct 循环</h1></div>
+            <div class="card">
+                <p>核心循环 <code>_invoke_loop_react</code>（<code>crew_agent_executor.py:330</code>），循环直到得到 <code>AgentFinish</code>：</p>
+<pre><code class="language-python"># :341-360（精简）
+while not isinstance(formatted_answer, AgentFinish):
+    if has_reached_max_iterations(self.iterations, self.max_iter):
+        formatted_answer = handle_max_iterations_exceeded(...)  # 到上限强制收尾
+        break
+    enforce_rpm_limit(...)                              # 限流
+    answer = get_llm_response(llm=..., messages=self.messages)  # 问一次 LLM
+    formatted_answer = process_llm_response(answer_str, ...)     # 解析成 Action/Finish
+    if isinstance(formatted_answer, AgentAction):
+        tool_result = execute_tool_and_check_finality(...)       # 执行工具
+        formatted_answer = self._handle_agent_action(...)        # 把结果写回
+    self._append_message(formatted_answer.text)          # 结果进对话历史</code></pre>
+                <div class="anno">读法：<b>这就是 ReAct 的精髓：问 LLM → 解析出"要调工具(AgentAction)"还是"给答案(AgentFinish)" → 若调工具则执行、把结果写回消息 → 循环，直到给答案。</b>每一步的工具结果都 append 进 <code>self.messages</code>，所以下一轮 LLM 能看到上一步的观察。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>parser：把文本解析成结构</h1></div>
+            <div class="card">
+                <p><code>parser.py</code> 是文本 ReAct 的关键翻译器。它把 LLM 的文本输出解析成两个数据类之一（<code>parser.py:25</code>）：</p>
+<pre><code class="language-python">@dataclass
+class AgentAction:   # "我要调工具"
+    thought: str; tool: str; tool_input: str; text: str
+@dataclass
+class AgentFinish:   # "我给出最终答案"
+    thought: str; output: str | BaseModel; text: str</code></pre>
+                <p><code>parse()</code>（<code>parser.py:62</code>）看文本里有没有 <code>Final Answer:</code> 或 <code>Action:</code>：有 Final Answer → AgentFinish；有 Action → AgentAction；两者都没有 → 抛 <code>OutputParserError</code>。</p>
+                <div class="baby"><span class="t">解析失败了怎么办？（自愈设计）</span>
+                如果 LLM 输出的既没有 Action 也没有 Final Answer（格式跑偏），<code>parse</code> 抛 <code>OutputParserError</code>，并附一句提示（如"你漏了 Action:"）。<strong>这个提示会被塞回给 LLM，让它自己纠正重来。</strong>还有 <code>_safe_repair_json</code>（<code>parser.py:161</code>）用 <code>json_repair</code> 修复模型输出的破损 JSON。<strong>面对"模型可能不听话"，框架不是直接崩，而是"给提示让它改"——这种容错是 Agent 框架健壮性的关键。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>原生函数调用循环</h1></div>
+            <div class="card">
+                <p><code>_invoke_loop_native_tools</code>（<code>crew_agent_executor.py:484</code>）先把工具转成 OpenAI schema，然后循环里 LLM 直接返回结构化 tool_calls。有个有意思的策略（<code>:667</code> <code>_handle_native_tool_calls</code>）：</p>
+                <ul>
+                    <li><strong>默认一次只执行第一个工具调用</strong>，把结果写回后让模型重新推理再决定下一步（顺序 + 反思，更稳）。</li>
+                    <li>但如果模型一次返回多个工具、且都不涉及 <code>result_as_answer</code>/<code>max_usage_count</code>，就用线程池<strong>并行</strong>执行（<code>:746</code>，提速）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么默认只执行第一个工具？</span>
+                因为 Agent 干活常常有依赖——"先查 A，根据 A 的结果再决定查什么"。如果一次把模型说的所有工具都执行了，可能第 2 个工具的参数本该依赖第 1 个的结果。<strong>默认"执行一个、看结果、再想"更符合真实推理链</strong>；只有当多个工具明显独立时才并行提速。<strong>正确性优先，性能其次——这个权衡很稳健。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>出错与自愈</h1></div>
+            <div class="card">
+                <p>循环里对各种异常有细致处理（<code>crew_agent_executor.py:434-447</code>）：</p>
+                <ul>
+                    <li><strong>解析失败</strong>（<code>OutputParserError</code>）：把纠错提示喂回 LLM，重来。</li>
+                    <li><strong>上下文超长</strong>：走 <code>handle_context_length</code>（<code>:447</code>）自动压缩历史后 <code>continue</code>。</li>
+                    <li><strong>原生模式不支持</strong>：优雅降级到文本 ReAct 模式（<code>:577</code>）。</li>
+                </ul>
+                <div class="glossary"><b>"自愈"是 Agent 健壮性的核心</b>。真实运行中模型会犯各种错（格式错、上下文爆、工具用错）。CrewAI 的执行器不是遇错就崩，而是<strong>尽量把错误信息转化成"给模型的反馈"，让它自己修正</strong>。这和 OpenHands 的"看 Observation 自我纠错"、eino 的容错设计一脉相承——<strong>Agent 系统必须假设"模型会犯错"并优雅应对。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>上限与降级</h1></div>
+            <div class="card">
+                <p>循环的终止保障：</p>
+                <ul>
+                    <li><strong>max_iter</strong>（默认 25，Day 02）：迭代次数到上限，<code>handle_max_iterations_exceeded</code> 强制收尾——让模型基于目前信息给个最终答案，而不是无限循环。</li>
+                    <li><strong>max_execution_time</strong>：超时抛错（Day 02 的线程池/asyncio.wait_for）。</li>
+                    <li><strong>RPM 限流</strong>：<code>enforce_rpm_limit</code> 保证不超过每分钟请求数。</li>
+                </ul>
+                <div class="glossary"><b>三道保障防失控</b>：次数上限、时间上限、频率上限。能自主循环的 Agent 必须有这些"刹车"——否则一个跑偏的 Agent 可能无限循环烧钱。<strong>这是所有 Agent 框架的共识（eino 的 MaxRunSteps、OpenHands 的 max_iterations）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ReAct 循环是什么？一次轨迹长啥样？</li>
+                    <li>两种执行模式（原生函数调用 vs 文本 ReAct）的区别与分流？</li>
+                    <li>parser 把文本解析成哪两个类？解析失败怎么自愈？</li>
+                    <li>原生模式为什么默认一次只执行第一个工具？</li>
+                    <li>循环的三道终止保障？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '308,360p' $P/agents/crew_agent_executor.py   # 分流 + 文本 ReAct 循环
+sed -n '25,130p' $P/agents/parser.py                  # AgentAction/AgentFinish + parse
+sed -n '484,520p' $P/agents/crew_agent_executor.py    # 原生函数调用循环</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>Agent 间委派 delegation</strong>——一个 Agent 怎么"喊同事帮忙"。看委派如何被实现成"工具"（DelegateWorkTool / AskQuestionTool），以及层级模式的经理如何靠它分派任务。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 Process</a>
+                <a href="crewai-day08.html" style="color:var(--accent-green);">Day 08 · 委派 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
