@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Push 与事件模型 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:8px 10px 8px 36px;border:1px solid var(--border-color);border-radius:7px;margin:6px 0;font-size:12px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:8px;top:8px;width:19px;height:19px;border-radius:50%;background:linear-gradient(135deg,#7c4dff,#00acc1);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px}
+        .flow .step code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Push 与事件模型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 完整链路</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 事件源</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · PushRequest</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · debounce 防抖</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 两级缓冲</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · PushQueue 合并</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ProxyNeedsPush</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 Builder</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day10.html" class="nav-link" style="color:#7c4dff;">Day 10 连接生命周期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 xDS 生成</span>
+            <h1 class="part-title">Push 与事件模型</h1>
+            <p class="part-desc">你改了一条 VirtualService，几秒后所有相关 Envoy 就更新了——中间发生了什么？今天追这条"神经反射弧"：<code>ConfigUpdate → debounce → Push → PushQueue → 各 proxy</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>完整链路</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step">registry/config 事件（K8s CRD/服务变化）</div>
+                    <div class="step"><code>DiscoveryServer.ConfigUpdate</code>（discovery.go:318）投递到 <code>pushChannel</code></div>
+                    <div class="step"><code>handleUpdates → debounce</code>（防抖合并，100ms）</div>
+                    <div class="step"><code>Push</code>（构建/复用 PushContext，Day 05）</div>
+                    <div class="step"><code>AdsPushAll → StartPush</code>：遍历所有连接入 <code>pushQueue</code></div>
+                    <div class="step"><code>sendPushes</code>：并发从 pushQueue 出队</div>
+                    <div class="step"><code>pushConnection → pushXds</code>：生成并下发 xDS（Day 07-08）</div>
+                </div>
+                <div class="anno">读法：<b>这条链是控制面的"神经系统"——从"配置变了"到"Envoy 收到新配置"的完整路径。<strong>两级缓冲</strong>：<code>pushChannel</code>（防抖前）和 <code>pushQueue</code>（防抖后、下发前）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>事件源</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/bootstrap/server.go:893 initRegistryEventHandlers
+// 服务变更（:896）：serviceHandler → PushRequest{Full:true, ConfigsUpdated:{ServiceEntry...}} → ConfigUpdate
+// 配置(CRD)变更（:908）：configHandler，EventUpdate 时若 spec 未变则跳过（needsPush）
+// EDS 增量：Full:false，由 EDSUpdate 触发（不经这里，Day 07）</code></pre>
+                <div class="anno">读法：<b>Day 04 的服务注册表、Day 03 的 ConfigStore 检测到变化，就调 <code>ConfigUpdate</code> 触发推送。<strong>关键优化：配置更新时若 spec 没实质变化（只是 resourceVersion 变了）就跳过</strong>（<code>needsPush</code>）——避免无谓推送。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>PushRequest</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/push_context.go:366
+type PushRequest struct {
+  Full           bool                 // true=全量重算 PushContext；false=增量(一般仅 EDS)
+  ConfigsUpdated sets.Set[ConfigKey]  // 变更配置集合；空=推所有；非空=只推依赖它的 proxy
+  Push           *PushContext         // 本次用的快照
+  Reason         ReasonStats          // 触发原因（受控枚举，防 metrics 基数爆炸）
+  Forced         bool                 // 强制生成下发
+}
+// Merge()（:500）：debounce 时合并 —— Full 取或、ConfigsUpdated 求并</code></pre>
+                <div class="anno">读法：<b><code>PushRequest</code> 描述"一次推送请求"。<code>ConfigsUpdated</code> 是关键——记录"哪些配置变了"，用于 proxy 级裁剪（L07）。<code>Merge</code> 让 debounce 时能把多个请求合并成一个（<code>Full</code> 求或、<code>ConfigsUpdated</code> 求并）。</b>配置变更绝不能是增量（只有 EDS 会 <code>Full=false</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>debounce 防抖</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/discovery.go:357 debounce
+// 默认：DebounceAfter=100ms（每事件后静默期）、DebounceMax=10s（累计最长等待）
+// pushWorker（:378）：quietTime >= DebounceAfter || eventDelay >= debounceMax 才真推
+// 期间的事件用 req = req.Merge(r) 累积合并</code></pre>
+                <div class="baby"><span class="t">debounce（防抖）= "等一等再一起处理"</span>
+                想象你批量 <code>kubectl apply</code> 了 50 个 CRD——如果每个都立即触发一次全量推送，istiod 会被打爆、Envoy 收到 50 次抖动的配置。<strong>debounce 的策略：收到事件后<strong>不立即推</strong>，而是等一个"静默期"（100ms）。如果 100ms 内又来事件，合并（Merge）并重置计时；直到 100ms 内没有新事件（或累计等了 10s），才把合并后的一个 PushRequest 真正推出去。</strong>好比电梯——不是每按一次就走，而是等一会儿把同时按的人一起送。<strong>这把"50 次抖动"合并成"1 次推送"，是控制面稳定性的关键。</strong>Higress 还加了 <code>ShouldBlockPush</code> 全局节流。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>两级缓冲</h1></div>
+            <div class="card">
+<pre><code class="language-go">// Push（discovery.go:277）：
+//   Full → initPushContext（重算/复用 PushContext，Day 05）→ AdsPushAll
+//   非 Full → 直接 AdsPushAll（不重建 PushContext）
+// AdsPushAll → StartPush（ads.go:584）：for 每个连接 pushQueue.Enqueue(p, req)</code></pre>
+                <div class="anno">读法：<b>debounce 后进入 <code>Push</code>：全量则重建/复用 PushContext（Day 05 的增量复用优化），然后 <code>AdsPushAll</code> 把请求投给<strong>每个连接</strong>入 <code>pushQueue</code>。<strong>两级缓冲</strong>：<code>pushChannel</code>（防抖前，吸收突发）→ debounce → <code>pushQueue</code>（防抖后，控制并发下发）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>PushQueue 合并</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/pushqueue.go:23 PushQueue
+//   pending map[*Connection]*PushRequest   // 排队中，重复入队会 merge
+//   processing map[*Connection]*PushRequest // 已出队未完成
+// Enqueue（:51）：已在 pending/processing → CopyMerge（合并，不重复排队）
+// sendPushes → doSendPushes（:491）：semaphore 限并发 + Dequeue</code></pre>
+                <div class="baby"><span class="t">PushQueue 保证"每个 proxy 至多一个待推请求"</span>
+                如果推送队列里对同一个 Envoy 堆了 10 个待推请求，纯属浪费（只需推最新的）。<strong>PushQueue 的巧思：每个 proxy 在队列里<strong>至多一个</strong>请求——重复入队时不新增，而是 <code>Merge</code> 进已有的那个。</strong>还有并发控制（<code>concurrentPushLimit</code> 信号量）：同时最多推 N 个 proxy（按核数），防止一次性给几千个 Envoy 推送打爆 istiod。<strong>这是"合并 + 限流"双重保护——大规模网格下 istiod 稳定的关键。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ProxyNeedsPush</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/proxy_dependencies.go:114 DefaultProxyNeedsPush
+if req.Forced { return req, true }
+req = filterRelevantUpdates(proxy, req)  // 按 Sidecar 依赖过滤（Day 05）
+return req, len(req.ConfigsUpdated) > 0  // 过滤后无关联则跳过该代理</code></pre>
+                <div class="glossary"><b>三级优化的完整拼图</b>（<code>pilot.md:166-181</code>）：<br>
+                ① <strong>debounce</strong>（本课 L04）——把突发事件合并成少数几次推送<br>
+                ② <strong>PushContext 增量复用</strong>（Day 05 <code>updateContext</code>）——即便全量推送也只重算变化的索引<br>
+                ③ <strong>proxy 级裁剪</strong>（本课，<code>ProxyNeedsPush</code>）——只推给依赖变更配置的 proxy，其余跳过<br>
+                <strong>层层收窄：从"哪些事件"→"重算哪些"→"推给谁"。这套优化让 istiod 能管理数千 Envoy 而不被推送风暴压垮。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Push 完整链路的七步？两级缓冲是哪两级？</li>
+                    <li>PushRequest 的 Full/ConfigsUpdated 各是什么？Merge 干嘛？</li>
+                    <li>debounce 防抖解决什么问题？100ms/10s 各是什么？</li>
+                    <li>PushQueue 怎么保证"每 proxy 至多一个请求"？</li>
+                    <li>三级优化分别是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func.*ConfigUpdate\|func debounce\|func (s \*DiscoveryServer) Push' pilot/pkg/xds/discovery.go
+grep -n 'type PushQueue struct\|func.*Enqueue' pilot/pkg/xds/pushqueue.go
+grep -n 'DefaultProxyNeedsPush' pilot/pkg/xds/proxy_dependencies.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>代理连接生命周期</strong>——把第 2 周串起来：一个 Envoy 从连上 istiod、拿初始配置、到收增量更新、到断开的完整故事。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 Builder</a>
+                <a href="istio-day10.html" style="color:#7c4dff;">Day 10 · 代理连接生命周期 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

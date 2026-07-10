@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 代理连接生命周期 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:8px 10px 8px 36px;border:1px solid var(--border-color);border-radius:7px;margin:6px 0;font-size:12px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:8px;top:8px;width:19px;height:19px;border-radius:50%;background:linear-gradient(135deg,#7c4dff,#00acc1);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px}
+        .flow .step b{color:#7c4dff}.flow .step code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">代理连接生命周期 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 全景六阶段</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 建立连接</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 首请求初始化</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 初始配置下发</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 增量更新</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 端点高频更新</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 断开清理</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 Push 模型</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day16.html" class="nav-link" style="color:#66bb6a;">Day 16 遥测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">代理连接生命周期</h1>
+            <p class="part-desc">把第 2 周串成一个完整故事：一个 Envoy 从连上 istiod、拿初始配置、收增量更新、到断开的全过程。这是控制面和数据面协作的端到端复盘。收官第 2 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>全景六阶段</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step"><b>建立连接</b>：Envoy 拨号 istiod :15012 ADS gRPC</div>
+                    <div class="step"><b>首请求初始化</b>：报 Node.Id → 解析 model.Proxy + 算 SidecarScope</div>
+                    <div class="step"><b>初始配置下发</b>：Envoy 请求 CDS/LDS/EDS/RDS → istiod 生成并 Send</div>
+                    <div class="step"><b>增量更新</b>：配置变 → debounce → Push → 只推相关 proxy</div>
+                    <div class="step"><b>端点高频更新</b>：Pod 扩缩容 → EDS 独立快路径</div>
+                    <div class="step"><b>断开清理</b>：流关闭 → 从连接表移除</div>
+                </div>
+                <div class="anno">读法：<b>这六阶段把 Day 06（连接/流）+ Day 07-08（生成）+ Day 09（推送）全串起来了。<strong>能讲清这个故事，就真正掌握了 istiod 的运行时。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① 建立连接</h1></div>
+            <div class="card">
+                <p>Envoy（经 pilot-agent，Day 12）拨号 istiod <code>:15012</code>（mTLS）或 <code>:15010</code>（明文）的 ADS gRPC，调 <code>StreamAggregatedResources</code>（<code>ads.go:182</code>）。ready/限流/认证通过后 <code>newConnection</code> → <code>xds.Stream(con)</code>，起 Receive 协程，阻塞等首请求（Day 06）。</p>
+                <div class="anno">读法：<b>连接建立要过 Day 06 的三道关（ready/限流/认证）。此时连接还没注册进活跃表——要等首请求初始化完（下一步）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② 首请求初始化</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># Receive 收到首请求（必带 Node.Id）→ initConnection（ads.go:239）：
+#   initProxyMetadata：解析 node id → model.Proxy
+#   proxy.LastPushContext = globalPushContext()  # 保证 push context 单调
+#   addCon 注册进 adsClients（此后才被 push 遍历到）
+#   computeProxyState：算 SidecarScope/Gateway/labels（Day 05）
+#   MarkInitialized() → 主循环开始服务</code></pre>
+                <div class="baby"><span class="t">初始化的时序竞态（一个真实工程细节）</span>
+                注意 <code>addCon</code>（注册进连接表）和 <code>initializeProxy</code>（算 proxy 状态）的顺序很讲究——注释（<code>ads.go:265-269</code>）专门解释了这个竞态。<strong>如果先注册再初始化，可能有推送来了但 proxy 状态还没算好；如果先初始化再注册，可能初始化期间的配置变更漏掉。</strong>Istio 的处理保证了"注册后一定能被推、且推的时候状态已就绪"。<strong>这种时序细节是分布式系统里最容易出 bug 的地方——读源码时看到这类注释要格外留意，它们往往是踩过坑的经验结晶。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ 初始配置下发</h1></div>
+            <div class="card">
+                <p>Envoy 依次发 CDS/LDS/EDS/RDS 请求；主循环从 <code>reqChan</code> 取出 → <code>processRequest</code> → <code>ShouldRespond</code> 判定"初始请求"（Day 06）→ <code>pushXds</code> → 对应 Generator（Day 07-08）→ <code>BuildClusters</code>/<code>BuildListeners</code>… → <code>Send</code>。Envoy 收到后回 ACK。</p>
+                <div class="anno">读法：<b>初始下发有严格顺序（<code>PushOrder</code>，<code>ads.go:499</code>）：<code>CDS → EDS → LDS → RDS → SDS</code>——因为 Envoy 有依赖（Listener 引用 Route、Route 引用 Cluster、Cluster 引用 Endpoint）。<strong>先发被依赖的，再发依赖它的</strong>，否则 Envoy 会收到"引用了还不存在的资源"的配置。</b>每次下发 Envoy 都回 ACK（带 nonce）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ 增量更新</h1></div>
+            <div class="card">
+                <p>集群里某 VirtualService 变更 → configHandler → <code>ConfigUpdate</code> → <code>pushChannel</code> → debounce（100ms 合并）→ <code>Push</code>（全量时重算/复用 PushContext）→ <code>AdsPushAll → StartPush</code> 遍历所有连接入 <code>PushQueue</code>（Day 09）。</p>
+                <p><code>doSendPushes</code> 出队 → Event 送入连接 <code>pushChannel</code> → 主循环 <code>pushConnection</code>：<code>ProxyNeedsPush</code> 判该 proxy 相关否 → 相关则按 <code>PushOrder</code> 逐类型 <code>pushXds</code>。Envoy 再 ACK。</p>
+                <div class="anno">读法：<b>这就是 Day 09 的推送链在"一次真实变更"里的走位。关键：<code>ProxyNeedsPush</code> 让不相关的 proxy 被跳过——改 payment 的路由，只有调用 payment 的 Envoy 收到更新。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 端点高频更新</h1></div>
+            <div class="card">
+                <p>Pod 扩缩容 → <code>EDSUpdate</code>（<code>eds.go:47</code>）更新 endpoint 分片 → 触发 push；EDS 走独立缓存路径（Day 07），多数情况只重算该 service 的 <code>ClusterLoadAssignment</code>，且可 SotW 下增量推送（Day 06 通配/非通配）。</p>
+                <div class="anno">读法：<b>端点变化不重算 PushContext（Day 05），走 EDS 快路径。这是"最高频操作专门优化"的体现——Pod 扩缩容是集群里最频繁的事件，必须轻量处理。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>⑥ 断开清理</h1></div>
+            <div class="card">
+                <p>流关闭 → Receive 返回 → Stream 退出 → <code>defer ctx.Close()</code> → <code>closeConnection</code>（<code>ads.go:283</code>）：<code>removeCon</code> 从 <code>adsClients</code> 删除 + <code>WorkloadEntryController.OnDisconnect</code>。</p>
+                <div class="baby"><span class="t">VM 自动注册随连接生命周期</span>
+                有个巧妙联动：<strong>VM（虚拟机工作负载）通过 WorkloadEntry 自动注册——连上 istiod 时 <code>OnConnect</code> 创建 WorkloadEntry（表示"这个 VM 上线了"），断开时 <code>OnDisconnect</code> 清理（"VM 下线了"）。</strong>于是 VM 的生命周期和它的 xDS 连接绑定——连着就在网格里，断了就自动摘除。<strong>这让非 K8s 的 VM 也能像 Pod 一样被自动管理（Day 04 的 K8s+VM 混合网格）。</strong>断开清理不只是删连接，还要处理这些副作用。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周（xDS 生成）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 06</strong> DiscoveryServer：ADS 流、收发分离、ShouldRespond 状态机</li>
+                    <li><strong>Day 07</strong> 配置生成：ConfigGenerator、生成器薄封装、EDS 独立路径</li>
+                    <li><strong>Day 08</strong> 三大 Builder：Listener/Cluster/Route 怎么构造 Envoy 对象</li>
+                    <li><strong>Day 09</strong> Push 模型：ConfigUpdate → debounce → PushQueue → 三级优化</li>
+                    <li><strong>Day 10</strong> 连接生命周期：连接→初始化→初始下发→增量→端点→断开</li>
+                </ul>
+                <p style="margin-top:10px;">你现在完全理解了 istiod 的核心——怎么把配置翻译成 xDS 并高效推送给每个 Envoy。<strong>第 1 周（数据基础）+ 第 2 周（xDS 生成）= istiod 控制面的完整闭环。</strong>第 3 周（已学）讲 sidecar 落地与安全，第 4 周讲遥测、EnvoyFilter、安装。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func.*initConnection\|func.*closeConnection\|PushOrder' pilot/pkg/xds/ads.go
+sed -n '445,476p' architecture/networking/pilot.md   # 连接生命周期文档</code></pre>
+                <div class="tip"><strong>下一步 · Day 16（第4周）</strong>：第 3 周（Day 11-15 sidecar/安全）你已学过。接下来第 4 周 <strong>遥测</strong>——Istio 怎么采集 metrics/trace，Telemetry API 怎么翻译成 Envoy stats filter。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 Push 模型</a>
+                <a href="istio-day16.html" style="color:#66bb6a;">Day 16 · 遥测 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
