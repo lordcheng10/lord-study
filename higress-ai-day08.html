@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Nacos 注册表 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">Nacos 注册表 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三代 Nacos</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · watcher 结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Run 轮询</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · fetchAllServices</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 订阅回调</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · generateServiceEntry</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · v2/nacos3 演进</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 McpBridge</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day09.html" class="nav-link" style="color:#3b82f6;">Day 09 ServiceEntry &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 服务发现与配置</span>
+            <h1 class="part-title">Nacos 注册表</h1>
+            <p class="part-desc">Nacos 是 Higress 最重用的注册源（阿里生态）。今天拆一个具体 watcher：怎么订阅 Nacos、轮询全量服务、把实例转成 Istio ServiceEntry。三代实现体现能力演进。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三代 Nacos</h1></div>
+            <div class="card">
+                <p>Higress 有三套 Nacos 实现：<code>registry/nacos/</code>（v1 SDK）、<code>registry/nacos/v2/</code>（v2 SDK）、<code>registry/nacos/mcpserver/</code>（MCP Server 发现）。</p>
+                <div class="anno">读法：<b>v1（基础订阅）→ v2（加鉴权 AccessKey/SecretKey + 地址服务器）→ nacos3（v2 + MCP Server 发现，把 Nacos 上注册的 MCP Server 转成服务，AI 网关特性）。今天以 v1 为主讲清核心流程，再看 v2/nacos3 加了什么。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>watcher 结构</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/nacos/watcher.go:54
+type watcher struct {
+  provider.BaseWatcher            // 嵌入基类（Day 06）
+  apiv1.RegistryConfig
+  namingClient naming_client.INamingClient  // Nacos 官方 SDK
+}
+// 默认：超时 5000ms、刷新间隔默认 30s(下限 10s)、分页 50、Group/Service 连接符 @@</code></pre>
+                <div class="anno">读法：<b>watcher 嵌入 <code>BaseWatcher</code>（复用回调管理）+ 持有 Nacos 官方 SDK 的 <code>INamingClient</code>。<code>NewWatcher</code> 用 Option 模式配置（<code>WithNacosNamespaceId</code> 空值默认 <code>public</code> 等）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Run 轮询</h1></div>
+            <div class="card">
+<pre><code class="language-go">// watcher.go:196 Run()
+// 起 ticker 按 NacosRefreshInterval 周期跑
+//   先探活设 Status → fetchAllServices() → Ready(true)</code></pre>
+                <div class="baby"><span class="t">"轮询 + 订阅"双管齐下</span>
+                Nacos watcher 有两个机制：<strong>①<strong>周期轮询</strong>（Run 里的 ticker）——定期拉 Nacos 上的全量服务列表，发现"哪些服务新增/消失"（服务级变化）；②<strong>订阅</strong>（subscribe）——对每个服务向 Nacos 注册监听，实例增删时 Nacos 主动推回调（实例级变化）。</strong>轮询管"服务列表"，订阅管"某服务的实例列表"。<strong>两者配合：轮询发现新服务 → 订阅它 → 实例变化实时收到。</strong>首次 <code>fetchAllServices</code> 完成后 <code>Ready(true)</code> 报告就绪（Day 06 回调）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>fetchAllServices</h1></div>
+            <div class="card">
+<pre><code class="language-go">// watcher.go:212 fetchAllServices()
+// 对每个 group 用 GetAllServicesInfo 分页拉全量服务列表
+// 与本地 WatchingServices diff：
+//   消失的 → unsubscribe；新增的 → subscribe
+// shouldSubscribe（:414）过滤掉 consumers: 前缀（Dubbo 消费者，不是服务提供者）</code></pre>
+                <div class="anno">读法：<b>轮询核心：拉 Nacos 全量服务，和本地"正在监听的服务"diff——新增的订阅、消失的退订。<strong>过滤 Dubbo 消费者</strong>（<code>consumers:</code> 前缀）——只关心服务提供者，消费者不是可路由的目标。</b>这是 Nacos + Dubbo 场景的实战细节。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>订阅回调</h1></div>
+            <div class="card">
+<pre><code class="language-go">// watcher.go:297 getSubscribeCallback —— 实例变化时被 Nacos SDK 调用
+// 拼 host（serviceName.group.namespace.type，下划线转连字符）
+// 空实例时删缓存
+// 跳过 register-resource=mcp-bridge 的自注册回环
+// 否则 generateServiceEntry 后 cache.UpdateServiceWrapper
+//   最后 defer w.UpdateService() 通知上层（Day 06 回调）</code></pre>
+                <div class="anno">读法：<b>某服务的实例增删时，Nacos SDK 调这个回调。它把新实例列表转成 ServiceEntry（L06）、写共享缓存、通知上层刷新。<strong>"跳过 mcp-bridge 自注册回环"</strong>——避免 Higress 自己注册的东西又被自己发现（死循环）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>generateServiceEntry</h1></div>
+            <div class="card">
+<pre><code class="language-go">// watcher.go:331 把 Nacos 实例转成 Istio ServiceEntry
+// 每个实例转 WorkloadEntry（IP+端口+Metadata 作 Labels）
+// 从 metadata 读 protocol，权重 math.Round(service.Weight)
+// ServiceEntry{Location: MESH_INTERNAL, Resolution: STATIC}</code></pre>
+                <div class="baby"><span class="t">转换是关键——异构 → 统一</span>
+                这是"把 Nacos 的服务"翻译成"Istio 认的 ServiceEntry"的现场。<strong>Nacos 的每个服务实例（IP:Port + 元数据）→ Istio 的一个 <code>WorkloadEntry</code>（Istio 课 Day 03 的概念）；一个 Nacos 服务 → 一个 <code>ServiceEntry</code>（含所有实例、协议、权重）。</strong><code>Resolution: STATIC</code> 表示端点是明确的 IP（Istio 课 Day 15 的服务发现类型）。<strong>转成 ServiceEntry 后，它就融入了 Istio 的配置体系——istiod 拿去生成 Envoy 的 Cluster/Endpoint，和 K8s 服务一视同仁。</strong>这就是"多源统一"的落点。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>v2 / nacos3 演进</h1></div>
+            <div class="card">
+                <p><code>registry/nacos/v2/watcher.go</code>：结构多了 <code>addrProvider</code>（地址服务器动态解析 Nacos 集群地址）、<code>mcpWatcher</code>（MCP Server 子 watcher）。<code>ClientConfig</code> 多了 AccessKey/SecretKey/Username/Password（鉴权）。若 <code>EnableMCPServer=true</code> 且类型 <code>nacos3</code>，创建 mcpserver 子 watcher，把 Nacos 上的 MCP Server 转成 ServiceEntry + WasmPlugin 规则。</p>
+                <div class="anno">读法：<b>v2 加了企业级能力（鉴权、地址服务器）；nacos3 加了 AI 网关特性（发现 Nacos 上的 MCP Server）。<strong>三代演进对应 Higress 从"普通网关"到"AI 网关"的进化——nacos3 能自动发现并接入 MCP 工具服务。</strong></b>核心 <code>fetchAllServices</code>/回调/<code>generateServiceEntry</code> 逻辑三代类似。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Nacos 三代的区别？</li>
+                    <li>watcher 怎么复用 BaseWatcher + 用官方 SDK？</li>
+                    <li>"轮询 + 订阅"双机制各管什么？</li>
+                    <li>fetchAllServices 怎么 diff？为什么过滤 Dubbo 消费者？</li>
+                    <li>generateServiceEntry 怎么把 Nacos 实例转成 ServiceEntry？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'func.*Run\|func.*fetchAllServices\|func.*generateServiceEntry\|getSubscribeCallback' registry/nacos/watcher.go
+ls registry/nacos/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>服务 → ServiceEntry</strong>——发现的服务怎么进入 Istio config store？共享内存缓存（生产者-消费者）、延迟删除、<code>convertServiceEntry</code>、完整数据流。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 McpBridge</a>
+                <a href="higress-ai-day09.html" style="color:#3b82f6;">Day 09 · 服务 → ServiceEntry &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

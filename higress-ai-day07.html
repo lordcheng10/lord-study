@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · McpBridge + reconcile — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">McpBridge + reconcile · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · McpBridge CRD</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 谁监听它</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · AddOrUpdateMcpBridge</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Reconciler 控制循环</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · diff 式协调</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · watcher 工厂</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · getAuthOption</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 多注册中心</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day08.html" class="nav-link" style="color:#3b82f6;">Day 08 Nacos &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 服务发现与配置</span>
+            <h1 class="part-title">McpBridge + reconcile</h1>
+            <p class="part-desc">用户用 McpBridge CRD 声明"从哪些注册中心发现服务"，Reconciler 是那个"控制循环"——diff 出该创建/停止哪些 watcher。典型的 K8s Operator 模式。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>McpBridge CRD</h1></div>
+            <div class="card">
+<pre><code class="language-go">// api/networking/v1/mcp_bridge.proto:47
+McpBridge { registries []RegistryConfig; proxies []ProxyConfig }
+// RegistryConfig（:52）：type(必填)/name/domain/port/authSecretName
+//   Nacos 专属：nacosNamespaceId/nacosGroups/nacosRefreshInterval…
+//   Consul 专属：consulDatacenter/consulServiceTag…
+//   MCP Server(nacos3)：mcpServerExportDomains/enableMCPServer/allowMcpServers</code></pre>
+                <div class="baby"><span class="t">McpBridge = "注册中心接入清单"</span>
+                你写一个 McpBridge YAML，列出"我要从这个 Nacos、那个 Consul 发现服务"，每个 registry 配好类型、地址、端口、认证。<strong>Higress 读这个 CRD，就知道该连哪些注册中心。</strong>全局单例名 <code>default</code>（一个集群一个 McpBridge）。这是"声明式配置"——你声明想要什么，Higress 负责实现（连上、订阅、转 ServiceEntry）。<strong>Higress 有三个自定义 CRD：McpBridge（注册中心）、WasmPlugin（插件）、Http2Rpc（协议转换）。今天是第一个。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>谁监听它</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/kube/mcpbridge/controller.go:33 NewController
+//   基于 informer 监听 McpBridge，复用通用 CommonController（Day 03）
+// 装配：pkg/ingress/config/ingress_config.go:215
+mcpbridgeController.AddEventHandler(config.AddOrUpdateMcpBridge, config.DeleteMcpBridge)
+// :2010 go m.mcpbridgeController.Run(stop)</code></pre>
+                <div class="anno">读法：<b>mcpbridge 控制器（Day 03 的六大子控制器之一）watch McpBridge CRD，变更时回调 <code>AddOrUpdateMcpBridge</code>/<code>DeleteMcpBridge</code>。复用泛型 <code>CommonController</code>（Day 03）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>AddOrUpdateMcpBridge</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/config/ingress_config.go:1341
+// 只处理名为 default 的 McpBridge（单例约定，:1343）
+// 懒初始化 RegistryReconciler = reconcile.NewReconciler(serviceUpdate, ...)（:1352）
+//   serviceUpdate 回调：服务变化时对 se/dr/vs/wasm/ef 所有 handler 触发 EventUpdate
+//     （带 AlwaysPushLabel 强制全量推 xDS）
+// reconciler.Reconcile(mcpbridge)（:1414）真正干活</code></pre>
+                <div class="anno">读法：<b>McpBridge 变了 → 懒建 Reconciler（传入 <code>serviceUpdate</code> 回调：服务变了就通知 istiod 全量刷新）→ 调 <code>Reconcile</code> 对账。<code>DeleteMcpBridge</code> → <code>Reconcile(nil)</code> 清空所有 watcher。</b>这里把 Day 06 的 <code>UpdateService</code> 回调接到了向 istiod 推送。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Reconciler 控制循环</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Reconcile = "让现状逼近期望"</span>
+                这是 Kubernetes 最核心的编程模式——<strong>Reconcile（对账/调谐）：拿"期望状态"（McpBridge 里声明的注册中心列表）和"现状"（当前跑着的 watcher）对比，算出差异，让现状变成期望。</strong>比如 McpBridge 里加了一个 Consul，Reconcile 发现"期望有 Consul 但现状没有"→ 创建一个 Consul watcher。删了一个 Nacos → 停掉对应 watcher。<strong>不是命令式（"创建 X"），而是声明式（"最终应该有这些"，系统自己算怎么达到）。</strong>Higress 的 McpBridge + Reconciler 就是这个模式（和 Istio Operator 的 Reconcile 同思想）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>diff 式协调</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/reconcile/reconcile.go reconcileRegistries（:108）
+// 用 path.Join(type, name) 做 key，算出 toBeCreated/toBeUpdated/toBeDeleted
+//   删除/更新先 watcher.Stop()（:136）
+//   新建则 generateWatcherFromRegistryConfig 后 go watcher.Run()（:156）
+// 最后用 WaitGroup + 60s 超时等所有 watcher ready（:171）</code></pre>
+                <div class="anno">读法：<b>典型 diff：按 <code>type/name</code> 做 key，对比期望和现状，分成"要建/要改/要删"三组，分别处理。改和删都先 <code>Stop()</code> 旧 watcher，建则起新 watcher 的 goroutine。<code>PurgeStaleItems</code>（<code>:101</code>）在最后物理删除标记删除项。</b>等所有 watcher ready（60s 超时）才算对账完成。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>watcher 工厂</h1></div>
+            <div class="card">
+<pre><code class="language-go">// reconcile.go generateWatcherFromRegistryConfig（:186）—— 工厂分发中枢
+switch registry.Type {
+  case "nacos":          nacos.NewWatcher(...)
+  case "nacos2","nacos3": nacosv2.NewWatcher(...)
+  case "zookeeper":      zookeeper.NewWatcher(...)
+  case "consul":         consul.NewWatcher(...)
+  case "static","dns":   direct.NewWatcher(...)
+  case "eureka":         eureka.NewWatcher(...)
+}
+// :281 给每个 watcher 挂 ReadyHandler(wg.Done) + AppendServiceUpdateHandler(serviceUpdate)</code></pre>
+                <div class="anno">读法：<b>又是工厂模式（Envoy/Istio 课反复见过）——按 <code>registry.Type</code> 分发到对应 watcher 构造。这是"多源发现的开关中枢"。挂上 Day 06 的两个回调（Ready→wg.Done、ServiceUpdate→serviceUpdate）联动上层。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>getAuthOption</h1></div>
+            <div class="card">
+                <p><code>reconcile.go:296</code> <code>getAuthOption</code>：若配了 <code>AuthSecretName</code>，从 K8s Secret 读用户名/密码/token 填进 <code>AuthOption</code>（Day 06）。<code>reconcileProxies</code>（<code>:332</code>）同样 diff 处理 HTTP 正向代理配置。</p>
+                <div class="anno">读法：<b>连注册中心需要认证时，从 McpBridge 引用的 Secret 里读凭据（不明文存 CRD）。这坐实了 Day 06 的"认证信息存 Secret"。</b><code>GetRegistryWatcherStatusList</code>（<code>:399</code>）暴露每个 watcher 的健康/就绪状态供运维。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>McpBridge CRD 声明什么？为什么是单例？</li>
+                    <li>谁监听 McpBridge？变更回调是什么？</li>
+                    <li>Reconcile 控制循环的思想（期望 vs 现状）？</li>
+                    <li>diff 式协调怎么算出建/改/删？</li>
+                    <li>watcher 工厂按什么分发？认证凭据怎么读？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+sed -n '47,90p' api/networking/v1/mcp_bridge.proto
+grep -n 'func.*Reconcile\|reconcileRegistries\|generateWatcherFromRegistryConfig' registry/reconcile/reconcile.go
+grep -n 'AddOrUpdateMcpBridge' pkg/ingress/config/ingress_config.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>Nacos 注册表</strong>——Higress 最重用的注册源。看 Nacos watcher 怎么订阅、轮询、把实例转成 ServiceEntry。三代实现的演进。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 多注册中心</a>
+                <a href="higress-ai-day08.html" style="color:#3b82f6;">Day 08 · Nacos 注册表 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

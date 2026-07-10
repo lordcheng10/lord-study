@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 配置模型 + 证书管理 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">配置 + 证书 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 配置模型</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 复用 Istio config</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 自动 HTTPS 概览</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · certmagic 引擎</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · HTTP-01 挑战</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ConfigMap 存储</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 证书落地</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 ServiceEntry</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day11.html" class="nav-link" style="color:#8b5cf6;">Day 11 Wasm 概览 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">配置模型 + 证书管理</h1>
+            <p class="part-desc">收官第 2 周：先看 Higress 的 config 模型（复用 Istio），再看它的自动 HTTPS——用 certmagic + ACME Let's Encrypt，还有一个"用自身网关完成 HTTP-01 挑战"的巧妙设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>配置模型</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/config/envs.go：环境变量配置
+//   PodNamespace 默认 higress-system、GatewayName 默认 higress-gateway
+//   McpServerWasmImageUrl 默认阿里云 OCI 镜像
+// pkg/config/constants/constants.go：
+//   DefaultIngressClass/DefaultGatewayClass = "higress"
+//   ManagedGatewayController = "higress.io/gateway-controller"
+//   RegistryTypeLabelKey/RegistryNameLabelKey（Day 09 打给 ServiceEntry 的标签）</code></pre>
+                <div class="anno">读法：<b>config 包放全局常量和环境变量——命名空间、网关名、ingress class、各种标签 key。<code>DefaultIngressClass=higress</code> 决定 Higress 只处理标了这个 class 的 Ingress（避免和其他 Ingress 控制器冲突）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>复用 Istio config</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Higress 的 config 模型 = 复用 Istio + 自建聚合</span>
+                Higress 不重新发明配置类型——<strong>直接复用 Istio 的 <code>config.Config</code>、<code>config.Meta</code>、<code>config.GroupVersionKind</code>（Istio 课 Day 03）。</strong>它自己写的是 <code>IngressConfig</code>（Day 03）这个聚合 ConfigStore——把三类来源（Ingress、Gateway API、McpBridge 注册中心）统一转换成 Istio 的 <code>config.Config</code>，用 GVK 区分资源类型。<strong>McpBridge 的注册结果最终以 <code>Namespace:"mcp"</code> 的 ServiceEntry 形式融入 Istio 配置体系（Day 09）。</strong>Higress 自有 CRD（McpBridge/WasmPlugin/Http2Rpc）的 proto/client 在 <code>api/</code> 和 <code>client/pkg/</code>。<strong>"复用成熟抽象 + 自建聚合层"是 Higress 的一贯策略。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>自动 HTTPS 概览</h1></div>
+            <div class="card">
+                <p>Higress 用 <code>certmagic</code>（caddy 的证书库）+ <code>acmez</code> 实现自动 HTTPS。配置在 <code>higress-https</code> ConfigMap，Issuer 支持 <code>aliyunssl</code>、<code>letsencrypt</code>（<code>pkg/cert/config.go:41</code>）。默认续期提前 30 天。</p>
+                <div class="baby"><span class="t">自动 HTTPS = "证书全自动"</span>
+                传统上给网站配 HTTPS 要：申请证书、配置、到期手动续。<strong>Higress 的自动 HTTPS：你只需声明"我要给 example.com 自动签证书"，Higress 就通过 ACME 协议（Let's Encrypt）<strong>自动申请、自动续期</strong>——零手动。</strong>底层用 certmagic（Caddy 服务器的证书引擎，久经考验）。<strong>这是"网关帮你搞定证书"的产品化能力——又一个"让用户省心"的产品特性。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>certmagic 引擎</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/cert/certmgr.go:52 InitCertMgr
+//   用 ConfigMap 作 certmagic 的 Storage（:59）
+//   RenewalWindowRatio = RenewBeforeDays/90（:60）
+//   ACMEIssuer：CA 用 LetsEncryptProductionCA，禁 TLS-ALPN、启用 HTTP-01（:86）
+//   注入自定义 ingressSolver（:94）
+// Reconcile（:116）：配置变化时 manageSync 管理域名证书，触发 XDSUpdater.ConfigUpdate 全量推送</code></pre>
+                <div class="anno">读法：<b>CertMgr 封装 certmagic：配好 CA（Let's Encrypt）、续期比例、challenge 方式（HTTP-01）。<code>Reconcile</code> 是证书的控制循环（和 Day 07 的 Reconcile 同模式）——配置变了就管理对应域名的证书。证书变更触发 xDS 全量推送（让 Envoy 用新证书）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>HTTP-01 挑战（巧妙设计）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/cert/ingress.go IngressSolver（实现 acmez.Solver）
+// Present（:58）：挑战时【动态创建一个 Ingress】
+//   path /.well-known/acme-challenge/{token}，后端指向 higress-controller:8889
+// CleanUp（:95）：验证完删除该 Ingress</code></pre>
+                <div class="baby"><span class="t">用网关自己完成 ACME 挑战——绝妙</span>
+                Let's Encrypt 签证书前要验证"你真的拥有这个域名"——HTTP-01 挑战：它访问 <code>你的域名/.well-known/acme-challenge/{token}</code>，你能返回正确 token 就证明拥有域名。<strong>问题：这个验证请求得能到达 Higress。Higress 的巧妙解法：<strong>动态创建一个临时 Ingress</strong>，把 <code>/.well-known/acme-challenge/{token}</code> 路由到自己的证书服务（8889 端口）——用<strong>自身的网关能力</strong>来接 Let's Encrypt 的验证请求！验证完删掉这个临时 Ingress。</strong>网关用自己解决自己的证书验证——自举、优雅。<strong>这是"用产品自身能力解决产品自身需求"的漂亮设计。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>ConfigMap 存储</h1></div>
+            <div class="card">
+                <p><code>pkg/cert/storage.go</code> <code>ConfigmapStorage</code> 实现 certmagic 的 <code>Storage</code> 接口（Exists/Store/Load/Delete/Lock/Unlock），把证书、账户、锁全存进 K8s ConfigMap。</p>
+                <div class="baby"><span class="t">用 ConfigMap 当"证书数据库"</span>
+                certmagic 需要一个地方存证书、ACME 账户、分布式锁。<strong>Higress 不引入外部数据库，而是<strong>用 K8s ConfigMap 作存储</strong>——实现 certmagic 的 <code>Storage</code> 接口，把这些数据全塞进 ConfigMap。</strong>好处：<strong>零外部依赖</strong>——K8s 集群本身就是存储，多个 Higress 副本共享同一个 ConfigMap（含分布式锁，避免多副本同时申请证书）。<strong>这是"复用 K8s 原生能力做持久化"的云原生实践（和 Istio 用 Secret 存证书同理）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>证书落地</h1></div>
+            <div class="card">
+                <p><code>certmgr.go:203</code> <code>OnEvent</code> 监听 certmagic 的 <code>cert_obtained</code> 事件——拿到证书后解析有效期，<code>secretMgr.Update</code> 把证书写入 K8s TLS Secret 供网关使用。控制器 <code>pkg/cert/controller.go</code> watch <code>higress-https</code> ConfigMap 触发 Reconcile；<code>pkg/cert/server.go</code> 用 <code>HTTPChallengeHandler</code> 在 8889 处理 ACME 挑战。</p>
+                <div class="anno">读法：<b>证书申请成功 → 写入 K8s TLS Secret → Envoy（通过 istiod SDS）用它做 TLS。整个链路：ConfigMap 配置 → Reconcile → certmagic 申请（HTTP-01 挑战）→ 证书存 ConfigMap + 落地 TLS Secret → xDS 推给 Envoy。</b>全自动、零手动。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周（服务发现与配置）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 06</strong> 多注册中心：8 种类型、Watcher 统一接口、BaseWatcher 组合</li>
+                    <li><strong>Day 07</strong> McpBridge CRD、Reconciler 控制循环、diff 式协调、watcher 工厂</li>
+                    <li><strong>Day 08</strong> Nacos 三代、轮询+订阅、generateServiceEntry</li>
+                    <li><strong>Day 09</strong> 共享内存缓存、生产者-消费者、延迟删除、convertServiceEntry、全链路</li>
+                    <li><strong>Day 10</strong> config 模型复用 Istio、自动 HTTPS certmagic、HTTP-01 自举、ConfigMap 存储</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Higress 的两大特色能力：<strong>多注册中心服务发现</strong>（连接老微服务生态）和<strong>自动 HTTPS</strong>。第 3 周进入插件生态——Wasm 插件怎么写和加载。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'DefaultIngressClass\|RegistryTypeLabelKey' pkg/config/constants/constants.go
+grep -n 'func InitCertMgr\|func.*Reconcile' pkg/cert/certmgr.go
+grep -n 'func.*Present\|func.*CleanUp' pkg/cert/ingress.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 11（第3周开始）</strong>：<strong>Wasm 插件系统概览</strong>——Higress 的插件生态：Wasm 插件 vs golang-filter 两套机制、和 Envoy proxy-wasm 的关系、SDK 已迁到独立 module。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 ServiceEntry</a>
+                <a href="higress-ai-day11.html" style="color:#8b5cf6;">Day 11 · Wasm 插件系统概览 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

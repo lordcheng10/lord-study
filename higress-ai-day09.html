@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 服务 → ServiceEntry — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:8px 10px 8px 34px;border:1px solid var(--border-color);border-radius:7px;margin:6px 0;font-size:12px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:8px;top:8px;width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:10px}
+        .flow .step code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">服务 → ServiceEntry · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 共享内存缓存</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 生产者-消费者</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 延迟删除</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · convertServiceEntry</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · mcp 命名空间</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · direct watcher 样例</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 全链路数据流</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 Nacos</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day10.html" class="nav-link" style="color:#3b82f6;">Day 10 配置+证书 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 服务发现与配置</span>
+            <h1 class="part-title">服务 → ServiceEntry</h1>
+            <p class="part-desc">watcher 发现的服务怎么进入 Istio config store、最终下发给 Envoy？今天看共享内存缓存（生产者-消费者的中介）、延迟删除、<code>convertServiceEntry</code>，串起完整数据流。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>共享内存缓存</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/memory/cache.go:39 Cache 接口
+// 生产者（watcher）：UpdateServiceWrapper / DeleteServiceWrapper
+// 消费者（ingress config）：GetAllServiceWrapper / GetAllServiceEntry / GetAllProxyWrapper
+// store（:71）：sew（host→ServiceWrapper）+ toBeUpdated/toBeDeleted + ip2services</code></pre>
+                <div class="anno">读法：<b>各注册中心的 watcher（Day 08）把发现的服务写进这个<strong>共享内存缓存</strong>；ingress config（Day 04）从缓存读出来转成 config.Config。缓存是"生产者和消费者之间的中介"。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>生产者-消费者</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">缓存解耦"发现"和"下发"</span>
+                <strong>生产者（8 种注册中心的 watcher）各自异步地发现服务、写进缓存；消费者（istiod 来 List 时触发的 convertServiceEntry）从缓存读。中间用缓存解耦——watcher 不用知道谁消费、消费者不用知道服务从哪个注册中心来。</strong>好比一个公告板：各注册中心把"我这有哪些服务"贴上去，istiod 需要时来看板子取全部。<strong>这个解耦让"多源发现"和"统一下发"各自独立演化——加一个新注册中心类型，只要它往缓存写，消费侧零改动。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>延迟删除</h1></div>
+            <div class="card">
+<pre><code class="language-go">// cache.go DeleteServiceWrapper（:219）只做标记
+// PurgeStaleItems（:260，reconcile 完成时调）才真正物理删除
+// deferredDeleteServices：延迟删除列表</code></pre>
+                <div class="baby"><span class="t">为什么删除要"延迟"？</span>
+                注册中心抖动（网络闪断）时，watcher 可能瞬间收到"服务全没了"的错误信号——如果立即删除，Envoy 会瞬间把该服务的路由全撤，导致流量中断。<strong>延迟删除：<code>Delete</code> 只打个"待删"标记，等一轮 reconcile 完整跑完、确认"确实没了"，<code>PurgeStaleItems</code> 才真删。</strong>如果期间服务又回来了，标记撤销。<strong>这避免了"抖动导致误删、流量中断"——是服务发现系统的稳定性保障（Istio 的 EDS 也有类似的健康状态过渡 Draining/Terminating）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>convertServiceEntry</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/ingress/config/ingress_config.go:862 convertServiceEntry —— 消费侧核心
+RegistryReconciler.GetAllServiceWrapper()  // 从缓存拿所有 ServiceWrapper
+// 逐个包成 config.Config{
+//   GroupVersionKind: gvk.ServiceEntry,
+//   Namespace: "mcp",
+//   Labels: {registry-type, registry-name},
+//   Spec: se.ServiceEntry }
+// 再补充来自 nacos3 MCP 的 SE</code></pre>
+                <div class="anno">读法：<b>istiod 来 <code>List(gvk.ServiceEntry)</code> 时触发（Day 04/05）：从缓存取所有服务，包成标准 Istio <code>config.Config</code>（ServiceEntry）返回。<strong>这些 ServiceEntry 就是 istiod 认识的标准配置对象</strong>——和 Ingress 翻译出的 VirtualService 一样，通过 MCP 喂给 istiod。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>mcp 命名空间</h1></div>
+            <div class="card">
+                <p>注册中心来的 ServiceEntry 固定放在 <code>Namespace: "mcp"</code>，带 <code>registry-type</code>/<code>registry-name</code> 标签（常量 <code>RegistryTypeLabelKey</code>/<code>RegistryNameLabelKey</code>）。</p>
+                <div class="anno">读法：<b>用固定命名空间 <code>mcp</code> + 标签标记"这个 ServiceEntry 来自哪个注册中心"——方便区分、管理、排查。不同来源的服务在配置里可追溯。</b>这是"给动态发现的资源打来源标记"的实践。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>direct watcher 样例</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/direct/watcher.go（static/dns，最简单的样例）
+// Run（:103）直接同步生成 SE（无需轮询）
+// generateServiceEntry（:142）：
+//   static 解析 IP:port（支持 IPv6 [::1]:8080），Resolution=STATIC
+//   dns 校验域名，Resolution=DNS
+// HTTPS 时生成带 SNI 的 DestinationRule（ClientTLSSettings_SIMPLE）</code></pre>
+                <div class="anno">读法：<b><code>direct</code>（static/dns）是最好懂的 watcher——static 就是配置里写死的 IP、dns 就是域名。没有轮询/订阅的复杂性，直接生成 ServiceEntry。<strong>看它能快速理解"watcher → ServiceEntry"的最小闭环。</strong></b>consul/zookeeper/eureka watcher 结构类似（用各自 SDK）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>全链路数据流</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step">McpBridge CRD 变更 → mcpbridgeController（informer）→ AddOrUpdateMcpBridge（Day 07）</div>
+                    <div class="step">Reconciler.Reconcile → generateWatcherFromRegistryConfig → watcher.Run（Day 07-08）</div>
+                    <div class="step">watcher 订阅注册中心 → generateServiceEntry → memory.Cache.UpdateServiceWrapper（Day 08）</div>
+                    <div class="step">serviceUpdate() 回调 → serviceEntryHandlers EventUpdate（触发推送）</div>
+                    <div class="step">istiod 来 List → IngressConfig.convertServiceEntry（读 Cache）（今天）</div>
+                    <div class="step">生成 ServiceEntry → 经 MCP(15051) 下发 istiod → istiod 生成 xDS → Envoy</div>
+                </div>
+                <div class="anno">读法：<b>这条链把 Day 06-09 全串起来：注册中心 → watcher → 缓存 → convertServiceEntry → MCP → istiod → Envoy。<strong>建议对照这张图在源码里各跳一遍。</strong></b>Envoy 最终拿到的 Cluster/Endpoint，源头就是 Nacos 里的服务实例。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>共享内存缓存的生产者/消费者各是谁？</li>
+                    <li>缓存为什么解耦"发现"和"下发"？</li>
+                    <li>为什么删除要延迟？防什么问题？</li>
+                    <li>convertServiceEntry 怎么把缓存里的服务变成 Istio config？</li>
+                    <li>全链路数据流的六步？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'UpdateServiceWrapper\|PurgeStaleItems\|deferredDeleteServices' registry/memory/cache.go
+grep -n 'func.*convertServiceEntry' pkg/ingress/config/ingress_config.go
+sed -n '103,160p' registry/direct/watcher.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>配置模型 + 证书管理</strong>——config 常量/环境变量，以及 Higress 的自动 HTTPS（certmagic + ACME Let's Encrypt + 用自身网关完成 HTTP-01 挑战的巧妙设计）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 Nacos</a>
+                <a href="higress-ai-day10.html" style="color:#3b82f6;">Day 10 · 配置模型 + 证书管理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

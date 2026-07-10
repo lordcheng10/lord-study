@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · 多注册中心概览 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#3b82f6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">多注册中心概览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要多注册中心</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 八种类型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Watcher 接口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · BaseWatcher 组合</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 两个回调</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 探活与 vport</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 认证选项</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 xDS-over-MCP</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day07.html" class="nav-link" style="color:#3b82f6;">Day 07 McpBridge &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 服务发现与配置</span>
+            <h1 class="part-title">多注册中心概览</h1>
+            <p class="part-desc">Higress 相比原生 Istio 的一大特色：<strong>不只从 K8s 发现服务，还能从 Nacos/ZK/Eureka/Consul/DNS 发现</strong>。今天看统一的 <code>Watcher</code> 抽象怎么屏蔽这些异构注册中心。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要多注册中心</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"微服务迁移"的痛点</span>
+                很多公司的微服务用 <strong>Nacos/Zookeeper/Eureka</strong> 等注册中心（Spring Cloud/Dubbo 生态），服务实例注册在那里，不在 K8s Service 里。<strong>原生 Istio 只认 K8s Service——你的 Nacos 服务它看不见。Higress 的杀手锏：能从 Nacos/ZK/Consul/Eureka/DNS/静态配置等多种来源发现服务，统一转成 Istio ServiceEntry（Day 09）。</strong>于是你能用 Higress 网关代理这些"注册在 Nacos 的老服务"，平滑迁移到云原生，不用先把服务全搬进 K8s。<strong>这是 Higress 在国内微服务场景大受欢迎的关键能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>八种类型</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/watcher.go:27 支持的注册中心类型
+Zookeeper / Eureka / Consul
+Nacos   (老 SDK v1)
+Nacos2  (新 SDK v2)
+Nacos3  (v2 + MCP Server 发现，AI 网关特性)
+Static  (配置里写死)
+DNS     (域名解析)</code></pre>
+                <div class="anno">读法：<b>八种注册中心类型，各有一个 Watcher 实现（在 <code>registry/&lt;类型&gt;/</code>）。Nacos 有三代——v1（基础）、v2（鉴权+地址服务器）、nacos3（MCP Server 发现，Day 08）。</b>代码在 <code>registry/</code> 各子目录。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Watcher 接口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// registry/watcher.go:54 统一 Watcher 接口（所有注册中心都实现它）
+type Watcher interface {
+  Run(); Stop(); IsHealthy() bool; IsReady() bool
+  GetRegistryType() string
+  AppendServiceUpdateHandler(f func())   // 挂"服务变化回调"
+  ReadyHandler(f func(bool))             // 挂"就绪回调"
+}</code></pre>
+                <div class="baby"><span class="t">统一接口屏蔽异构（老朋友了）</span>
+                Nacos、ZK、Consul 的 API 天差地别（有的推、有的拉、协议不同）。<strong><code>Watcher</code> 接口把它们抽象成同一套：<code>Run</code>（开始订阅）、<code>Stop</code>（停）、<code>IsReady</code>（就绪没）、<code>AppendServiceUpdateHandler</code>（服务变了叫我）。每个注册中心只需实现这个接口——"订阅本注册中心 → 生成 ServiceEntry → 写共享缓存 → 回调通知"。</strong>上层（Reconciler，Day 07）只跟 <code>Watcher</code> 打交道，不管底层是 Nacos 还是 ZK。<strong>这是"接口/实现分离"的又一次应用——和 Envoy 的 LoadBalancer、Istio 的 ServiceDiscovery、OpenClaw 的 ChannelPlugin 同一个思想。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>BaseWatcher 组合</h1></div>
+            <div class="card">
+                <p><code>BaseWatcher</code>（<code>watcher.go:64</code>）提供接口默认实现，各具体 watcher <strong>匿名嵌入</strong> <code>provider.BaseWatcher</code> 复用。<code>UpdateService</code>（服务变更通知上层）和 <code>Ready</code>（就绪状态）两个回调是与 Reconciler 联动的关键。</p>
+                <div class="anno">读法：<b>Go 的"组合复用"——具体 watcher（如 Nacos watcher）嵌入 <code>BaseWatcher</code> 就自动获得回调管理等通用能力，只需实现自己独特的"怎么订阅本注册中心"。</b>比继承更灵活（Go 没有类继承，用组合）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>两个回调</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">UpdateService 和 Ready 是"信号线"</span>
+                Watcher 和上层 Reconciler 靠两个回调联动：<strong>①<code>UpdateService</code>——注册中心的服务实例变了（新增/下线），watcher 调它通知上层"配置该刷新了"，触发向 istiod 推送新配置。②<code>Ready</code>——watcher 首次同步完注册中心的全部服务，调它报告"我准备好了"。</strong>Reconciler 等所有 watcher 都 Ready 才算整体就绪（Day 07）。<strong>这是"生产者（watcher 发现服务）→ 通知（回调）→ 消费者（Reconciler/istiod 刷新）"的事件驱动联动。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>探活与 vport</h1></div>
+            <div class="card">
+                <p><code>ProbeWatcherStatus(host, port)</code>（<code>watcher.go:91</code>）用 <code>net.DialTimeout</code> 三秒 TCP 探活，作为 <code>IsHealthy()</code> 依据。<code>GetServiceVport</code>（<code>watcher.go:101</code>）虚拟端口机制——把注册中心里各实例真实端口统一映射成一个对外服务端口。</p>
+                <div class="baby"><span class="t">vport（虚拟端口）解决什么？</span>
+                注册中心里同一个服务的不同实例可能监听不同端口（比如实例 A 在 8080、实例 B 在 8081）。<strong>但对网关来说，"服务"应该有一个统一的对外端口。vport（virtual port，虚拟端口）就是给这个服务分配一个统一的逻辑端口，屏蔽各实例真实端口的差异。</strong>探活则是判断注册中心本身是否可达（连不上就标记不健康）。这些是把"异构注册中心的服务"规整成"Istio 认的统一服务模型"的细节处理。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>认证选项</h1></div>
+            <div class="card">
+                <p><code>registry/auth_option.go:17</code> <code>AuthOption</code> + Secret key 常量（nacosUsername/Password、consulToken、etcdUsername/Password）。认证信息<strong>不写在 CRD 明文里，而是引用一个 K8s Secret</strong>。</p>
+                <div class="anno">读法：<b>连 Nacos/Consul 可能需要账号密码/token。这些敏感信息不明文写在 McpBridge CRD 里，而是 CRD 里引用一个 Secret 名字，运行时从 Secret 读（Day 07 的 <code>getAuthOption</code>）。</b>这是安全实践——敏感凭据和配置分离（和 Istio 的 SDS、OpenClaw 的密钥管控同理）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Higress 要支持多注册中心？解决什么迁移痛点？</li>
+                    <li>支持哪八种类型？Nacos 三代的区别？</li>
+                    <li>Watcher 接口的核心方法？它怎么屏蔽异构？</li>
+                    <li>UpdateService/Ready 两个回调的作用？</li>
+                    <li>vport 解决什么？认证信息怎么存？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+sed -n '27,99p' registry/watcher.go
+ls registry/
+cat registry/auth_option.go | head -35</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>McpBridge + reconcile</strong>——用户用 McpBridge CRD 配置注册源，Reconciler 怎么 diff 出"该创建/停止哪些 watcher"（典型 K8s Operator 控制循环）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 xDS-over-MCP</a>
+                <a href="higress-ai-day07.html" style="color:#3b82f6;">Day 07 · McpBridge + reconcile &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
