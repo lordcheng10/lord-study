@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · SSL/secret/wasm/pubsub — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14a085);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">SSL/secret/wasm · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 动态证书</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ssl_client_hello_phase</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · SNI 选证书</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · secret 密钥管理</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 密钥引用</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · wasm 支持</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · pubsub</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day20.html" class="nav-link" style="color:#ec4899;">Day 20 部署收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 高级子系统与运维</span>
+            <h1 class="part-title">SSL / secret / wasm / pubsub</h1>
+            <p class="part-desc">收官前把剩余几个子系统扫一遍：动态 TLS 证书（按 SNI 选、热更新）、密钥管理（对接 Vault 等）、Wasm 插件支持（呼应上一站 wasm-go）、pubsub 发布订阅。它们各自解决一类问题。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>动态证书</h1></div>
+            <div class="card">
+                <p><code>init.lua:173-182</code> 的 <code>ssl_phase</code>：TLS 握手时用 <code>router.router_ssl</code>（Day 06 的 radixtree_sni）选证书。<code>apisix/ssl/</code> + <code>ssl.lua</code> 管证书。</p>
+                <div class="baby"><span class="t">"动态证书"= 加/换证书不重启</span>
+                <strong>传统 Nginx 证书写在配置文件里，换证书要 reload。APISIX 把证书存 etcd（SSL 对象），握手时动态查——加新域名的证书、续期换证书，写 etcd 即生效，零重启。</strong>对"几百个域名、证书频繁续期（Let's Encrypt 90 天）"的场景至关重要。<strong>这是"全动态"理念延伸到了 TLS 证书。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ssl_client_hello_phase</h1></div>
+            <div class="card">
+                <p><code>init.lua:184-224</code> 的 <code>ssl_client_hello_phase</code>——在 TLS 的 ClientHello 阶段（握手最早期）就拿到 SNI：</p>
+<pre><code class="language-lua">function _M.ssl_client_hello_phase()
+    local sni, err = apisix_ssl.server_name(true)   -- 从 ClientHello 取 SNI
+    if not sni then ngx_exit(-1) end
+    local api_ctx = core.tablepool.fetch("api_ctx", 0, 32)
+    router.router_ssl.match_and_set(api_ctx, true, sni)  -- 按 SNI 匹配证书并设置
+end</code></pre>
+                <div class="baby"><span class="t">为什么在 ClientHello 阶段？</span>
+                <strong>SNI（客户端想访问的域名）在 TLS 握手的第一个包 ClientHello 里。网关必须在这时就知道用哪张证书——因为握手要用对应域名的证书回应。</strong>OpenResty 的 <code>ssl_client_hello_by_lua</code> 让你在这个最早期介入。<strong>拿到 SNI → radixtree_sni 匹配 → 设置本次握手用的证书。之后 <code>ssl_phase</code> 完成握手。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>SNI 选证书</h1></div>
+            <div class="card">
+                <p>SSL 对象（schema_def.lua:765）含 <code>cert</code>（证书）、<code>key</code>（私钥）、<code>snis</code>（这张证书服务哪些域名）。router_ssl 按 SNI 建 radixtree（Day 06），握手时 <code>match_and_set</code> 匹配。</p>
+                <div class="anno">读法：<b>一个网关服务几百个域名 = 几百张证书，radixtree_sni 让"按域名找证书"和"按 uri 找路由"一样快。<strong>回想 Day 06——路由匹配的能力被复用到了证书选择。</strong>证书还支持通配符（<code>*.example.com</code>）、多 SNI 共享一张证书。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>secret 密钥管理</h1></div>
+            <div class="card">
+                <p><code>apisix/secret.lua</code> + <code>apisix/secret/</code>：对接外部密钥管理系统（Vault、AWS Secrets Manager、环境变量），让配置里不写死敏感信息。<code>secret.lua:77</code> 的 <code>init_worker</code> watch <code>/secrets</code>。</p>
+                <div class="baby"><span class="t">别把密钥明文写进配置</span>
+                <strong>插件配置里常有敏感信息（数据库密码、API key、JWT secret）。直接写进 etcd/配置文件不安全（谁能看配置谁就看到密钥）。secret 机制让你写"引用"（如 <code>$secret://vault/1/mysql-pass</code>），运行时从 Vault 等动态解析真实值。</strong>密钥集中在 Vault 管理、轮换，配置里只留引用。<strong>这是生产安全的重要一环——和上一站 Higress Console 的"证书/密钥存 Secret"是同类思想。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>密钥引用</h1></div>
+            <div class="card">
+                <p>配置里用 <code>$secret://&lt;manager&gt;/&lt;id&gt;/&lt;key&gt;</code> 或 <code>$env://VAR</code> 引用。<code>secret.lua</code> 的 <code>fetch_by_uri</code> 解析这些引用，从对应后端取真实值（带缓存 + TTL）。</p>
+                <div class="anno">读法：<b>插件读配置时，如果值是 secret 引用，secret 层透明地解析成真实值再给插件。<strong>插件无感——它拿到的就是明文密码，不知道背后从 Vault 取的。</strong>又是"透明适配"的设计。支持 vault/aws/gcp/环境变量等多种 manager（<code>secret/</code> 目录）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>wasm 支持</h1></div>
+            <div class="card">
+                <p><code>apisix/wasm.lua</code>：APISIX 也支持 <strong>Wasm 插件</strong>（通过 proxy-wasm）——除了 Lua 插件，还能跑 Wasm 插件（Go/Rust/C++ 编译的）。<code>wasm.lua:158</code> 的 <code>require</code> 把 wasm 插件包装成标准插件对象。</p>
+                <div class="baby"><span class="t">Lua 之外的扩展路线</span>
+                <strong>APISIX 主打 Lua 插件（开发快、热加载）。但如果你已有 Wasm 插件（比如上一站 wasm-go 写的），或想用 Rust 写高性能插件，APISIX 也能加载 proxy-wasm 格式的 Wasm 插件。</strong><code>wasm.lua</code> 把 Wasm 插件适配成 APISIX 的插件接口（priority/schema/阶段方法），和 Lua 插件一视同仁地跑。<strong>这意味着 APISIX 和 Envoy/Higress 在插件层有了共同语言——proxy-wasm 是跨网关的插件标准（呼应上一站 wasm-go Day 03 说的"USB 标准"）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>pubsub</h1></div>
+            <div class="card">
+                <p><code>apisix/pubsub/</code> + <code>core/pubsub.lua</code>：APISIX 能当"消息网关"——代理 Kafka、MQTT、NATS 等发布订阅协议，让 WebSocket 客户端订阅消息流。</p>
+                <div class="anno">读法：<b>这是把网关能力扩展到"消息"领域——比如浏览器通过 WebSocket 连 APISIX，APISIX 代理到 Kafka 消费消息推给浏览器。属于较专门的能力，了解即可。<strong>它体现了 APISIX 从"HTTP API 网关"向"统一流量网关"（HTTP + L4 + 消息 + AI）扩张的野心。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>动态证书为什么要在 ClientHello 阶段按 SNI 选？</li>
+                    <li>secret 机制怎么让配置不写死密钥？谁来解析引用？</li>
+                    <li>APISIX 除了 Lua 插件为什么还支持 Wasm？和上一站什么关系？</li>
+                    <li>pubsub 体现了 APISIX 什么野心？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '173,225p' apisix/init.lua
+sed -n '68,90p' apisix/secret.lua
+ls apisix/secret/ apisix/ssl/ apisix/pubsub/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（收官）</strong>：<strong>部署与三网关大对比</strong>——bin/apisix 部署、config.yaml 关键配置，最后把 APISIX 和 higress-group（Envoy/Higress）三种网关架构做终极对比，理解不同技术路线的取舍。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day18.html" style="color:var(--accent-cyan);">&larr; Day 18</a>
+                <a href="apisix-day20.html" style="color:#ec4899;">Day 20 · 部署收官 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

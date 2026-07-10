@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Admin API 与 control API — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14a085);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Admin/control API · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两套管理接口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Admin 目录</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · resource 通用 CRUD</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 写入即校验</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · standalone admin</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · control API</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Dashboard 与生态</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day18.html" class="nav-link" style="color:#ec4899;">Day 18 stream &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 高级子系统与运维</span>
+            <h1 class="part-title">Admin API 与 control API</h1>
+            <p class="part-desc">前面都在讲"网关怎么用配置",今天讲"配置怎么进去"——Admin API 是配置管理入口（增删改路由/上游/插件），control API 是运维接口（看健康状态、触发操作）。这是运维 APISIX 的日常。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两套管理接口</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Admin API</strong>（<code>apisix/admin/</code>）：管配置——<code>PUT/GET/DELETE /apisix/admin/routes/{id}</code> 等。写入 etcd（然后 watch 生效）。</li>
+                    <li><strong>control API</strong>（<code>apisix/control/</code>）：管运行时——查健康检查状态、schema、触发 GC 等。只读/运维，不改配置。</li>
+                </ul>
+                <div class="baby"><span class="t">配置管理 vs 运维观测</span>
+                <strong>Admin API 是"改东西"（加路由、改插件）——写 etcd。control API 是"看/操作运行状态"（哪个上游不健康、当前 schema 是啥）——不碰 etcd。</strong>两者端口/权限通常分开（Admin 需要 key 鉴权，control 一般内网访问）。<strong>回想 Day 03 <code>http_init_worker</code> 里 <code>admin.init</code> 和 <code>control_api_router.init_worker</code>——两套接口各自初始化。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Admin 目录</h1></div>
+            <div class="card">
+<pre><code class="language-bash">apisix/admin/
+  init.lua         入口 + 鉴权 + 路由分发
+  resource.lua     ★ 通用 CRUD 逻辑（各资源共用）
+  routes.lua services.lua upstreams.lua consumers.lua
+  plugin_configs.lua global_rules.lua ssl.lua ...  各资源
+  schema.lua       暴露 schema 查询
+  standalone.lua   standalone 模式的 admin
+  v3_adapter.lua   API 版本适配</code></pre>
+                <div class="anno">读法：<b>每种资源（routes/services/upstreams…）一个文件，但它们大多复用 <code>resource.lua</code> 的通用 CRUD——只提供自己的 schema 和特殊逻辑。<strong>这和上一站 Higress Console 的 controller 一一对应（都是每种资源一个 CRUD 端点）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>resource 通用 CRUD</h1></div>
+            <div class="card">
+                <p><code>admin/resource.lua</code> 抽象了所有资源共同的 CRUD 流程：GET（查）、PUT（建/改）、DELETE（删）、PATCH（部分改）。各资源文件只传入自己的"名字 + schema + 校验钩子"。</p>
+                <div class="baby"><span class="t">"模板方法"减少重复</span>
+                <strong>所有资源的 CRUD 骨架都一样：校验入参 → 校验 schema → 读/写 etcd → 返回结果。差异只在"用哪个 schema、有没有特殊校验"。所以抽出 <code>resource.lua</code> 通用骨架，routes.lua 只填"我是 routes、我的 schema 是 route、我有这些额外校验"。</strong>加一种资源类型 = 加个薄文件传参给 resource。<strong>又是"通用核心 + 具体参数"——和 balancer/discovery 的可插拔一个思路。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>写入即校验</h1></div>
+            <div class="card">
+                <p>Admin API 写 etcd 前用对应 schema 校验（Day 09）——回收 Day 09 的"校验在写入端"。不合法返回 400 + 具体错误，坏配置进不了 etcd。</p>
+<pre><code class="language-bash"># 示例：建一条路由
+curl -X PUT http://127.0.0.1:9180/apisix/admin/routes/1 \
+  -H "X-API-KEY: $admin_key" \
+  -d '{"uri":"/hello","upstream":{"nodes":{"127.0.0.1:8080":1},"type":"roundrobin"}}'
+# → 校验通过 → 写 /apisix/routes/1 到 etcd → watch 秒级生效（Day 07）</code></pre>
+                <div class="anno">读法：<b>这条 curl 就是"全动态"的完整闭环：Admin 校验 → 写 etcd → 所有节点 watch → 内存更新 → radixtree 重建 → 新路由立即可用，<strong>全程零 reload</strong>。<code>X-API-KEY</code> 是 Admin API 的鉴权（<code>admin/init.lua</code> 里校验）——管理接口必须保护好。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>standalone admin</h1></div>
+            <div class="card">
+                <p><code>admin/standalone.lua</code>：standalone（config_yaml，Day 07）模式下的 Admin——配置不写 etcd 而是操作 <code>apisix.yaml</code>/内存。</p>
+                <div class="baby"><span class="t">两种模式的 Admin 都统一</span>
+                <strong>etcd 模式 Admin 写 etcd，standalone 模式 Admin 操作内存/文件——但对外的 API 形状一样（PUT /routes/1）。</strong>这样用户/Dashboard 不用管底层是哪种模式，用同一套 API。<strong>又是"接口统一、实现可换"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>control API</h1></div>
+            <div class="card">
+                <p><code>apisix/control/</code> + <code>init.lua:1058</code> 的 <code>http_control</code>。提供运维接口，例如：</p>
+                <ul>
+                    <li><code>GET /v1/healthcheck</code>：查各上游节点的健康检查状态。</li>
+                    <li><code>GET /v1/schema</code>：查所有资源/插件的 schema。</li>
+                    <li><code>GET /v1/routes</code>：查当前内存里的路由（调试）。</li>
+                    <li><code>POST /v1/gc</code>：触发 Lua GC 等。</li>
+                </ul>
+                <div class="anno">读法：<b>control API 是"运行时的观测窗口"——不改配置，只看/操作运行状态。<strong>比如排查"为什么请求打不到某个上游"，查 <code>/v1/healthcheck</code> 看是不是被健康检查剔除了（Day 10）。</strong>它通常在单独端口、只允许内网访问。插件也能注册自己的 control 接口（如 prometheus 的 <code>/apisix/prometheus/metrics</code>）。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Dashboard 与生态</h1></div>
+            <div class="card">
+                <p>Admin API 之上有 <strong>APISIX Dashboard</strong>（独立项目，本机 <code>apisix-dashboard/</code>）——一个 Web 界面，调 Admin API 让你点点点管配置（类似上一站的 Higress Console）。</p>
+                <div class="baby"><span class="t">界面 vs API 的分层</span>
+                <strong>Admin API 是"机器接口"（给程序/CI 调），Dashboard 是"人的界面"（给运维点）。Dashboard 本质就是个前端 + 后端，把界面操作翻译成 Admin API 调用。</strong>这和上一站 Higress Console 的定位完全一样——网关本体提供 API，单独的 Dashboard/Console 提供界面。<strong>你也能用 curl/Terraform/CRD（apisix-ingress-controller）等各种方式调 Admin API，不限于 Dashboard。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Admin API 和 control API 的分工？</li>
+                    <li>resource.lua 怎么用"通用 CRUD"减少重复？</li>
+                    <li>一条 PUT /routes 请求怎么走完"全动态"闭环？</li>
+                    <li>control API 能查什么？Dashboard 和 Admin API 的关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+ls apisix/admin/ apisix/control/
+grep -n "function\|resource" apisix/admin/routes.lua | head
+sed -n '1058,1066p' apisix/init.lua</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>stream 子系统</strong>——APISIX 不只代理 HTTP，还能代理 L4（TCP/UDP）。看 <code>stream_preread_phase</code> 怎么处理 L4 流量、和 HTTP 子系统的异同。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day16.html" style="color:var(--accent-cyan);">&larr; Day 16</a>
+                <a href="apisix-day18.html" style="color:#ec4899;">Day 18 · stream &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

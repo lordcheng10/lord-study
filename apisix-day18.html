@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · stream 子系统 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14a085);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">stream 子系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · L4 vs L7</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · stream 阶段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · stream_preread_phase</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · preread 的含义</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · stream 路由与上游</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · stream 插件</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · xrpc 协议扩展</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day19.html" class="nav-link" style="color:#ec4899;">Day 19 SSL/secret/wasm &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 高级子系统与运维</span>
+            <h1 class="part-title">stream 子系统（L4 代理）</h1>
+            <p class="part-desc">前面都是 HTTP（L7）代理。但 APISIX 还能代理 L4（TCP/UDP）流量——比如 MySQL、Redis、MQTT。今天看 stream 子系统：它和 HTTP 子系统共享架构，但工作在更底层。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>L4 vs L7</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">网络分层：L4 管"连接"，L7 管"内容"</span>
+                <strong>L7（应用层）= HTTP，网关能看懂 uri/header/body，按内容路由。L4（传输层）= TCP/UDP，网关只看到"字节流",看不懂内容（因为内容可能是 MySQL 协议、Redis 协议、加密的 TLS）。</strong>APISIX 大部分能力是 L7（HTTP），但也提供 L4 代理——用来给 TCP/UDP 服务（数据库、消息队列、DNS）做负载均衡/限流/mTLS。<strong>底层还是 OpenResty（Nginx 的 stream 模块也支持 L4）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>stream 阶段</h1></div>
+            <div class="card">
+                <p><code>init.lua</code> 里有一套平行的 stream 阶段函数（对应 Nginx stream 模块的阶段）：</p>
+                <ul>
+                    <li><code>stream_init</code>（<code>:1066</code>）/ <code>stream_init_worker</code>（<code>:1082</code>）：初始化（类比 http_init）</li>
+                    <li><code>stream_preread_phase</code>（<code>:1120</code>）：主处理（类比 http_access_phase）</li>
+                    <li><code>stream_balancer_phase</code>（<code>:1239</code>）：选上游</li>
+                    <li><code>stream_log_phase</code>（<code>:1251</code>）：日志</li>
+                </ul>
+                <div class="anno">读法：<b>结构和 HTTP 子系统<strong>平行对称</strong>——init/init_worker/主处理/balancer/log。只是 L4 没有 header_filter/body_filter（没有 HTTP 头/体的概念）。<strong>APISIX 把两套子系统（http/stream）用同一套代码风格实现，很多 core 组件（config/router/plugin/balancer）两边共用。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>stream_preread_phase</h1></div>
+            <div class="card">
+                <p><code>init.lua:1120-1160</code>（和 http_access_phase 神似）：</p>
+<pre><code class="language-lua">function _M.stream_preread_phase()
+    local api_ctx = core.tablepool.fetch("api_ctx", 0, 32)   -- 一样用 tablepool
+    ngx_ctx.api_ctx = api_ctx
+    if not verify_tls_client(api_ctx) then return ngx_exit(1) end
+    core.ctx.set_vars_meta(api_ctx)                           -- 一样的 ctx 机制
+    router.router_stream.match(api_ctx)                       -- stream 路由匹配
+    local matched_route = api_ctx.matched_route
+    if not matched_route then return ngx_exit(1) end
+    -- 取上游（upstream_id / service_id）...
+end</code></pre>
+                <div class="baby"><span class="t">"复用 HTTP 那套"很明显</span>
+                <strong>tablepool 取 api_ctx、set_vars_meta、router.match——全是 HTTP 子系统学过的东西，stream 直接复用！</strong>只是路由器换成 <code>router_stream</code>（按 L4 条件匹配，如源 IP、SNI、端口）。<strong>这就是为什么 core/ 里的 ctx/config/router/plugin/balancer 设计成"子系统无关"——http 和 stream 都能用。</strong>省了大量重复代码。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>preread 的含义</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么叫 "preread"（预读）？</span>
+                <strong>L4 是字节流，网关默认看不懂内容。但有时想"偷看"开头几个字节来做路由决策——比如 TLS 握手的 SNI（想访问哪个域名）、或某协议的标识。</strong>Nginx stream 的 <code>preread</code> 阶段就是"在把流转发给上游前，先预读一小段"。APISIX 在这个阶段做路由匹配（可能基于预读的内容，如 SNI）。<strong>这是 L4 代理能做"基于内容路由"的关键——虽然是 L4，但偷看一眼开头就能智能路由。</strong>比如 MQTT 网关按 client-id 路由、TLS 按 SNI 分流。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>stream 路由与上游</h1></div>
+            <div class="card">
+                <p>stream 有自己的抽象对象 <code>stream_route</code>（schema_def.lua:960），匹配条件是 L4 的（remote_addr、server_addr、server_port、sni 等），上游还是复用 upstream（Day 08/10 的负载均衡、健康检查全能用）。preread 匹配后，<code>stream_balancer_phase</code>（<code>:1239</code>）选上游实例，转发。</p>
+                <div class="anno">读法：<b>stream_route 和 http route 是平行的（<code>/apisix/stream_routes/{id}</code>）。<strong>上游（upstream）两边共用——所以一个数据库集群的负载均衡、健康检查配置，L4 代理直接享用 Day 10 学的那套。</strong>Day 06 的 <code>merge_service_stream_route</code>（Day 13 见过）就是 stream 版的 service 合并。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>stream 插件</h1></div>
+            <div class="card">
+                <p>stream 也有插件（Day 11 <code>plugin.load</code> 里的 <code>load_stream</code>、<code>stream_filter</code> <code>:564</code>）——但因为 L4 没有 HTTP 语义，stream 插件较少（如 <code>mqtt-proxy</code>、<code>ip-restriction</code>、限流类）。</p>
+                <div class="baby"><span class="t">L4 插件能做什么？</span>
+                <strong>不能做"改 HTTP header"这种（没有 header），但能做 IP 黑白名单、L4 限流、协议解析（mqtt-proxy 解析 MQTT）、日志。</strong>插件机制和 HTTP 一样（priority、阶段方法），只是可用的阶段和能力受 L4 限制。<strong>plugin.lua 里 http 和 stream 插件分开加载（<code>local_stream_plugins</code>）,但共用同一套运行引擎。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>xrpc 协议扩展</h1></div>
+            <div class="card">
+                <p>Day 03 的 <code>http_init</code> 末尾有 <code>xrpc.init()</code>。<strong>xRPC</strong> 是 APISIX 的"L4 之上的协议框架"——让你为特定协议（如 Redis、Dubbo）写"协议感知"的代理逻辑（超越纯字节转发）。</p>
+                <div class="anno">读法：<b>纯 L4 只转发字节；xRPC 让网关"理解"某个 L7-over-TCP 协议（如 Redis 命令），从而做协议级的路由/限流/观测。<strong>比如 xrpc 的 redis 模块能识别 Redis 命令、按 key 路由、统计命令级指标。</strong>这是 APISIX 在 L4 和 L7 之间的补充能力，用于那些"跑在 TCP 上但有自己协议"的服务。属于进阶话题，了解即可。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>L4 和 L7 代理的区别？APISIX 为什么要支持 L4？</li>
+                    <li>stream 阶段和 HTTP 阶段怎么对称？复用了哪些 core 组件？</li>
+                    <li>"preread"是什么意思？为什么 L4 也能基于内容路由？</li>
+                    <li>stream 插件相比 HTTP 插件受什么限制？xRPC 补充了什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '1120,1160p' apisix/init.lua
+sed -n '960,999p' apisix/schema_def.lua       # stream_route
+ls apisix/stream/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>SSL/secret/wasm/pubsub</strong>——动态证书（ssl_phase 按 SNI 选证书）、密钥管理（secret 对接 Vault）、Wasm 插件支持、以及 pubsub 发布订阅等剩余子系统。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day17.html" style="color:var(--accent-cyan);">&larr; Day 17</a>
+                <a href="apisix-day19.html" style="color:#ec4899;">Day 19 · SSL/secret/wasm &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

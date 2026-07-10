@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 部署与收官串讲 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:5px 8px;text-align:left;vertical-align:top}
+        th{background:var(--bg-secondary);color:#14a085}
+        .chain{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .chain .s{border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;background:var(--bg-secondary);font-size:13px}
+        .chain .s b{color:#14a085}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ec4899,#14a085);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">部署收官 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 部署形态</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · config.yaml</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 完整请求链回顾</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 四周主线</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 设计智慧总结</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 三网关大对比</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 怎么选</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 毕业 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 第 4 周 高级子系统与运维</span>
+            <h1 class="part-title">部署与收官串讲</h1>
+            <p class="part-desc">恭喜读完 APISIX！今天讲部署，回顾四周主线，最后把 APISIX 和 higress-group（Envoy/Higress）做一次终极三网关对比——理解两大网关流派的技术路线取舍。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>部署形态</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>裸机/VM</strong>：装 OpenResty + APISIX + etcd，<code>apisix start</code>。</li>
+                    <li><strong>Docker</strong>：官方镜像（<code>docker/</code> 目录），<code>docker compose</code> 起 APISIX + etcd。</li>
+                    <li><strong>Kubernetes</strong>：Helm chart 或 apisix-ingress-controller（用 CRD 管配置，呼应 higress-group 的 K8s 路线）。</li>
+                </ul>
+                <div class="baby"><span class="t">最小依赖：APISIX + etcd</span>
+                <strong>APISIX 本身是单体（不像 Envoy/Higress 要控制面），核心依赖只有 etcd。</strong>裸机部署超简单。K8s 上用 apisix-ingress-controller 后，你写 K8s CRD（ApisixRoute 等）→ controller 转成 Admin API 调用 → 写 etcd——这时它就有了"控制面"的味道（和 Higress 的 Ingress→配置类似）。<strong>standalone 模式（Day 07）甚至不用 etcd，纯文件——最轻。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>config.yaml</h1></div>
+            <div class="card">
+                <p><code>conf/config.yaml</code> 是启动配置（Day 03 生成 nginx.conf 的输入），关键项：</p>
+<pre><code class="language-yaml">apisix:
+  node_listen: 9080          # 数据面端口（处理业务请求）
+  enable_admin: true
+  router:
+    http: radixtree_uri      # 路由算法（Day 06）
+deployment:
+  role: traditional          # 部署角色
+  etcd:
+    host: ["http://127.0.0.1:2379"]   # etcd 地址（Day 07）
+plugins:                     # 启用哪些插件（Day 11 load 读它）
+  - key-auth
+  - limit-count
+  - prometheus</code></pre>
+                <div class="anno">读法：<b>这个 YAML 决定"用哪个 etcd、监听什么端口、启用哪些插件、用什么路由算法"。<strong>它是运维配置（启动时定）；业务配置（路由/上游）走 Admin API + etcd（运行时动态）。</strong>两者分开：config.yaml 改要重启，etcd 里的配置改是热更新。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>完整请求链回顾</h1></div>
+            <div class="card">
+<pre><code class="language-bash">请求进入（Nginx access 阶段 → init.lua http_access_phase，W1）
+  → 创建 api_ctx（tablepool + 惰性变量，W1 Day 05）
+    → router 匹配路由（radixtree，W2 Day 06）
+      → 合并 plugin_config/service/consumer 配置（W3 Day 13）
+        → filter 选插件 → run_plugin rewrite（含鉴权识别 consumer，W3 Day 11-14）
+          → run_plugin access（限流等拦截，W3 Day 15）
+            → balancer 选上游实例（W2 Day 10，可能 discovery 动态，W4 Day 16）
+              → 转发 → header_filter/body_filter 改响应 → log 收尾释放 ctx
+（配置全程来自 etcd watch 的内存，改配置秒级热更新，W2 Day 07）</code></pre>
+                <div class="tip">这条链贯穿全课——每一环你都读过源码了。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>四周主线</h1></div>
+            <div class="card">
+                <div class="chain">
+                    <div class="s"><b>W1 全景与请求生命周期</b>：OpenResty/etcd → Nginx 阶段 → 启动 → http_access_phase → api_ctx（tablepool+惰性变量）</div>
+                    <div class="s"><b>W2 路由/配置/数据面</b>：radixtree 路由 → etcd watch 热更新 → 六大对象 → schema 校验 → upstream/balancer</div>
+                    <div class="s"><b>W3 插件系统</b>：load/priority → filter 选插件 → run_plugin 各阶段 → 配置合并 → consumer 鉴权 → 典型插件</div>
+                    <div class="s"><b>W4 高级子系统</b>：服务发现 → Admin/control API → stream L4 → SSL/secret/wasm/pubsub</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>设计智慧总结</h1></div>
+            <div class="card">
+                <ol>
+                    <li><strong>OpenResty + etcd 双支柱</strong>：Nginx 给性能、LuaJIT 给灵活、etcd 给动态。</li>
+                    <li><strong>读写分离 + 版本化缓存</strong>：请求走内存（快）、配置走 etcd watch（动态）、用 modifiedIndex 保证缓存一致。</li>
+                    <li><strong>处处"策略/适配器模式"</strong>：路由/配置中心/负载均衡/限流/服务发现/密钥都是"接口统一、实现可换"。</li>
+                    <li><strong>tablepool + 惰性求值 + 编译缓存</strong>：把重复计算和 GC 压力压到最低。</li>
+                    <li><strong>内核小、插件多</strong>：核心只做路由+插件链+转发，功能全靠 104 个插件。</li>
+                </ol>
+                <div class="baby"><span class="t">能迁移到你项目的思想</span>
+                <strong>"用现成设施当配置中心（etcd）""读写分离 + 版本号失效缓存""策略模式应对多变体""对象池抗 GC""内核小插件多"——这些在任何高性能/高可扩系统里都通用。</strong>看懂 APISIX 怎么用，你写自己的系统时也能借鉴。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>三网关大对比</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>维度</th><th>Envoy/Higress</th><th>APISIX</th></tr>
+                    <tr><td>语言</td><td>C++ 数据面</td><td>Lua（OpenResty）</td></tr>
+                    <tr><td>架构</td><td>控制面(istiod/Higress Core) + 数据面分离</td><td>单体（每节点自给自足）+ etcd</td></tr>
+                    <tr><td>配置分发</td><td>控制面生成 xDS 下发</td><td>节点直接 watch etcd</td></tr>
+                    <tr><td>配置模型</td><td>K8s Ingress/CRD → 翻译</td><td>etcd 里的 Route/Upstream/…（或 CRD）</td></tr>
+                    <tr><td>扩展</td><td>Wasm / C++ filter</td><td>Lua 插件（也支持 Wasm）</td></tr>
+                    <tr><td>动态性</td><td>xDS 增量下发</td><td>etcd watch 热更新</td></tr>
+                    <tr><td>上手</td><td>较复杂（要懂 xDS/istiod）</td><td>较简单（Lua + etcd）</td></tr>
+                    <tr><td>规模</td><td>超大规模 service mesh 强</td><td>API 网关场景轻快</td></tr>
+                </table>
+                <div class="baby"><span class="t">两条路线殊途同归</span>
+                <strong>它们解决同一问题（南北向 API 网关 + AI 网关），但技术路线不同：Envoy/Higress 是"控制面算好、xDS 下发数据面"的分离架构（适合超大规模、多语言、service mesh）；APISIX 是"单体节点 + etcd"的自给架构（部署轻、Lua 上手快、动态强）。</strong>而且两者越来越像——APISIX 支持 Wasm 和 xDS（<code>config_xds</code>）、K8s CRD；Higress 也在简化。<strong>都全面拥抱了 AI 网关。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>怎么选</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">没有银弹，看场景</span>
+                <strong>选 APISIX：想要轻量部署、团队熟 Lua、快速迭代插件、纯 API 网关场景、不想维护 istiod。<br>选 Higress/Envoy：已在 Istio/service mesh 生态、需要 C++ 级性能和超大规模、多语言 Wasm 扩展、东西向+南北向统一。</strong><br><br>
+                <strong>关键是理解两种架构的取舍，而非记结论。</strong>你学完 higress-group（Envoy/Istio/Higress/Console/wasm-go）+ APISIX，就完整看过了业界两大网关流派——这个视野比"用哪个"更值钱。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>毕业 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🎓 20 天后，你已经能</h3>
+                <ul>
+                    <li>说清 APISIX 的 OpenResty+etcd 架构和"全动态"原理。</li>
+                    <li>追踪一个请求从 access 到转发的完整生命周期源码。</li>
+                    <li>理解路由(radixtree)/配置(etcd watch)/插件(load/filter/run)/上游(balancer) 四大子系统。</li>
+                    <li>掌握插件机制并能读懂/编写一个 Lua 插件。</li>
+                    <li>把 APISIX 和 Envoy/Higress 两大网关流派做架构对比。</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 毕业动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+# 用 docker compose 跑一套（需要 Docker）
+ls docker/
+# 追一条请求的完整链路
+sed -n '602,758p' apisix/init.lua        # http_access_phase
+# 试着读/改一个插件，感受插件化的威力
+cat apisix/plugins/echo.lua 2>/dev/null | head -60</code></pre>
+                <div class="tip"><strong>系列进度</strong>：higress-group 5 站 + APISIX 全部完成。你已通读两大网关流派。若还想深入，可写个自定义 Lua 插件、或对比 apisix-dashboard 与 Higress Console 的实现差异。感谢跟到最后！🎉</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day19.html" style="color:var(--accent-cyan);">&larr; Day 19</a>
+                <a href="apisix-tutorial.html" style="color:#ec4899;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
