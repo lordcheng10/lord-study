@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · callbacks 回调系统 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .tw{display:flex;align-items:stretch;justify-content:center;gap:6px;flex-wrap:wrap;padding:16px 4px}
+        .tw .cb{background:rgba(6,182,212,.08);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700}
+        .tw .node{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:7px 14px;font-size:12.5px;display:flex;align-items:center}
+        .tw .a{color:var(--text-muted);align-self:center;font-weight:800}
+        .tw .err{border-color:#ef4444;background:rgba(239,68,68,.08);color:#ef4444}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">callbacks 回调系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 回调解决什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 5 个触发时机</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Handler 接口（真实代码）</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 怎么挂上去</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · RunInfo 你在哪</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 流式回调的坑</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 典型用途</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 ReAct</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 流式深入 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 横切与生态</span>
+            <h1 class="part-title">callbacks 回调系统</h1>
+            <p class="part-desc">不改任何业务代码，就能给每个节点埋点——日志、监控、计时、链路追踪。今天讲 5 个触发时机、Handler 接口，以及流式回调那个必须知道的坑。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>回调解决什么问题</h1></div>
+            <div class="card">
+                <p>你想知道"每个节点耗时多少、输入输出是啥、有没有报错"，用来做监控和排查。但你<strong>不想</strong>在每个组件里手写 <code>log.Print</code>——那样代码脏、还改不动第三方组件。回调让你<strong>从外部</strong>统一挂上这些逻辑。</p>
+                <div class="baby"><span class="t">类比：监控摄像头</span>
+                回调就像在流水线的每个工位装摄像头：不改工人的操作，就能记录"这个工位几点开始、几点结束、处理了什么、出没出错"。你想加监控，装摄像头（挂 handler）即可，不用改流水线本身。<strong>这在设计上叫 AOP（面向切面编程）——把"日志/监控"这类横切关注点从业务逻辑里剥离。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>5 个触发时机</h1></div>
+            <div class="card">
+                <p>Eino 在每个节点执行的关键点触发回调（<code>callbacks/</code>、<code>internal/callbacks</code>）：</p>
+                <div class="tw">
+                    <span class="cb">OnStart<br>开始前</span><span class="a">→</span>
+                    <span class="node">节点执行中</span><span class="a">→</span>
+                    <span class="cb">OnEnd<br>成功后</span>
+                    <span class="a" style="margin:0 6px">或</span>
+                    <span class="cb err">OnError<br>出错时</span>
+                </div>
+                <div class="tw" style="padding-top:0">
+                    <span class="cb">OnStartWithStreamInput<br>流式输入开始</span>
+                    <span class="cb">OnEndWithStreamOutput<br>流式输出结束</span>
+                </div>
+                <div class="glossary">前三个（OnStart / OnEnd / OnError）针对普通调用；后两个（<code>OnStartWithStreamInput</code> / <code>OnEndWithStreamOutput</code>）针对流式场景——输入/输出是流的时候用这两个。一共 <strong>5 个时机</strong>。每个节点执行都会走"开始→(成功|出错)结束"，回调就挂在这些点上。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Handler 接口（真实代码）</h1></div>
+            <div class="card">
+                <p>一个回调 handler 实现这些方法（<code>callbacks/interface.go</code>，用 Builder 构造更方便）：</p>
+<pre><code class="language-go">handler := callbacks.NewHandlerBuilder().
+    OnStartFn(func(ctx, info *RunInfo, input CallbackInput) context.Context {
+        // 节点开始：记下开始时间、打日志
+        return context.WithValue(ctx, startKey, now)
+    }).
+    OnEndFn(func(ctx, info *RunInfo, output CallbackOutput) context.Context {
+        // 节点成功：算耗时、上报监控
+        return ctx
+    }).
+    OnErrorFn(func(ctx, info *RunInfo, err error) context.Context {
+        // 节点出错：记录错误
+        return ctx
+    }).Build()</code></pre>
+                <div class="anno">读法：<b>每个时机一个函数，都收到 ctx + RunInfo（你在哪个节点，L05）+ 输入/输出/错误。</b>注意每个函数<strong>返回 ctx</strong>——你可以往 ctx 里塞东西（如开始时间），下一个时机取出来用（算耗时）。用 Builder 只实现你关心的时机即可。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>怎么挂上去</h1></div>
+            <div class="card">
+                <p>两种挂法：全局（对所有执行生效）或运行时（这一次执行生效）：</p>
+<pre><code class="language-go">// 方式一：全局挂（进程启动时，对之后所有调用生效）
+callbacks.AppendGlobalHandlers(handler)
+
+// 方式二：运行时挂（只对这一次 Invoke/Stream 生效）
+r.Invoke(ctx, input, compose.WithCallbacks(handler))</code></pre>
+                <div class="anno">读法：<b>全局挂适合"所有请求都要的监控/日志"；运行时挂适合"只想给这一次调用加临时观测"（比如调试某个请求）。</b>两者可叠加。挂上后，框架执行每个节点时自动在 5 个时机调用你的 handler，你的业务/组件代码<strong>一行都不用改</strong>。</div>
+                <div class="baby"><span class="t">这就是"无侵入"的含义</span>
+                你写组件时压根不知道有没有人在监控它；运维想加监控时，也不用去改组件源码。两边解耦。第三方写的组件、Eino 内置的节点，照样能被你的 handler 观测到——因为埋点在框架的执行层，不在组件里。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>RunInfo：告诉你"现在在哪"</h1></div>
+            <div class="card">
+                <p>每次回调都带一个 <code>RunInfo</code>，告诉你当前是<strong>哪个节点、什么组件类型、叫什么名字</strong>：</p>
+<pre><code class="language-go">type RunInfo struct {
+    Name      string   // 节点名
+    Type      string   // 具体类型
+    Component components.Component   // 组件类别（ChatModel/Tool/...）
+}</code></pre>
+                <div class="anno">读法：<b>有了 RunInfo，你的 handler 就能区分"这次触发是模型节点还是工具节点"，分别处理。</b>比如只给 ChatModel 节点统计 token、只给 Tool 节点记录调用参数。链路追踪时用它给 span 命名。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>流式回调的坑（必须知道）</h1></div>
+            <div class="card">
+                <p>流式场景（<code>OnEndWithStreamOutput</code>）里，回调拿到的是一个 <strong>StreamReader</strong>（Day 03）。而流<strong>只能被消费一次</strong>——如果你的 handler 把流读完了，真正的业务下游就读不到了！</p>
+                <div class="glossary"><b>解法：Copy</b>（Day 03 的 <code>StreamReader.Copy</code>）。框架/你在把流交给回调前会 <code>Copy</code> 一份，让回调读副本、业务读原本，互不影响。<strong>写流式 handler 时切记：要么用框架已 Copy 好的副本，要么自己 Copy——绝不能直接把业务的流读干。</strong>这是流式回调最常见的 bug 来源。另外流式 handler 读流是异步的，别在里面做重活阻塞主流程。</div>
+                <div class="baby"><span class="t">为什么流只能读一次？</span>
+                回忆 Day 03：StreamReader 像一次性水管，水（chunk）流过去就没了。两个人都想喝，就得先分叉（Copy）成两根管。回调和业务都想看模型输出流，必须 Copy。这是流式一等公民设计带来的必然约束。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>典型用途</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>日志</strong>：每个节点的输入输出打点，排查问题。</li>
+                    <li><strong>指标监控</strong>：节点耗时、成功率、token 用量 → Prometheus。</li>
+                    <li><strong>链路追踪</strong>：给每个节点开一个 span，串成一条 trace（OpenTelemetry/Langfuse）。</li>
+                    <li><strong>成本核算</strong>：在模型节点的 OnEnd 里累加 token → 算这次请求花了多少钱（Day 01 成本经济学）。</li>
+                </ul>
+                <div class="glossary">eino-ext（Day 19）里就有现成的 callback handler，比如对接 Langfuse、APM 的，拿来即用。<strong>可观测性是生产级 Agent 的刚需</strong>——线上出问题时，这些埋点数据就是你的眼睛。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>回调解决什么？为什么叫 AOP/横切？</li>
+                    <li>5 个触发时机分别是？</li>
+                    <li>Handler 怎么写、怎么挂（全局 vs 运行时）？</li>
+                    <li>RunInfo 有什么用？</li>
+                    <li>流式回调为什么必须 Copy 流？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '1,80p' callbacks/interface.go | head -60
+grep -rn 'OnStart\|OnEnd\|OnError\|WithStream' callbacks/ | head
+grep -rn 'AppendGlobalHandlers\|WithCallbacks' . | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>流式深水区</strong>——回到 Day 03 的 StreamReader，读它内部实现：Pipe 缓冲、Copy 的引用计数、多路合并、自动拼接。理解流式为什么能既快又安全。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 ReAct</a>
+                <a href="eino-day17.html" style="color:var(--accent-green);">Day 17 · 流式深入 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
