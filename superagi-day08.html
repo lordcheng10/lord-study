@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · 提示词构建 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#3b82f6);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">提示词构建 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两级构建</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 系统提示模板</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 填充主变量</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 工具渲染成 schema</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 拼装对话消息</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 滚动记忆压缩</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 模板与代码分离</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 工作流</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 输出解析 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Agent 执行</span>
+            <h1 class="part-title">提示词构建</h1>
+            <p class="part-desc">智能体每一步都要把 role/goal/工具/记忆拼成一段 LLM 提示。今天读提示词构建的两级流程，尤其是"滚动记忆压缩"这个应对长对话的关键机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两级构建</h1></div>
+            <div class="card">
+                <p>提示词构建分两级：<strong>先填模板变量，再拼对话消息</strong>。</p>
+                <ul>
+                    <li><strong>① 填模板</strong>（<code>AgentPromptBuilder</code>）：把 goals/instructions/工具塞进系统提示模板。</li>
+                    <li><strong>② 拼消息</strong>（<code>AgentLlmMessageBuilder</code>）：系统提示 + 历史 Feed → LLM 的 messages 数组。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么分两级？</span>
+                <strong>系统提示</strong>（定义智能体是谁、有什么工具、行为规则）相对固定，每轮基本一样——填一次模板。<strong>对话消息</strong>（历史往来）每轮增长——每轮重新拼。分开处理：模板管"人设与能力"，消息管"对话上下文"。<strong>最终喂给 LLM 的是 <code>[{role:system, 系统提示}, {role:user/assistant, 历史...}]</code> 这个消息数组。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>系统提示模板</h1></div>
+            <div class="card">
+                <p><code>agent/prompts/superagi.txt</code> 定义智能体人设，含占位符 <code>{goals}</code> <code>{instructions}</code> <code>{constraints}</code> <code>{tools}</code>，并<strong>强制 LLM 只输出符合给定 JSON schema 的内容</strong>：</p>
+<pre><code class="language-python"># 模板要求 LLM 输出：
+# thoughts: {text, reasoning, plan, criticism, speak}
+# tool: {name, args}</code></pre>
+                <div class="baby"><span class="t">为什么强制 JSON schema 输出？</span>
+                LLM 默认输出自由文本，但框架需要<strong>结构化</strong>地知道"它想调哪个工具、参数是什么"。<strong>系统提示里明确要求 LLM 按固定 JSON schema 输出（thoughts + tool），下一步 output_parser（Day 09）才能可靠地解析。</strong>这个 schema 和解析器是配套的——提示定格式，解析器按格式解。<code>thoughts</code> 里还分 text/reasoning/plan/criticism——引导 LLM 结构化思考（甚至自我批评 criticism），提升决策质量。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>填充主变量</h1></div>
+            <div class="card">
+                <p><code>AgentPromptBuilder.replace_main_variables</code>（<code>agent/agent_prompt_builder.py:65</code>）把 goals/instructions/constraints 转成编号列表塞进模板。</p>
+                <div class="anno">读法：<b>把"目标""指令""约束"渲染成 <code>1. xxx / 2. yyy</code> 的编号列表填进模板占位符。</b>任务队列型工作流还会填 <code>{current_task}</code>/<code>{pending_tasks}</code>/<code>{task_history}</code>（<code>replace_task_based_variables</code>，<code>:95</code>），并按 token 预算截断历史。</div>
+                <div class="baby"><span class="t">为什么用编号列表？</span>
+                给 LLM 的目标/约束如果是一大段文字，它容易忽略某条。<strong>渲染成编号列表（1. 2. 3.）让每条清晰、独立、易被 LLM 逐条对照。</strong>这是提示词工程的小技巧——结构化的输入让 LLM 更好地遵守。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>工具渲染成 schema</h1></div>
+            <div class="card">
+                <p><code>add_tools_to_prompt</code>（<code>agent_prompt_builder.py:23</code>）把每个工具渲染成 <code>"工具名": 描述, args json schema: {...}</code>，并追加内置 <code>finish</code> 工具。</p>
+                <div class="anno">读法：<b>每个工具的 name + description + args 的 JSON schema（Day 03 的 <code>tool.args</code>）拼进提示——告诉 LLM"你有这些工具、每个怎么用、参数怎么填"。</b><code>_generate_tool_string</code>（<code>:53</code>）用 <code>tool.args</code> 的 JSON schema 说明每个工具的参数。总会追加一个 <code>finish</code> 工具——让 LLM 有办法"宣布任务完成"（Day 06 的结束条件）。</div>
+                <div class="baby"><span class="t">工具的动态构建（ToolBuilder，Day 12 预告）</span>
+                这些工具实例是运行时动态构建的（<code>ToolBuilder</code>，Day 12）——根据 DB 里 Tool 记录的 folder/file/class 名 <code>importlib</code> 动态导入实例化，再注入依赖（llm/resource_manager…）。迭代步默认还会放一个 <code>ThinkingTool</code>（Day 03）。<strong>"哪些工具进提示"由智能体配置 + 工作流决定。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>拼装对话消息（含记忆）</h1></div>
+            <div class="card">
+                <p><code>AgentLlmMessageBuilder.build_agent_messages</code>（<code>agent/agent_message_builder.py:26</code>）：</p>
+<pre><code class="language-python"># :38  system 消息 = 上面填好的系统提示
+# :39-53  若 history_enabled，加当前时间，把历史 agent_feeds（Day 02 的 Feed）转成消息
+# 超 token 预算的旧历史 → _split_history 切出去 → 压缩成摘要（L06）</code></pre>
+                <div class="anno">读法：<b>最终 messages = system 提示 + 历史 Feed 转成的对话消息。</b>这就是把 Day 02 的 Feed（短期记忆）读回来、拼进 LLM 上下文的地方——让 LLM"记得之前干了什么"。首次执行时还会把初始 messages 落库成 Feed，保证后续能回读。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>滚动记忆压缩（关键机制）</h1></div>
+            <div class="card">
+                <p>历史越来越长会超 token 上限。<code>_split_history</code>（<code>agent_message_builder.py:59</code>）把超预算的旧历史切出去，交给 <code>_build_ltm_summary</code>（<code>:91</code>）<strong>调 LLM 压缩成"长期记忆摘要"</strong>作为一条 assistant 消息。</p>
+                <div class="baby"><span class="t">滚动摘要压缩解决什么？</span>
+                智能体循环几十轮后，历史 Feed 可能几万 token，塞不进 LLM 上下文。<strong>做法：保留最近的详细历史，把更早的旧历史用 LLM 压缩成一段"摘要"（"前面我做了 A、B、C，结论是 D"）。</strong>于是上下文 = 摘要（浓缩的远期）+ 详细的近期。既不超限，又保留关键信息。<strong>这和 CrewAI/OpenHands 的历史压缩（CondensationEvent）完全同理——长任务智能体必备的"记忆管理"。</strong>"滚动"= 随着对话增长，不断把新变旧的部分卷进摘要。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>模板与代码分离</h1></div>
+            <div class="card">
+                <p>注意提示词放在 <code>.txt</code> 文件里（<code>prompts/superagi.txt</code>、<code>agent_tool_input.txt</code>、<code>agent_tool_output.txt</code>），代码只做"读模板 + 变量替换"。</p>
+                <div class="baby"><span class="t">为什么提示词单独放文件？</span>
+                智能体的提示词是<strong>需要反复调优</strong>的（改一个词可能大幅影响智能体表现）。如果提示词硬编码在 Python 字符串里，改它要动代码、要程序员。<strong>放 .txt 文件里——非程序员也能调提示、改了不用改代码、能单独 review 提示的变更。</strong>这是"模板方法 + 配置外置"的思想（和 CrewAI 把提示放 YAML、Day 19 一个道理）。<strong>Agent 开发的一大工作量是调提示，把提示外置是工程化的必然。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>提示词构建的两级（填模板 / 拼消息）？</li>
+                    <li>系统提示为什么强制 JSON schema 输出？</li>
+                    <li>工具怎么渲染进提示？为什么总追加 finish 工具？</li>
+                    <li>历史 Feed 怎么拼进消息？</li>
+                    <li>滚动记忆压缩解决什么？为什么提示词放 .txt？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/agent
+cat prompts/superagi.txt | head -40
+sed -n '23,93p' agent_prompt_builder.py | head -40    # 填变量 + 工具渲染
+sed -n '26,70p' agent_message_builder.py              # 拼消息 + 切历史
+grep -n '_build_ltm_summary' agent_message_builder.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>输出解析 output_parser</strong>——LLM 按 schema 输出后，怎么解析成"选哪个工具 + 参数"（AgentGPTAction）。两个 parser、JSON 容错、自我纠错。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 工作流</a>
+                <a href="superagi-day09.html" style="color:var(--accent-green);">Day 09 · 输出解析 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
