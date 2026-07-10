@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · Workflow 引擎 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#34d399,#a855f7);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">Workflow 引擎 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 超越 RAG</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 事件驱动</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · @step 装饰器</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Event 连接步骤</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Start/Stop Event</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Context 状态</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 和 langgraph 对比</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day17.html" class="nav-link" style="color:#34d399;">Day 17 Agent &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 Agent/Workflow/生态</span>
+            <h1 class="part-title">Workflow 引擎</h1>
+            <p class="part-desc">前三周把 RAG 全链路拆透了。第 4 周超越 RAG——LlamaIndex 用 <strong>Workflow</strong>（事件驱动引擎）作为 Agent 的底座。今天看 Workflow 的核心：@step、Event、Context，理解"事件驱动编排"这个新范式。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>超越 RAG</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">从"一问一答"到"多步自主"</span>
+                <strong>RAG（前三周）是"检索→生成"的固定流程。但复杂任务需要"多步、有分支、能循环"——比如 Agent："先想想要用什么工具 → 调工具 → 看结果 → 再决定下一步 → 直到解决"。这不是固定流程，而是动态的、可能循环的。</strong>LlamaIndex 用 <strong>Workflow</strong> 表达这种复杂控制流——一个事件驱动的编排引擎。<strong>Agent（Day 17）、复杂 RAG（多步查询）都建在 Workflow 上。</strong>（注意：Workflow 核心已抽成独立包 <code>workflows</code>，core 的 <code>workflow/</code> 主要是 re-export + LlamaIndex 特定事件。）</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>事件驱动</h1></div>
+            <div class="card">
+                <p><code>workflow/</code>：<code>workflow.py</code>（Workflow 基类）、<code>decorators.py</code>（@step）、<code>events.py</code>（Event）、<code>context.py</code>（Context）、<code>handler.py</code>。</p>
+                <div class="baby"><span class="t">"步骤发事件、事件触发步骤"</span>
+                <strong>Workflow 的核心模型：一堆"步骤"（step），每个步骤<strong>接收</strong>某种事件、处理后<strong>发出</strong>另一种事件；发出的事件又触发下一个步骤。</strong>就像多米诺骨牌——A 步骤发出 EventX，接收 EventX 的 B 步骤被触发，B 发出 EventY 触发 C……直到发出 StopEvent 结束。<strong>这种"事件驱动"比"写死的函数调用链"灵活得多：能分支（发不同事件走不同步骤）、能循环（步骤发出的事件又回到自己）、能并发。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>@step 装饰器</h1></div>
+            <div class="card">
+                <p><code>workflow/decorators.py:7</code>：<code>step</code> 装饰器（委托给上游 <code>workflows</code> 包的 <code>upstream_step</code>）。用法：</p>
+<pre><code class="language-python">from workflows import Workflow, step
+from workflows.events import StartEvent, StopEvent, Event
+
+class MyFlow(Workflow):
+    @step
+    async def step_one(self, ev: StartEvent) -> MiddleEvent:   # 接收 Start，发出 Middle
+        return MiddleEvent(data="...")
+    @step
+    async def step_two(self, ev: MiddleEvent) -> StopEvent:    # 接收 Middle，发出 Stop
+        return StopEvent(result="done")</code></pre>
+                <div class="baby"><span class="t">用"类型注解"声明事件流</span>
+                <strong>关键设计：步骤的<strong>参数类型</strong>声明"我接收什么事件"，<strong>返回类型</strong>声明"我发出什么事件"。<code>step_one(ev: StartEvent) -> MiddleEvent</code> 就是"收 Start、发 Middle"。</strong>Workflow 引擎读这些类型注解，自动把步骤连成事件流——不用手写"谁调谁"。<strong>你只写步骤 + 声明输入输出事件，引擎自动编排。</strong>这比手写调用链优雅（回想 wasm-go 的类型驱动、langgraph 的图）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Event 连接步骤</h1></div>
+            <div class="card">
+                <p>自定义 Event 继承 <code>Event</code>（Pydantic 模型，装数据）。步骤间通过 Event 传递数据。一个步骤可以返回不同 Event 实现分支，或返回自己接收的 Event 类型实现循环。</p>
+                <div class="baby"><span class="t">Event 既是"信号"也是"数据载体"</span>
+                <strong>Event 不只触发下一步，还带着数据（Pydantic 字段）。<code>MiddleEvent(data="...")</code> 把 data 传给接收它的步骤。</strong>分支：一个步骤根据情况返回 <code>EventA</code> 或 <code>EventB</code>——走不同的后续步骤。循环：步骤 X 返回一个最终又会触发 X 的事件——实现"反复执行直到条件满足"（Agent 的"想-做-看"循环就靠它）。<strong>Event 类型 = 控制流的"路标"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Start / Stop Event</h1></div>
+            <div class="card">
+                <p>两个特殊事件：<code>StartEvent</code>（Workflow 启动时自动发，携带输入）、<code>StopEvent</code>（发出它就结束，<code>result</code> 是最终结果）。</p>
+<pre><code class="language-python">flow = MyFlow()
+result = await flow.run(input="...")   # 触发 StartEvent → ... → StopEvent → 返回 result</code></pre>
+                <div class="anno">读法：<b><code>run</code> 发出 StartEvent 启动流程，引擎按事件流跑各步骤，直到某步骤返回 StopEvent 结束、返回其 result。<strong>接收 StartEvent 的步骤是"入口",返回 StopEvent 的步骤是"出口"。</strong>中间可以有任意多步骤、分支、循环。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Context 状态</h1></div>
+            <div class="card">
+                <p><code>workflow/context.py</code> 的 <code>Context</code>：跨步骤共享状态。步骤可以 <code>await ctx.store.set/get</code> 存取数据、<code>ctx.write_event_to_stream</code> 发流式事件（进度）、<code>ctx.collect_events</code> 等待多个事件（并发汇合）。</p>
+                <div class="baby"><span class="t">Context = Workflow 的"共享内存 + 流式通道"</span>
+                <strong>步骤间除了用 Event 传数据，还能用 Context 存"全局状态"（整个流程共享，如累积的中间结果）。</strong><code>collect_events</code> 支持"扇入"（等几个并发步骤都完成再继续）。<code>write_event_to_stream</code> 让流程"边跑边报告进度"（前端能实时看到 Agent 在干嘛）。<strong>回想 langgraph 的 State/Channels、wasm-go 的 Context——都是"跨步骤共享状态"的机制。Workflow 的 Context 是 LlamaIndex 版。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>和 langgraph 对比</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">两种"编排范式"</span>
+                <strong>你学过的 langgraph 用"图"（节点 + 边 + 状态通道，Pregel 超步）编排；LlamaIndex Workflow 用"事件驱动"（步骤 + 事件）编排。</strong>本质都是"表达复杂控制流（分支/循环/并发）"，风格不同：<strong>langgraph 显式画图（节点边）；Workflow 用类型注解隐式连接（收什么事件、发什么事件）。</strong>Workflow 的事件模型对"动态、涌现式"的流程更自然（不用预先画全图）。<strong>两者都比"写死的 if-else 链"强——都是 Agent 时代的编排基础设施。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么复杂任务需要 Workflow 而非固定 RAG 流程？</li>
+                    <li>"事件驱动"怎么工作（步骤收发事件）？</li>
+                    <li>@step 怎么用类型注解声明事件流？Event 怎么做分支/循环？</li>
+                    <li>Context 的作用？和 langgraph 的图编排有何异同？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls workflow/
+cat workflow/decorators.py
+grep -rn "upstream_step\|from workflows" workflow/*.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>Agent 智能体</strong>——建在 Workflow 上的 Agent：FunctionAgent（工具调用）和 ReActAgent（推理-行动循环）。看它们怎么让 LLM 自主决定用哪个工具、多步解决问题。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day15.html" style="color:var(--accent-cyan);">&larr; Day 15</a>
+                <a href="llama-index-day17.html" style="color:#34d399;">Day 17 · Agent &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Agent 智能体 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .loop{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .loop .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;font-size:12px;text-align:center}
+        .loop .n b{display:block;color:#34d399}
+        .loop .a{color:#a855f7;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#34d399,#a855f7);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Agent 智能体 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是 Agent</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · tools 工具</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · FunctionAgent</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · take_step</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ReActAgent</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · RAG 作为工具</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 多智能体</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day18.html" class="nav-link" style="color:#34d399;">Day 18 聊天记忆 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 Agent/Workflow/生态</span>
+            <h1 class="part-title">Agent 智能体</h1>
+            <p class="part-desc">建在 Workflow 上的 Agent——能让 LLM 自主决定"用哪个工具、怎么多步解决问题"。今天看 FunctionAgent（工具调用）和 ReActAgent（推理-行动循环），以及 RAG 怎么作为 Agent 的一个工具。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是 Agent</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Agent = 会用工具、能多步推理的 LLM</span>
+                <strong>普通 LLM 只会"聊天"。Agent 给它加了两样：① <strong>工具</strong>（能调函数：查数据库、算数、搜网、跑 RAG）；② <strong>自主循环</strong>（自己决定"该用哪个工具、用完看结果再决定下一步",直到解决问题）。</strong>比如问"北京今天气温比上海高几度?"——Agent 会：调天气工具查北京 → 调天气工具查上海 → 算差值 → 回答。<strong>这超越了 RAG 的"一次检索一次生成"——是"多步、动态、自主"的。</strong>LlamaIndex 的 Agent 都建在 Day 16 的 Workflow 上（<code>agent/workflow/</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>tools 工具</h1></div>
+            <div class="card">
+                <p><code>tools/</code>：<code>BaseTool</code>、<code>FunctionTool</code>（把普通 Python 函数包成工具）、<code>QueryEngineTool</code>（把查询引擎包成工具）。工具 = 名字 + 描述 + 参数 schema + 可调用的函数。</p>
+<pre><code class="language-python">from llama_index.core.tools import FunctionTool
+def multiply(a: int, b: int) -> int:
+    """两数相乘"""
+    return a * b
+tool = FunctionTool.from_defaults(fn=multiply)   # 函数 → 工具</code></pre>
+                <div class="baby"><span class="t">工具的"描述"是给 LLM 看的</span>
+                <strong>工具的名字、docstring（描述）、参数类型会被转成 LLM 能理解的"工具规格"。LLM 看着这些描述，决定"这个任务该调哪个工具、传什么参数"（回想 Day 15 的 function calling）。</strong>所以工具的描述要写清楚——LLM 靠它判断何时用。<strong><code>QueryEngineTool</code> 把 Day 12 的查询引擎包成工具——这样 RAG 就成了 Agent 的一种能力（L06）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>FunctionAgent</h1></div>
+            <div class="card">
+                <p><code>agent/workflow/function_agent.py:19</code>：<code>class FunctionAgent(BaseWorkflowAgent)</code>——基于 LLM 原生的"函数调用"能力的 Agent。</p>
+<pre><code class="language-python">from llama_index.core.agent.workflow import FunctionAgent
+agent = FunctionAgent(tools=[multiply_tool, weather_tool], llm=llm)
+response = await agent.run("北京比上海气温高几度?")   # 自主调工具、多步、给答案</code></pre>
+                <div class="baby"><span class="t">依赖 LLM 的原生工具调用</span>
+                <strong>现代 LLM（GPT-4/Claude）原生支持"函数调用"——你给它工具列表，它直接返回"我要调 weather('北京')"这样的结构化决策。FunctionAgent 就用这个：把工具给 LLM，LLM 决定调哪个，Agent 执行工具、把结果喂回 LLM，循环直到 LLM 给出最终答案。</strong>这是最主流、最可靠的 Agent 形式（模型原生支持，比让模型"用文字描述要调什么"稳）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>take_step</h1></div>
+            <div class="card">
+                <p><code>function_agent.py:33-48</code> 的 <code>take_step</code>（简化）：</p>
+<pre><code class="language-python">async def take_step(self, current_llm_input: List[ChatMessage], tools, ...):
+    # 把对话历史 + 工具列表喂给 LLM，让它决定：直接答 or 调工具
+    response = await self.llm.achat_with_tools(tools=tools, chat_history=current_llm_input, ...)
+    # 返回 LLM 的决策（含要调的工具 + 参数，或最终答案）</code></pre>
+                <div class="baby"><span class="t">Agent 的一"步"</span>
+                <strong><code>take_step</code> 是 Agent 循环里的一步：把当前对话 + 工具喂给 LLM，LLM 要么"决定调某工具",要么"给出最终答案"。</strong>这个 <code>take_step</code> 被包在 Day 16 的 Workflow 里循环执行：调工具 → 结果加进对话 → 再 take_step → 直到 LLM 不再调工具（给出答案）。<strong>Workflow 的"事件循环"正好表达这个"想-做-看-再想"的循环——这就是为什么 Agent 建在 Workflow 上。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ReActAgent</h1></div>
+            <div class="card">
+                <p><code>agent/workflow/react_agent.py:38</code>：<code>ReActAgent</code>——用 <strong>ReAct</strong>（Reasoning + Acting）范式，让 LLM 用文字输出"思考-行动-观察"：</p>
+<pre><code class="language-bash">Thought: 我需要先查北京气温        # 推理（:169-171 的提示词格式）
+Action: get_weather
+Action Input: {"city": "北京"}      # 行动
+Observation: 北京 15°C             # 观察（工具返回）
+Thought: 再查上海...               # 继续循环
+... Thought: 我知道答案了
+Answer: 北京比上海高 3 度</code></pre>
+                <div class="loop">
+                    <span class="n"><b>Thought</b>推理</span><span class="a">→</span>
+                    <span class="n"><b>Action</b>调工具</span><span class="a">→</span>
+                    <span class="n"><b>Observation</b>看结果</span><span class="a">→</span>
+                    <span class="n"><b>循环</b>直到 Answer</span>
+                </div>
+                <div class="baby"><span class="t">FunctionAgent vs ReActAgent</span>
+                <strong>FunctionAgent 用模型<strong>原生</strong>函数调用（结构化、可靠，需模型支持）；ReActAgent 让模型<strong>用文字</strong>输出 Thought/Action/Observation（不需原生函数调用，任何模型都能用，但要解析文字、稍不稳）。</strong>回想你学过的 crewAI/langgraph 里的 ReAct——同一个经典范式。<strong>有原生函数调用的模型优先 FunctionAgent；老模型/开源模型用 ReActAgent。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>RAG 作为工具</h1></div>
+            <div class="card">
+                <p><code>QueryEngineTool.from_defaults(query_engine, name, description)</code> 把 Day 12 的查询引擎包成工具，给 Agent 用。</p>
+                <div class="baby"><span class="t">RAG 和 Agent 的结合（本课两条主线汇合）</span>
+                <strong>前三周的 RAG 查询引擎，可以作为 Agent 的一个"工具"——Agent 遇到"需要查资料"的问题时，调这个 RAG 工具检索答案。</strong>比如一个客服 Agent 有多个工具：RAG 工具（查产品手册）、订单查询工具、退款工具。用户问啥，Agent 自主决定用哪个。<strong>这就是"Agentic RAG"——RAG 不再是固定流程，而是 Agent 能按需调用的能力之一。</strong>本课的两条主线（RAG + Agent）在这里汇合。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>多智能体</h1></div>
+            <div class="card">
+                <p><code>agent/workflow/multi_agent_workflow.py</code>：<code>AgentWorkflow</code> 支持多个 Agent 协作——不同 Agent 各有专长和工具，互相"移交"（handoff）任务。</p>
+                <div class="anno">读法：<b>复杂任务可以拆给多个专家 Agent：一个负责研究、一个负责写作、一个负责审核，互相传递。<strong>它们也建在 Workflow 上（Agent 之间用事件通信）。</strong>回想你学过的 crewAI（多智能体协作）、AutoGPT——LlamaIndex 的 AgentWorkflow 是它对标的多智能体能力。<code>codeact_agent.py</code> 还有能写代码执行的 CodeAct Agent。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Agent 比普通 LLM 多了哪两样（工具 + 自主循环）？</li>
+                    <li>工具的"描述"为什么重要？QueryEngineTool 是什么？</li>
+                    <li>FunctionAgent 和 ReActAgent 的区别？各适合什么模型？</li>
+                    <li>"Agentic RAG"怎么把本课两条主线汇合？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls agent/workflow/
+sed -n '19,50p' agent/workflow/function_agent.py
+sed -n '165,205p' agent/workflow/react_agent.py
+ls tools/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>聊天引擎 + 记忆</strong>——单轮问答升级为多轮对话：chat_engine 怎么处理"结合历史 + 当前问题"、memory 怎么管理对话历史（缓冲/摘要/向量记忆）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day16.html" style="color:var(--accent-cyan);">&larr; Day 16</a>
+                <a href="llama-index-day18.html" style="color:#34d399;">Day 18 · 聊天记忆 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 可观测与评估 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#34d399,#a855f7);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">可观测与评估 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 黑盒问题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · callbacks 回调</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · instrumentation</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · token 计数</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 第三方追踪</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · evaluation 评估</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 检索 vs 生成评估</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day20.html" class="nav-link" style="color:#34d399;">Day 20 收官串讲 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 Agent/Workflow/生态</span>
+            <h1 class="part-title">可观测与评估</h1>
+            <p class="part-desc">RAG/Agent 是"黑盒"——检索了啥、LLM 想了啥、花了多少 token、答得好不好，都看不见。今天看两套工具：callbacks/instrumentation（追踪内部）+ evaluation（衡量质量）。这是把 RAG 从"能跑"做到"能上线"的关键。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>黑盒问题</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"答错了，但不知道错在哪"</span>
+                <strong>RAG 答错了——是检索没找到对的内容？还是找到了但 LLM 没用好？花了多少钱（token）？延迟多少？Agent 到底调了哪些工具、想了什么？</strong>不观测就是抓瞎。而且怎么<strong>客观衡量</strong>"这个 RAG 系统好不好"？改了参数是变好还是变差？<strong>可观测（看内部）+ 评估（打分）解决这两个问题——它们是 RAG 从 demo 走向生产的必经之路。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>callbacks 回调</h1></div>
+            <div class="card">
+                <p><code>callbacks/</code>：<code>CallbackManager</code> + 各种 handler（<code>LlamaDebugHandler</code>、<code>TokenCountingHandler</code>）。<code>schema.py</code> 的 <code>CBEventType</code> 定义事件类型（RETRIEVE/LLM/EMBEDDING/QUERY/…）。</p>
+                <div class="anno">读法：<b>回想前几天代码里到处的 <code>callback_manager.event(CBEventType.RETRIEVE, ...)</code>（Day 11/12）——那就是埋点。<strong>CallbackManager 在每个关键步骤（检索、调 LLM、嵌入）发事件，handler 接收后可以打印/计时/统计。</strong><code>LlamaDebugHandler</code> 打印每步详情（调试神器），<code>TokenCountingHandler</code> 数 token。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>instrumentation</h1></div>
+            <div class="card">
+                <p><code>instrumentation/</code>（较新，逐步取代 callbacks）：基于 <code>dispatcher</code> 的事件系统——回想 Day 11 <code>dispatcher.event(RetrievalStartEvent(...))</code>、<code>@dispatcher.span</code>。更细粒度、更结构化的追踪。</p>
+                <div class="baby"><span class="t">新一代可观测：span + event</span>
+                <strong>instrumentation 引入了"span"（一段操作的时间区间，如"这次检索耗时 200ms"）和结构化 event。你注册一个 handler，就能收到框架各处发的事件（检索开始/结束、LLM 调用、Agent 每步）。</strong>这套更接近现代 APM（应用性能监控）的模型——回想 Envoy/Istio 的追踪、langgraph 的流式事件。<strong>基于它能实现完整的链路追踪：一次 query 内部所有步骤的时间线。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>token 计数</h1></div>
+            <div class="card">
+                <p><code>callbacks/token_counting.py</code> 的 <code>TokenCountingHandler</code>：统计嵌入 token、LLM 提示 token、LLM 生成 token。</p>
+                <div class="baby"><span class="t">token = 钱，必须盯</span>
+                <strong>LLM 和嵌入都按 token 收费。一次 RAG query 可能：嵌入问题（几十 token）+ 检索的内容塞进提示（几千 token）+ LLM 生成答案（几百 token）。TokenCountingHandler 帮你算清每部分用了多少。</strong>生产环境这直接关系成本——比如发现"检索塞了太多内容导致提示 token 爆炸",就调小 top_k。<strong>回想 wasm-go/Higress 的 tokenusage——AI 应用都要盯 token。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>第三方追踪</h1></div>
+            <div class="card">
+                <p>通过 instrumentation/callbacks，LlamaIndex 能接入第三方可观测平台：Arize Phoenix、LangSmith、Langfuse、OpenTelemetry 等（integrations）。<code>set_global_handler("arize_phoenix")</code> 一行开启。</p>
+                <div class="anno">读法：<b>这些平台提供"可视化链路追踪 UI"——一次 query 的每步（检索了哪些 Node、每个的分数、LLM 的完整提示和输出、耗时）都能在界面上看。<strong>调试复杂 RAG/Agent 时，可视化追踪比看日志高效得多。</strong>Phoenix 还能做评估（下面）。<strong>这是生产 RAG 的标配——线上出问题能快速定位。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>evaluation 评估</h1></div>
+            <div class="card">
+                <p><code>evaluation/</code>：一批 Evaluator（<code>FaithfulnessEvaluator</code>、<code>RelevancyEvaluator</code>、<code>CorrectnessEvaluator</code>、<code>RetrieverEvaluator</code>…），多用 <strong>LLM-as-judge</strong>（用一个 LLM 给答案打分）。</p>
+                <div class="baby"><span class="t">怎么给"答案质量"打分？</span>
+                <strong>RAG 答案好不好难量化（不像分类有标准答案）。LlamaIndex 用"LLM 当裁判"：<br>• Faithfulness（忠实度）：答案是不是真的基于检索的资料（没瞎编）？<br>• Relevancy（相关性）：答案和检索内容跟问题相关吗？<br>• Correctness（正确性）：对比参考答案，答对了吗？</strong>让一个强 LLM 读"问题+资料+答案",打分 + 给理由。<strong>这样能批量、客观地衡量 RAG 质量——改了参数跑一批评估，看分数升降。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>检索 vs 生成评估</h1></div>
+            <div class="card">
+                <p>RAG 评估分两段：</p>
+                <ul>
+                    <li><strong>检索评估</strong>（<code>RetrieverEvaluator</code>）：检索出的 Node 里有没有正确答案所在的（hit rate、MRR 等指标）。</li>
+                    <li><strong>生成评估</strong>（Faithfulness/Relevancy/Correctness）：基于检索内容，答案生成得好不好。</li>
+                </ul>
+                <div class="baby"><span class="t">分段评估才能定位问题</span>
+                <strong>RAG 答错了，是"没检索到对的"（检索问题）还是"检索到了但没答好"（生成问题）？分段评估告诉你。</strong>检索评估分低 → 改切块/嵌入/检索策略（第 1-2 周、Day 11/14）；生成评估分低 → 改提示词/合成模式/LLM（Day 13-15）。<strong>这让 RAG 调优有的放矢——先测哪段弱、再针对性优化。</strong>回想 Day 09/14 说的"检索质量决定一切"——评估帮你验证。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 RAG/Agent 需要可观测和评估？</li>
+                    <li>callbacks/instrumentation 怎么追踪内部？token 为什么要盯？</li>
+                    <li>evaluation 怎么用 LLM-as-judge 给答案打分？三个维度？</li>
+                    <li>检索评估 vs 生成评估——为什么要分段？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls callbacks/ instrumentation/ evaluation/
+grep -n "class TokenCountingHandler" callbacks/token_counting.py | head
+grep -rn "class FaithfulnessEvaluator\|class RetrieverEvaluator" evaluation/*.py 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（收官）</strong>：<strong>部署与收官串讲</strong>——core vs integrations、RAG 全链路回顾、Agent/Workflow 总结、和你学过的其他框架（langgraph/crewAI）对比，画上圆满句号。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day18.html" style="color:var(--accent-cyan);">&larr; Day 18</a>
+                <a href="llama-index-day20.html" style="color:#34d399;">Day 20 · 收官串讲 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 聊天引擎与记忆 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#34d399,#a855f7);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">聊天引擎与记忆 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 单轮 vs 多轮</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ChatEngine 模式</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · condense_question</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · context 模式</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Memory 记忆</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 缓冲区 token 限制</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 摘要与向量记忆</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day19.html" class="nav-link" style="color:#34d399;">Day 19 可观测评估 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 Agent/Workflow/生态</span>
+            <h1 class="part-title">聊天引擎与记忆</h1>
+            <p class="part-desc">QueryEngine 是"单轮问答"，但真实对话是多轮的（"它多少钱?" 这个"它"指上文提过的东西）。今天看 ChatEngine（多轮对话）和 Memory（管理对话历史）——让 RAG/Agent 记住上下文。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>单轮 vs 多轮</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">多轮对话的"指代"难题</span>
+                <strong>QueryEngine 每次 query 是独立的（Day 12）——它不记得上一句。但对话有上下文："公司的退款政策是什么?"→"那需要多久?"——第二句的"那"指退款。如果不记历史，检索"那需要多久"根本检索不到东西。</strong>ChatEngine 解决多轮：<strong>它维护对话历史，把当前问题结合历史处理</strong>（比如把"那需要多久"改写成"退款需要多久"再检索）。<strong>这是从"问答"到"对话"的关键升级。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ChatEngine 模式</h1></div>
+            <div class="card">
+                <p><code>chat_engine/</code>：<code>simple.py</code>（纯聊天，无 RAG）、<code>condense_question.py</code>、<code>context.py</code>、<code>condense_plus_context.py</code>（默认推荐）。<code>index.as_chat_engine(chat_mode=...)</code> 创建。</p>
+                <div class="anno">读法：<b>不同模式 = 不同的"结合历史 + RAG"策略。<strong>SimpleChatEngine</strong>：只聊天不检索。<strong>CondenseQuestion</strong>：把历史+新问题浓缩成一个独立问题再检索。<strong>Context</strong>：每轮都检索、把结果塞进 system 提示。<strong>CondensePlusContext</strong>：两者结合（默认）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>condense_question 模式</h1></div>
+            <div class="card">
+                <p><code>chat_engine/condense_question.py</code>：先用 LLM 把"对话历史 + 当前问题"浓缩成一个"独立问题"，再拿它走 RAG。</p>
+                <div class="baby"><span class="t">"改写问题"解决指代</span>
+                <strong>历史："退款政策是什么?" → 答。当前："那需要多久?"。CondenseQuestion 先让 LLM 看历史，把"那需要多久"改写成"退款需要多久"（独立、无指代），再用这个改写后的问题检索。</strong>这样检索能命中"退款时长"的内容。<strong>优点：检索的问题总是完整独立的。缺点：多一次 LLM 调用（改写）。</strong>适合"每轮都需要检索"的知识问答。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>context 模式</h1></div>
+            <div class="card">
+                <p><code>chat_engine/context.py</code>：每轮用当前消息检索相关 Node，把它们塞进 system 提示，连同完整对话历史一起给 LLM。</p>
+                <div class="baby"><span class="t">"带着资料聊天"</span>
+                <strong>Context 模式不改写问题——它每轮检索相关资料，作为"背景知识"放进 system 提示，然后 LLM 看着"资料 + 完整对话历史"回答。</strong>好处：保留完整对话上下文（LLM 自己理解指代）、资料实时相关。<strong>CondensePlusContext（默认）= 先浓缩问题做精准检索 + 保留对话上下文——兼顾两者优点。</strong>选哪个模式取决于你的对话特点。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Memory 记忆</h1></div>
+            <div class="card">
+                <p><code>memory/</code>：<code>memory.py</code>（新版统一 Memory）、<code>chat_memory_buffer.py</code>、<code>chat_summary_memory_buffer.py</code>、<code>vector_memory.py</code>、<code>simple_composable_memory.py</code> + <code>memory_blocks/</code>。存对话历史（ChatMessage 列表，Day 15）。</p>
+                <div class="baby"><span class="t">Memory = 对话历史的管理者</span>
+                <strong>Memory 存这次对话的所有消息（user/assistant 轮流）。ChatEngine/Agent 每轮从 Memory 取历史、处理完把新消息写回。</strong>核心难题：<strong>对话越长历史越长，塞不下 LLM 上下文</strong>——所以有不同的 Memory 策略管理"记多少、怎么记"（下面）。<strong>回想你学过的其他框架的 memory（SuperAGI 的滚动记忆压缩、crewAI 的统一记忆）——同一个问题的不同解法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>缓冲区 token 限制</h1></div>
+            <div class="card">
+                <p><code>memory/chat_memory_buffer.py</code> 的 <code>ChatMemoryBuffer</code>：保留最近的消息，用 <code>token_limit</code> 控制——超了就丢最老的。</p>
+                <div class="baby"><span class="t">最简单：只记最近的</span>
+                <strong>ChatMemoryBuffer 像"滑动窗口"——只保留最近 N token 的对话，老的丢弃。简单有效，适合大多数场景（远古对话通常不重要）。</strong>缺点：丢掉的历史彻底忘了（如果用户 10 轮前说的名字，现在问就想不起）。<strong>这是"记忆容量"和"上下文限制"的最朴素折中。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>摘要与向量记忆</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>ChatSummaryMemoryBuffer</strong>：历史超限时，用 LLM 把旧对话<strong>摘要</strong>成一段，保留摘要 + 最近消息——不彻底忘，压缩记忆。</li>
+                    <li><strong>VectorMemory</strong>：把历史消息也向量化存起来，需要时<strong>检索</strong>相关历史（而非全带）——"长期记忆"。</li>
+                    <li><strong>SimpleComposableMemory / memory_blocks</strong>：组合多种记忆（短期缓冲 + 长期向量 + 事实块）。</li>
+                </ul>
+                <div class="baby"><span class="t">三层记忆策略，越来越像人</span>
+                <strong>Buffer（只记最近）→ Summary（压缩旧的成摘要）→ Vector（旧对话存起来、按需检索）。</strong>越往后越像人的记忆——近的记得清、远的记要点、需要时能"回忆"。<strong>新版 Memory（<code>memory.py</code> + <code>memory_blocks/</code>）支持"可组合记忆块"——短期 + 长期 + 静态事实混合，这是当前 Agent 记忆的前沿。</strong>选哪种看你的对话长度和"要不要记住远期信息"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>多轮对话的"指代"难题？ChatEngine 怎么解决？</li>
+                    <li>condense_question 和 context 模式的区别？</li>
+                    <li>Memory 的核心难题（历史太长塞不下）？</li>
+                    <li>Buffer/Summary/Vector 三种记忆策略的取舍？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls chat_engine/ memory/
+grep -n "class ChatMemoryBuffer\|token_limit" memory/chat_memory_buffer.py | head
+grep -n "chat_mode\|CondensePlusContext" chat_engine/types.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>可观测与评估</strong>——RAG/Agent 是"黑盒"，怎么看内部发生了什么、怎么衡量质量好坏？callbacks/instrumentation（追踪）+ evaluation（评估检索/答案质量）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day17.html" style="color:var(--accent-cyan);">&larr; Day 17</a>
+                <a href="llama-index-day19.html" style="color:#34d399;">Day 19 · 可观测评估 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
