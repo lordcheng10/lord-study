@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · wasm-go SDK — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#10b981);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">wasm-go SDK · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 最小骨架</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SetCtx + Option</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 三级 Context</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 配置解析</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 请求生命周期</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · RuleMatcher</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 外呼与协调</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 概览</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day13.html" class="nav-link" style="color:#10b981;">Day 13 写一个插件 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 Wasm 插件</span>
+            <h1 class="part-title">wasm-go SDK</h1>
+            <p class="part-desc">用户真正写插件用的是 wasm-go SDK 的 wrapper 层（<code>&lt;wasm-go&gt;/pkg/wrapper/</code>）。今天看它的核心：<code>SetCtx</code> + Option 模式、三级 Context、配置解析、请求生命周期。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>最小骨架</h1></div>
+            <div class="card">
+<pre><code class="language-go">// extensions/hello-world/main.go
+func main() {}   // 空！
+func init() {
+  wrapper.SetCtx("hello-world", wrapper.ProcessRequestHeadersBy(onHttpRequestHeaders))
+}
+func onHttpRequestHeaders(ctx wrapper.HttpContext, config HelloWorldConfig, log log.Log) types.Action {
+  proxywasm.AddHttpRequestHeader("hello", "world")
+  proxywasm.SendHttpResponseWithDetail(200, "hello-world", nil, []byte("hello world"), -1)
+  return types.ActionContinue
+}</code></pre>
+                <div class="baby"><span class="t">为什么 main 是空的？</span>
+                Wasm 模块加载时，Go runtime 会执行 <code>init()</code>。<strong>插件的逻辑全在 <code>init()</code> 里通过 <code>SetCtx</code> 注册——注册"插件名 + 各阶段回调"。<code>main()</code> 空着是因为没有"主流程"，一切都是事件驱动（Envoy 调回调）。</strong>这个骨架就是所有 Higress Wasm 插件的模板：<code>init</code> 里 <code>SetCtx</code> 注册回调，回调函数里写业务逻辑（读写 header/body、外呼、返回响应）。<code>onHttpRequestHeaders</code> 收到请求头时被调用，加个 header、直接返回响应。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SetCtx + Option</h1></div>
+            <div class="card">
+<pre><code class="language-go">// plugin_wrapper.go SetCtx[PluginConfig any](pluginName, options ...CtxOption)（:114）
+//   → proxywasm.SetVMContext(NewCommonVmCtx(...))
+// Option 注册各阶段回调（有新旧两套 API）：
+//   ProcessRequestHeaders/By（:246/:242）、ProcessRequestBody（:270）
+//   ProcessStreamingRequestBody（:294）、ProcessResponseHeaders（:318）
+//   ParseConfig（:158）、ParseOverrideConfig（:212 全局+规则两个函数）</code></pre>
+                <div class="anno">读法：<b><code>SetCtx</code> 用泛型 <code>PluginConfig</code> 承载"插件配置结构体"，用 Option 注册各阶段回调。你想处理哪个阶段（请求头/请求体/响应头/流式响应体），就注册对应 Option。<code>ParseConfig</code> 注册"怎么解析配置"。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>三级 Context</h1></div>
+            <div class="card">
+                <p>对应 proxy-wasm 三级上下文：</p>
+                <ul>
+                    <li><code>CommonVmCtx[PluginConfig]</code>（<code>:73</code>）：VM 级，持全部回调指针。</li>
+                    <li><code>CommonPluginCtx[PluginConfig]</code>（<code>:462</code>）：插件级，含 <code>RuleMatcher</code>、配置解析、OnPluginStart、leader 选举。</li>
+                    <li><code>CommonHttpCtx[PluginConfig]</code>（<code>:653</code>）：每请求级，持 <code>config</code>、<code>userContext</code>、body 缓冲控制。</li>
+                </ul>
+                <div class="baby"><span class="t">三级 Context = 三个生命周期</span>
+                <strong>VM 级（最长）——整个 Wasm 实例活着期间存在，持有插件的全局定义。插件级（中）——一次插件配置加载期间，管配置和规则匹配。请求级（最短）——每个 HTTP 请求一个，管这个请求的状态。</strong>回想 Envoy 课 Day 17 的 proxy-wasm 三级上下文——SDK 把它们封装成三个 Go 结构。<strong>你写插件时主要在"请求级 Context"（<code>HttpContext</code>）里操作——它是每个请求独立的，跨阶段传值用 <code>SetContext/GetContext</code>。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>配置解析</h1></div>
+            <div class="card">
+<pre><code class="language-go">// plugin_wrapper.go OnPluginStart（:561）
+// proxywasm.GetPluginConfiguration() 读配置（:569）→ 校验 JSON（:581）
+// 抽出内部 _plugin_id_（:585）→ ctx.ParseRuleConfig(...)（:598，交给 RuleMatcher）
+// 注册 OnTick（SetTickPeriodMilliSeconds(100)，:611）</code></pre>
+                <div class="anno">读法：<b>插件启动时 <code>OnPluginStart</code> 读配置（Envoy 通过 <code>proxy_on_configure</code> 传进来的，源头是 WasmPlugin CRD，Day 11）、校验、交给 RuleMatcher 解析（L06）。你的 <code>ParseConfig</code> 回调在这里被调用，把 JSON 反序列化成你的配置结构体。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>请求生命周期</h1></div>
+            <div class="card">
+<pre><code class="language-go">// plugin_wrapper.go（wrapper 把 proxy-wasm 回调翻译成用户回调）
+// OnHttpRequestHeaders（:856）：先 GetMatchConfig() 做规则匹配（:861）→ 调用户回调（:881）
+// OnHttpRequestBody（:884）：区分流式 vs 整体缓冲（未结束返回 ActionPause）
+// OnHttpResponseHeaders（:918）/ OnHttpResponseBody（:948）
+// 每个回调 defer recoverFunc() 捕获 panic（:1061，避免整个 VM 崩）</code></pre>
+                <div class="baby"><span class="t">SDK 帮你做了"脏活"</span>
+                你只写"收到请求头怎么办"（<code>onHttpRequestHeaders</code>），SDK 在背后帮你：<strong>①<code>GetMatchConfig</code> 算出"这个请求该用哪份配置"（规则匹配，L06）；②区分流式 body vs 整体 body（整体的要缓冲到 <code>endOfStream</code> 才回调，未结束返回 <code>ActionPause</code> 让 Envoy 等）；③用 <code>recover</code> 捕获你代码里的 panic（防止一个插件 bug 崩掉整个 Wasm VM）。</strong>这些复杂性 SDK 都封装了——你专注业务。<strong>回调返回 <code>types.Action</code>（Continue/Pause）控制 Envoy 是否继续（呼应 Envoy 课 Day 08 的 FilterStatus）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>RuleMatcher（配置匹配）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// matcher/rule_matcher.go
+// Category（:33）：Route / Host / Service / RoutePrefix / RouteAndService
+// 约定字段（:49）：_rules_、_match_route_、_match_domain_、_match_service_
+// ParseRuleConfig（:182）：空配置=全局生效；有 _rules_ 则逐条解析
+// GetMatchConfig（:127）：运行时读 :authority/route_name/cluster_name，按类别匹配</code></pre>
+                <div class="baby"><span class="t">一份插件，不同 route/domain/service 用不同配置</span>
+                RuleMatcher 是"一份插件如何按路由/域名/服务生效不同配置"的核心。<strong>比如同一个限流插件，对 <code>/api</code> 路由限 100 QPS、对 <code>/admin</code> 限 10 QPS。配置里用 <code>_rules_</code> 数组 + <code>_match_route_</code>/<code>_match_domain_</code> 表达这些规则。</strong>运行时 <code>GetMatchConfig</code> 读请求的域名/路由/集群，匹配到对应规则的配置。<strong>关键闭环：控制面 <code>convertIstioWasmPlugin</code>（Day 04）写 <code>_rules_</code> 结构，数据面 SDK 的 RuleMatcher 读 <code>_rules_</code>——控制面写、数据面读，闭环。</strong>这就是 Higress WasmPlugin 的"多级配置"能力。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>外呼与协调</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>HTTP 外呼</strong>（<code>http_wrapper.go</code>）：<code>HttpClient</code>/<code>ClusterClient</code>，底层 <code>DispatchHttpCall</code>——AI 插件调 LLM/鉴权服务的基础。</li>
+                    <li><strong>Redis</strong>（<code>redis_wrapper.go</code>）：<code>RedisClient</code>（Eval/Get/Incr），走 <code>proxy_redis_call</code>（限流用）。</li>
+                    <li><strong>leader 选举</strong>（<code>:478 DoLeaderElection</code>）：多 Envoy worker 用 SharedData + CAS 选一个干活（限流计数、定时上报）。</li>
+                </ul>
+                <div class="anno">读法：<b>插件不只处理请求，还能主动外呼（调 LLM/鉴权）、访问 Redis（分布式限流）、做 leader 选举（多 worker 协调）。<strong>这些能力让 Wasm 插件能实现复杂的 AI 网关逻辑</strong>（Day 16-17 的 ai-proxy/限流就靠这些）。</b>外呼是异步的——发出后在回调里处理响应（Envoy 事件驱动）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么插件的 main 是空的？逻辑在哪注册？</li>
+                    <li>SetCtx + Option 模式怎么注册回调？</li>
+                    <li>三级 Context 对应哪三个生命周期？</li>
+                    <li>请求生命周期里 SDK 帮你做了哪些"脏活"？</li>
+                    <li>RuleMatcher 怎么实现"多级配置"？控制面/数据面怎么闭环？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># SDK 在 module 缓存，先下载
+cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/wasm-go/extensions/hello-world
+cat main.go
+go env GOPATH  # SDK 在 $GOPATH/pkg/mod/github.com/higress-group/wasm-go@*/pkg/wrapper/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>写一个插件</strong>——把 SDK 用起来：逐行拆解一个插件的 HttpContext/OnHttpRequestHeaders，理解从配置到处理的完整流程。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 概览</a>
+                <a href="higress-ai-day13.html" style="color:#10b981;">Day 13 · 写一个插件 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

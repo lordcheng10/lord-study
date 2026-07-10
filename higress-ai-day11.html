@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · Wasm 插件系统概览 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#8b5cf6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#10b981);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">Wasm 插件系统概览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两套扩展机制</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SDK 已独立</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · proxy-wasm 绑定</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 下行回调</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 上行宿主调用</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 连回 Envoy 课</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 配置下发闭环</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 配置+证书</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day12.html" class="nav-link" style="color:#10b981;">Day 12 wasm-go SDK &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 Wasm 插件</span>
+            <h1 class="part-title">Wasm 插件系统概览</h1>
+            <p class="part-desc">第 3 周讲 Higress 的插件生态——它最活跃、最"AI"的部分。今天建立全景：Wasm 插件 vs golang-filter 两套机制、和 Envoy proxy-wasm 的关系、SDK 已迁到独立 module。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两套扩展机制</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th></th><th>Wasm 插件</th><th>Golang Filter</th></tr>
+                    <tr><td>目录</td><td>plugins/wasm-go(+rust/cpp)</td><td>plugins/golang-filter</td></tr>
+                    <tr><td>运行</td><td>编译成 .wasm，跑 proxy-wasm 沙箱</td><td>编译成 .so，Envoy Go filter 动态加载</td></tr>
+                    <tr><td>隔离</td><td>沙箱隔离、跨语言、热更</td><td>原生 Go、无沙箱、性能高、可用完整 Go 生态</td></tr>
+                    <tr><td>用途</td><td>绝大多数用户插件、AI 插件</td><td>mcp-server/mcp-session（需常驻 goroutine 的 SSE）</td></tr>
+                </table>
+                <div class="baby"><span class="t">两套机制的取舍</span>
+                <strong>Wasm 插件（主力）：编译成 .wasm，跑在 Envoy 的 proxy-wasm 沙箱里——安全隔离（插件崩了不影响 Envoy）、跨语言（Go/Rust/C++/JS 都能写）、热插拔（不重启换插件）。缺点：沙箱有性能开销、能力受 ABI 限制。</strong><strong>golang-filter（特殊场景）：编译成 .so，是 Envoy 原生 Go 扩展——无沙箱、性能高、能用完整 Go 生态（redis/gorm）、能开常驻 goroutine（维护 SSE 长连接）。缺点：无隔离、要重编 Envoy。</strong>绝大多数插件用 Wasm；只有 mcp-server 这种需要长连接的用 golang-filter。今天到 Day 14 讲 Wasm，Day 15 讲 golang-filter。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SDK 已独立</h1></div>
+            <div class="card">
+                <div class="glossary"><b>一个必须知道的坑</b>：<code>plugins/wasm-go/pkg/</code> 现在<strong>只剩 MCP Server SDK</strong>。核心插件框架（<code>wrapper</code>/<code>log</code>/<code>matcher</code>）已抽成<strong>独立 module <code>github.com/higress-group/wasm-go</code></strong>，通过 go.mod 依赖引入。<br>所以看 SDK 源码要去 module 缓存：<code>~/go/pkg/mod/github.com/higress-group/wasm-go@&lt;版本&gt;/pkg/</code>，插件 import 路径是 <code>github.com/higress-group/wasm-go/pkg/wrapper</code>（<strong>不是</strong> 仓库内路径）。</div>
+                <div class="anno">读法：<b>写教程/看源码时，SDK 在 <code>go env GOPATH</code>/pkg/mod 下找，仓库 <code>plugins/wasm-go/pkg</code> 只剩 MCP SDK。每个插件 <code>go.mod</code> 锁不同 SDK 版本。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>proxy-wasm 绑定</h1></div>
+            <div class="card">
+                <p>底层是 <code>github.com/higress-group/proxy-wasm-go-sdk</code>（Higress fork 了 tetratelabs 版，加了 redis、route call、streaming body）。入口 <code>SetVMContext</code>（<code>entrypoint.go:27</code>）把 VMContext 存入全局。</p>
+                <div class="baby"><span class="t">proxy-wasm-go-sdk = "Go 和 Envoy 的桥"</span>
+                回想 Envoy 课 Day 17：Envoy 有 proxy-wasm ABI（宿主和插件的合同）。<strong>proxy-wasm-go-sdk 是这个 ABI 的 <strong>Go 语言绑定</strong>——它把 Envoy 的 proxy-wasm 回调（<code>proxy_on_request_headers</code> 等）和宿主函数（<code>proxy_get_header_map_value</code> 等）封装成 Go 能调的形式。</strong>用户几乎不直接碰它——都通过上层的 wrapper（Day 12）。<strong>这一层就是 Envoy 课学的 proxy-wasm 在 Go 侧的落地：Envoy 调 Go 函数、Go 调 Envoy 宿主函数。</strong>Higress fork 加了 redis 调用等增强 ABI（呼应 Envoy 课 Day 17 的 Higress 定制 host functions）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>下行回调（Host→Wasm）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// proxywasm/internal/abi_callback_l7.go（//go:wasmexport，Envoy 调 Go）
+proxy_on_request_headers  → proxyOnRequestHeaders（:23）
+proxy_on_request_body（:37）/ proxy_on_response_headers（:63）/ proxy_on_response_body（:76）
+proxy_on_http_call_response（:102，外呼响应回调）
+proxy_on_redis_call_response（:133，Higress 加的 Redis 回调）</code></pre>
+                <div class="anno">读法：<b>"下行"= Envoy 调 Wasm。请求头来了 → Envoy 调 <code>proxy_on_request_headers</code> → Go 侧处理 → 返回 <code>types.Action</code>（Continue/Pause）。这些是 <code>//go:wasmexport</code> 导出给 Envoy 调的函数（对应 Envoy 课 Day 17 的"下行 filter 钩子"）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>上行宿主调用（Wasm→Host）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// proxywasm/internal/abi_hostcalls.go（//go:wasmimport，Go 调 Envoy）
+proxy_log / proxy_send_local_response
+proxy_get/add/replace/remove_header_map_value（读写 header）
+proxy_get_buffer_bytes（读 body）/ proxy_http_call（外呼）
+proxy_redis_call（Higress）/ proxy_define_metric / proxy_increment_metric</code></pre>
+                <div class="anno">读法：<b>"上行"= Wasm 调 Envoy。插件想读 header/发外部请求/加指标，就调这些 <code>//go:wasmimport</code> 的宿主函数（对应 Envoy 课 Day 17 的"上行 host 函数"）。<strong>下行（Envoy 通知插件）+ 上行（插件操作 Envoy）= 插件的全部能力边界。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>连回 Envoy 课</h1></div>
+            <div class="card">
+                <div class="glossary"><b>三站在 Wasm 这里完整贯通</b>：<br>
+                • <strong>Envoy 课 Day 17</strong>：讲了 Envoy 的 proxy-wasm ABI、Context 双向翻译、VM 生命周期——那是 C++ 宿主侧。<br>
+                • <strong>Istio 课 Day 17</strong>：讲了 Higress 用 EnvoyFilter 的 <code>WasmPhase</code>/<code>WasmPriority</code> 把 Wasm 插件插进 Envoy 过滤器链。<br>
+                • <strong>Higress 课（本周）</strong>：讲用 wasm-go SDK <strong>写</strong>插件（Go 侧），编译成 .wasm，由 Higress 控制面下发、Envoy 加载执行。<br>
+                <strong>完整链路：wasm-go 写插件（Higress）→ 编译成 .wasm → WasmPlugin CRD 配置 → istiod 生成 EnvoyFilter 插入过滤器链（Istio）→ Envoy 的 Wasm runtime 加载执行（Envoy）。你三站都学了，就打通了整个 Wasm 插件生态的技术底座。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>配置下发闭环</h1></div>
+            <div class="card">
+                <p>WasmPlugin CRD → Higress 控制面 <code>convertIstioWasmPlugin</code>（<code>ingress_config.go:1123</code>）转成标准 Istio WasmPlugin（含 <code>Url</code> 拉 .wasm、<code>Sha256</code>、<code>PluginConfig</code>）→ 经 MCP 喂 istiod → Envoy 从 URL 拉 .wasm 加载。</p>
+                <div class="anno">读法：<b>插件的 <code>.wasm</code> 文件放在 OCI/HTTP，WasmPlugin CRD 声明 URL + 配置。控制面翻译成 Istio WasmPlugin（Day 04-05 的翻译流程），Envoy 按 URL 拉取 .wasm 加载。<strong>Day 12-14 会看插件配置里的 <code>_rules_</code> 怎么和 SDK 的 RuleMatcher 闭环（控制面写、数据面读）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Wasm 插件 vs golang-filter 两套机制的取舍？</li>
+                    <li>SDK 现在在哪（独立 module）？import 路径？</li>
+                    <li>proxy-wasm-go-sdk 是什么桥？</li>
+                    <li>下行回调 vs 上行宿主调用各是什么方向？</li>
+                    <li>Wasm 插件怎么连接 Envoy 课和 Istio 课？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+ls plugins/
+ls plugins/wasm-go/pkg/  # 只剩 mcp
+cat plugins/wasm-go/extensions/hello-world/go.mod | grep wasm-go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>wasm-go SDK</strong>——用户真正写插件的 API：<code>SetCtx</code> + Option 模式、三级 Context、配置解析、请求生命周期。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 配置+证书</a>
+                <a href="higress-ai-day12.html" style="color:#10b981;">Day 12 · wasm-go SDK &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
