@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · enterprise 企业版扩展 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#06b6d4}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">enterprise 企业版 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · OSS vs 企业版</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 目录一览</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 鉴权 Keycloak</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 计费与预算</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Git 平台集成</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 会话分享</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 靠什么优雅扩展</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 微代理</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day20.html" class="nav-link" style="color:var(--accent-green);">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 前端/安全/生态</span>
+            <h1 class="part-title">enterprise 企业版扩展</h1>
+            <p class="part-desc">OpenHands 不只是单机工具，还能做成企业级 SaaS。本仓 <code>enterprise/</code> 目录就是这层。今天看它如何在核心之上加多租户、鉴权、计费、集成——而不改动核心。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>OSS 模式 vs 企业版</h1></div>
+            <div class="card">
+                <p>回忆 Day 10：<code>config.py</code> 根据部署模式选不同实现——比如生命周期钩子，OSS 用 <code>OssAppLifespanService</code>（跑 Alembic 迁移），SaaS 用 <code>SaasAppLifespanService</code>（初始化 PostHog 埋点）。<code>enterprise/</code> 目录就是这套"SaaS 增强"的集中地。</p>
+                <table class="k">
+                    <tr><th>维度</th><th>OSS（开源单机）</th><th>Enterprise（企业 SaaS）</th></tr>
+                    <tr><td>用户</td><td>单用户，无需登录</td><td>多租户，需鉴权</td></tr>
+                    <tr><td>付费</td><td>免费，自带模型 key</td><td>计费、预算、配额</td></tr>
+                    <tr><td>集成</td><td>基础</td><td>GitHub/GitLab/Slack 深度集成</td></tr>
+                    <tr><td>协作</td><td>个人</td><td>会话分享、团队 profile</td></tr>
+                </table>
+                <div class="baby"><span class="t">同一套核心，两种形态</span>
+                核心（app_server + Agent）不变，<strong>企业版是"外挂"上去的一圈增强</strong>——加登录、加计费、加集成。这靠的是 Day 06 的依赖注入：企业版提供自己的 Service 实现（如带鉴权的用户服务），通过配置注入替换掉 OSS 的简单实现。<strong>核心保持纯粹，增值功能作为可插拔层——这是开源 + 商业化双赢的经典架构。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>enterprise 目录一览</h1></div>
+            <div class="card">
+<pre><code class="language-bash">enterprise/
+├── server/
+│   ├── routes/          # 22 个企业级路由：auth, billing, api_keys,
+│   │                    #   github_proxy, agent_profiles, integration...
+│   ├── auth/            # 鉴权（Keycloak）
+│   ├── maintenance_task_processor/  # 后台维护任务
+│   ├── rate_limit.py    # 企业级限流
+│   ├── sharing/         # 会话分享
+│   └── verified_models/ # 认证过的模型清单
+├── integrations/        # GitHub/GitLab/Slack/Jira 等深度集成
+├── migrations/          # 企业版自己的 DB 迁移（135 个版本文件）
+├── saas_server.py       # SaaS 服务入口
+├── run_budget_maintenance.py   # 预算维护任务
+└── storage/             # 企业级存储实现</code></pre>
+                <div class="anno">读法：<b>企业版结构和 app_server 平行——也有 routes/auth/storage，但都是"企业增强版"。</b>比如它有自己的 <code>saas_server.py</code>（SaaS 入口）、自己的 migrations（比 OSS 多得多，135 个版本，因为企业功能表更多）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>鉴权（Keycloak）</h1></div>
+            <div class="card">
+                <p>OSS 单机无需登录，企业版必须区分用户。<code>enterprise/server/auth/</code> + <code>routes/auth.py</code>、<code>oauth_device.py</code> 实现了完整的身份认证（对接 Keycloak 这类身份平台，仓库里有 <code>allhands-realm-github-provider.json.tmpl</code> 即 Keycloak realm 模板）。</p>
+                <div class="baby"><span class="t">为什么企业版鉴权这么重</span>
+                回忆 Day 08/17 的"用户隔离靠 user_id 前缀"——那套隔离要成立，前提是<strong>能可靠地知道"当前请求是哪个用户"</strong>。企业鉴权就是解决这个：用户登录（可能用公司的 SSO/GitHub 账号），拿到身份，之后每个请求都带着这个身份，app_server 用它做数据隔离、计费归属。<strong>鉴权是多租户安全的入口关卡——没有可靠的"你是谁"，后面的"你能看什么"都无从谈起。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>计费与预算</h1></div>
+            <div class="card">
+                <p><code>routes/billing.py</code> + <code>run_budget_maintenance.py</code> 处理付费。回忆 Day 14 的用量/成本统计——企业版把它接到计费系统：用户消耗的 token 折算成费用、扣预算、超额限制。</p>
+                <div class="glossary"><b>成本经济学的商业化落地</b>：Day 04/14 讲的 <code>max_budget_per_task</code>、token 统计，在企业版里升级成完整的"配额 + 计费 + 预算维护"体系。<code>run_budget_maintenance.py</code> 是定时任务，定期结算/重置预算。<strong>把"每个动作花多少钱"一路追踪到"每个用户/团队的账单"——这是 AI 产品商业化的基础设施。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Git 平台深度集成</h1></div>
+            <div class="card">
+                <p><code>enterprise/integrations/</code> + <code>routes/github_proxy.py</code>/<code>bitbucket_dc_proxy.py</code>/<code>integration/</code> 提供和 GitHub、GitLab、Bitbucket、Slack、Jira 等的深度集成。</p>
+                <div class="baby"><span class="t">深度集成能做什么？（呼应 README 的自动化愿景）</span>
+                Day 01 提过 OpenHands 能"把 GitHub issue 自动拆成任务、生成报告推到 Slack"。这些自动化就靠集成实现：<strong>GitHub 上开个 issue → 触发 OpenHands 起个会话去解决 → 完成后自动提 PR</strong>；或 <strong>Slack 里 @机器人下任务 → Agent 干完在 Slack 回复</strong>。<code>github_proxy.py</code> 这类"代理"让 OpenHands 能安全地代表用户操作这些平台（用 OAuth 授权）。<strong>集成把 Agent 从"聊天框里的工具"变成"嵌入你工作流的自动化队友"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>会话分享</h1></div>
+            <div class="card">
+                <p><code>enterprise/server/sharing/</code> 让用户能把一次会话（Agent 干活的完整过程）分享给同事看。</p>
+                <div class="glossary"><b>为什么能轻松实现分享？——回到事件流</b>。还记得 Day 03 说"会话 = 一条可持久化的事件流"、Day 08 说"事件全存成文件、能导出（<code>iter_events_for_export</code>）"吗？正因为整个会话就是一串结构化事件，<strong>"分享会话"= 把这串事件给另一个人回放</strong>——天然可行。<strong>好的底层抽象（一切皆事件）让上层功能（分享、审计、回放）几乎白送。</strong>这再次印证第 1 周事件模型的威力。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>靠什么优雅扩展（不改核心）</h1></div>
+            <div class="card">
+                <p>企业版这么多功能，核心 app_server 却几乎没被改动。靠三个机制（都是前面学过的）：</p>
+                <ul>
+                    <li><strong>依赖注入</strong>（Day 06）：企业版提供自己的 Service 实现（带鉴权的用户服务、企业存储），通过配置注入替换。</li>
+                    <li><strong>路由聚合</strong>（Day 10）：企业路由作为额外的 router 挂上，不动 OSS 路由。</li>
+                    <li><strong>模式选择</strong>（Day 10）：<code>config.py</code> 按 app_mode 选 OSS/SaaS 的不同实现（如 lifespan）。</li>
+                </ul>
+                <div class="glossary"><b>"对扩展开放，对修改封闭"</b>（开闭原则）——想加企业功能，<strong>新增</strong>实现和路由，而非<strong>修改</strong>核心代码。这样 OSS 核心保持简单干净、社区能持续贡献，企业增值层独立演进、不互相拖累。<strong>这套架构让"同一个开源核心"既能给个人免费单机用、又能撑起商业 SaaS——这是很多成功开源项目的商业模式基础。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>OSS 和企业版的区别？同一核心怎么支撑两种形态？</li>
+                    <li>企业版加了哪些能力？（鉴权/计费/集成/分享）</li>
+                    <li>企业鉴权为什么是多租户安全的入口？</li>
+                    <li>为什么"会话分享"能轻松实现？（回到事件流）</li>
+                    <li>靠哪三个机制做到"扩展不改核心"？开闭原则是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">ls enterprise/server/routes/          # 22 个企业路由
+ls enterprise/server/ enterprise/integrations/
+grep -rn 'SaasAppLifespanService\|app_mode\|AppMode' openhands/app_server/config.py | head
+cat enterprise/README.md | head -40</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>构建、测试与收官串讲</strong>——怎么本地跑起来开发、测试怎么组织、从零用 OpenHands 完成一个任务的清单、全 20 天知识地图、以及贯穿始终的设计哲学。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 微代理</a>
+                <a href="openhands-day20.html" style="color:var(--accent-green);">Day 20 · 收官 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
