@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 配置系统与 workspace — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f97316}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#e11d48);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">配置系统与 workspace · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两类配置</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · env 优先级链</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · openclaw.json</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 目录约定</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · workspace 是什么</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · bootstrap 文件</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 密钥与脱敏</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 消息旅程</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day06.html" class="nav-link" style="color:#e11d48;">Day 06 Pi 内核 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">配置系统与 workspace</h1>
+            <p class="part-desc">助理的行为、连哪些渠道、用哪个模型、什么人设——全由配置决定。今天看配置怎么加载（env 优先级链 + openclaw.json）、workspace 工作区是什么、bootstrap 文件如何塑造助理。收官第 1 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两类配置</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>环境变量（env）</strong>：适合密钥、部署级开关（如 <code>OPENCLAW_GATEWAY_TOKEN</code>）。</li>
+                    <li><strong>配置文件 <code>openclaw.json</code></strong>：适合结构化配置（渠道、模型、agent、绑定）。</li>
+                </ul>
+                <div class="anno">读法：<b>两类互补：敏感/部署相关走 env（不进版本库），结构化功能配置走 json。<code>openclaw.json</code> 里还能有一个 <code>env</code> 块作为兜底。</b>配置代码在 <code>src/config/</code>（<code>config.ts</code>、<code>config-paths.ts</code>、<code>paths.ts</code>、schema 等）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>env 优先级链</h1></div>
+            <div class="card">
+                <p><code>.env.example</code> 明确了 env 解析顺序（前者覆盖后者）：</p>
+<pre><code class="language-bash"># 优先级从高到低：
+process env  &gt;  ./.env  &gt;  ~/.openclaw/.env  &gt;  openclaw.json 的 env 块</code></pre>
+                <div class="baby"><span class="t">为什么要"优先级链"？</span>
+                同一个变量可能在多处定义，得有规矩决定谁说了算。<strong>顺序设计得很合理：命令行/进程环境最高（临时覆盖最方便）→ 项目本地 <code>./.env</code>（这个仓库/项目专属）→ 用户全局 <code>~/.openclaw/.env</code>（你所有项目共享，daemon 用）→ 配置文件兜底。</strong>越"就近、越临时"的优先级越高。<strong>这样你能全局配一次默认，又能在特定场景临时覆盖——和技能的"就近覆盖"（Day 11）、配置的层叠是同一种思想。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>openclaw.json</h1></div>
+            <div class="card">
+                <p>主配置文件，默认 <code>~/.openclaw/openclaw.json</code>（<code>OPENCLAW_CONFIG_PATH</code> 可改）。结构化配置各功能域，例如：</p>
+<pre><code class="language-typescript">{
+  "gateway": { "bind": "loopback", "auth": { "token": "..." } },
+  "agents": { "defaults": { "model": { "fallbacks": [...] } } },   // Day 07
+  "channels": { "telegram": {...}, "slack": {...} },               // Day 13-14
+  "messages": { "tts": {...} }                                     // Day 15
+}</code></pre>
+                <div class="anno">读法：<b>你在前几天见到的配置键（<code>gateway.bind</code>、<code>agents.defaults.model.fallbacks</code>、<code>channels.slack</code>、<code>messages.tts</code>）都住在这里。</b>有完整 schema 校验（<code>src/config/</code> 里大量 schema 测试）——配错了会报错并提示。扩展的 <code>configSchema</code>（Day 12）也会并入总 schema。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>目录约定</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>环境变量</th><th>默认</th><th>含义</th></tr>
+                    <tr><td><code>OPENCLAW_STATE_DIR</code></td><td><code>~/.openclaw</code></td><td>状态目录（配置、auth、沙箱注册表等）</td></tr>
+                    <tr><td><code>OPENCLAW_CONFIG_PATH</code></td><td><code>~/.openclaw/openclaw.json</code></td><td>主配置文件</td></tr>
+                    <tr><td><code>OPENCLAW_WORKSPACE_DIR</code></td><td>（见 L05）</td><td>工作区</td></tr>
+                </table>
+                <div class="anno">读法：<b><code>~/.openclaw/</code> 是助理的"家目录"，放它的状态；部署时（Day 20）把它挂成持久卷 <code>/data</code>，机器重建数据不丢。</b>路径解析在 <code>src/config/config-paths.ts</code> / <code>paths.ts</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>workspace 工作区</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">workspace 是什么？</span>
+                <strong>workspace（工作区）是助理"干活的目录"——它读写文件、放记忆、放项目专属技能/扩展都在这里。</strong>好比给助理一个"办公桌+文件柜"。为什么要单独一个工作区（而非到处乱放）？<strong>①安全：沙箱可以只挂载这个目录（Day 16 的 workspaceAccess），限制助理只能碰这里；②隔离：不同工作区可以是不同项目/身份，各有各的记忆和技能；③清晰：助理的一切产出集中一处，好管理好备份。</strong>Day 11 的 workspace 技能、Day 10 的 MEMORY.md 都住在工作区里。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>bootstrap 文件（塑造人设）</h1></div>
+            <div class="card">
+                <p>工作区里有一组特殊的 bootstrap 文件（<code>src/agents/workspace.ts:25-33</code>），每次运行注入系统提示（Day 09）：</p>
+                <table class="k">
+                    <tr><th>文件</th><th>作用</th></tr>
+                    <tr><td><code>SOUL.md</code></td><td>助理的性格/语气（读到就"入戏"）</td></tr>
+                    <tr><td><code>USER.md</code></td><td>你是谁、你的偏好</td></tr>
+                    <tr><td><code>MEMORY.md</code></td><td>长期记忆（Day 10）</td></tr>
+                    <tr><td><code>AGENTS.md</code> / <code>TOOLS.md</code> / <code>IDENTITY.md</code></td><td>行为准则 / 工具说明 / 身份</td></tr>
+                    <tr><td><code>BOOTSTRAP.md</code> / <code>HEARTBEAT.md</code></td><td>启动引导 / 心跳</td></tr>
+                </table>
+                <div class="anno">读法：<b>改这几个 markdown 文件，就能重塑助理的人格、记忆、行为——无需改代码。<code>SOUL.md</code> 定性格、<code>USER.md</code> 让它认识你、<code>MEMORY.md</code> 是它记住的事。</b>单文件上限 2MB（<code>MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES</code>），有字符预算防撑爆上下文。这就是"配置即人格"——OpenClaw 把助理的灵魂放在你能编辑的文件里。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>密钥与脱敏</h1></div>
+            <div class="card">
+                <p>配置里难免有密钥（模型 API key、渠道 token）。OpenClaw 的处理（Day 17 详讲）：</p>
+                <ul>
+                    <li>密钥优先放 env（不进 json、不进版本库）。</li>
+                    <li>SecretRef 语法 <code>source:provider:id</code>（<code>src/secrets/</code>）——配置里存"引用"而非明文。</li>
+                    <li>Web UI 编辑配置时脱敏往返（<code>redact-snapshot.ts</code>）：密钥用哨兵替换，写回时从磁盘还原。</li>
+                    <li>detect-secrets 预提交钩子防密钥误提交仓库。</li>
+                </ul>
+                <div class="anno">读法：<b>配置系统从头到尾都在防"密钥泄露"——不明文存、不明文传、不误提交。</b>这呼应 Day 17 的安全纵深。第 1 周结束，你已见到 OpenClaw"默认安全"的一贯姿态。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 1 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周（入门与全景）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 01</strong> 个人助理定位、五件套、控制平面、内嵌 Pi 内核</li>
+                    <li><strong>Day 02</strong> 启动链：openclaw.mjs → entry.ts → runCli（Commander）+ onboard 向导</li>
+                    <li><strong>Day 03</strong> Gateway 控制平面：bind 安全、拉起渠道、WebSocket JSON-RPC、角色作用域</li>
+                    <li><strong>Day 04</strong> 一条消息的七站旅程（进→路由→想+做→出）</li>
+                    <li><strong>Day 05</strong> 配置：env 优先级链 + openclaw.json + workspace + bootstrap 人设 + 密钥脱敏</li>
+                </ul>
+                <p style="margin-top:10px;">你现在有了 OpenClaw 的完整全局图：<strong>它是什么、怎么启动、控制平面怎么协调、消息怎么流转、配置怎么塑造它</strong>。第 2 周钻进"大脑"——内嵌的 Pi 内核、故障转移、执行循环、提示词、记忆。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+head -30 .env.example                          # env 优先级链
+ls src/config/ | grep -iE 'paths|config\.ts'
+sed -n '25,33p' src/agents/workspace.ts        # bootstrap 文件名</code></pre>
+                <div class="tip"><strong>明天预告 · Day 06（第2周开始）</strong>：<strong>LLM 层与 Pi 内核</strong>——正式揭开"OpenClaw 不自己写 LLM 循环、而内嵌 Pi"的真相，看 streamFn 抽象和装饰器中间件。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 消息旅程</a>
+                <a href="openclaw-day06.html" style="color:#e11d48;">Day 06 · LLM 层与 Pi 内核 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
