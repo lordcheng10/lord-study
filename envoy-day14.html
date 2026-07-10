@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 负载均衡 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#7c4dff}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#26a69a);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">负载均衡 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · LoadBalancer 接口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 现有 LB 类型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 轮询 Round Robin</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 最少请求 P2C</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · EDF 加权公平</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一致性哈希</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · LB 是扩展</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 Cluster Mgr</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day15.html" class="nav-link" style="color:#e91e63;">Day 15 健康检查 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 xDS 与上游</span>
+            <h1 class="part-title">负载均衡</h1>
+            <p class="part-desc">集群里有多个后端，一个请求该发给哪个？这就是负载均衡（LB）。今天看 <code>LoadBalancer::chooseHost</code> 接口，以及轮询、最少请求（P2C）、一致性哈希几种经典算法的实现。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>LoadBalancer 接口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/upstream/load_balancer.h:191
+class LoadBalancer {
+  virtual HostSelectionResponse chooseHost(LoadBalancerContext* context) PURE;   // :222 核心！
+  virtual HostConstSharedPtr peekAnotherHost(LoadBalancerContext* context) PURE; // :230 预测下一个（预连接）
+};</code></pre>
+                <div class="baby"><span class="t">LB = "从一堆后端里挑一个"</span>
+                <code>chooseHost</code> 就是负载均衡的全部：给它一个请求上下文，它按某种算法返回"这个请求该发给哪台后端"。<strong>不同算法有不同取舍：轮询最公平简单、最少请求更能避开慢节点、一致性哈希保证同一用户总去同一后端（会话粘性）。</strong>Router（Day 09）转发前就调它选后端。<code>peekAnotherHost</code> 用于"预连接"（提前和下一个可能用到的后端建连，降延迟）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>现有 LB 类型</h1></div>
+            <div class="card">
+                <p>每种算法一个目录（<code>source/extensions/load_balancing_policies/</code>）：</p>
+                <table class="k">
+                    <tr><th>算法</th><th>特点</th></tr>
+                    <tr><td>round_robin</td><td>轮询，依次分配（最公平）</td></tr>
+                    <tr><td>least_request</td><td>最少请求，避开繁忙节点（默认）</td></tr>
+                    <tr><td>ring_hash / maglev</td><td>一致性哈希，会话粘性</td></tr>
+                    <tr><td>random</td><td>随机</td></tr>
+                    <tr><td>subset</td><td>子集（按元数据筛选后再 LB）</td></tr>
+                </table>
+                <div class="anno">读法：<b>多数加权算法继承 <code>EdfLoadBalancerBase</code>（EDF = Earliest Deadline First 加权公平调度，L05）。</b>算法都作为扩展存在（Day 16 讲扩展机制）——想加新算法，写个扩展注册即可。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>轮询 Round Robin</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/load_balancing_policies/round_robin/round_robin_lb.h:28
+class RoundRobinLoadBalancer : public EdfLoadBalancerBase {
+  HostConstSharedPtr unweightedHostPick(const HostVector&amp; hosts_to_use, const HostsSource&amp; source) override {
+    return hosts_to_use[rr_indexes_[source]++ % hosts_to_use.size()];   // :78 取模递增
+  }
+  absl::flat_hash_map&lt;HostsSource, uint64_t, HostsSourceHash&gt; rr_indexes_;  // :82
+};</code></pre>
+                <div class="anno">读法：<b>等权重时轮询就是最朴素的"取模递增"：一个自增索引对后端数取模，1→2→3→1→2→3… 依次分配。</b>每个 <code>HostsSource</code>（优先级+本地性组合）有独立索引。权重不等时走 EDF 基类（L05）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>最少请求 P2C</h1></div>
+            <div class="card">
+                <p><code>least_request_lb.h:25</code> 的 <code>LeastRequestLoadBalancer</code>，默认用 <strong>P2C（Power of Two Choices，二选一）</strong>（<code>unweightedHostPickNChoices</code>，<code>:71</code>）：随机取 2 个后端，选其中活跃请求数更少的那个。</p>
+                <div class="baby"><span class="t">为什么"随机二选一"比"全局选最少"更好？</span>
+                直觉上应该扫描所有后端、选活跃请求最少的那个（全局最优）。<strong>但那样有两个问题：①后端多时扫描慢（O(N)）；②"羊群效应"——所有 worker 线程同时都把请求发给那个"当前最闲"的后端，瞬间把它打爆。</strong>P2C 的巧妙：<strong>随机挑 2 个，选较闲的那个。O(1) 代价，却能很好地近似全局最少请求，且因为有随机性不会所有人挤同一个。</strong>这是负载均衡领域著名的理论结果（"两个选择的力量"）。Envoy 默认用它。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>EDF 加权公平</h1></div>
+            <div class="card">
+                <p>权重不等时（比如后端 A 权重 3、B 权重 1，希望 A 收 3 倍流量），走 <code>EdfLoadBalancerBase</code>（基于 <code>edf_scheduler.h</code>）：用<strong>权重的倒数作 deadline</strong>，实现按权重平滑分配。</p>
+                <div class="baby"><span class="t">EDF = "谁最该被选就选谁"</span>
+                EDF（Earliest Deadline First，最早截止优先）本是操作系统调度算法。<strong>这里用它做加权：权重高的后端"deadline 来得快"（倒数小），所以被选得更频繁，但又是<strong>平滑</strong>交错的（A B A A B A A A…而非 AAA...BBB...）。</strong>好处：既满足权重比例，又避免"连续把请求全给高权重节点"的突刺。慢启动（slow-start）因子也叠加在这里——新上线的节点权重逐渐爬升，避免冷启动被打爆。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一致性哈希</h1></div>
+            <div class="card">
+                <p><code>ring_hash</code> / <code>maglev</code> 提供<strong>会话粘性</strong>：按请求的某个 key（如用户 ID、cookie）哈希到固定后端——同一用户总去同一后端。</p>
+                <div class="baby"><span class="t">为什么需要"粘性"？</span>
+                有些场景需要"同一用户的请求总落到同一后端"——比如后端在本地缓存了该用户的会话数据。<strong>一致性哈希（ring_hash/maglev）把后端排在一个哈希环上，请求按 key 哈希落到环上最近的后端。</strong>关键优点：<strong>某个后端挂了，只有它负责的那一小段 key 需要重新分配，其他用户不受影响</strong>（普通哈希取模会导致后端数变化时几乎所有 key 重新分配）。maglev 是 Google 的改进版，分布更均匀。这是"有状态服务"负载均衡的标准解法。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>LB 是扩展</h1></div>
+            <div class="card">
+                <p>所有 LB 算法都在 <code>source/extensions/load_balancing_policies/</code>，作为扩展注册（Day 16）。集群配置里指定用哪个策略，ClusterManager 为集群创建对应 LB。</p>
+                <div class="anno">读法：<b>LB 可插拔——这体现了 Envoy"核心稳定 + 扩展丰富"的架构。每个 Worker 的 <code>ClusterEntry</code>（Day 13）持有该集群的 LB 实例，本线程独享（无锁）。</b>选后端发生在 Router 转发时，从当前线程的 LB 调 <code>chooseHost</code>。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>chooseHost 干什么？LB 的核心问题是什么？</li>
+                    <li>轮询等权重时怎么实现？</li>
+                    <li>P2C 为什么比"全局选最少"好？（羊群效应 + O(1)）</li>
+                    <li>EDF 怎么做加权平滑分配？</li>
+                    <li>一致性哈希解决什么问题？后端挂了影响多少 key？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '191,235p' envoy/upstream/load_balancer.h
+sed -n '28,85p' source/extensions/load_balancing_policies/round_robin/round_robin_lb.h
+ls source/extensions/load_balancing_policies/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>健康检查 + 服务发现</strong>——主动健康检查（定时探测）vs 被动异常点检测（看真实请求结果剔除坏节点），以及 static/strict_dns/logical_dns/eds 四种端点来源，最后串讲 LDS→RDS→CDS→EDS 全链路。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 Cluster Mgr</a>
+                <a href="envoy-day15.html" style="color:#e91e63;">Day 15 · 健康检查 + 服务发现 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · 健康检查 + 服务发现 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#7c4dff}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#26a69a);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">健康检查 + 服务发现 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两种健康检查</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 主动健康检查</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 被动异常点检测</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 四种服务发现</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · STRICT_DNS</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · EDS 动态端点</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 全链路串讲</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 负载均衡</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day16.html" class="nav-link" style="color:#26a69a;">Day 16 扩展机制 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">健康检查 + 服务发现</h1>
+            <p class="part-desc">后端会挂、会新增。健康检查负责"剔除坏节点"，服务发现负责"知道有哪些节点"。今天讲两种健康检查 + 四种服务发现，最后串讲 LDS→RDS→CDS→EDS 全链路，收官第 3 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种健康检查</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th></th><th>主动健康检查</th><th>被动异常点检测</th></tr>
+                    <tr><td>方式</td><td>主动定时发探测包</td><td>观察真实业务请求的成败</td></tr>
+                    <tr><td>判定</td><td>探测响应码/超时</td><td>连续 5xx / 成功率低于阈值</td></tr>
+                    <tr><td>代码</td><td><code>health_checkers/</code></td><td><code>upstream/outlier_detection_impl</code></td></tr>
+                </table>
+                <div class="baby"><span class="t">"体检" vs "看病历"</span>
+                <strong>主动健康检查像"定期体检"</strong>——不管有没有病，定时给每个后端发个探测请求，看它还活着吗。<strong>被动异常点检测像"看病历"</strong>——不额外探测，而是观察真实请求：这个后端最近连续返回 5xx？或成功率明显低于其他节点？那就临时把它踢出去。<strong>两者互补：主动能在没流量时也发现死节点；被动能捕捉"探测正常但实际处理业务出错"的问题。</strong>生产常同时开。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>主动健康检查</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/health_checkers/common/health_checker_base_impl.h:44
+class HealthCheckerImplBase : public HealthChecker {
+  class ActiveHealthCheckSession {           // :59 每个 Host 一个会话
+    virtual void onInterval() PURE;          // :80 子类实现：发起一次探测
+    virtual void onTimeout() PURE;           // :82 超时处理
+    void setUnhealthy(UnhealthyType type);   // :129 标记不健康
+  };
+  void setUnhealthyCrossThread(const HostSharedPtr&amp; host, ...);  // :147 跨线程通知
+};</code></pre>
+                <div class="anno">读法：<b>每个后端一个 <code>ActiveHealthCheckSession</code>，定时器到点触发 <code>onInterval()</code>（子类发探测请求），成功/超时更新健康状态。状态变化通过 <code>setUnhealthyCrossThread</code> 跨线程通知集群管理器</b>（呼应 Day 13 的跨线程传播），进而重建各 Worker 的可用主机列表。HTTP 健康检查在 <code>health_checkers/http/</code>，还有 tcp/grpc/redis。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>被动异常点检测</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/upstream/outlier_detection_impl.h:122
+class DetectorHostMonitorImpl : public DetectorHostMonitor {
+  void putResult(Result result, absl::optional&lt;uint64_t&gt; code);  // :138 每次请求结果上报累积
+};
+// 判定维度（outlier_detection_impl.cc）：
+//   :216 consecutive_5xx（连续 5xx 次数）
+//   :226 success_rate_request_volume + 成功率统计法（低于 均值−N×标准差 则弹出）
+//   :236 enforcing_*（各判据的生效概率，可灰度）</code></pre>
+                <div class="baby"><span class="t">"弹出（eject）"与指数退避</span>
+                当某后端触发阈值（比如连续 5 次 5xx），异常点检测会把它<strong>临时"弹出"</strong>集群一段时间（不再给它发请求），期满放回。<strong>反复出问题的节点，弹出时间会<strong>指数增长</strong>（退避）——第一次弹 30 秒，再犯弹 60 秒、120 秒…</strong>避免一个持续故障的节点反复被放回又立刻出错。还支持"主动健康检查成功则取消弹出"的联动。这套"被动观测 + 弹出 + 退避"让集群能自愈——坏节点自动隔离，好了自动回归。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>四种服务发现</h1></div>
+            <div class="card">
+                <p>每种集群类型对应一种"端点从哪来"（<code>source/extensions/clusters/</code>）：</p>
+                <table class="k">
+                    <tr><th>类型</th><th>端点来源</th></tr>
+                    <tr><td><strong>static</strong></td><td>配置里写死的 IP:Port，启动即就绪</td></tr>
+                    <tr><td><strong>strict_dns</strong></td><td>周期解析 DNS，A 记录里<strong>每个 IP 都成为一个 Host</strong></td></tr>
+                    <tr><td><strong>logical_dns</strong></td><td>周期解析 DNS，但<strong>只取第一个 IP</strong> 作逻辑主机</td></tr>
+                    <tr><td><strong>eds</strong></td><td>通过 EDS xDS 从控制面动态获取端点</td></tr>
+                </table>
+                <div class="anno">读法：<b>static 最简单（写死）；strict_dns 适合"每个 IP 都要单独连"；logical_dns 适合大型无状态服务（只维护一个逻辑主机，避免为海量 IP 建海量连接）；eds 最动态（控制面推）。</b>生产 K8s 环境几乎都用 eds。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>STRICT_DNS 解析循环</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/clusters/strict_dns/strict_dns_cluster.cc
+// :39 dns_refresh_rate_ms_（默认 5000ms）
+// :120 resolve_timer_ 到点触发 startResolve()
+// :132 dns_resolver_->resolve(...) 异步 DNS 查询
+//   回调里把解析出的所有地址转成 Host 集合
+// :192 updateAllHosts(hosts_added, hosts_removed, priority) 增删差量更新
+// :139 根据 TTL 计算下次刷新间隔并重新 arm 定时器</code></pre>
+                <div class="anno">读法：<b>DNS 类集群就是一个"定时解析→差量更新主机集"的循环。<code>updateAllHosts</code> 只增删变化的主机（不是全量重建），配合 Day 13 的跨线程传播更新各 Worker。</b>解析是异步的（不阻塞事件循环，Day 04 会讲）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>EDS 动态端点</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/clusters/eds/eds.cc:31
+class EdsClusterImpl : public SubscriptionBase&lt;ClusterLoadAssignment&gt; {
+  // :197 onConfigUpdate()：收到 ClusterLoadAssignment
+  //   :262 update(cluster_load_assignment) 应用端点
+  // :162 updateLocalityEndpoints()：按 locality（地域/可用区）批量重建主机集合
+};</code></pre>
+                <div class="anno">读法：<b>EDS 集群本身就是一个 xDS 订阅者（<code>SubscriptionBase&lt;ClusterLoadAssignment&gt;</code>，呼应 Day 12）——控制面推端点变化，它 <code>onConfigUpdate</code> 应用。</b>按 locality 组织（同可用区优先，降跨区延迟）。这是 K8s Pod 增删时端点实时更新的机制。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>全链路串讲 LDS→RDS→CDS→EDS</h1></div>
+            <div class="card">
+                <div class="glossary"><b>第 3 周大串讲</b>：一个请求进来的完整配置解析链——<br>
+                ① <strong>LDS</strong> 决定它命中哪个 <strong>Listener</strong>（Day 11）<br>
+                ② <strong>RDS</strong> 的路由表决定路由到哪个 <strong>Cluster</strong>（Day 09 Router）<br>
+                ③ <strong>CDS</strong> 定义该 Cluster 的属性（LB 策略/健康检查/发现类型，Day 13）<br>
+                ④ <strong>EDS</strong> 提供该 Cluster 当前有哪些健康端点（今天）<br>
+                ⑤ 最后 <strong>LB</strong> 从这些健康端点里 <code>chooseHost</code> 选一个真正转发（Day 14）<br>
+                <strong>这条链 + xDS 动态下发 + 线程本地无锁读取，就是 Envoy 作为"可编程数据面"的完整图景。所有配置都能被控制面（Istio/Higress）热更新。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 3 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周（xDS 与上游）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 11</strong> xDS 总览：五大发现服务、管理服务器、ACK/NACK</li>
+                    <li><strong>Day 12</strong> 配置订阅：Subscription/GrpcMux、ADS 一条流、热更新闭环</li>
+                    <li><strong>Day 13</strong> Cluster Manager：线程本地集群、无锁读、CDS 驱动</li>
+                    <li><strong>Day 14</strong> 负载均衡：轮询/最少请求 P2C/EDF 加权/一致性哈希</li>
+                    <li><strong>Day 15</strong> 主动+被动健康检查、四种服务发现、LDS→RDS→CDS→EDS 全链路</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Envoy 作为"可编程数据面"的动态配置全貌。第 4 周进入扩展生态——扩展机制、<strong>Wasm 插件（Higress 的基础）</strong>、可观测性、Buffer、Bazel。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '44,150p' source/extensions/health_checkers/common/health_checker_base_impl.h | head -40
+ls source/extensions/clusters/
+grep -n 'onConfigUpdate\|updateLocalityEndpoints' source/extensions/clusters/eds/eds.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 16（第4周开始）</strong>：<strong>扩展机制</strong>——Envoy 的可插拔架构核心：<code>Registry::RegisterFactory</code> 工厂模式、<code>category()</code> 类别、编译期静态注册 + 裁剪。理解它才能看懂 Wasm、过滤器等一切扩展。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 负载均衡</a>
+                <a href="envoy-day16.html" style="color:#26a69a;">Day 16 · 扩展机制 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
