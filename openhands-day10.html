@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · server 服务装配 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .mw{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+        .mw .m{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .mw .m b{color:#f97316}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">server 服务装配 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · server 目录为何废弃</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 中间件三件套</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CORS 与本地放行</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 缓存与限流</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 生命周期与 Alembic</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · v1_router 汇总</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 鉴权在哪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 沙箱</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 Agent SDK &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 app_server 编排层（收官）</span>
+            <h1 class="part-title">server 服务装配</h1>
+            <p class="part-desc">第2周收官。看 FastAPI 应用怎么被中间件（CORS/缓存/限流）武装、生命周期钩子怎么自动跑数据库迁移、路由怎么汇总、鉴权加在哪。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>openhands/server 目录为何废弃</h1></div>
+            <div class="card">
+                <p>先解一个可能的困惑：既然叫"server"，为什么真正的东西在 <code>app_server</code>？看 <code>openhands/server/</code> 里的文件，全是一行转发：</p>
+<pre><code class="language-python"># openhands/server/app.py（全部内容差不多就这样）
+from openhands.app_server.app import app   # 只是 re-export
+# openhands/server/__main__.py 注释建议：直接用 uvicorn openhands.app_server.app:app</code></pre>
+                <div class="anno">读法：<b><code>openhands/server/</code> 是历史遗留的"兼容壳"——老代码/文档可能还 import <code>openhands.server</code>，为了不破坏它们，保留这些转发文件，实际全指向 <code>app_server</code>。</b>启动入口 <code>main()</code> 默认端口 3000。<strong>看到 server 目录别停留，真东西在 app_server。</strong></div>
+                <div class="glossary"><b>为什么保留废弃壳而不直接删？</b> 向后兼容。可能有部署脚本、外部集成还在引用旧路径。保留薄薄的转发层，让老引用继续能用、同时引导大家迁到新路径（注释里写明建议）。<strong>这是成熟项目重构时的常见做法——渐进迁移，不搞破坏性大爆炸。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>中间件三件套</h1></div>
+            <div class="card">
+                <p>回忆 Day 06，<code>app.py</code> 给应用装了三个中间件（<code>app.py:81</code>，实现在 <code>middleware.py</code>）：</p>
+                <div class="mw">
+                    <div class="m"><b>LocalhostCORSMiddleware</b> — 跨域控制（+ 本地开发放行）</div>
+                    <div class="m"><b>CacheControlMiddleware</b> — 静态资源缓存策略</div>
+                    <div class="m"><b>RateLimitMiddleware</b> — 按客户端限流</div>
+                </div>
+                <div class="baby"><span class="t">中间件（middleware）是什么？</span>
+                中间件是"每个请求进出都会经过的关卡"。请求到达路由处理函数<strong>之前</strong>、响应返回<strong>之后</strong>，中间件都能插一脚做统一处理——比如"所有请求都检查跨域""所有响应都加缓存头""所有请求都算一下限流"。这样这些通用逻辑不用在每个接口里重复写。<strong>中间件 = 请求处理的流水线上的通用工序。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CORS 与本地放行</h1></div>
+            <div class="card">
+                <p><code>LocalhostCORSMiddleware</code>（<code>middleware.py:21</code>）继承标准 CORS 中间件，额外放行任意 localhost/127.0.0.1 来源：</p>
+<pre><code class="language-python">class LocalhostCORSMiddleware(CORSMiddleware):
+    # 除了配置的 origins，额外无条件放行 localhost / 127.0.0.1（开发便利）
+    # 若一个 origin 都没配，会放行所有并打 warning</code></pre>
+                <div class="baby"><span class="t">CORS 是什么？为什么要特殊放行 localhost？</span>
+                CORS（跨域资源共享）是浏览器的安全机制：默认不允许"A 网站的页面去请求 B 网站的接口"。开发 OpenHands 时，前端跑在 <code>localhost:3001</code>、后端在 <code>localhost:3000</code>——严格说是"跨域"，会被浏览器拦。所以这个中间件特意放行本地来源，让开发者不用折腾 CORS 配置就能前后端联调。<strong>生产环境则靠配置的 <code>permitted_cors_origins</code> 严格限定。</strong>一个都没配还会打 warning 提醒你——防止误放行所有来源。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>缓存与限流</h1></div>
+            <div class="card">
+<pre><code class="language-python"># CacheControlMiddleware (middleware.py:59)
+#   /assets 下（带指纹的文件名）→ 强缓存 30 天 immutable
+#   其余 → no-store（一律不缓存）
+# RateLimitMiddleware + InMemoryRateLimiter (middleware.py:78)
+#   按 client host 内存滑动窗口限流（app.py 配 10 req/s）
+#   /assets 和 sandbox resume 请求豁免</code></pre>
+                <div class="anno">读法：<b>缓存策略"看人下菜"——带指纹的静态资源（文件名含 hash，内容变文件名就变）可以放心长期强缓存；动态接口一律 no-store（防止拿到过期数据）。</b>限流按来源 IP 滑动窗口算，保护服务不被打爆。</div>
+                <div class="baby"><span class="t">为什么 sandbox resume 请求要豁免限流？</span>
+                因为"恢复一个暂停的沙箱"可能很慢（要 unpause 容器、等 agent-server 就绪，可能几秒到几十秒）。如果这种慢请求也被 10 req/s 的限流误伤，用户想恢复会话却被限流挡住，体验很差。所以特意豁免。<strong>限流是好事，但要给"合理的慢请求"开绿灯——一刀切的限流会误伤正常操作。</strong>这种对边界情况的照顾，是打磨产品的功夫。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>生命周期与 Alembic 自动迁移</h1></div>
+            <div class="card">
+                <p>应用启动/关闭时要做一些事（比如建数据库表），这靠"生命周期（lifespan）"钩子。<code>OssAppLifespanService</code>（<code>oss_app_lifespan_service.py:12</code>）在启动时<strong>自动跑数据库迁移</strong>：</p>
+<pre><code class="language-python">def run_alembic(self):    # :23 启动时执行
+    # alembic upgrade head —— 自动把数据库结构升级到最新版本
+    # 迁移脚本在 app_lifespan/alembic/versions/001.py … 014.py</code></pre>
+                <div class="baby"><span class="t">数据库迁移（migration）是什么？为什么要自动跑？</span>
+                随着项目演进，数据库表结构会变（加字段、加表）。"迁移脚本"就是"如何把旧结构升级到新结构"的一步步说明（001→002→…→014）。<code>alembic upgrade head</code> = "把数据库升级到最新版本"。<strong>启动时自动跑</strong>意味着：你拉个新版本、一启动，表结构就自动升级好了，不用手动执行 SQL。对开源用户（OSS 模式）超友好——开箱即用。<strong>SaaS 模式则用不同的 lifespan 实现</strong>（初始化 PostHog 埋点等），由 <code>config.py</code> 根据部署模式选择。</div>
+                <div class="glossary"><code>AppLifespanService</code> 本身是个 async 上下文管理器抽象——启动时进入、关闭时退出。Day 06 的 <code>combine_lifespans</code> 把它和 MCP 子应用的 lifespan 合并成一个，交给 FastAPI。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>v1_router：把所有路由汇成一束</h1></div>
+            <div class="card">
+                <p>各模块（会话/事件/沙箱/用户…）各有自己的路由，<code>v1_router.py:24</code> 把它们全挂到统一前缀 <code>/api/v1</code> 下：</p>
+<pre><code class="language-python"># v1_router.py（概念）
+router = APIRouter(prefix='/api/v1')
+router.include_router(event_router)          # /api/v1/conversation/{id}/events
+router.include_router(app_conversation_router)  # /api/v1/app-conversations
+router.include_router(sandbox_router)        # /api/v1/sandboxes
+router.include_router(webhook_router)        # /api/v1/webhooks
+router.include_router(settings_router, secrets_router, user_router, git_router, config_router)</code></pre>
+                <div class="anno">读法：<b>一个总路由把所有子模块的路由聚合起来，统一加 <code>/api/v1</code> 前缀。</b>然后 <code>app.py</code> 只 <code>include_router(v1_router.router)</code> 一句就把全部 API 挂上了。这种"每个模块管自己的路由、总路由汇总"的组织方式，让新增模块很容易（写好自己的 router、在这里 include 一行）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>鉴权加在哪</h1></div>
+            <div class="card">
+                <p>各业务路由用 <code>dependencies=get_dependencies()</code> 标记"受保护"（比如 <code>event_router.py:16</code>）。但源码注释多次强调：<strong>真正的保护由 <code>SetAuthCookieMiddleware</code> 提供</strong>——那个 <code>dependencies</code> 主要是给 OpenAPI 文档打"需要认证"的标记。</p>
+                <div class="glossary"><b>两套鉴权，看对象</b>：① <strong>用户请求</strong>（前端→app_server）走 cookie/中间件鉴权（证明"你是登录用户"）；② <strong>沙箱回调</strong>（agent-server→app_server 的 webhook、沙箱来取密钥）走 <code>X-Session-API-Key</code> 头鉴权（证明"我是那个合法沙箱"，Day 08/09 见过）。<strong>不同来源用不同的鉴权方式——用户用 cookie，机器用 API key，各得其所。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 2 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 2 周（Day 06-10）你已读懂 app_server 编排层</h3>
+                <ul>
+                    <li><b>Day 06</b> 架构总览 + Injector 依赖注入（改环境变量换实现）</li>
+                    <li><b>Day 07</b> 会话生命周期：启动状态机、生成器即进度流</li>
+                    <li><b>Day 08</b> 事件系统：只存不推、模板方法存储、webhook 入站</li>
+                    <li><b>Day 09</b> 沙箱管理：Docker 供给、回调闭环、密钥按需下发</li>
+                    <li><b>Day 10</b> 服务装配：中间件、Alembic 迁移、路由汇总、鉴权</li>
+                </ul>
+                <p style="margin-top:8px">你已理解"管家"如何编排一切。下周（Day 11-15）进入 <strong>Agent 大脑</strong>——SDK 概念、工具体系、运行时、LLM、CodeAct 范式。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cat openhands/server/app.py                        # 确认是转发壳
+grep -n 'class .*Middleware\|localhost\|no-store\|resume' openhands/app_server/middleware.py
+grep -n 'run_alembic\|upgrade' openhands/app_server/app_lifespan/oss_app_lifespan_service.py
+grep -n 'include_router\|prefix' openhands/app_server/v1_router.py</code></pre>
+                <div class="tip"><strong>下周预告 · Day 11</strong>：离开管家，进入工人的大脑——<strong>Agent SDK 概念</strong>（openhands-sdk）。虽然核心在外部包，但我们能从本仓的调用方式 + 公开设计，讲清 Agent 的感知-决策循环、状态、步进机制。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 沙箱</a>
+                <a href="openhands-day11.html" style="color:var(--accent-green);">Day 11 · Agent SDK &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
