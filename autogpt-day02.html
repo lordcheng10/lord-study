@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · Block 积木的概念 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .blk{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 4px;flex-wrap:wrap}
+        .blk .box{border:2px solid #6366f1;border-radius:10px;padding:14px 18px;background:rgba(99,102,241,.06);text-align:center;position:relative}
+        .blk .box b{color:#6366f1;display:block;margin-bottom:4px} .blk .box small{color:var(--text-muted);font-size:11px}
+        .blk .pin{font-size:11px;color:var(--text-secondary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">Block 积木 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Block 心智模型</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · run 是异步生成器</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 最简 Block 精读</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Input/Output Schema</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · SchemaField</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · error 引脚约定</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 自动发现注册</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day03.html" class="nav-link" style="color:var(--accent-green);">Day 03 Graph &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">Block：积木的概念</h1>
+            <p class="part-desc">第一个核心概念。Block 是有"输入口/输出口"和 run() 逻辑的可复用功能积木。今天建立心智模型、读一个最简 Block 的真实代码。核心代码在 <code>blocks/_base.py</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Block 心智模型</h1></div>
+            <div class="card">
+                <p>一个 Block 就像电路里的一个<strong>元件</strong>——有输入引脚、输出引脚，中间一段处理逻辑：</p>
+                <div class="blk">
+                    <span class="pin">输入 →</span>
+                    <span class="box"><b>WordCount Block</b><small>数单词和字符</small></span>
+                    <span class="pin">→ 输出</span>
+                </div>
+                <p style="text-align:center;font-size:12px;color:var(--text-muted)">输入口：text　｜　输出口：word_count、character_count</p>
+                <div class="glossary"><b>先澄清一个坑</b>：文件名有迷惑性——<code>data/block.py</code> 里<strong>没有</strong> Block 基类！它只放类型别名和"同步到数据库"的逻辑。真正的 <code>Block</code> 基类在 <code>blocks/_base.py:550</code>。</div>
+                <div class="baby"><span class="t">Block vs Node 的区别（重要）</span>
+                <strong>Block 是"能力"（一个类）</strong>——描述"这种积木能干什么"。<strong>Node 是"这个 Block 在某张图里的一次摆放"</strong>（Day 03）——带具体的连线和配置。就像"电阻"这个元件型号（Block）vs "电路图里第 3 个位置那个电阻"（Node）。同一个 LLM Block 可以在一张图里放好几份 Node，各自配置不同。<strong>Block = 逻辑/代码，Node = 数据/配置——逻辑与配置分离。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>run 是异步生成器（关键设计）</h1></div>
+            <div class="card">
+                <p>看类型别名（<code>data/block.py:15</code>）——它揭示了 Block 的核心：</p>
+<pre><code class="language-python">BlockInput = dict[str, Any]                          # 输入：口名 → 数据
+BlockOutputEntry = tuple[str, Any]                   # 输出：(口名, 值)
+BlockOutput = AsyncGenerator[BlockOutputEntry, None] # 输出：一个异步生成器！</code></pre>
+                <div class="anno">读法：<b><code>run()</code> 的返回类型是<strong>异步生成器</strong>——它用 <code>yield ("口名", 值)</code> <strong>可以产出多次</strong>。</b>所以一个 Block 天然支持"一个输入 → 多个输出"，甚至流式地陆续产出。</div>
+                <div class="baby"><span class="t">为什么用生成器而不是普通 return？</span>
+                普通函数 <code>return</code> 一次就结束、只能返回一个值。<strong>生成器能 <code>yield</code> 很多次</strong>——这让 Block 能：① 有多个输出口（<code>yield "word_count", 4</code> 然后 <code>yield "character_count", 19</code>）；② 流式产出（比如一个"逐行读文件"块，每读一行 yield 一次，下游能边收边处理）；③ 一个输出口产出多个值（列表展开）。<strong>异步（async）则让 Block 里能 await 网络请求等 I/O 而不阻塞。</strong>这个设计让 Block 既灵活又高效。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>最简 Block 精读</h1></div>
+            <div class="card">
+                <p>看一个最纯粹的 Block（<code>blocks/count_words_and_char_block.py:11</code>）——理解结构的最佳入门：</p>
+<pre><code class="language-python">class WordCharacterCountBlock(Block):
+    class Input(BlockSchemaInput):          # ← 内嵌输入 schema
+        text: str = SchemaField(description="要统计的文本", advanced=False)
+    class Output(BlockSchemaOutput):        # ← 内嵌输出 schema
+        word_count: int = SchemaField(description="单词数")
+        character_count: int = SchemaField(description="字符数")
+        error: str = SchemaField(...)       # error 口（L06）
+    def __init__(self):
+        super().__init__(id="ab2a782d-...", categories={BlockCategory.TEXT},
+                         input_schema=..., output_schema=...,
+                         test_input={"text": "Hello, how are you?"},
+                         test_output=[("word_count", 4), ("character_count", 19)])
+    async def run(self, input_data: Input, **kwargs) -> BlockOutput:
+        yield "word_count", len(input_data.text.split())
+        yield "character_count", len(input_data.text)</code></pre>
+                <div class="anno">读法：<b>一个 Block 的标准结构三段式：① 内嵌 <code>Input</code>/<code>Output</code> 两个类（定义有哪些输入/输出口）；② <code>__init__</code> 里声明元数据（唯一 id、分类、测试样例）；③ <code>run()</code> 里 <code>yield</code> 输出。</b>这个块无副作用、无凭据，最纯粹。</div>
+                <div class="baby"><span class="t">注意 test_input/test_output</span>
+                每个 Block 都<strong>自带测试样例</strong>——给定 <code>test_input</code> 应该产出 <code>test_output</code>。这是很好的设计：Block 自带"我该怎么用、正确输出长啥样"的示例，既能自动测试、又是文档。<strong>把测试数据做成 Block 定义的一部分——保证每个积木都可验证。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Input/Output Schema</h1></div>
+            <div class="card">
+                <p><code>BlockSchema</code>（<code>blocks/_base.py:194</code>）继承 Pydantic BaseModel，是输入/输出的"类型契约"。关键能力：</p>
+                <ul>
+                    <li><code>jsonschema()</code>（<code>:197</code>）：转成前端能用的 JSON Schema——<strong>前端画布就靠它画出"输入表单/输出引脚"</strong>。</li>
+                    <li><code>validate_data()</code>（<code>:227</code>）：执行前校验用户填的输入。</li>
+                    <li>派生出 <code>BlockSchemaInput</code>（输入基类）、<code>BlockSchemaOutput</code>（输出基类，自带 error 字段）。</li>
+                </ul>
+                <div class="glossary"><b>一个聪明的自动校验</b>（<code>_base.py:337</code> 的 <code>__pydantic_init_subclass__</code>）：每当有人定义新 Schema 子类，Pydantic 自动跑校验，强制命名规范——名为 <code>credentials</code> 或 <code>*_credentials</code> 的字段<strong>必须</strong>是凭证类型，反之亦然。<strong>这保证整个平台凭证字段命名统一，前端能据此识别"哪些字段要弹连接账号的 UI"（Day 08）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>SchemaField：带 UI 元数据的字段</h1></div>
+            <div class="card">
+                <p>Block 不用 Pydantic 原生 <code>Field</code>，而用封装的 <code>SchemaField</code>（<code>data/model.py:263</code>）——它把 UI/行为元数据塞进字段：<code>placeholder</code>、<code>secret</code>（密码型，前端打码）、<code>advanced</code>（收进高级折叠区）、<code>hidden</code>、<code>depends_on</code>（字段依赖）等。</p>
+                <div class="baby"><span class="t">一个贴心的默认值逻辑</span>
+                <code>model.py:283</code>：字段<strong>没有默认值</strong> → 强制 <code>advanced=False</code>（因为是必填，得让用户显眼地看到）；<strong>有默认值且没显式指定</strong> → 默认 <code>advanced=True</code>（收进"高级"折叠区，不打扰新手）。<strong>框架用这个小逻辑自动决定"哪些输入口显眼、哪些藏起来"——让画布界面对新手友好（只显示必填的），对高级用户也够用（展开高级）。</strong>这种对 UI 体验的用心，是"面向非程序员的可视化平台"该有的细致。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>error 引脚约定</h1></div>
+            <div class="card">
+                <p><code>BlockSchemaOutput</code> 默认带一个 <code>error: str</code> 字段（<code>_base.py:471</code>）。这是全局的错误处理约定——看执行包装 <code>_execute()</code>（<code>_base.py:922</code>）：</p>
+<pre><code class="language-python">async for output_name, output_data in self.run(...):
+    if output_name == "error":
+        raise BlockExecutionError(...)   # ★ yield "error" = 失败信号，转成异常
+    # 每条输出还按 schema 校验
+    yield output_name, output_data</code></pre>
+                <div class="anno">读法：<b>Block 只要 <code>yield "error", "出错了..."</code>，框架就把它转成异常、中断执行。</b>这就是为什么每个输出 schema 默认带 error 字段——它是"Block 报告失败"的统一渠道。</div>
+                <div class="baby"><span class="t">为什么用"约定的 error 口"而不是抛异常？</span>
+                两种都支持，但 error 口更符合"数据流"心智——Block 的一切产出（包括失败）都是"从某个口 yield 出的数据"。而且 error 是<strong>一个输出口，可以被连线</strong>——你能把某个块的 error 口连到"发告警"块，实现"这步失败就通知我"的可视化错误处理。<strong>把错误也变成可连线的输出口——这是数据流范式的优雅之处。</strong>另外注意 <code>_execute()</code> 还做了输入校验、敏感操作人工审核、输出 schema 校验——它是 run() 外面的一层"执行生命周期管理"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>自动发现注册</h1></div>
+            <div class="card">
+                <p>怎么让 300+ 个 Block 被系统认识？<code>load_all_blocks()</code>（<code>blocks/__init__.py:17</code>）——<strong>放进 blocks/ 目录就自动加载，无需手动注册</strong>：</p>
+<pre><code class="language-python"># 递归扫描 blocks/ 下所有 .py，逐个 import，
+# 再用 Block.__subclasses__() 找出所有 Block 子类
+# 结果 @cached(ttl=3600) 缓存一小时</code></pre>
+                <div class="anno">读法：<b>约定优于配置——你在 blocks/ 目录放一个符合规范的 Block 类文件，它自动被发现注册。</b>加载时有一堆严格校验（fail-fast）：类名必须以 <code>Block</code> 结尾、<code>id</code> 必须是唯一 UUID、字段必须是 SchemaField……不合规立刻报错。</div>
+                <div class="glossary"><code>initialize_blocks()</code>（<code>data/block.py:21</code>）再把内存里的 Block <strong>同步到数据库</strong>（AgentBlock 表）——比对 id/schema 有变化就 upsert。<strong>为什么要同步到 DB？</strong>因为前端要列出所有可用 Block（画布左侧的积木清单）、Graph 里的 Node 用 block_id 引用 Block——这些都需要 Block 在数据库里有记录。<strong>"代码里定义 Block → 自动发现 → 同步到 DB → 前端可拖拽"这条链让加新积木极其简单。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Block 是什么？和 Node 的区别？（能力/类 vs 摆放/数据）</li>
+                    <li>run 为什么是异步生成器？带来什么能力？</li>
+                    <li>一个 Block 的标准三段式结构？test_input 有什么用？</li>
+                    <li>error 引脚约定是什么？为什么把错误做成输出口？</li>
+                    <li>Block 怎么被自动发现和注册？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '15,20p' $P/data/block.py                          # 类型别名
+sed -n '11,40p' $P/blocks/count_words_and_char_block.py   # 最简 Block
+sed -n '456,490p' $P/blocks/_base.py                      # BlockSchemaInput/Output
+sed -n '17,60p' $P/blocks/__init__.py                     # 自动发现</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：第二个核心概念——<strong>Graph（图）</strong>。读 <code>data/graph.py</code>：Node（节点）+ Link（连线）怎么把 Block 连成一个智能体、图怎么校验、起始节点怎么确定、agent-as-block 子图。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="autogpt-day03.html" style="color:var(--accent-green);">Day 03 · Graph 图 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
