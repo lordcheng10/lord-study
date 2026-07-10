@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次任务的完整旅程 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .journey{display:flex;flex-direction:column;gap:0;margin:16px 0}
+        .journey .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-left:2px solid var(--border-color);padding-left:16px;margin-left:8px;position:relative}
+        .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#f59e0b}
+        .journey .step .who{font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;flex-shrink:0;margin-top:1px}
+        .journey .who.f{background:rgba(6,182,212,.15);color:#06b6d4} .journey .who.a{background:rgba(245,158,11,.15);color:#f59e0b} .journey .who.s{background:rgba(139,92,246,.15);color:#8b5cf6}
+        .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+        .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .two .c{border:1px solid var(--border-color);border-radius:9px;padding:13px;background:var(--bg-secondary)}
+        .two .c h4{margin:0 0 6px;font-size:13px} @media(max-width:768px){.two{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#f97316);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">一次任务的完整旅程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 双进程全景图</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① 你下任务</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② 建会话与沙箱</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ Agent 循环</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④ 事件回推闭环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤ 前端实时展示</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么这么绕</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 运行</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 app_server 总览 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次任务的完整旅程</h1>
+            <p class="part-desc">把前四天串成一条故事线：你下一个任务，到它被自主完成，数据在"双进程"之间怎么流动。这是理解 OpenHands 全局的关键一天。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>双进程全景图</h1></div>
+            <div class="card">
+                <p>OpenHands V1 的核心是"双进程 + 事件回推"架构。先记住三个角色：</p>
+                <div class="two">
+                    <div class="c"><h4 style="color:#06b6d4">前端 frontend</h4><p style="font-size:12px;color:var(--text-secondary);margin:0">你在这里下任务、看进度。通过 WebSocket 直连沙箱里的 agent-server 看实时事件。</p></div>
+                    <div class="c"><h4 style="color:#8b5cf6">app_server（本仓）</h4><p style="font-size:12px;color:var(--text-secondary);margin:0">"管家"：管会话、拉起沙箱、持久化事件、鉴权、代理转发。不亲自跑 Agent。</p></div>
+                </div>
+                <div class="c" style="border:1px solid var(--border-color);border-radius:9px;padding:13px;background:var(--bg-secondary);margin-top:0">
+                    <h4 style="margin:0 0 6px;font-size:13px;color:#f59e0b">agent-server（沙箱容器内，外部包）</h4>
+                    <p style="font-size:12px;color:var(--text-secondary);margin:0">"工人"：真正跑 Agent 的 Action/Observation 循环。每产生一个事件，就通过 webhook 回推给 app_server 持久化。</p>
+                </div>
+                <div class="baby"><span class="t">一句话记住这个架构</span>
+                <strong>app_server 是管家，agent-server 是工人，工人在隔离的工作间（沙箱）里干活。</strong>管家负责安排工作间、记录工人干了啥；工人埋头执行；你（前端）既看管家的记录，也能开个窗户直接看工人现场。为什么这么分？为了<strong>安全（工人隔离在沙箱）和扩展（一个管家能管很多工人）</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① 你下任务</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="who f">前端</span><div class="b">你在聊天框输入"帮我给项目加个 /health 接口"，点发送。前端 <code>POST /api/v1/app-conversations</code> 请求 app_server 启动一个会话（携带 repo、初始消息、要用的模型等）。</div></div>
+                </div>
+                <div class="anno">读法：<b>一切从一个"启动会话"的 HTTP 请求开始。</b>对应源码 <code>app_conversation_router.py:364</code> 的 <code>start_app_conversation</code>。此刻还没有沙箱、没有 Agent，只有一个请求到达了管家。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② app_server 建会话与沙箱（慢启动）</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="who s">app_server</span><div class="b"><b>找/建沙箱</b>：没有可复用的就 <code>start_sandbox</code> 拉起一个 Docker 容器（里面是 agent-server），轮询等它 <code>/alive</code> 就绪。</div></div>
+                    <div class="step"><span class="who s">app_server</span><div class="b"><b>准备仓库</b>：在沙箱里 clone 你的 repo、跑 <code>.openhands/setup.sh</code>、装 git hooks、加载 skills。</div></div>
+                    <div class="step"><span class="who s">app_server</span><div class="b"><b>构建 Agent</b>：组装 LLM + 工具集（<code>get_default_tools</code>）+ 系统提示，<code>POST {agent_server_url}/api/conversations</code> 在沙箱内真正创建会话。</div></div>
+                    <div class="step"><span class="who s">app_server</span><div class="b"><b>状态机推进</b>：整个过程是一个状态机 <code>WORKING → WAITING_FOR_SANDBOX → PREPARING_REPOSITORY → RUNNING_SETUP_SCRIPT → … → READY</code>，每一步都以进度事件反馈前端。</div></div>
+                </div>
+                <div class="baby"><span class="t">为什么启动要搞这么复杂的状态机？</span>
+                因为"拉起容器 + clone 仓库 + 装环境"可能要几十秒。用户干等着会以为卡死了。所以 app_server 用一个<strong>启动任务状态机</strong>（<code>AppConversationStartTask</code>），每完成一步就吐一个状态更新，前端就能显示"正在准备沙箱…""正在克隆仓库…"。<strong>把慢操作变成可见的进度，是好产品的基本功。</strong>源码在 <code>live_status_app_conversation_service.py:361</code> 的 <code>_start_app_conversation</code>——第2周 Day 07 逐行读。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ agent-server 跑 Action/Observation 循环</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="who a">agent-server</span><div class="b"><b>感知</b>：把系统提示 + 你的任务 + 历史事件喂给大模型。</div></div>
+                    <div class="step"><span class="who a">agent-server</span><div class="b"><b>决策 → Action</b>：大模型输出"要跑 <code>ls</code>" → 产生一个 ActionEvent（Day 03）。</div></div>
+                    <div class="step"><span class="who a">agent-server</span><div class="b"><b>执行 → Observation</b>：在沙箱里真的跑 <code>ls</code>，输出包成 ObservationEvent，<code>action_id</code> 指回那个动作。</div></div>
+                    <div class="step"><span class="who a">agent-server</span><div class="b"><b>循环</b>：把观察结果加进历史，回到"感知"。反复，直到大模型产出 FinishAction。</div></div>
+                </div>
+                <div class="anno">读法：<b>这就是第1周反复讲的 Action→Observation 循环，此刻真正在沙箱里转起来了。</b>注意这一切发生在 agent-server（外部包）里——app_server 此刻只是在旁边"记账"。循环的每一步都产生事件。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ 事件回推闭环（webhook）</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="who a">agent-server</span><div class="b">每产生一个事件，就 <code>POST</code> 到 app_server 的 <code>/api/v1/webhooks/events/{会话id}</code>（用启动时注入的 <code>session_api_key</code> 鉴权）。</div></div>
+                    <div class="step"><span class="who s">app_server</span><div class="b"><code>on_event</code>（<code>webhook_router.py:468</code>）：把事件<b>持久化</b>（存成 JSON 文件）、更新会话状态、后台跑回调（如自动生成会话标题）。</div></div>
+                </div>
+                <div class="glossary"><b>这个"回推闭环"是双进程架构的精髓</b>。启动沙箱时，app_server 往容器里注入了两个值（<code>docker_sandbox_service.py:418</code>）：① <code>session_api_key</code>（工人回家的钥匙）；② webhook 回调地址 <code>http://host.docker.internal:{port}/api/v1/webhooks</code>（工人往哪汇报）。于是沙箱里的工人每干一件事，就拿钥匙敲管家的门汇报一次。<strong>管家由此拥有完整的事件记录（可查询、可导出、可审计），哪怕工作间关了记录还在。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 前端实时展示</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="who f">前端</span><div class="b">前端<b>直连沙箱里 agent-server 的 WebSocket</b>（用会话的 <code>conversation_url</code> + <code>session_api_key</code>），实时收到每个事件。</div></div>
+                    <div class="step"><span class="who f">前端</span><div class="b"><code>handleEventForUI</code>：Action 来了画一张"⏳ 要跑命令"卡片；对应 Observation 来了，用 <code>action_id</code> 找到那张卡片<b>原地替换</b>成"✅ 命令输出"。</div></div>
+                </div>
+                <div class="baby"><span class="t">等等——前端为什么直连沙箱，不走管家？</span>
+                好问题！<strong>实时性</strong>。如果每个事件都"工人→管家→前端"转一道，会有延迟。所以实时事件流（打字机效果、命令输出滚动）走"前端↔工人"的 WebSocket 直连（低延迟）；而"持久化存档"走"工人→管家"的 webhook（可靠记录）。<strong>两条路各司其职：直连求快，回推求稳。</strong>历史记录（比如你刷新页面重进）则是前端走 REST 从管家 <code>/events/search</code> 拉。（app_server 本身不做实时推送，只有 REST 只读 + webhook 入站——这点第2周 Day 08 会确认。）</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么架构要这么"绕"</h1></div>
+            <div class="card">
+                <p>你可能觉得：一个进程全干了不好吗？为什么拆成双进程 + webhook + 直连 WebSocket？三个原因：</p>
+                <ul>
+                    <li><strong>安全</strong>：Agent 执行必须隔离在沙箱。把"跑 Agent"和"管理/网关"分开，管家进程永远不直接执行 AI 产生的命令。</li>
+                    <li><strong>扩展</strong>：一个 app_server 能管理很多沙箱（很多并发会话、甚至远程/K8s 沙箱）。工人可以随意增减。</li>
+                    <li><strong>职责分离</strong>：管家管"编排与记录"，工人管"执行"，前端管"展示"。各自能独立演进、独立部署（这也是 V1 拆包的动机，Day 01）。</li>
+                </ul>
+                <div class="glossary"><b>浏览器连不上沙箱怎么办？</b> 有些操作（看 git diff、下载文件）前端无法直连沙箱（网络隔离），这时就由 app_server 做<strong>服务端代理转发</strong>——前端请求管家，管家再转给工人。所以 app_conversation_router 里有大量"薄代理"端点（Day 07 会看到）。<strong>这套架构的每一处"绕"，背后都是"安全 / 扩展 / 隔离"的权衡。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 1 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 1 周（Day 01-05）你已建立完整心智</h3>
+                <ul>
+                    <li><b>Day 01</b> OpenHands 是什么、V1 拆包架构</li>
+                    <li><b>Day 02</b> Action / Observation：Agent 的动作与结果</li>
+                    <li><b>Day 03</b> 事件流：一切皆事件、action_id 配对、安全评估</li>
+                    <li><b>Day 04</b> 运行与配置：旋钮决定能力</li>
+                    <li><b>Day 05</b> 完整旅程：双进程 + 事件回推 + 前端直连</li>
+                </ul>
+                <p style="margin-top:8px">你现在理解了"一个任务如何被自主完成"的全局。下周（Day 06-10）进入 <strong>app_server 编排层源码</strong>——逐行读管家怎么管会话、事件、沙箱。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：验证这条旅程</h3>
+<pre><code class="language-bash"># 1. 启动会话的入口
+grep -n 'def start_app_conversation' openhands/app_server/app_conversation/app_conversation_router.py
+
+# 2. 启动状态机 + 全流程
+grep -n 'WAITING_FOR_SANDBOX\|PREPARING_REPOSITORY\|READY' openhands/app_server/app_conversation/app_conversation_models.py
+
+# 3. 事件回推闭环
+grep -n 'def on_event\|WEBHOOK_CALLBACK\|SESSION_API_KEY' openhands/app_server/event_callback/webhook_router.py openhands/app_server/sandbox/docker_sandbox_service.py</code></pre>
+                <div class="tip"><strong>下周预告 · Day 06</strong>：进入 <strong>app_server 架构总览</strong>——顶层模块地图、FastAPI 应用装配、以及贯穿全代码库的 <strong>Injector 依赖注入</strong>机制（"改环境变量就换实现"的魔法）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 运行</a>
+                <a href="openhands-day06.html" style="color:var(--accent-green);">Day 06 · app_server 总览 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

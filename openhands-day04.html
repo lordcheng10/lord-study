@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 运行一个 OpenHands — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
+        table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#f97316);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">运行一个 OpenHands · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三种运行方式</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Docker 方式（推荐）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 从源码 make run</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 配置文件总览</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · [core] 核心配置</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · [agent] 工具开关</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · [sandbox] 与 [security]</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 事件流</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 完整旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">运行一个 OpenHands</h1>
+            <p class="part-desc">概念够了，让它跑起来。今天讲三种启动方式，并读 <code>config.template.toml</code> 的关键配置——你会发现"Agent 能干什么"很大程度是配置决定的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三种运行方式</h1></div>
+            <div class="card">
+                <p>OpenHands（Agent Canvas 形态）有三种跑法，从易到难：</p>
+                <table class="k">
+                    <tr><th>方式</th><th>命令</th><th>适合谁</th></tr>
+                    <tr><td>npm 直接跑（无沙箱）</td><td><code>npm i -g @openhands/agent-canvas && agent-canvas</code></td><td>快速体验（AI 有完整文件权限，有风险警告）</td></tr>
+                    <tr><td>Docker（推荐）</td><td><code>docker run ... ghcr.io/openhands/agent-canvas</code></td><td>普通用户，带沙箱隔离</td></tr>
+                    <tr><td>从源码</td><td><code>make build && make run</code></td><td>开发者、想读/改源码的你</td></tr>
+                </table>
+                <div class="baby"><span class="t">先搞清楚"两个进程"</span>
+                回忆 Day 01：OpenHands V1 是双进程——① <strong>app_server</strong>（本仓，编排/网关，第2周主角）；② <strong>agent-server</strong>（跑在沙箱容器里，真正执行 Agent 循环）。你启动时，app_server 先起来，等你下任务时它再去拉起一个 sandbox 容器（里面装着 agent-server）。<strong>理解这个"一个管家 + 按需开工作间"的模型，后面读代码就不会晕。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Docker 方式（推荐，README 原文）</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># README.md:88-106
+export PROJECTS_PATH="$HOME/projects"     # 你想让 AI 操作的项目目录
+docker run -it --rm -p 8000:8000 \
+  -v "$HOME/.openhands:/home/openhands/.openhands" \   # 持久化配置
+  -v "${PROJECTS_PATH}:/projects" \                     # 挂载你的项目进去
+  ghcr.io/openhands/agent-canvas:1.0.0-rc.11
+# 然后浏览器打开 http://localhost:8000</code></pre>
+                <div class="anno">读法：<b><code>-p 8000:8000</code> 把界面端口映射出来；两个 <code>-v</code> 挂载让"配置"和"你的项目"在容器内外共享。</b>打开 8000 端口就是 Web 界面，在 Settings 里配大模型和 API Key（V1 在 UI 里配，不用手写配置文件），然后就能下任务了。</div>
+                <div class="glossary"><b>关于大模型 API Key</b>：OpenHands 自己不含大模型，你得"自带模型"（bring your own model）——填你的 OpenAI/Anthropic/等 API Key。它用 <code>litellm</code>（<code>pyproject.toml:55</code>）统一对接上百种模型，所以几乎什么模型都能接（Day 14 讲 LLM 抽象）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>从源码 make run（开发者路线）</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># Development.md / AGENTS.md
+make build          # 一键构建前后端
+make run            # 同时跑前端(3001)和后端(3000)
+# 或分开：
+make start-backend  # 后端，端口 3000（等价 uvicorn openhands.app_server.app:app）
+make start-frontend # 前端，端口 3001
+
+# 用 OpenHands 开发 OpenHands 自己（本地 runtime、不装 docker）：
+export INSTALL_DOCKER=0
+export RUNTIME=local
+make build && make run</code></pre>
+                <div class="anno">读法：<b>后端真正的入口是 <code>openhands.app_server.app:app</code>（一个 FastAPI 应用）。</b><code>openhands/server/</code> 目录现在只是"向后兼容的转发壳"（<code>server/app.py</code> 只 re-export <code>app_server.app</code>），真正实现全在 <code>app_server</code>——第 2 周我们就读它。</div>
+                <div class="glossary"><b><code>RUNTIME</code> 环境变量很关键</b>：它决定沙箱用什么实现——<code>docker</code>（默认，Docker 容器）、<code>local</code>/<code>process</code>（本地进程，开发用）、<code>remote</code>（远程）。这一个环境变量就切换了整个沙箱后端——第 2 周 Day 09 会看到 <code>config.py</code> 里正是靠它选择不同的 SandboxServiceInjector。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>配置文件总览 config.template.toml</h1></div>
+            <div class="card">
+                <p>headless/CLI 模式用 <code>config.toml</code>（从 <code>config.template.toml</code> 拷贝改）。它是 TOML 格式，分成若干 <code>[段]</code>：</p>
+                <table class="k">
+                    <tr><th>配置段</th><th>管什么</th></tr>
+                    <tr><td><code>[core]</code></td><td>运行时选择、默认 Agent、最大步数/预算、并发数</td></tr>
+                    <tr><td><code>[agent]</code></td><td>Agent 能用哪些工具（浏览/编辑/命令/思考…开关）</td></tr>
+                    <tr><td><code>[sandbox]</code></td><td>沙箱镜像、超时、挂载卷、GPU</td></tr>
+                    <tr><td><code>[security]</code></td><td>confirmation mode、安全分析器</td></tr>
+                    <tr><td><code>[condenser]</code></td><td>历史压缩策略（Day 03 提过）</td></tr>
+                    <tr><td><code>[mcp]</code>/<code>[kubernetes]</code></td><td>MCP 外部工具接入 / K8s 部署</td></tr>
+                </table>
+                <div class="baby"><span class="t">配置文件为什么值得单独学？</span>
+                因为<strong>读配置文件是理解一个系统能力边界最快的方式</strong>。看 <code>[agent]</code> 段就知道 Agent 能发哪些动作；看 <code>[sandbox]</code> 就知道它在什么环境跑；看 <code>[security]</code> 就知道有哪些安全闸。<strong>配置项 = 系统旋钮，把旋钮认全了，系统的骨架也就清楚了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>[core]：核心配置</h1></div>
+            <div class="card">
+<pre><code class="language-ini">[core]
+runtime = "docker"                # 沙箱后端：docker/local/remote
+default_agent = "CodeActAgent"    # 默认用哪个 Agent（Day 15 讲 CodeAct）
+max_iterations = 500              # 一个任务最多循环多少步（防失控）
+max_budget_per_task = 0           # 每个任务最多花多少钱（0=无限）
+enable_browser = true             # 是否允许浏览器动作
+max_concurrent_conversations = 3  # 最多同时几个会话</code></pre>
+                <div class="anno">读法：<b><code>max_iterations</code> 和 <code>max_budget_per_task</code> 是两条"安全带"——防止 Agent 陷入死循环无限烧钱。</b>循环步数超过 500 就强制停；花费超过预算也停。<code>default_agent="CodeActAgent"</code> 指定了默认的 Agent 类型，它是 OpenHands 的招牌（Day 15 精读）。</div>
+                <div class="glossary"><b>为什么要限制步数和预算？</b> Agent 自主循环最怕"停不下来"——它可能反复尝试同一个错误方案，每一步都在调大模型（花钱）。<code>max_iterations</code>/<code>max_budget</code> 是硬性熔断。这呼应了我们在 eino 教程里反复讲的"成本经济学"——<strong>能自主行动的 AI，必须配硬性的花费上限。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>[agent]：工具开关决定 Agent 的能力</h1></div>
+            <div class="card">
+<pre><code class="language-ini">[agent]
+enable_cmd = true       # 能跑 bash 命令（ExecuteBashAction）
+enable_editor = true    # 能编辑文件（FileEditorAction）
+enable_browsing = true  # 能浏览网页（Browser*Action）
+enable_jupyter = true   # 能跑 Jupyter
+enable_think = true     # 能记录思考（ThinkAction）
+enable_finish = true    # 能结束任务（FinishAction）</code></pre>
+                <div class="anno">读法：<b>每个开关直接对应 Day 02 学的一类动作。</b>关掉 <code>enable_browsing</code>，Agent 就发不出浏览器动作、系统提示里也不会声明浏览器工具——它就"失去了上网这只手"。<strong>这些开关和 Day 03 的 SystemPromptEvent.tools 是一回事：开关决定了会话开头告诉大模型"你有哪些工具"。</strong></div>
+                <div class="baby"><span class="t">串起来看（Day 02+03+04）</span>
+                配置 <code>enable_cmd=true</code> → 会话开始时 SystemPromptEvent 里就包含 bash 工具的定义 → 大模型知道自己能跑命令 → 于是它可能产出 ExecuteBashAction → 沙箱执行 → 返回 ExecuteBashObservation。<strong>一条链，从配置旋钮一直贯穿到动作执行。前三天的概念在这里全串起来了。</strong>还能用 <code>[agent.CustomAgent]</code> + <code>classpath</code> 注册你自己写的 Agent。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>[sandbox] 与 [security]</h1></div>
+            <div class="card">
+<pre><code class="language-ini">[sandbox]
+base_container_image = "nikolaik/python-nodejs:..."  # 沙箱基础镜像
+timeout = 120                     # 命令超时
+volumes = "/host/path:/container/path"  # 把宿主目录挂进沙箱
+
+[security]
+confirmation_mode = false         # 危险动作执行前是否要人工确认
+security_analyzer = "llm"          # 用什么评估动作风险（默认用 LLM）</code></pre>
+                <div class="anno">读法：<b><code>[sandbox]</code> 定义"AI 的工作间长什么样"——用哪个 Docker 镜像（决定里面有 python/node 等什么工具）、命令超时、挂载哪些目录。</b><code>[security]</code> 则是安全闸：<code>confirmation_mode=true</code> 时，高危动作（还记得 Day 03 的 <code>security_risk</code> 吗？）执行前会暂停等你点头。</div>
+                <div class="glossary"><b>security_analyzer="llm"</b>：用大模型来判断"这个动作危不危险"（对应 Day 03 ActionEvent 的 <code>security_risk</code>）。配合 <code>confirmation_mode</code>，就实现了"AI 自评风险 + 高危人工确认"的完整安全链（Day 17 深入）。<strong>沙箱隔离（物理隔离）+ confirmation（人工闸）= OpenHands 的双重安全带。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>三种运行方式？"双进程"（app_server + agent-server）是怎么回事？</li>
+                    <li>RUNTIME 环境变量控制什么？</li>
+                    <li>后端真正的入口是哪个（app_server.app），server 目录现在是什么？</li>
+                    <li>[agent] 的开关如何决定 Agent 的能力？（串起 Day 02/03）</li>
+                    <li>两条"安全带"配置？双重安全机制？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：读配置模板</h3>
+<pre><code class="language-bash"># 1. 通读配置结构
+grep -nE '^\[' config.template.toml    # 列出所有配置段
+
+# 2. 核心段
+sed -n '/\[core\]/,/\[/p' config.template.toml | head -40
+sed -n '/\[agent\]/,/\[/p' config.template.toml | head -30
+
+# 3. 确认 server 只是转发壳
+cat openhands/server/app.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：把前四天串成一条完整故事线——<strong>一次任务的完整旅程</strong>：你下任务 → app_server 建会话/沙箱 → agent-server 跑 Action/Observation 循环 → 事件 webhook 回推 + 前端 WebSocket 实时展示 → 任务完成。看数据怎么在双进程间流动。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 事件流</a>
+                <a href="openhands-day05.html" style="color:var(--accent-green);">Day 05 · 完整旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
