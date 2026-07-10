@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · ChatModelAgent 剖析 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .loopd{position:relative;max-width:520px;margin:18px auto;padding:12px}
+        .loopd .row{display:flex;align-items:center;justify-content:center;gap:8px;margin:8px 0;flex-wrap:wrap}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:9px 14px;font-size:12.5px}
+        .loopd .n.model{border-color:#00ADD8;color:#00ADD8} .loopd .n.tool{border-color:#8b5cf6;color:#8b5cf6} .loopd .n.br{border-color:#f59e0b;color:#f59e0b}
+        .loopd .a{color:var(--text-muted);font-weight:800} .loopd .back{color:var(--accent-green);font-size:11.5px;font-weight:700}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">ChatModelAgent 剖析 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 它是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 配置项（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 内部那张 Graph</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 模型节点</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 流式分支判断</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工具节点与回头边</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 图执行→事件流</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 ADK</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 多智能体 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 ADK 智能体开发</span>
+            <h1 class="part-title">ChatModelAgent 剖析</h1>
+            <p class="part-desc">最常用的 Agent。今天拆开它，看内部那张"模型 ↔ 工具"循环 Graph 的真实搭建代码，把第 2 周的引擎知识和 Agent 彻底打通。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ChatModelAgent 是什么</h1></div>
+            <div class="card">
+                <p>它是"一个会用工具的对话 Agent"——给它一个 ChatModel + 一组工具，它就能自动完成 <strong>ReAct 循环</strong>（推理→行动→观察→再推理），直到得出最终答案。Day 02 你建的就是它。</p>
+                <div class="baby"><span class="t">ReAct 是啥？（一句话）</span>
+                <b>Re</b>ason + <b>Act</b>：模型先想"我需要什么信息"→ 调用工具去拿（Act）→ 看工具结果（Observe）→ 再想 → 直到能回答。人类查资料解题也是这个循环。ChatModelAgent 把这个循环自动化了，你只管给模型和工具。<strong>今天看它内部怎么用 Graph 实现这个循环。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>配置项（真实代码）</h1></div>
+            <div class="card">
+                <p><code>adk/chatmodel.go</code> 的 <code>ChatModelAgentConfig</code>：</p>
+<pre><code class="language-go">type ChatModelAgentConfig struct {
+    Name         string
+    Description  string
+    Instruction  string                 // 系统提示词（角色设定）
+    Model        model.ToolCallingChatModel   // 会调工具的模型（Day 04）
+    ToolsConfig  ToolsConfig            // 可用工具集
+    MaxIterations int                   // 最多循环几轮（默认 20，防死循环）
+    // ... GenModelInput / OutputKey 等
+}
+agent, _ := adk.NewChatModelAgent(ctx, &cfg)   // chatmodel.go:484</code></pre>
+                <div class="anno">读法：<b>核心四样：Instruction（系统提示，定角色）、Model（会调工具的模型）、ToolsConfig（工具箱）、MaxIterations（循环上限）。</b>其余可选。<code>NewChatModelAgent</code> 在 chatmodel.go:484 构建，内部就开始搭那张 Graph。</div>
+                <div class="glossary"><b>MaxIterations 是安全带</b>：万一模型陷入"反复调工具却得不出答案"的死循环，到 20 轮强制停。对应 Day 09 图层的 <code>MaxRunSteps</code>——双层防护。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>内部那张 Graph</h1></div>
+            <div class="card">
+                <p>NewChatModelAgent 内部搭的图，正是 Day 08 讲的"回头边+分支"循环：</p>
+                <div class="loopd">
+                    <div class="row"><span class="n" style="border-style:dashed">START</span><span class="a">→</span><span class="n model">ChatModel 节点</span></div>
+                    <div class="row"><span class="a">↓</span></div>
+                    <div class="row"><span class="n br">分支：输出里有 tool_calls 吗？</span></div>
+                    <div class="row"><span class="a">有 ↓</span> &nbsp;&nbsp;&nbsp; <span class="a">没有 →</span> <span class="n" style="border-style:dashed">END（最终答案）</span></div>
+                    <div class="row"><span class="n tool">ToolsNode 节点（执行工具）</span></div>
+                    <div class="row"><span class="back">↺ 回头边：工具结果追加进消息，回到 ChatModel</span></div>
+                </div>
+                <div class="glossary">和 Day 08 L07 的拓扑<strong>一模一样</strong>：<code>AddEdge(START,"model")</code> + <code>AddBranch("model", 有工具→"tools"，无→END)</code> + <code>AddEdge("tools","model")</code>。这就是 Agent 循环的真身。因为用 Graph（Pregel 引擎），回头边才被允许（Day 09）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>模型节点：绑定工具</h1></div>
+            <div class="card">
+                <p>建模型节点前，先把工具"告诉"模型——用 Day 04 学的 <code>WithTools</code>：</p>
+<pre><code class="language-go">// 概念示意（chatmodel.go 内）
+modelWithTools, _ := cfg.Model.WithTools(toolInfos)  // 让模型知道有哪些工具可调
+g.AddChatModelNode("model", modelWithTools)</code></pre>
+                <div class="anno">读法：<b><code>WithTools</code> 返回一个"知道工具清单"的新模型（Day 04 讲过它返回新实例、不改原对象——不可变设计）。</b>模型知道工具的名字/参数 schema 后，才可能在输出里产生 tool_calls。</div>
+                <div class="baby"><span class="t">模型怎么"调"工具？</span>
+                模型不会真的执行代码——它只是在输出的 Message 里带上 <code>ToolCalls</code>（"我想调 get_weather，参数 city=北京"，Day 03 见过这个字段）。真正执行是下游 ToolsNode 干的（L06）。<strong>模型负责"决定调什么"，ToolsNode 负责"真的去调"——职责分离。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>流式分支：模型刚开口就判断</h1></div>
+            <div class="card">
+                <p>分支用的是 Day 08 讲的<strong>流式分支</strong>（<code>NewStreamGraphBranch</code>）——看模型输出流的开头就能判断有没有 tool_calls，不用等整段生成完：</p>
+<pre><code class="language-go">// 概念：条件函数吃的是流
+func(ctx, stream *schema.StreamReader[*Message]) (string, error) {
+    msg, _ := stream.Recv()          // 只看第一个 chunk
+    if len(msg.ToolCalls) > 0 { return "tools", nil }   // 要调工具
+    return END, nil                                       // 直接回答
+}</code></pre>
+                <div class="anno">读法：<b>只 Recv 第一个 chunk 就能判断路由方向。</b>因为模型要调工具时，tool_calls 信息在流的最开头就出现了。判断完，剩余的流交给对应节点继续处理（Day 03 的流可以边收边转）。</div>
+                <div class="glossary"><b>为什么用流式分支？</b> 提速。如果等模型把整段回答生成完再判断"要不要调工具"，用户会多等几秒。流式分支让"刚开口就分流"——要调工具立刻去调，要回答立刻开始往前端推字。<strong>这是 Day 06 流式设计在 Agent 层的直接收益。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>工具节点与回头边</h1></div>
+            <div class="card">
+                <p>ToolsNode（<code>compose/tool_node.go</code>）拿到模型输出里的 tool_calls，<strong>并发执行对应工具</strong>，把每个结果包成一条 <code>Role=Tool</code> 的消息，追加到消息列表，然后回头边送回模型：</p>
+<pre><code class="language-go">// 概念：ToolsNode 内
+for _, call := range msg.ToolCalls {        // 可能多个工具调用
+    tool := 按 call.Function.Name 找到工具
+    result := tool.InvokableRun(ctx, call.Function.Arguments)  // 真正执行
+    toolMsgs = append(toolMsgs, schema.ToolMessage(result, call.ID))
+}
+// 这些 tool 消息经回头边追加进历史，回到 ChatModel 再推理</code></pre>
+                <div class="anno">读法：<b>一条模型消息里可能有多个 tool_calls（并行工具），ToolsNode 全部执行（并发），每个结果变一条 Tool 消息（带 call.ID 对应上是哪个调用）。</b>然后回到模型——模型看到工具结果，继续推理或给出最终答案。</div>
+                <div class="glossary"><code>schema.ToolMessage(content, toolCallID)</code>（Day 03）就是在这里造出来的——<code>toolCallID</code> 让模型知道"这个结果对应我刚才发的哪个调用请求"。工具执行出错也会包成消息回给模型，让模型自己决定重试或换方案（而不是直接崩）——这又是"优雅降级"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>图执行 → 翻译成事件流</h1></div>
+            <div class="card">
+                <p>Agent 的 <code>Run</code> 方法（Day 11）驱动这张图执行，并把图每一步的产出<strong>翻译成 AgentEvent</strong> 往迭代器里塞：模型每说一句 → 一个 Output 事件；要调工具 → 相关事件；最终答案 → 最后一个 Output 事件。</p>
+                <div class="glossary"><b>这就是 Day 11 和 Day 12 的合流点</b>：图在内部一轮轮转（super-step），每轮的产出被 Run 转成事件，通过 <code>AsyncIterator</code> 实时交给你。所以你 <code>iter.Next()</code> 能看到 Agent "边想边调工具边回答"的全过程。<strong>引擎（Graph）在跑，ADK（Run）在翻译，你（Runner.Query）在收——三层清晰分工。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ChatModelAgent 干什么？ReAct 循环是什么？</li>
+                    <li>它内部的 Graph 拓扑长什么样？（模型→流式分支→工具→回头边）</li>
+                    <li>模型怎么"调"工具？谁真正执行工具？</li>
+                    <li>为什么用流式分支？</li>
+                    <li>图执行怎么变成 AgentEvent 事件流？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '1,60p' adk/chatmodel.go                # Config
+sed -n '484,520p' adk/chatmodel.go             # NewChatModelAgent
+grep -n 'AddBranch\|AddEdge\|NewStreamGraphBranch\|ToolsNode' adk/chatmodel.go
+sed -n '1,80p' compose/tool_node.go | head -50 # ToolsNode 执行工具</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：一个 Agent 不够用时怎么办？<strong>多智能体</strong>——Agent-as-Tool（把子 Agent 当工具，推荐）vs Transfer（转交，不推荐），以及 Supervisor 模式。看 Eino 官方为什么推荐前者。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 ADK</a>
+                <a href="eino-day13.html" style="color:var(--accent-green);">Day 13 · 多智能体 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

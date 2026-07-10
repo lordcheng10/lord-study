@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · ADK Agent 抽象 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:16px 4px}
+        .flow .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:9px 12px;font-size:12px} .flow .a{color:#8b5cf6;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">ADK Agent 抽象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ADK 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Agent 接口（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · AgentInput</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · AgentEvent 事件流</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Runner 运行器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Session 与消息累积</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Agent 与编排引擎的关系</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 Workflow</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 ChatModelAgent &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 ADK 智能体开发</span>
+            <h1 class="part-title">ADK：Agent 抽象</h1>
+            <p class="part-desc">前两周学的是"编排引擎"（怎么把组件连成流程）。本周学 ADK——Eino 在引擎之上封装的"智能体开发套件"。今天讲最核心的 Agent 接口、事件流、Runner。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ADK 是什么，为什么要有它</h1></div>
+            <div class="card">
+                <p>ADK = Agent Development Kit（智能体开发套件），代码在 <code>adk/</code> 目录。它站在编排引擎（compose）之上，提供"直接可用的 Agent 抽象"，让你不必每次都手搭 Graph。</p>
+                <div class="baby"><span class="t">分层再回顾（Day 01）</span>
+                最底层 <b>schema</b>（消息/流）→ <b>components</b>（模型/工具等零件）→ <b>compose</b>（把零件连成流程的引擎，第2周）→ <b>adk/flow</b>（把流程封装成开箱即用的 Agent，本周）。<strong>ADK 就是"我给你个 Agent，你喂问题、收事件流"，内部帮你搭好了那张 Graph。</strong>Day 02 你其实已经用过 ADK（NewChatModelAgent + Runner），本周揭开它内部。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Agent 接口（真实代码）</h1></div>
+            <div class="card">
+                <p>所有智能体都实现同一个接口（<code>adk/interface.go</code>）：</p>
+<pre><code class="language-go">type Agent interface {
+    Name(ctx context.Context) string          // 智能体名字
+    Description(ctx context.Context) string    // 描述（多智能体路由时用）
+    Run(ctx context.Context, input *AgentInput,
+        opts ...AgentRunOption) *AsyncIterator[*AgentEvent]   // ★ 核心
+}</code></pre>
+                <div class="anno">读法：<b>核心就一个 <code>Run</code> 方法——吃一个 <code>AgentInput</code>（用户输入 + 上下文），返回一个 <code>AsyncIterator[*AgentEvent]</code>（异步事件迭代器，你 <code>for</code> 循环一个个取事件）。</b>Name/Description 供"多智能体"场景里互相识别、路由用（Day 13）。</div>
+                <div class="glossary"><b>为什么返回"事件流迭代器"而不是"一个结果"？</b> 因为 Agent 运行是个<strong>过程</strong>：它会思考、调工具、再思考……每一步都产出一个事件（"我说了这句""我要调这个工具""工具返回了这个"）。返回迭代器让你能<strong>实时看到 Agent 的每一步</strong>，而不是干等最终答案。这对做"打字机效果""显示 Agent 正在调工具"的 UI 至关重要。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>AgentInput：喂给 Agent 的东西</h1></div>
+            <div class="card">
+<pre><code class="language-go">type AgentInput struct {
+    Messages        []Message   // 对话消息（含用户这轮的问题）
+    EnableStreaming bool         // 是否要流式输出
+}</code></pre>
+                <div class="anno">读法：<b>输入就是"一组消息 + 要不要流式"。</b>消息用的正是 Day 03 学的 <code>schema.Message</code>——看，底层抽象在这里复用。<code>EnableStreaming=true</code> 时 Agent 内部走 Stream 范式（Day 06），事件里带的是流。</div>
+                <div class="baby"><span class="t">为什么输入是"一组消息"而非"一个字符串"？</span>
+                因为 Agent 需要<strong>上下文</strong>。多轮对话时，你要把之前的历史一起给它（system 提示 + 过往 user/assistant 往来 + 这轮的新问题）。用消息数组天然表达。单轮场景就一条 user 消息。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>AgentEvent：Agent 吐出的每一步</h1></div>
+            <div class="card">
+                <p>Agent 运行过程中产出的每个事件（<code>adk/interface.go</code>）：</p>
+<pre><code class="language-go">type AgentEvent struct {
+    AgentName string
+    Output    *AgentOutput    // 这步的产出（一条消息，可能是流）
+    Action    *AgentAction    // 这步的动作（如"转交给另一个Agent""中断""退出"）
+    Err       error           // 出错了
+}</code></pre>
+                <div class="anno">读法：<b>一个事件三选一：要么有 Output（产出内容）、要么有 Action（要执行的控制动作）、要么有 Err（出错）。</b>你 for 循环收事件时，判断它是哪种，分别处理。</div>
+                <div class="glossary"><b>AgentAction 是控制信号</b>：常见的有 <code>TransferToAgent</code>（转交给别的 Agent，Day 13）、<code>Interrupt</code>（中断等待人工，Day 14）、<code>Exit</code>（结束）。<strong>Output 是"内容"，Action 是"控制流"</strong>——事件流同时承载了这两种信息，这样一个迭代器就能表达 Agent 的完整行为。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Runner：驱动 Agent 跑起来</h1></div>
+            <div class="card">
+                <p>你一般不直接调 <code>agent.Run</code>，而是用 <code>Runner</code> 包一层（<code>adk/runner.go</code>）——它管 Session、消息累积、回调等杂事：</p>
+<pre><code class="language-go">runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: myAgent})  // runner.go:89
+iter := runner.Query(ctx, "你好")                                // runner.go:108
+for {
+    event, ok := iter.Next()      // 一个个取事件
+    if !ok { break }              // 取完了
+    // 处理 event.Output / event.Action / event.Err
+}</code></pre>
+                <div class="anno">读法：<b>NewRunner 建运行器 → Query 发问题拿到事件迭代器 → for + Next() 消费。</b>这正是 Day 02 你敲过的那五步的后半段。Runner 是"用户友好的入口"，Agent 是"被驱动的核心"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Session 与消息累积</h1></div>
+            <div class="card">
+                <p>Runner 维护一个 <strong>Session</strong>（<code>adk/session.go</code>），记录本次会话累积的消息。每产出一条新消息，Session 把它追加进历史，供 Agent 下一步（或下一轮）使用。</p>
+                <div class="baby"><span class="t">为什么需要 Session？</span>
+                Agent 的循环里，第 1 步模型说"我要查天气"，第 2 步工具返回"25℃"，第 3 步模型要基于"25℃"回答。这些中间消息必须<strong>攒起来</strong>喂给下一步模型，否则模型就"失忆"了。Session 就是这个"对话记忆本"。多轮对话时它还跨轮保留。<strong>这跟 Day 09 的 State 是两回事：State 是图内共享变量，Session 是 Agent 层的对话历史。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Agent 与编排引擎的关系</h1></div>
+            <div class="card">
+                <p>关键认知：<strong>一个 Agent 内部通常就是一张编译好的 Graph</strong>（第 2 周学的）。比如 ChatModelAgent（Day 12）内部搭了"模型→分支→工具→回头"的 Graph；它的 <code>Run</code> 方法就是驱动这张图执行，把图的执行过程翻译成 AgentEvent 事件流。</p>
+                <div class="glossary"><b>所以两周的知识在这里合流</b>：编排引擎（Graph/Pregel/channel/循环）是"发动机"，ADK 的 Agent 是"整车"——把发动机包成方向盘和油门（Run/Query/事件流）交到你手里。理解了 Graph 的循环（Day 08/09），就理解了 Agent 为什么能"反复思考调工具"。<strong>下一课 Day 12 就拆开 ChatModelAgent，看它内部那张 Graph 长什么样。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ADK 在四层架构的哪一层？解决什么？</li>
+                    <li>Agent 接口的核心方法？为什么 Run 返回事件流迭代器？</li>
+                    <li>AgentEvent 的 Output/Action/Err 分别代表什么？</li>
+                    <li>Runner 和 Session 各管什么？</li>
+                    <li>Agent 和 Graph 的关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '1,80p' adk/interface.go | head -60   # Agent/AgentInput/AgentEvent
+sed -n '89,130p' adk/runner.go                # NewRunner / Query
+grep -n 'type Session\|func.*Session' adk/session.go | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：拆开 <strong>ChatModelAgent</strong>——最常用的 Agent，内部那张"模型↔工具"Graph 的真实搭建代码（<code>adk/chatmodel.go</code>），以及它怎么把图执行翻译成事件流。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 Workflow</a>
+                <a href="eino-day12.html" style="color:var(--accent-green);">Day 12 · ChatModelAgent &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
