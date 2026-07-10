@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · schema 校验 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">schema 校验 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要校验</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · JSON Schema</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · core.schema.check</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · schema_def 复用片段</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 插件的 schema</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Admin 校验</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 编译缓存</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day10.html" class="nav-link" style="color:#6366f1;">Day 10 upstream/balancer &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 路由/配置/数据面</span>
+            <h1 class="part-title">schema 校验</h1>
+            <p class="part-desc">昨天的对象存入前必须校验（不能存一条 uri 是数字的路由）。今天看 <code>core/schema.lua</code> 怎么用 JSON Schema 校验，以及 schema 在 Admin API 和插件配置里的统一作用。这是 APISIX 配置健壮性的保障。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要校验</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">垃圾进 → 垃圾出</span>
+                <strong>配置是运维手写/程序生成的，难免出错：uri 写成数字、端口填了字符串、必填字段漏了。如果不校验就存进 etcd，等请求处理时才崩——难排查、影响线上。</strong>所以 APISIX 在配置<strong>写入时（Admin API）</strong>就用 schema 严格校验，不合法直接拒绝、返回清晰错误。<strong>"在源头挡住坏配置"比"运行时才发现"好一万倍。</strong>（回想上一站 Higress Console 的后端校验是空 TODO——APISIX 这里是真校验。）</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>JSON Schema</h1></div>
+            <div class="card">
+                <p>APISIX 用 <strong>JSON Schema</strong> 描述"合法配置长什么样"。<code>schema_def.lua</code> 里的对象定义就是 JSON Schema：</p>
+<pre><code class="language-lua">_M.route = {
+    type = "object",
+    properties = {
+        uri = {type = "string"},
+        methods = method_schema,
+        priority = {type = "integer", default = 0},
+        plugins = _M.plugins,
+        -- ...
+    },
+    -- oneOf / required / dependencies 等约束
+}</code></pre>
+                <div class="baby"><span class="t">JSON Schema 是"数据的合同"</span>
+                <strong>JSON Schema 是一套标准，用来声明"一个 JSON 对象允许有哪些字段、什么类型、哪些必填、取值范围"。</strong>比如 <code>uri</code> 必须是 string、<code>priority</code> 是 integer 默认 0。校验器拿配置对照 schema 检查，不符就报错。<strong>好处：声明式（不用写一堆 if 校验代码）、标准化（前后端/文档共用）、自带默认值填充。</strong>上一站 wasm-go/Higress Console 的插件配置也用 JSON Schema——网关界的通用语言。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>core.schema.check</h1></div>
+            <div class="card">
+                <p><code>core/schema.lua:59</code> 的 <code>check(schema, json)</code> 是校验入口：拿 schema 和数据，返回是否合法 + 错误信息。底层用 <code>jsonschema</code> 库（Lua 的 JSON Schema 实现，会把 schema"编译"成校验函数）。</p>
+                <div class="anno">读法：<b><code>check</code> 被到处调用：Admin API 存对象前校验、插件加载配置时校验（<code>plugin.check_schema</code>）、consumer 凭据校验……<strong>一个统一的校验函数，配上各处的 schema 定义,覆盖了整个配置系统。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>schema_def 复用片段</h1></div>
+            <div class="card">
+                <p><code>schema_def.lua</code> 定义了很多可复用的 schema 片段：<code>host_def</code>（<code>:50</code>）、<code>ip_def</code>（<code>:69</code>）、<code>uri_def</code>（<code>:72</code>，带正则 pattern）、<code>label_value_def</code>、<code>health_checker</code>（<code>:300</code>）、<code>method_schema</code>…</p>
+                <div class="baby"><span class="t">schema 也讲 DRY</span>
+                <strong>"合法的 host""合法的 IP""合法的健康检查配置"这些片段被 route/service/upstream 反复用到。定义一次（如 <code>host_def</code>），到处引用——改一处全生效。</strong>比如 <code>uri_def</code>（<code>:72</code>）用一个正则严格限制 uri 格式，所有用到 uri 的地方共享这个约束。<strong>schema 片段化让配置校验既严格又不重复。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>插件的 schema</h1></div>
+            <div class="card">
+                <p>每个插件（<code>apisix/plugins/*.lua</code>）都定义自己的 <code>schema</code>（该插件接受哪些配置）。插件加载/配置时用 <code>core.schema.check</code> 校验用户填的插件配置。</p>
+<pre><code class="language-lua">-- 插件文件里（如 limit-count.lua）
+local schema = {
+    type = "object",
+    properties = {
+        count = {type = "integer", exclusiveMinimum = 0},
+        time_window = {type = "integer", exclusiveMinimum = 0},
+    },
+    required = {"count", "time_window"},
+}</code></pre>
+                <div class="anno">读法：<b>插件自带 schema，让"配 limit-count 但漏填 count"这种错误在配置阶段就被拒。<strong>Day 11 会看到 <code>plugin.check_schema</code> 怎么用它。</strong>这套 schema 还能自动生成插件文档/前端表单（呼应上一站 Console 的动态表单）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Admin 校验</h1></div>
+            <div class="card">
+                <p>Admin API（Day 17）在把对象写进 etcd 前，用对应 schema 校验。<code>apisix/admin/</code> 下每种资源（routes/services/upstreams…）都有校验逻辑，不合法返回 400 + 具体哪个字段错。</p>
+                <div class="baby"><span class="t">"写入时校验"是关键位置</span>
+                <strong>校验放在 Admin API（写入端），而不是读取端（请求处理）——因为 etcd 里的配置应该永远是合法的。守住写入这道门，读取时就不用再校验，省性能。</strong>好比"入库时质检合格，出库时直接用"。所以你调 Admin API 建一条非法路由会立刻被拒，坏配置进不了 etcd。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>编译缓存</h1></div>
+            <div class="card">
+                <p><code>jsonschema</code> 库会把 schema"编译"成一个 Lua 校验函数（比每次解释 schema 快）。APISIX 缓存这些编译结果，同一个 schema 只编译一次。</p>
+                <div class="anno">读法：<b>schema 校验虽然主要在写入时（不那么频繁），但插件配置变更、consumer 校验也会用到，编译缓存避免重复编译开销。<strong>这又是 APISIX "把重复计算缓存起来"的一贯风格（对比 Day 05 的变量缓存、Day 06 的路由预处理）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要在写入时校验配置？</li>
+                    <li>JSON Schema 是什么？为什么网关界都用它？</li>
+                    <li>schema 片段（host_def/uri_def）怎么体现 DRY？</li>
+                    <li>校验为什么放在 Admin 写入端而非读取端？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '59,90p' apisix/core/schema.lua
+sed -n '50,93p' apisix/schema_def.lua
+grep -n "schema" apisix/plugins/limit-count.lua | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第 2 周收官）</strong>：<strong>upstream 与 balancer</strong>——请求最后要转发给后端：负载均衡算法（roundrobin/chash/least_conn/ewma/priority）怎么选实例、健康检查怎么剔除坏节点、失败怎么重试。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day08.html" style="color:var(--accent-cyan);">&larr; Day 08</a>
+                <a href="apisix-day10.html" style="color:#6366f1;">Day 10 · upstream/balancer &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

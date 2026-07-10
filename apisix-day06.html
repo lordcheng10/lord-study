@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · 路由 router — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">路由 router · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 路由要解决什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 可插拔路由</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · radixtree</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · http_init_worker</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · filter 预处理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · match 匹配</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · router_ssl / api</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day07.html" class="nav-link" style="color:#6366f1;">Day 07 etcd &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 路由/配置/数据面</span>
+            <h1 class="part-title">路由 router</h1>
+            <p class="part-desc">第 2 周开始拆数据面。路由是"请求进来后第一个大决策":这个 uri/host/method 该走哪条配置？今天看 <code>router.lua</code> 怎么用 radixtree（前缀树）高效匹配，以及路由的可插拔设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>路由要解决什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">从"一堆规则"里快速找到匹配的那条</span>
+                <strong>你可能配了几千条路由（<code>/api/user/*</code> 走服务 A、<code>/api/order/*</code> 走服务 B、<code>host=a.com</code> 走 C…）。请求进来，要在几千条里<strong>快速</strong>找到匹配的那条。</strong>如果逐条比对（O(n)），路由多了就慢。<strong>APISIX 用 radixtree（基数树/前缀树）——把路径组织成树，匹配是 O(路径长度) 而非 O(路由数)，几千条路由也能微秒级匹配。</strong>这就是路由子系统的核心任务：又快又准地"选路"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>可插拔路由</h1></div>
+            <div class="card">
+                <p><code>router.lua:74-93</code> 的 <code>http_init_worker</code> 按配置选路由实现：</p>
+<pre><code class="language-lua">local router_http_name = "radixtree_uri"     -- 默认
+if conf.apisix.router then
+    router_http_name = conf.apisix.router.http or router_http_name
+end
+local router_http = require("apisix.http.router." .. router_http_name)</code></pre>
+                <div class="baby"><span class="t">路由算法可以换</span>
+                <strong>APISIX 支持多种路由实现：<code>radixtree_uri</code>（按 uri）、<code>radixtree_host_uri</code>（按 host+uri）、<code>radixtree_uri_with_parameter</code> 等，在 <code>apisix/http/router/</code> 目录下。</strong>你在 config.yaml 里选用哪个。<strong>这是"策略模式"——路由核心逻辑不变，具体匹配算法可插拔。</strong>SSL 路由（按 SNI 选证书）也一样可插拔（<code>radixtree_sni</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>radixtree</h1></div>
+            <div class="card">
+                <p>radixtree 是一个独立的 C 库（<code>lua-resty-radixtree</code>，通过 FFI 调用），APISIX 把路由规则喂给它建树。</p>
+                <div class="baby"><span class="t">前缀树为什么快？</span>
+                <strong>想象一本字典：找 "apple" 不用翻遍所有词，而是先翻 a、再 ap、再 app…按前缀逐层缩小。radixtree 就是这个思想——把所有路由路径按公共前缀组织成树，匹配时顺着树走，走到哪算到哪。</strong>路由再多，匹配代价只跟"路径有多长"有关，跟"有多少条路由"无关。<strong>而且它是 C 实现 + FFI 调用，比纯 Lua 快得多。</strong>这是 APISIX 路由高性能的核心。除了 uri，还能按 host、method、header、参数、优先级等组合匹配。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>http_init_worker</h1></div>
+            <div class="card">
+                <p><code>router.lua:74-96</code> 完整初始化：装 <code>router_http</code>（uri 路由）、<code>router_ssl</code>（SNI 证书路由）、<code>api</code>（内部 API 路由）。<code>attach_http_router_common_methods</code>（<code>:54-72</code>）给路由实现补上通用方法（<code>routes()</code> 返回路由列表、<code>init_worker</code> 建 watch）。</p>
+                <div class="anno">读法：<b><code>http_route.init_worker(filter)</code> 建立对 etcd <code>/routes</code> 的 watch（Day 07）——路由配置变了，重新喂给 radixtree 建树。<code>filter</code> 是每条路由存入前的预处理函数（下一节）。<strong>三个路由器：http（业务路由）、ssl（证书）、api（内部管理 API）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>filter 预处理</h1></div>
+            <div class="card">
+                <p><code>router.lua:29-50</code> 的 <code>filter(route)</code>——每条路由存入前的预处理：</p>
+<pre><code class="language-lua">local function filter(route)
+    route.orig_modifiedIndex = route.modifiedIndex
+    route.has_domain = false
+    set_plugins_meta_parent(route.value.plugins, route)
+    if route.value.host then
+        route.value.host = str_lower(route.value.host)      -- host 转小写
+    elseif route.value.hosts then
+        for i, v in ipairs(route.value.hosts) do
+            route.value.hosts[i] = str_lower(v)
+        end
+    end
+    apisix_upstream.filter_upstream(route.value.upstream, route)  -- 预处理上游
+end</code></pre>
+                <div class="baby"><span class="t">"存入时预处理"是优化</span>
+                <strong>host 转小写、上游预解析这些活，如果每次请求都做就浪费。放在"路由存入内存时"做一次，之后每次匹配直接用处理好的结果。</strong>这是"把重复计算前移到配置变更时"——配置不常变、请求很频繁，所以在配置变更时多算点、请求时省点，划算。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>match 匹配</h1></div>
+            <div class="card">
+                <p>回到 Day 04：<code>init.lua:654</code> 调 <code>router.router_http.match(api_ctx)</code>。match 把当前请求的 uri/host/method/args 等喂给 radixtree，radixtree 返回匹配的路由，放进 <code>api_ctx.matched_route</code>。</p>
+                <div class="anno">读法：<b>匹配还会考虑<strong>优先级</strong>（多条路由都匹配时选 priority 高的）和<strong>各种条件</strong>（vars 表达式、自定义匹配函数）。radixtree 支持这些高级匹配。匹配到的路由对象里就有插件配置、上游引用——供后续步骤（Day 04 的合并、选插件）使用。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>router_ssl 与 api</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>router_ssl</strong>（<code>radixtree_sni</code>）：TLS 握手时按 SNI（客户端请求的域名）选对应证书——在 <code>ssl_phase</code>（Day 19）用。</li>
+                    <li><strong>api</strong>（<code>api_router</code>）：APISIX 内部 API 的路由（比如插件暴露的 <code>/apisix/*</code> 接口），和业务路由分开。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么证书路由也用 radixtree？</span>
+                <strong>你可能有几百张证书，每张对应一个/一批域名。TLS 握手时客户端说"我要访问 a.com"（SNI），网关要快速找到 a.com 的证书。这也是"从一堆规则里按名字快速找"——正好用 radixtree（按 SNI 匹配）。</strong>APISIX 把"路由匹配"这个能力复用到了证书选择上。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>路由要解决什么问题？为什么不能逐条比对？</li>
+                    <li>radixtree 为什么快（跟路由数无关）？</li>
+                    <li>路由为什么可插拔？有哪几个路由器？</li>
+                    <li><code>filter</code> 预处理为什么放在"存入时"而非"匹配时"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '29,96p' apisix/router.lua
+ls apisix/http/router/
+grep -n "radixtree" apisix/http/router/radixtree_uri.lua | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>配置中心 etcd</strong>——APISIX"全动态"的核心：<code>config_etcd.lua</code> 怎么 watch etcd、增量同步配置到内存，以及 standalone（config_yaml）模式。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day05.html" style="color:var(--accent-cyan);">&larr; Day 05</a>
+                <a href="apisix-day07.html" style="color:#6366f1;">Day 07 · etcd &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

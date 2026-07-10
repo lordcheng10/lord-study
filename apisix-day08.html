@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · 六大抽象对象 — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#6366f1}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">抽象对象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · etcd 里的组织</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Route</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Service</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Upstream</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Consumer</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Plugin Config / Global Rule</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 引用关系</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day09.html" class="nav-link" style="color:#6366f1;">Day 09 schema &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 路由/配置/数据面</span>
+            <h1 class="part-title">六大抽象对象</h1>
+            <p class="part-desc">昨天配置从 etcd 同步进内存，今天看"配置长什么样"——APISIX 的六大核心对象。它们的 schema 定义都在 <code>apisix/schema_def.lua</code>，理解它们的字段和引用关系，就理解了 APISIX 的配置模型。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>etcd 里的组织</h1></div>
+            <div class="card">
+                <p>每类对象在 etcd 里有自己的前缀，一个对象一个 key：</p>
+<pre><code class="language-bash">/apisix/routes/{id}          Route
+/apisix/services/{id}        Service
+/apisix/upstreams/{id}       Upstream
+/apisix/consumers/{name}     Consumer
+/apisix/plugin_configs/{id}  Plugin Config
+/apisix/global_rules/{id}    Global Rule
+/apisix/ssls/{id}  /apisix/plugin_metadata/{name}  ...</code></pre>
+                <div class="anno">读法：<b>各子系统 watch 自己那个前缀（Day 07）。对象的 schema（有哪些字段、什么类型）定义在 <code>schema_def.lua</code>——<code>_M.route</code>（<code>:553</code>）、<code>_M.service</code>（<code>:684</code>）、<code>_M.upstream</code>（<code>:756</code>）、<code>_M.consumer</code>（<code>:715</code>）、<code>_M.plugin_config</code>（<code>:1018</code>）、<code>_M.global_rule</code>（<code>:905</code>）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Route（路由）</h1></div>
+            <div class="card">
+                <p><code>schema_def.lua:553-680</code>。核心字段：</p>
+                <table>
+                    <tr><th>字段</th><th>含义</th></tr>
+                    <tr><td>uri / uris</td><td>匹配的路径</td></tr>
+                    <tr><td>host / hosts</td><td>匹配的域名</td></tr>
+                    <tr><td>methods</td><td>匹配的 HTTP 方法</td></tr>
+                    <tr><td>vars</td><td>更复杂的匹配表达式</td></tr>
+                    <tr><td>priority</td><td>优先级（多路由匹配时）</td></tr>
+                    <tr><td>plugins</td><td>这条路由启用的插件</td></tr>
+                    <tr><td>upstream / upstream_id</td><td>内联上游 或 引用上游</td></tr>
+                    <tr><td>service_id / plugin_config_id</td><td>引用可复用配置</td></tr>
+                </table>
+                <div class="baby"><span class="t">Route 是"中心枢纽"</span>
+                <strong>Route 把三件事绑在一起：匹配什么（uri/host/methods/vars）、怎么处理（plugins）、转发到哪（upstream）。</strong>它可以内联一切（自己写死上游和插件），也可以引用 service/upstream/plugin_config 复用。<strong>Day 04 的 <code>matched_route</code> 就是它。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Service（服务）</h1></div>
+            <div class="card">
+                <p><code>schema_def.lua:684-714</code>：含 <code>plugins</code> + <code>upstream/upstream_id</code>（和 Route 类似，但没有匹配条件）。</p>
+                <div class="baby"><span class="t">Service = "可复用的插件+上游套餐"</span>
+                <strong>如果 20 条路由都指向同一组后端、用同样的限流/鉴权，与其在 20 条路由里重复配，不如建一个 Service 装好这些，20 条路由都 <code>service_id: X</code> 引用它。</strong>改一次 Service，20 条路由全生效（Day 04 的 <code>merge_service_route</code> 就是运行时把 Service 合并进 Route）。<strong>Service 没有"匹配条件"——匹配是 Route 的职责，Service 只管"处理和转发"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Upstream（上游）</h1></div>
+            <div class="card">
+                <p><code>schema_def.lua:756</code>（<code>upstream_schema</code>）核心字段：<code>nodes</code>（后端实例列表 host:port + weight）、<code>type</code>（负载均衡算法 roundrobin/chash/...）、<code>scheme</code>（http/https/grpc）、<code>checks</code>（健康检查）、<code>discovery_type</code>（服务发现）、<code>timeout</code>、<code>retries</code>。</p>
+                <div class="anno">读法：<b>Upstream 描述"一组后端 + 怎么在它们之间分流"。<code>nodes</code> 可以是静态列表，也可以留空用 <code>discovery_type</code>（Day 16 服务发现动态获取）。<strong>Day 10 的负载均衡就是在 <code>nodes</code> 里按 <code>type</code> 挑一个。</strong>Route/Service 都能引用 <code>upstream_id</code> 复用。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Consumer（消费者）</h1></div>
+            <div class="card">
+                <p><code>schema_def.lua:715-755</code>：<code>username</code> + <code>plugins</code>（consumer 专属插件，通常是鉴权凭据如 key-auth 的 key）+ <code>group_id</code>。还有 <code>credential</code>（<code>:736</code>）分离凭据。</p>
+                <div class="baby"><span class="t">Consumer 是"API 调用方的身份"</span>
+                <strong>Consumer 代表"谁在调 API"——通常配合鉴权插件：consumer "alice" 的 plugins 里有 <code>key-auth: {key: "alice-secret"}</code>。请求带这个 key，鉴权插件就识别出"这是 alice",然后能给 alice 用专属配置（专属限流等）。</strong>回想 Day 04 的 <code>merge_consumer_route</code>——识别 consumer 后合并她的专属配置。<strong>Consumer 用 <code>username</code> 而非数字 id 做 key（<code>/apisix/consumers/alice</code>）。</strong>Day 14 详讲。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Plugin Config / Global Rule</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Plugin Config</strong>（<code>:1018</code>）：一组可复用的插件配置（只有 plugins，比 Service 更轻，不含上游）。Route 用 <code>plugin_config_id</code> 引用。</li>
+                    <li><strong>Global Rule</strong>（<code>:905</code>）：对<strong>所有</strong>请求生效的插件（不绑任何路由）。Day 04 里"匹配路由前后都跑 global_rules"就是它。</li>
+                </ul>
+                <div class="baby"><span class="t">三种"复用/全局"层次</span>
+                <strong>Plugin Config = "可复用的插件套餐"（多路由共享一组插件）；Service = "插件+上游套餐"；Global Rule = "全站生效的插件"（如全局的 prometheus 指标、全局限流）。</strong>层层递进的复用粒度，让你不用到处重复配置。<strong>还有 Consumer Group（<code>:1039</code>）——一组 consumer 共享配置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>引用关系</h1></div>
+            <div class="card">
+<pre><code class="language-bash">Route ──plugin_config_id──> Plugin Config（复用插件）
+      ──service_id────────> Service ──upstream_id──> Upstream
+      ──upstream_id───────> Upstream（也可内联 upstream）
+Consumer（鉴权识别）──> 合并专属 plugins
+Global Rule（无引用，全局生效）</code></pre>
+                <div class="anno">读法：<b>运行时 Day 04 的合并顺序：Route 基础 → 合并 plugin_config → 合并 service → 识别 consumer 后合并 consumer 配置。<strong>越具体的覆盖越通用的（consumer > route > service）。</strong>这套引用+合并模型让配置既能复用又能精细定制——和上一站 Higress Console 的路由/服务/插件概念完全相通。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>六大对象在 etcd 里怎么组织？schema 定义在哪？</li>
+                    <li>Route 为什么是"中心枢纽"？它绑定了哪三件事？</li>
+                    <li>Service / Plugin Config / Global Rule 的复用粒度差异？</li>
+                    <li>Consumer 怎么代表"调用方身份"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '553,620p' apisix/schema_def.lua      # route
+sed -n '684,760p' apisix/schema_def.lua      # service/consumer/upstream
+grep -n "^_M\." apisix/schema_def.lua | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>schema 校验</strong>——这些对象存入前要校验字段合法性。看 <code>core/schema.lua</code> 怎么用 JSON Schema（jsonschema 库）校验，以及 schema 在 Admin API 和插件里的作用。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day07.html" style="color:var(--accent-cyan);">&larr; Day 07</a>
+                <a href="apisix-day09.html" style="color:#6366f1;">Day 09 · schema &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

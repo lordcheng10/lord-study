@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 配置中心 etcd — Apache APISIX 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">配置中心 etcd · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么是 etcd</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · watch 机制</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 单连接共享 watch</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · revision 增量</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 内存里的配置</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 全量兜底</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · config_yaml standalone</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="apisix-day08.html" class="nav-link" style="color:#6366f1;">Day 08 抽象对象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 路由/配置/数据面</span>
+            <h1 class="part-title">配置中心 etcd</h1>
+            <p class="part-desc">APISIX"全动态热更新"的核心机密就在 <code>core/config_etcd.lua</code>。今天看它怎么 watch etcd、把配置变更增量同步到每个 worker 的内存——让"改配置秒级生效、零 reload"成为可能。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么是 etcd</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">etcd 天生适合当配置中心</span>
+                <strong>etcd 是一个分布式键值存储（Kubernetes 也用它），关键特性：① 强一致（多节点数据一致）；② 支持 watch（订阅某个 key 的变化，一变就推给你）；③ 有 revision（全局递增的版本号）。</strong>这三点正好是配置中心需要的：配置存 etcd（一致）、网关 watch 配置（变了立刻知道）、用 revision 做增量同步（只拉变化的部分）。<strong>APISIX 把 Route/Upstream/Consumer 等都存成 etcd 的 key（如 <code>/apisix/routes/1</code>），watch 整个 <code>/apisix</code> 前缀。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>watch 机制</h1></div>
+            <div class="card">
+                <p><code>config_etcd.lua</code> 的 <code>do_run_watch</code>（<code>:135+</code>）是核心：worker 启动后建立一个长连接，<code>watchdir(prefix)</code> 订阅 <code>/apisix</code> 前缀的所有变化。</p>
+<pre><code class="language-lua">-- 简化：do_run_watch
+watch_ctx.cli:watchdir(watch_ctx.prefix, opts)   -- 订阅整个前缀
+-- etcd 有变化 → 推送事件 → produce_res 放进队列 → 唤醒等待的 watcher</code></pre>
+                <div class="baby"><span class="t">watch = "订阅推送",不是轮询</span>
+                <strong>传统做法是"每隔几秒去问一次配置变了没"（轮询，有延迟又浪费）。watch 是"我订阅了，你变了主动推给我"——etcd 一旦有 key 变化，立刻通过长连接推送事件给 APISIX。</strong>所以配置变更能<strong>秒级甚至毫秒级</strong>传到所有网关节点。这是"全动态"的技术基础。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>单连接共享 watch</h1></div>
+            <div class="card">
+                <p><code>config_etcd.lua</code> 用一个 <code>watch_ctx</code>（<code>:78</code>）在整个 worker 里<strong>共享一条 watch 连接</strong>——router、consumer、upstream 等各子系统不各开一条连接，而是共用这一条主 watcher。<code>produce_res</code>（<code>:123</code>）把事件分发给各等待者（用信号量 <code>sema</code> 唤醒）。</p>
+                <div class="baby"><span class="t">为什么共享一条连接？</span>
+                <strong>如果 router、consumer、upstream…每个都开一条 etcd watch 连接，一个 worker 就好几条、几十个 worker 上百条——etcd 扛不住。所以 APISIX 优化成"一条主 watch 连接监听整个 <code>/apisix</code> 前缀,收到事件后按 key 前缀分发给对应子系统"。</strong>大幅减少 etcd 连接数。这是大规模部署的关键优化（早期版本每个资源类型一条连接，后来合并成一条）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>revision 增量</h1></div>
+            <div class="card">
+                <p><code>config_etcd.lua:176</code>：<code>watch_ctx.rev = rev + 1</code>。watch 时带上 <code>start_revision</code>（<code>:192</code>），etcd 只推送"这个 revision 之后"的变化。</p>
+                <div class="baby"><span class="t">revision 是 etcd 的"全局版本号"</span>
+                <strong>etcd 每次写操作都让全局 revision +1。APISIX 记住"我已经同步到 revision N",下次 watch 时说"给我 N 之后的变化"——etcd 只推增量（改了哪几个 key），不用每次传全量配置。</strong>好比"我看到第 100 条消息了，只给我 101 之后的"。<strong>增量同步让配置变更的传输量极小（只传变化的那条路由），进一步保证秒级生效。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>内存里的配置</h1></div>
+            <div class="card">
+                <p>各子系统（如 router）通过 <code>core.config.new(key, opts)</code> 创建一个"配置对象",它 watch 自己那部分 key（如 <code>/routes</code>），把数据同步到内存的 <code>.values</code> 里，并维护 <code>.conf_version</code>（配置版本）。</p>
+                <div class="anno">读法：<b>请求处理时（Day 04-06），router 用的是<strong>内存里</strong>的路由列表（radixtree 用它建的树），完全不碰 etcd——所以匹配极快。<strong>etcd 只在"配置变更时"通过 watch 更新内存。读路径（每请求）走内存，写路径（改配置）走 etcd → watch → 内存。</strong>读写分离，性能与动态兼得。<code>conf_version</code> 变化时触发重建（如 radixtree 重新建树）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>全量兜底</h1></div>
+            <div class="card">
+                <p><code>config_etcd.lua:165</code>：主 watcher 首次启动时先 <code>cli:get(prefix)</code> 拉一次全量，之后才 watch 增量。watch 连接断了会重连并从记录的 revision 续上。</p>
+                <div class="baby"><span class="t">"先全量后增量"的健壮性</span>
+                <strong>刚启动时内存是空的，得先从 etcd 拉一次全量配置打底；之后靠 watch 增量维护。</strong>如果 watch 连接中途断了（网络抖动），重连后从记录的 revision 续传增量；如果落后太多（revision 过期），会重新全量同步。<strong>"全量兜底 + 增量高效 + 断线重连"三件套保证了配置同步既快又不丢。</strong>这是生产级配置中心客户端的标准做法。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>config_yaml standalone</h1></div>
+            <div class="card">
+                <p>APISIX 还支持不用 etcd 的 <strong>standalone 模式</strong>（<code>core/config_yaml.lua</code>）：配置直接写在 <code>conf/apisix.yaml</code> 文件里，APISIX 监听文件变化热加载。</p>
+                <div class="baby"><span class="t">什么时候用 standalone？</span>
+                <strong>etcd 模式适合"多节点 + 频繁动态变更"；但有些场景（单机、GitOps 声明式管理、不想维护 etcd）更适合"配置写在文件里"。</strong>standalone 模式下 APISIX 读 <code>apisix.yaml</code>，文件改了就重载——同样不用 reload nginx。<strong>两种模式（<code>config_etcd</code> / <code>config_yaml</code>）实现同一套 <code>core.config</code> 接口，上层子系统（router 等）无感切换。</strong>还有 <code>config_xds</code>（对接 xDS 控制面，呼应 higress-group 的路线）。这又是"接口统一、实现可换"的设计。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>etcd 的哪三个特性适合当配置中心？</li>
+                    <li>watch 和轮询的区别？为什么共享一条 watch 连接？</li>
+                    <li>revision 怎么实现增量同步？读/写路径怎么分离？</li>
+                    <li>standalone（config_yaml）模式适合什么场景？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
+sed -n '135,210p' apisix/core/config_etcd.lua
+grep -n "function _M\.\|core.config" apisix/core/config.lua 2>/dev/null | head
+ls apisix/core/config_*.lua</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>六大抽象对象</strong>——Route/Service/Upstream/Consumer/Plugin_config/Global_rule 的数据结构与关系，看它们怎么在 etcd 里组织、怎么被 config 对象加载。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="apisix-day06.html" style="color:var(--accent-cyan);">&larr; Day 06</a>
+                <a href="apisix-day08.html" style="color:#6366f1;">Day 08 · 抽象对象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
