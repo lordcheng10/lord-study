@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 插件管理 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">插件管理 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 定义 vs 实例</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两个 Controller</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 内置插件从 classpath 加载</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · i18n 反射覆盖</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 实例映射 CRD</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · JSONSchema 校验真相</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 内置插件元数据</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day13.html" class="nav-link" style="color:#3b82f6;">Day 13 消费者鉴权 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 AI/插件/消费者</span>
+            <h1 class="part-title">Wasm 插件管理</h1>
+            <p class="part-desc">上一站 Higress 教过 Wasm 插件怎么在网关里运行。今天看 Console 怎么"管理"它们：区分"插件定义"和"插件实例"，内置插件怎么从 jar 里的资源加载，以及一个反直觉的真相——后端的 JSONSchema 校验其实是空的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>定义 vs 实例（先分清）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>插件定义（WasmPlugin）</strong>：这个插件是什么、有哪些配置项（JSON Schema）、README、图标、镜像地址。像"App 商店里的应用介绍"。</li>
+                    <li><strong>插件实例（WasmPluginInstance）</strong>：把某个插件<strong>配到某个作用域</strong>并填好参数。像"你把这个 App 装到某台设备上并做了设置"。</li>
+                </ul>
+                <div class="baby"><span class="t">一个定义，多个实例</span>
+                比如"限流"是一个<strong>定义</strong>；你在路由 A 上配限流 100 QPS、在路由 B 上配 50 QPS，就是两个<strong>实例</strong>（都引用同一个定义，参数不同、作用域不同）。<strong>Console 分别用两套 Controller/Service 管定义和实例。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两个 Controller</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>WasmPluginsController</strong>（<code>/v1/wasm-plugins</code>，<code>:52</code>）—— 定义：list/query(支持 lang)/add/update(按 builtIn 分流 <code>updateBuiltIn/updateCustom</code> <code>:111-112</code>)/delete、<code>GET /{name}/config</code>(<code>:125</code> 返回 JSON Schema)、<code>GET /{name}/readme</code>。</li>
+                    <li><strong>WasmPluginInstancesController</strong>（<code>/v1</code>，<code>:57</code>）—— 实例：按 GLOBAL/DOMAIN/ROUTE/SERVICE 四作用域各提供 list/query/put/delete（<code>:93-245</code>），统一委托 4 个私有方法。</li>
+                </ul>
+                <div class="anno">读法：<b>实例 Controller 的 <code>queryInstance</code>（<code>:254</code>）查不到时返回"空实例"而非 404——<strong>因为前端要展示一个"未配置"的空表单让你填，而不是报错。</strong>细节里见用心。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>内置插件从 classpath 加载</h1></div>
+            <div class="card">
+                <p><code>WasmPluginServiceImpl.java</code> 的 <code>@PostConstruct initialize()</code>（<code>:122-186</code>）：</p>
+<pre><code class="language-java">// 读 plugins/plugins.properties（插件名 = OCI 镜像）
+// 逐插件读 plugins/<name>/spec.yaml（Swagger Yaml.mapper 反序列化成 Plugin）
+// 加载三语 README + base64 图标
+// 缓存到 builtInPlugins</code></pre>
+                <div class="baby"><span class="t">"内置插件"从哪来？</span>
+                约 43 个官方插件（ai-*、key-auth、jwt-auth、waf、model-mapper…）的元数据（描述、配置 schema、README、图标）<strong>作为资源文件打包在 jar 里</strong>（<code>sdk/src/main/resources/plugins/</code>）。启动时一次性读进内存缓存。<strong>这样前端插件列表不用查 K8s，直接从内存返回，快且稳定。</strong>插件的实际 Wasm 二进制则以 OCI 镜像形式存在镜像仓库，运行时由网关拉取。</div>
+                <div class="anno">读法：<b>镜像地址策略 <code>buildPluginImageUrl</code>（<code>:196-234</code>）默认 registry <code>higress-registry.cn-hangzhou.cr.aliyuncs.com</code>、namespace <code>plugins</code>，可由环境变量 <code>HIGRESS_ADMIN_WASM_PLUGIN_*</code> 覆盖（离线/私有仓库场景）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>i18n 反射覆盖</h1></div>
+            <div class="card">
+                <p>内部类 <code>PluginCacheItem</code>（<code>:674-822</code>）的 <code>applyI18nResources</code>（<code>:777-821</code>）用<strong>反射</strong>匹配 <code>^x-(.+)-i18n$</code> 扩展键，按当前语言覆盖 title/description。</p>
+                <div class="baby"><span class="t">多语言是怎么做到的？</span>
+                插件 spec 里除了 <code>title</code>，还有 <code>x-title-i18n: {zh-CN: 中文名, en-US: English}</code> 这样的扩展字段。<strong>后端按用户语言，用反射找到对应的 <code>x-xxx-i18n</code> 键，把值覆盖到 title/description 上。</strong>这套 <code>x-*-i18n</code> 约定第 4 周（Day 18）前端动态表单还会用到——前后端共用同一套多语言约定。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>实例映射 CRD</h1></div>
+            <div class="card">
+                <p><code>WasmPluginInstanceServiceImpl.addOrUpdateAll</code>（<code>:159-256</code>）核心写路径：校验 → 按 (plugin,version,internal) 分组 → 查/建 WasmPlugin CR → 解析 rawConfigurations(YAML) → 取 schema → <code>setWasmPluginInstanceToCr</code> → create/replace CR。</p>
+                <p>转换在 <code>KubernetesModelConverter.setWasmPluginInstanceToCr</code>（<code>:765-814</code>）：</p>
+<pre><code class="language-java">// GLOBAL 作用域  → 写 spec.defaultConfig + defaultConfigDisable = !enabled
+// 非 GLOBAL     → 构造 MatchRule（config/configDisable + domain/ingress/service 列表）
+//                 按 scope 优先级排序</code></pre>
+                <div class="anno">读法：<b>回想 Day 09 的四作用域——GLOBAL 写进 CRD 的 <code>defaultConfig</code>（默认对所有流量生效），其他作用域写进 <code>matchRules</code>（按域名/路由/服务匹配才生效）。<strong>"启用/禁用"用 <code>configDisable</code> 表达，保留配置值但让它不生效。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>JSONSchema 校验的"真相"</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">一个反直觉的发现</span>
+                你可能以为后端会用 JSON Schema 严格校验插件配置——<strong>但仓库根本没引入任何 jsonschema 校验库</strong>（没有 networknt / json-schema-validator）。<code>WasmPluginConfig.java</code>（<code>:31</code>）只有一个 Swagger 的 <code>Schema</code> 字段，它的 <code>validateAndCleanUp</code>（<code>:33-36</code>）<strong>是个空实现（TODO），原样返回配置</strong>。唯一调用点在 <code>WasmPluginInstanceServiceImpl.java:227-229</code>。</div>
+                <div class="glossary"><b>结论</b>：schema 当前<b>主要驱动前端表单渲染</b>（Day 18 会看到前端拿 schema 生成表单），<b>后端"校验"是预留扩展点</b>。<b>自定义插件的 <code>queryConfig/queryReadme</code> 也是 TODO（返回空）。</b>——这些都是极好的"动手改进"练习。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>内置插件元数据存储</h1></div>
+            <div class="card">
+                <p><code>sdk/src/main/resources/plugins/</code>：<code>plugins.properties</code> + 每插件目录 <code>spec.yaml / README*.md / icon.png</code>。<code>spec.yaml</code> 结构：</p>
+<pre><code class="language-yaml">info:                 # category / name / title / x-title-i18n /
+                      # description / iconUrl / readmeUrl / version
+spec:
+  phase:              # 插件执行阶段
+  priority:           # 优先级 0-1000
+  configSchema:
+    openAPIV3Schema:  # ← 前端据此渲染配置表单</code></pre>
+                <div class="anno">读法：<b>约 43 个插件目录：ai-*、basic-auth、jwt-auth、key-auth、waf、mcp-server、model-mapper、model-router 等。<code>BuiltInPluginName.java</code> 列了所有内置插件名常量（AI/Auth/Security/Transformation/Traffic 各类）。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>"插件定义"和"插件实例"的区别？</li>
+                    <li>内置插件的元数据从哪加载？为什么缓存在内存？</li>
+                    <li>插件实例怎么映射成 CRD 的 defaultConfig / matchRules？</li>
+                    <li>后端 JSONSchema 校验的真相是什么？schema 主要给谁用？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk
+sed -n '122,186p' service/WasmPluginServiceImpl.java
+sed -n '31,36p' model/WasmPluginConfig.java     # 空 TODO 校验
+sed -n '765,814p' service/kubernetes/KubernetesModelConverter.java
+ls src/main/resources/plugins/ | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>消费者与鉴权</strong>——消费者其实是 key-auth 插件的全局实例、allow list 机制、以及"目前只支持 API Key 一种鉴权"的现状与扩展点。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day11.html" style="color:var(--accent-cyan);">&larr; Day 11</a>
+                <a href="higress-console-day13.html" style="color:#3b82f6;">Day 13 · 消费者鉴权 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · AI 供应商与 AI 路由 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fan{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+        .fan .h{background:linear-gradient(135deg,#3b82f6,#ec4899);color:#fff;padding:8px 12px;border-radius:8px;font-weight:700;font-size:13px;text-align:center}
+        .fan .items{display:flex;gap:6px;flex-wrap:wrap}
+        .fan .items .b{flex:1;min-width:120px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;padding:7px 9px;font-size:12px;text-align:center}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">AI 供应商与路由 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · AI 网关两条主线</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · LlmProvider 模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Handler 注册表</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · addOrUpdate 全流程</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · AiRoute 模型与校验</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一对多编排</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Fallback 与 EnvoyFilter</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day12.html" class="nav-link" style="color:#3b82f6;">Day 12 插件管理 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 AI/插件/消费者</span>
+            <h1 class="part-title">AI 供应商与 AI 路由</h1>
+            <p class="part-desc">第 3 周开场就是 Console 最精彩的部分。今天看两条主线：LLM Provider（配置对接哪家大模型）如何变成 ai-proxy 插件配置，以及 AI 路由如何"一条变多个"展开成 Ingress + 多个插件 + EnvoyFilter。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>AI 网关两条主线</h1></div>
+            <div class="card">
+                <ol>
+                    <li><strong>LLM Provider</strong>（<code>/v1/ai/providers</code>）：定义"对接哪家大模型"——OpenAI/通义/Claude/DeepSeek… 含 API 密钥、端点。</li>
+                    <li><strong>AI Route</strong>（<code>/v1/ai/routes</code>）：定义"什么请求走哪个 provider、按什么模型路由/映射、失败怎么降级"。</li>
+                </ol>
+                <div class="baby"><span class="t">AI 网关在解决什么问题？</span>
+                你的应用要调大模型，但直接对接各家 API 很麻烦：密钥管理、格式不统一、限流、计费、故障切换……<strong>AI 网关把这些统一到网关层：应用只对网关说"用 OpenAI 格式",网关负责翻译成各家格式、管密钥、限 token、失败时自动切到备用 provider。</strong>Console 就是配置这套能力的界面，底层靠 <code>ai-proxy</code> 等 Wasm 插件实现（上一站 Higress 讲过 ai-proxy 支持 39 家 provider）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>LlmProvider 模型</h1></div>
+            <div class="card">
+                <p><code>sdk/model/ai/LlmProvider.java</code>（字段 <code>:33-46</code>）：</p>
+<pre><code class="language-java">name / type / protocol / proxyName
+tokens          // List<String>，各家的 API 密钥
+tokenFailoverConfig
+rawConfigs      // Map，直接透传给 ai-proxy 插件的原始 KV</code></pre>
+                <p>类型 <code>LlmProviderType.java</code> 有 30+ 常量（qwen/openai/moonshot/azure/deepseek/zhipuai/ollama/claude/gemini/doubao/bedrock/vertex/vllm…）；协议 <code>LlmProviderProtocol.java</code> 枚举 <code>OPENAI_V1</code>（默认）与 <code>ORIGINAL</code>。</p>
+                <div class="anno">读法：<b>注意协议有"API 层 value"和"插件层 pluginValue"两套值，<code>fromValue/fromPluginValue</code>（<code>:47-63</code>）双向转换——<strong>因为前端 API 用一套命名，底层插件用另一套，中间要翻译。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Handler 注册表（策略模式）</h1></div>
+            <div class="card">
+                <p><code>sdk/service/ai/LlmProviderServiceImpl.java</code> 静态块（<code>:59-90</code>）建一个 <code>Map&lt;type, LlmProviderHandler&gt;</code>：</p>
+<pre><code class="language-java">// 大多数厂商一行注册（域名固定）：
+map.put("moonshot", new DefaultLlmProviderHandler("moonshot", "api.moonshot.cn", 443, ...));
+map.put("deepseek", new DefaultLlmProviderHandler("deepseek", "api.deepseek.com", 443, ...));
+// 有特殊逻辑的用专用 Handler：
+map.put("qwen",  new QwenLlmProviderHandler());   // 注入 qwen 专属默认值
+map.put("azure", new AzureLlmProviderHandler());
+// Openai/ZhipuAI/Ollama/Claude/Bedrock/Vertex/Vllm ...</code></pre>
+                <div class="baby"><span class="t">为什么用"注册表 + Handler"？</span>
+                每家大模型的对接细节都不一样（域名、默认参数、鉴权方式）。<strong>与其写一大堆 if-else，不如给每家一个 Handler（处理器），统一接口，注册进一张表。加新厂商 = 加一个 Handler + 注册一行，老代码不动。</strong>这就是"策略模式 + 注册表"——开闭原则的经典应用。<code>QwenLlmProviderHandler</code> 就为通义注入了 <code>qwenEnableCompatible=true</code>（OpenAI 兼容模式）等专属默认值。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>addOrUpdate 全流程</h1></div>
+            <div class="card">
+                <p><code>LlmProviderServiceImpl.addOrUpdate</code>（<code>:104-246</code>）是"Provider → 网关配置"的核心：</p>
+                <ol>
+                    <li>按 type 取 handler，没有就抛 <code>ValidationException</code>（<code>:105-108</code>）。</li>
+                    <li><code>handler.normalizeConfigs</code> 归一化 + <code>fillDefaultValues</code> 默认协议 openai/v1（<code>:115-117</code>）。</li>
+                    <li>取 <code>ai-proxy</code> 插件的 <strong>GLOBAL</strong> 实例（没有就建空的，<code>setInternal(true)</code>，<code>:126-133</code>）。</li>
+                    <li>从全局配置取出 <code>providers</code> 数组，<code>handler.saveConfig</code> 把该 provider 序列化成 Map，按 <code>id</code> 替换或追加（<code>:148-168</code>）。</li>
+                    <li><code>handler.buildServiceSource</code> 生成对应的服务来源并落库（<code>:172-183</code>）。</li>
+                    <li><code>handler.buildUpstreamService</code> 生成上游服务名，为该 service 再建一个 ai-proxy 实例绑定 provider（<code>:185-222</code>）。</li>
+                    <li><code>wasmPluginInstanceService.addOrUpdateAll</code> 落库；必要时 <code>syncRelatedAiRoutes</code> 联动更新引用它的 AI 路由（<code>:234-236</code>）。</li>
+                </ol>
+                <div class="anno">读法：<b>一个"加 provider"操作，落地成了：ai-proxy 全局实例的 providers 数组多一项 + 一个服务来源 + 一个 service 维度的 ai-proxy 实例。<strong>反向读取 <code>getProviders</code>（<code>:387-414</code>）则从这些资源里还原成 LlmProvider 列表。</strong>配置常量在 <code>AiProxyConfig.java</code>（providers/id/type/apiTokens/protocol/failover…）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>AiRoute 模型与校验</h1></div>
+            <div class="card">
+                <p><code>sdk/model/ai/AiRoute.java</code>（字段 <code>:44-73</code>）：<code>name/domains/pathPredicate/headerPredicates/upstreams/modelPredicates/authConfig/fallbackConfig/cors/...</code>。<code>validate</code>（<code>:75-112</code>）：</p>
+                <ul>
+                    <li>upstreams 非空；</li>
+                    <li><strong>upstream 权重之和必须 = 100</strong>（<code>:99-101</code>）；</li>
+                    <li>headerPredicates 不能含模型路由头（<code>:90-93</code>）。</li>
+                </ul>
+                <p><code>AiUpstream.java</code>：<code>provider / weight / modelMapping(Map&lt;原模型,目标模型&gt;)</code>。</p>
+                <div class="anno">读法：<b><code>modelMapping</code> 很有意思——它能把请求里的模型名改写（比如把 <code>gpt-4</code> 映射到某 provider 的等效模型）。这让"应用写一个模型名，网关按路由映射到不同后端模型"成为可能。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一对多编排（本课最精彩）</h1></div>
+            <div class="card">
+                <p><code>AiRouteServiceImpl.writeAiRouteResources</code>（<code>:242-250</code>）——<strong>一条 AI 路由同时展开成多种资源</strong>：</p>
+                <div class="fan">
+                    <div class="h">一条 AiRoute</div>
+                    <div class="items">
+                        <div class="b"><b>Ingress 路由</b><br>buildRoute+saveRoute</div>
+                        <div class="b"><b>model-router</b><br>模型名→请求头</div>
+                        <div class="b"><b>model-mapper</b><br>每上游模型映射</div>
+                        <div class="b"><b>ai-statistics</b><br>统计（默认开）</div>
+                    </div>
+                </div>
+                <ul>
+                    <li><code>writeModelRouterResources</code>（<code>:312-341</code>）：有 modelPredicates 时配全局 model-router 插件，把模型名映射到 <code>MODEL_ROUTING_HEADER</code> 请求头。</li>
+                    <li><code>writeModelMappingResources</code>（<code>:343-381</code>）：每个上游在 (ROUTE, SERVICE) 双维度配 model-mapper。</li>
+                    <li><code>writeAiStatisticsResources</code>（<code>:383-402</code>）：挂 ai-statistics 插件。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么一条路由要拆成这么多插件？</span>
+                "AI 路由"是个高层概念，它组合了好几种底层能力：<strong>按模型名路由（model-router）、模型名映射（model-mapper）、Token 统计（ai-statistics）</strong>。这些能力各由一个 Wasm 插件实现。<strong>Console 把"配一条 AI 路由"这个人类友好的操作，翻译成"配好这一组插件实例"——用户不用懂底层有几个插件，界面上就是一条路由。</strong>这就是"高层抽象 → 底层资源"编排的极致体现。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Fallback 与 EnvoyFilter</h1></div>
+            <div class="card">
+                <p><code>writeAiRouteFallbackResources</code>（<code>:252-310</code>）：若启用降级，额外建一条"fallback 路由"（用 <code>FALLBACK_FROM_HEADER</code> 头匹配），并用 <strong>Velocity 模板</strong>渲染出一个 <code>EnvoyFilter</code>（模板 <code>/templates/envoyfilter-route-fallback.yaml</code>，<code>:111-127</code> 加载）实现失败重定向。</p>
+                <div class="baby"><span class="t">什么是 fallback（降级）？</span>
+                如果主 provider（比如 OpenAI）挂了或超时，<strong>网关自动把请求转给备用 provider</strong>，用户无感。RANDOM 策略给备用上游等权重、SEQUENCE 按顺序试。<strong>因为这种"失败后重路由"的逻辑 Ingress 注解表达不了，只能下沉到 Envoy 层——所以 Console 生成一个 EnvoyFilter（直接改 Envoy 配置）来实现。</strong>Velocity 模板负责把参数填进 EnvoyFilter 的 YAML 骨架。</div>
+                <div class="anno">读法：<b>别混淆两个 "AiProxy"：<code>AiProxyController</code>（<code>/aiproxy</code>）是<strong>控制台内置 AI 助手的反向代理</strong>（把界面上的"体验对话"转发到外部 AI），跟网关的 <code>ai-proxy</code> 插件不是一回事。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>AI 网关解决什么问题？两条主线（Provider/Route）？</li>
+                    <li>Handler 注册表为什么用策略模式？加新厂商怎么加？</li>
+                    <li>加一个 Provider 落地成哪几种资源？</li>
+                    <li>一条 AiRoute 展开成哪四件套？为什么要拆这么多插件？</li>
+                    <li>Fallback 为什么需要 EnvoyFilter？两个 "AiProxy" 怎么区分？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk
+sed -n '59,90p' service/ai/LlmProviderServiceImpl.java
+sed -n '104,246p' service/ai/LlmProviderServiceImpl.java
+sed -n '242,402p' service/ai/AiRouteServiceImpl.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>插件管理</strong>——WasmPlugin 定义怎么从 classpath 加载、实例怎么映射成 CRD 的 matchRules、以及"JSONSchema 校验"的真相（后端其实是空 TODO！）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day10.html" style="color:var(--accent-cyan);">&larr; Day 10</a>
+                <a href="higress-console-day12.html" style="color:#3b82f6;">Day 12 · 插件管理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

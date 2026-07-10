@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 路由与服务来源 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">路由与服务来源 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三个概念的关系</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 路由回顾</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 服务只读</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 服务来源 Controller</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 8 种注册中心</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 全存一个 McpBridge</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 认证单独存 Secret</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day15.html" class="nav-link" style="color:#3b82f6;">Day 15 MCP 管理 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 AI/插件/消费者</span>
+            <h1 class="part-title">路由 · 服务 · 服务来源</h1>
+            <p class="part-desc">今天理清三个容易混的概念：路由（怎么转发）、服务（转发到哪，只读）、服务来源（从哪发现服务）。重点在服务来源——8 种注册中心如何全部塞进一个名为 default 的 McpBridge CR。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三个概念的关系</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>服务来源（ServiceSource）</strong>：告诉 Higress"去哪个注册中心发现服务"（Nacos/K8s/…）。</li>
+                    <li><strong>服务（Service）</strong>：从服务来源<strong>发现</strong>到的服务，只读。</li>
+                    <li><strong>路由（Route）</strong>：把匹配的请求转发到某个（些）服务。</li>
+                </ul>
+                <div class="baby"><span class="t">一条链：来源 → 服务 → 路由</span>
+                <strong>先配服务来源（"去 Nacos 找服务"）→ Higress 发现一堆服务 → 你建路由时从这些服务里挑一个当后端。</strong>三者是上下游关系：没有服务来源就发现不到服务，没有服务就没得给路由当后端。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>路由回顾</h1></div>
+            <div class="card">
+                <p>路由第 2 周已深入（Day 10）。快速回顾：<code>RoutesController</code>（<code>/v1/routes</code>）→ <code>RouteServiceImpl</code>（依赖 K8sClient/ModelConverter/WasmPluginInstanceService/ConsumerService）→ <code>route2Ingress</code> 转成 Ingress + 注解。</p>
+                <div class="anno">读法：<b>Route 的高级能力（CORS/rewrite/header 控制/path 匹配类型）都通过 Higress 定制注解承载；rewrite 分"精确/前缀路径用 rewrite-path、正则用 rewrite-target"；path 类型 EXACT/PRE/REGULAR 对应 Ingress 的 Exact/Prefix + <code>use-regex</code> 注解。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>服务只读</h1></div>
+            <div class="card">
+                <p><code>ServicesController.java</code>（<code>/v1/services</code>，<code>:36</code>）仅 <code>GET list</code>（<code>:44</code>）。<code>ServiceServiceImpl.list</code>（<code>:61</code>）的数据来自 Istio 的 registryz/endpoint。<code>Service.java</code>：name/namespace/port/version/endpoints/protocol。</p>
+                <div class="baby"><span class="t">为什么服务不能增删改？</span>
+                服务不是你在 Console 里"创建"的，而是网关从注册中心<strong>实时发现</strong>的——服务实例上线下线由各服务自己决定，Console 只是"看客"。<strong>你想改变有哪些服务，得去改"服务来源"（换注册中心 / 加过滤），而不是直接改服务本身。</strong>所以服务只读，符合服务发现的语义。回想 Day 06 的"二选一"：这个列表可能来自 Higress 控制器的 registryz，也可能直接列 K8s Service。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>服务来源 Controller</h1></div>
+            <div class="card">
+                <p><code>ServiceSourceController.java</code>（<code>/v1/service-sources</code>，<code>:46</code>）：list(<code>:53</code>，<code>stripSensitiveInfo</code> 抹掉认证信息)、add(<code>:65</code>)、addOrUpdate(<code>:81</code>)、delete(<code>:99</code>)、query(<code>:112</code>)。</p>
+                <div class="anno">读法：<b>list 时 <code>stripSensitiveInfo</code> 把认证密码/token 抹掉再返回前端——<strong>敏感信息只写不读回</strong>，避免密码在界面泄露。这是安全设计的常见做法。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>8 种注册中心</h1></div>
+            <div class="card">
+                <p><code>ServiceSource.java</code>：<code>ALLOWABLE_TYPES</code>（<code>:52-55</code>）= <strong>nacos / nacos2 / nacos3 / zookeeper / consul / eureka / static / dns</strong>；<code>validate</code>（<code>:121-196</code>）按类型分派专用校验器（Nacos/Consul/Static/Dns）。</p>
+                <div class="anno">读法：<b>static = 直接写死 IP，dns = 用域名，其余是主流注册中心。<strong>proxy 只支持 static/dns</strong>（通过代理访问的场景）。注意只有 <code>nacos3</code> 支持 MCP Server（<code>V1McpBridge.MCP_SUPPORTED_REGISTRY_TYPES</code>，Day 15 用到）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>全部存进一个 McpBridge CR</h1></div>
+            <div class="card">
+                <p>关键设计：<strong>所有服务来源存进一个名为 <code>default</code> 的 McpBridge CR 的 <code>spec.registries[]</code> 数组</strong>。<code>ServiceSourceServiceImpl</code>：</p>
+<pre><code class="language-java">list  :61    // 读 default McpBridge 的 registries
+add   :169   // readMcpBridge(default) → addV1McpBridgeRegistry → replace
+// 转换：KubernetesModelConverter.addV1McpBridgeRegistry :1728
+//       removeV1McpBridgeRegistry :1752 / fillV1RegistryConfig :1860</code></pre>
+                <p>CRD 常量 <code>crd/mcp/V1McpBridge.java:27-35</code>：group <code>networking.higress.io</code>、kind <code>McpBridge</code>、plural <code>mcpbridges</code>、<code>DEFAULT_NAME=default</code>。</p>
+                <div class="baby"><span class="t">为什么全塞一个 CR，而不是一个来源一个 CR？</span>
+                McpBridge 是 Higress 定义的"服务来源汇总表"CRD。<strong>Higress 控制器只 watch 这一个名为 default 的 McpBridge，读它的 registries 数组就知道所有服务来源。</strong>Console 每次加/删来源，都是"读出这个 CR → 改数组 → 写回"（Day 07 说过的读-改-写）。<strong>单一资源好管理，也符合 Higress 控制器的约定。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>认证单独存 Secret</h1></div>
+            <div class="card">
+                <p><code>ServiceSourceServiceImpl.syncAuthSecret</code>（<code>:207</code>）把注册中心的认证信息（用户名/密码/token）单独存进 K8s Secret，McpBridge 的 registry 项里只存 <code>authSecretName</code>（引用）。</p>
+                <div class="anno">读法：<b>又是"敏感数据存 Secret"的体现（Day 07 表格）。<strong>McpBridge CR 里只放 Secret 的名字，真正的密码在 Secret 里（受 K8s 加密保护）。</strong>这样看 McpBridge 的人看不到明文密码，安全。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>服务来源、服务、路由三者的上下游关系？</li>
+                    <li>为什么服务只读？想改变服务列表该动什么？</li>
+                    <li>8 种注册中心有哪些？哪个支持 MCP？</li>
+                    <li>服务来源为什么全存进一个 default McpBridge？认证信息存哪？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk
+sed -n '52,55p' model/ServiceSource.java
+sed -n '61,210p' service/ServiceSourceServiceImpl.java
+sed -n '27,81p' service/kubernetes/crd/mcp/V1McpBridge.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：<strong>MCP 管理</strong>——MCP Server 的三种类型（OpenAPI/Database/DirectRoute）、双策略工厂（save/detail）、以及"MCP Server 不是独立 CRD 而是 Route + ConfigMap"的存储设计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day13.html" style="color:var(--accent-cyan);">&larr; Day 13</a>
+                <a href="higress-console-day15.html" style="color:#3b82f6;">Day 15 · MCP 管理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

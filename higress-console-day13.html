@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 消费者与鉴权 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">消费者与鉴权 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 消费者是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Controller</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 存进 key-auth 全局实例</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 凭据→插件配置</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 只支持 API Key</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · allow list 机制</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 路由鉴权桥梁</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day14.html" class="nav-link" style="color:#3b82f6;">Day 14 路由/服务源 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 AI/插件/消费者</span>
+            <h1 class="part-title">消费者与鉴权</h1>
+            <p class="part-desc">今天看"谁能访问我的 API"这套鉴权。核心发现：所谓"消费者"其实就是 key-auth 插件的一个全局实例，"给路由加鉴权"就是往 allow list 里加名字。理解这层映射，鉴权就不神秘了。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>消费者是什么</h1></div>
+            <div class="card">
+                <p><strong>消费者（Consumer）</strong>代表"一个 API 调用方"，带一份凭据（API Key）。给某条路由配上"只允许消费者 A、B 访问"，未带正确 Key 的请求就被拦。</p>
+                <div class="baby"><span class="t">用生活例子理解</span>
+                消费者就像"发给合作方的门禁卡"。<strong>你先登记若干张卡（消费者 + 各自的 Key），再在某扇门（路由）上设置"只有这几张卡能进"。</strong>访客刷卡（请求带 Key），网关核对卡号，对了放行、错了拦下。<strong>Console 管的就是"发卡"和"给门配名单"两件事。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ConsumersController</h1></div>
+            <div class="card">
+                <p><code>ConsumersController.java</code>（<code>/v1/consumers</code>，<code>:45-49</code>）：list(<code>:58</code>)、add(<code>:67</code>，<code>validate(false)</code> 凭据值必填)、query(<code>:78</code>)、put(<code>:88</code>，<code>validate(true)</code> 凭据值可空)、delete(<code>:105</code>)。</p>
+                <div class="anno">读法：<b>add 时 <code>validate(false)</code> 表示"凭据值必须填"（新建就要给 Key）；put 时 <code>validate(true)</code> 表示"凭据值可以空"（改其他字段时不强制重填 Key）。<strong>同一个校验方法用一个布尔参数区分新建/更新的宽严——小技巧。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>存进 key-auth 全局实例</h1></div>
+            <div class="card">
+                <p><code>ConsumerServiceImpl.addOrUpdate</code>（<code>:64-79</code>）：取/建 <code>key-auth</code> 插件的全局实例（<code>setInternal(true)</code> + <code>setGlobalTarget</code> + <code>initDefaultGlobalConfigs</code>）→ <code>handler.saveConsumer</code> → <code>addOrUpdateAll</code>。</p>
+                <div class="baby"><span class="t">消费者没有独立存储！</span>
+                你以为消费者会存在一张"用户表"里？<strong>不——所有消费者都存进 <code>key-auth</code> 这个鉴权插件的<strong>全局实例配置</strong>里</strong>（它的 <code>consumers</code> 数组）。因为消费者本来就是给 key-auth 插件用的数据，直接存进插件配置最自然。<strong>Console 的一切都落成插件/CRD/ConfigMap——消费者也不例外。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>凭据 → 插件配置</h1></div>
+            <div class="card">
+                <p><code>KeyAuthCredentialHandler.saveConsumer</code>（<code>:125-212</code>）是"凭据 → 插件配置"映射核心，按 <code>KeyAuthCredentialSource</code> 写 <code>in_header</code> / <code>in_query</code>：</p>
+                <ul>
+                    <li><strong>BEARER</strong>：key 固定 <code>Authorization</code>，值加 <code>Bearer </code> 前缀（<code>:188-195</code>）</li>
+                    <li><strong>HEADER</strong>：自定义请求头</li>
+                    <li><strong>QUERY</strong>：查询参数</li>
+                </ul>
+                <p>写 <code>keys</code>/<code>credentials</code>，强制 <code>global_auth=false</code>（<code>:210</code>）；不同消费者用相同 key 值会报错（<code>:165-168</code>）。</p>
+                <div class="anno">读法：<b>三种"Key 放哪"对应三种客户端习惯：放 Authorization 头（Bearer）、放自定义头、放 URL 参数。<code>global_auth=false</code> 表示"不是全局强制鉴权"——具体哪条路由要鉴权由 allow list 决定（下一讲）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>目前只支持 API Key</h1></div>
+            <div class="card">
+                <p><code>ConsumerServiceImpl</code> 的 Handler 注册表（<code>:51-56</code>）<strong>只注册了 <code>KeyAuthCredentialHandler</code></strong>。<code>jwt-auth</code> 只有插件名常量（<code>BuiltInPluginName.java:40</code>）<strong>没有对应 Handler</strong>。凭据类型 <code>CredentialType.java</code> 唯一值就是 <code>key-auth</code>。</p>
+                <div class="glossary"><b>现状 + 扩展点</b>：Console 目前只支持 API Key 一种鉴权。<b>想加 JWT 鉴权？扩展点很清晰</b>——新增一个 <code>CredentialHandler</code> 实现，注册进 <code>ConsumerServiceImpl.java:51-56</code> 的表里即可。<b>这又是一个绝佳的"动手改进"练习。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>allow list 机制</h1></div>
+            <div class="card">
+                <p>"某路由允许哪些消费者"用 allow list 表达。<code>ConsumerServiceImpl</code>：</p>
+                <ul>
+                    <li><code>listAllowLists</code>（<code>:120-155</code>）/ <code>getAllowList</code>（<code>:157-192</code>，禁 GLOBAL）</li>
+                    <li><code>updateAllowList</code>（<code>:194-278</code>）：空 credentialTypes 默认 KEY_AUTH，按 <strong>ADD/REMOVE/REPLACE/TOGGLE_ONLY</strong> 改 allow</li>
+                </ul>
+                <div class="baby"><span class="t">allow list 到底是什么？</span>
+                它就是"某个 ROUTE 作用域的 key-auth 插件实例"里的 <code>allow</code> 数组——列出这条路由放行哪些消费者，加上 <code>enabled</code>（是否开启鉴权）。<strong>四种操作：ADD 加人、REMOVE 移人、REPLACE 整体替换、TOGGLE_ONLY 只切换开关不改名单。</strong>前端"给路由勾选允许的消费者"就调这个。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>路由鉴权桥梁</h1></div>
+            <div class="card">
+                <p>回到 Day 10 的悬念——为什么 <code>RouteServiceImpl.add</code> 要 <code>writeAuthConfigResources</code>？答案在 <code>RouteServiceImpl.java</code>：</p>
+                <ul>
+                    <li>add/update 后 <code>writeAuthConfigResources</code>（<code>:167-175</code>）：把路由的 <code>RouteAuthConfig</code> 转成 AllowList，用 REPLACE 写入。</li>
+                    <li>读取时 <code>ingress2Route</code> 回填 <code>RouteAuthConfig</code>。</li>
+                    <li>delete 时清 ROUTE 作用域的 key-auth 实例（<code>:156-165</code>）。</li>
+                </ul>
+                <div class="anno">读法：<b>这就把"路由"和"鉴权"两个模块接起来了：<strong>路由上的鉴权设置 ↔ 一个 ROUTE 作用域 key-auth 插件实例的 allow list。</strong>Route 里的 <code>authConfig</code>（Day 09 见过的字段）就是这层桥梁的载体。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>消费者是什么？它存在哪（不是数据库）？</li>
+                    <li>三种凭据 source（BEARER/HEADER/QUERY）的区别？</li>
+                    <li>目前支持几种鉴权？加 JWT 的扩展点在哪？</li>
+                    <li>allow list 的四种操作？路由鉴权和 key-auth 实例怎么对应？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk
+sed -n '51,79p' service/consumer/ConsumerServiceImpl.java
+sed -n '125,212p' service/consumer/KeyAuthCredentialHandler.java
+sed -n '194,278p' service/consumer/ConsumerServiceImpl.java
+sed -n '156,175p' service/RouteServiceImpl.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>路由与服务来源管理</strong>——服务为什么只读、服务来源（8 种注册中心）如何全部存进一个 McpBridge CR、认证信息如何单独存 Secret。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day12.html" style="color:var(--accent-cyan);">&larr; Day 12</a>
+                <a href="higress-console-day14.html" style="color:#3b82f6;">Day 14 · 路由/服务源 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
