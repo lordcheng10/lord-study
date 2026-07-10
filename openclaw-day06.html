@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · LLM 层与 Pi 内核 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e11d48,#8b5cf6);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">LLM 层与 Pi 内核 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一个反直觉的事实</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Pi 是什么</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · streamFn 抽象</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Provider 分流</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 装饰器中间件</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 模型选择</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 插件式 Provider</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day07.html" class="nav-link" style="color:#f97316;">Day 07 故障转移 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 Agent 大脑</span>
+            <h1 class="part-title">LLM 层与 Pi 内核</h1>
+            <p class="part-desc">第 2 周进入 Agent 大脑。第一课要打破一个错觉：OpenClaw <strong>自己并不写 LLM 调用循环</strong>——它内嵌了第三方 Agent 框架 <strong>Pi</strong>，自己做"编排外壳"。理解这层关系，后面全通。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一个反直觉的事实</h1></div>
+            <div class="card">
+                <p>你可能以为 OpenClaw 里有一大段"调 OpenAI/Anthropic API + 解析工具调用 + 循环"的代码。<strong>其实没有。</strong>真正的 LLM 调用和 ReAct 循环在第三方库 <strong>Pi</strong>（<code>@mariozechner/pi-agent-core</code> / <code>pi-ai</code> / <code>pi-coding-agent</code>，见 <code>package.json:352-355</code>）里。</p>
+                <div class="baby"><span class="t">好比"买发动机造车"</span>
+                造车厂不一定自己造发动机——可以买一台成熟发动机（Pi），然后专注做<strong>底盘、变速箱、内饰、安全系统（OpenClaw 的编排外壳）</strong>。OpenClaw 就是这样：<strong>Pi 提供"和大模型对话、循环调工具"的发动机；OpenClaw 提供把它变成一个可靠个人助理所需的一切</strong>——多渠道、模型故障转移、鉴权轮换、技能、记忆、安全策略。<strong>本周你学的 90% 都是这层"外壳"的精妙工程，而不是发动机内部。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Pi 是什么</h1></div>
+            <div class="card">
+                <p>Pi 是一个 TypeScript 的编码 Agent 框架，分三个包：</p>
+                <ul>
+                    <li><code>pi-ai</code>：底层 LLM 传输（<code>streamSimple</code> 真正发请求）。</li>
+                    <li><code>pi-agent-core</code>：Agent 会话、消息类型、<code>StreamFn</code> 接口。</li>
+                    <li><code>pi-coding-agent</code>：编码工具（read/write/edit/grep…）+ ReAct 循环 <code>session.prompt()</code>。</li>
+                </ul>
+                <p>OpenClaw 通过 <code>src/agents/pi-embedded-runner/</code>（"内嵌 Pi 运行器"）来驱动它。入口 <code>createAgentSession</code>（<code>attempt.ts:1824</code>）：</p>
+<pre><code class="language-typescript">import { streamSimple } from "@mariozechner/pi-ai";
+import { createAgentSession, SessionManager } from "@mariozechner/pi-coding-agent";
+
+({ session } = await createAgentSession({
+  cwd: resolvedWorkspace, agentDir,
+  authStorage, modelRegistry, model: params.model,
+  tools: builtInTools, customTools: allCustomTools,   // ← OpenClaw 注入的工具
+  sessionManager, settingsManager, resourceLoader,
+}));</code></pre>
+                <div class="anno">读法：<b>OpenClaw 把"模型、工具、系统提示、会话管理器"交给 Pi 的 <code>createAgentSession</code>，Pi 负责跑循环。</b>OpenClaw 的活儿是"准备好这些输入 + 观察输出"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>streamFn 抽象</h1></div>
+            <div class="card">
+                <p>Pi 用一个 <code>StreamFn</code> 函数接口抽象"怎么和模型对话"。OpenClaw 把不同的传输实现挂到 <code>session.agent.streamFn</code> 上（<code>attempt.ts:1879-1905</code>）。</p>
+                <div class="baby"><span class="t">streamFn = "对话的插座"</span>
+                Pi 循环需要"给它文字、它流式返回模型输出"这么个能力，但不关心背后是 OpenAI 还是别的。<strong>这个能力被抽象成一个函数 <code>streamFn</code>——像一个标准插座。OpenClaw 按当前用的是哪个 provider，往这个插座里插不同的"插头"</strong>（OpenAI WebSocket 插头、Ollama 插头、默认插头）。这就是我们反复见到的<strong>接口/实现分离</strong>：Pi 定义接口，OpenClaw 提供实现。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Provider 分流</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">if (params.model.api === "ollama") {
+  activeSession.agent.streamFn = ollamaStreamFn;                    // 本地 Ollama 原生 API
+} else if (params.model.api === "openai-responses" &amp;&amp; params.provider === "openai") {
+  activeSession.agent.streamFn = createOpenAIWebSocketStreamFn(wsApiKey, ...);  // WebSocket
+} else {
+  activeSession.agent.streamFn = streamSimple;                     // Pi 默认（覆盖大多数 provider）
+}</code></pre>
+                <div class="anno">读法：<b>三条分支决定用哪个"插头"：Ollama 走本地原生 API、OpenAI responses 走 WebSocket、其余全走 Pi 自带的 <code>streamSimple</code>。</b>大多数 provider（Anthropic、Google…）都由 <code>streamSimple</code> 统一处理，只有需要特殊传输的才单独分支。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>装饰器中间件</h1></div>
+            <div class="card">
+                <p>选好 <code>streamFn</code> 后，OpenClaw 用一串"包裹函数"层层增强它（<code>attempt.ts:1925-2059</code>）：</p>
+<pre><code class="language-typescript">// 每一层都接收上一层的 streamFn、返回一个增强版 streamFn
+streamFn = cacheTrace.wrapStreamFn(streamFn);                       // 缓存命中跟踪
+streamFn = wrapStreamFnTrimToolCallNames(streamFn);                // 修剪工具名
+streamFn = wrapStreamFnRepairMalformedToolCallArguments(streamFn); // 修复畸形工具参数
+// …… Ollama num_ctx 修正、xAI 参数解码、Anthropic payload 日志</code></pre>
+                <div class="baby"><span class="t">装饰器模式 = "套娃式增强"</span>
+                每一层都是"拿到一个函数、返回一个功能更强的同类函数"。<strong>就像给手机套一层又一层保护壳：防摔壳、防水壳、支架壳——每层加一个能力，但对外还是"一个手机"。</strong>这里每层给 <code>streamFn</code> 加一个能力（修工具参数、记日志、跟踪缓存），最外层还是一个普通 <code>streamFn</code>，Pi 循环照常调用、浑然不觉。<strong>这是函数式编程里极常见的"中间件/装饰器"手法——把横切关注点（日志、修复、缓存）和核心逻辑解耦。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>模型选择</h1></div>
+            <div class="card">
+                <p>用哪个模型？入口 <code>runEmbeddedPiAgent</code>（<code>run.ts:256</code>）在 <code>run.ts:299-300</code> 定 provider/model（默认值 <code>src/agents/defaults.ts</code>）。插件钩子可在解析前改写：</p>
+<pre><code class="language-typescript">// before_model_resolve 钩子可返回 { providerOverride, modelOverride }
+// resolveModel(provider, modelId, agentDir, config) → { model, authStorage, modelRegistry }</code></pre>
+                <div class="anno">读法：<b><code>resolveModel</code>（<code>model.ts</code>）把"provider 名 + 模型 id"解析成真正的模型对象 + 鉴权存储 + 模型注册表。</b>插件可以通过 <code>before_model_resolve</code> 钩子拦截并换模型（Day 12 讲扩展）。模型目录在 <code>models-config.*.ts</code> / <code>model-catalog.ts</code>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>插件式 Provider</h1></div>
+            <div class="card">
+                <p>Provider 既有内建（anthropic/openai/google…），也能<strong>由扩展动态注入</strong>。比如 <code>extensions/ollama/index.ts</code> 的 <code>register</code> 只做一件事：</p>
+<pre><code class="language-typescript">register(api) {
+  api.registerProvider({ id, label, auth, discovery, wizard, onModelSelected });
+}</code></pre>
+                <div class="anno">读法：<b>想加一个新模型来源（vllm/sglang/ollama），不用改核心代码——写个扩展调 <code>api.registerProvider</code> 即可。</b>由 <code>src/plugins/providers.ts</code> + <code>provider-discovery.ts</code> 汇入模型配置。这是"开闭原则"：对扩展开放、对修改关闭。Day 12 详讲扩展系统。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>OpenClaw 自己写 LLM 循环吗？真正的循环在哪？</li>
+                    <li>Pi 的三个包各管什么？</li>
+                    <li>streamFn 是什么抽象？为什么要分 provider 挂不同实现？</li>
+                    <li>装饰器中间件怎么增强 streamFn？举两个例子。</li>
+                    <li>怎么加一个新的模型 provider（不改核心代码）？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+grep -n 'pi-agent-core\|pi-ai\|pi-coding-agent' package.json
+sed -n '1870,1910p' src/agents/pi-embedded-runner/run/attempt.ts   # streamFn 分流
+grep -n 'wrapStreamFn' src/agents/pi-embedded-runner/run/attempt.ts | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>模型故障转移</strong>——README 说的"OAuth vs API key 轮换 + fallback"是<strong>两层嵌套循环</strong>：外层换模型、内层换鉴权 profile。这是 OpenClaw"永不掉线"的关键工程。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="openclaw-day07.html" style="color:#f97316;">Day 07 · 模型故障转移 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

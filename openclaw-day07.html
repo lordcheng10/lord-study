@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 模型故障转移 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .layer{border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--bg-card)}
+        .layer h4{margin:0 0 6px;font-size:13px}.layer.outer h4{color:#e11d48}.layer.inner{margin-left:22px;border-style:dashed}.layer.inner h4{color:#8b5cf6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e11d48,#8b5cf6);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">模型故障转移 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要故障转移</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两层结构总览</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 外层：换模型</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 内层：换 profile</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · OAuth&gt;token&gt;key 排序</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 冷却与退避</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 错误分类</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 Pi 内核</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day08.html" class="nav-link" style="color:#f97316;">Day 08 Agent 循环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 Agent 大脑</span>
+            <h1 class="part-title">模型故障转移（Failover）</h1>
+            <p class="part-desc">README 里那句"Auth profile rotation (OAuth vs API keys) + fallbacks"，在代码里是<strong>两层嵌套循环</strong>：外层逐个换模型、内层逐个换鉴权 profile。这是 OpenClaw"某个模型/某把 key 挂了也不掉线"的核心工程。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要故障转移</h1></div>
+            <div class="card">
+                <p>一个 24 小时在线的个人助理，随时可能遇到：模型限流（429）、某把 API key 额度用尽、OAuth token 过期、某 provider 宕机、请求过载。<strong>如果一遇错就放弃，助理三天两头"失联"。</strong>故障转移让它自动换下一个可用的模型/凭据继续。</p>
+                <div class="baby"><span class="t">像"多条备用路线的导航"</span>
+                你开车时导航发现前方堵车，会自动切到备用路线，而不是让你停在原地。<strong>OpenClaw 也一样：当前模型/凭据不通，就自动切到下一个备选，用户几乎无感。</strong>而且它有两层备选——"换一条路"（换鉴权 profile）不行，就"换个目的地"（换模型）。这一整套让助理具备生产级的韧性。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两层结构总览</h1></div>
+            <div class="card">
+                <div class="layer outer"><h4>外层循环：模型级 failover — <code>runWithModelFallback</code>（model-fallback.ts:505）</h4>
+                    遍历候选模型链（主模型 + 配置的 fallbacks，可跨 provider）。每个候选模型 →
+                    <div class="layer inner"><h4>内层循环：鉴权 profile 轮换 — <code>runEmbeddedPiAgent</code>（run.ts:256, while 在 :809）</h4>
+                        对当前模型的 provider，遍历它的所有鉴权 profile（OAuth / token / API key），逐个尝试；失败就换下一个 profile 重试。
+                    </div>
+                </div>
+                <div class="anno">读法：<b>外层"这个模型不行换下个模型"，内层"这个模型的这把钥匙不行换下把钥匙"。</b>顶层把两者拼起来的地方在 <code>agent-runner-execution.ts:202-205</code>：把 <code>runEmbeddedPiAgent</code>（内层）作为回调传给 <code>runWithModelFallback</code>（外层）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>外层：换模型</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// resolveFallbackCandidates（model-fallback.ts:252）：主模型 + agents.defaults.model.fallbacks
+for (let i = 0; i &lt; candidates.length; i++) {          // model-fallback.ts:531
+  const candidate = candidates[i];
+  // 先检查该 provider 的所有鉴权 profile 是否都在冷却（:539-560）
+  //   全冷却 → 按策略 skip 或 probe
+  // 否则调用内层 run（= runEmbeddedPiAgent）
+}</code></pre>
+                <div class="anno">读法：<b>候选模型链来自配置 <code>agents.defaults.model.fallbacks</code>，可以跨 provider（如"先 Claude，挂了退 GPT，再退本地 Ollama"）。</b>还有一条 CLI provider 分支（<code>agent-runner-execution.ts:214</code> 的 <code>isCliProvider</code>）：有些 provider 由外部 CLI 承载（如 Claude CLI），走 <code>runCliAgent</code> 而非内嵌 Pi。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>内层：换 profile</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// resolveAuthProfileOrder（run.ts:423 → order.ts:67）算出 profile 尝试顺序
+const profileCandidates = ...;                 // run.ts:432-436
+while (true) {                                  // run.ts:809 主重试循环
+  // 上限 MAX_RUN_LOOP_ITERATIONS（run.ts:741，随 profile 数增长）
+  await runEmbeddedAttempt(...);                // run.ts:851 一次完整对话尝试
+  // 失败 → advanceAuthProfile（跳到下个可用 profile，跳过冷却中的）
+  //        markAuthProfileFailure（记失败 + 设冷却）
+  // 成功 → markAuthProfileGood / markAuthProfileUsed
+}</code></pre>
+                <div class="anno">读法：<b>内层对"同一个模型"尝试它的多个鉴权 profile。一个 profile 失败 → 记冷却、跳下一个。</b>profile 存储/类型在 <code>src/agents/auth-profiles/</code>（<code>types.ts</code>：ApiKeyCredential / TokenCredential / OAuthCredential）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>OAuth &gt; token &gt; key 排序</h1></div>
+            <div class="card">
+                <p>profile 顺序由 <code>orderProfilesByMode</code>（<code>order.ts:162-196</code>）决定：</p>
+<pre><code class="language-typescript">const typeScore = type === "oauth" ? 0 : type === "token" ? 1 : type === "api_key" ? 2 : 3;
+const lastUsed = store.usageStats?.[profileId]?.lastUsed ?? 0;
+// 先按类型分：oauth 优先于 token 优先于 api_key
+// 同类型内：lastUsed 最旧的优先（round-robin 轮换，均摊负载）
+// 冷却中的：排到最后（按冷却到期时间升序）</code></pre>
+                <div class="baby"><span class="t">为什么 OAuth 排在 API key 前面？</span>
+                OAuth（如 ChatGPT/Codex 订阅登录）通常是"包月订阅"——多用不额外花钱；API key 往往<strong>按量计费</strong>。<strong>所以优先用 OAuth（省钱），实在不行才用按量付费的 key。</strong>同类型内部又按"最久没用的先用"轮换——把负载均摊到多把钥匙上，避免单把 key 被打限流。<strong>这套排序把"成本优化 + 负载均衡 + 冷却规避"揉进了一个打分函数里，非常见工程巧思。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>冷却与退避</h1></div>
+            <div class="card">
+                <p>失败的 profile 会被<strong>设置冷却期</strong>（<code>markAuthProfileFailure</code>，<code>run.ts:762</code>），一段时间内不再尝试。过载错误（provider 说"我忙"）还有<strong>指数退避</strong>：</p>
+<pre><code class="language-typescript">// OVERLOAD_FAILOVER_BACKOFF_POLICY（run.ts:89-94）
+// maybeBackoffBeforeOverloadFailover（run.ts:781）：过载时先等一会儿再切，避免雪崩</code></pre>
+                <div class="anno">读法：<b>冷却 = "这把钥匙刚失败，先晾一会儿别再试"；指数退避 = "越试越等更久"，防止把已经过载的服务打得更狠。</b>这是分布式系统标准的容错手段，OpenClaw 用在鉴权凭据上。GitHub Copilot 还有专门的 token 刷新状态机（<code>refreshCopilotToken</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>错误分类</h1></div>
+            <div class="card">
+                <p>不是所有错误都该"换 profile"。错误分类在 <code>pi-embedded-helpers.ts</code>（<code>run.ts:40-57</code> 导入）：</p>
+                <ul>
+                    <li><code>isAuthAssistantError</code>：鉴权错 → 换 profile。</li>
+                    <li><code>isRateLimitAssistantError</code>：限流 → 冷却 + 换 profile。</li>
+                    <li><code>isBillingAssistantError</code>：额度/账单 → 换。</li>
+                    <li><code>isLikelyContextOverflowError</code>：上下文超长 → 触发压缩重试（Day 08）。</li>
+                </ul>
+                <div class="anno">读法：<b>根据错误类型走不同恢复策略，统一抛 <code>FailoverError</code>（<code>failover-error.ts</code>）。</b>比如"上下文超长"不该换 key（换了还是超长），而该压缩历史。<strong>精准的错误分类是有效故障转移的前提——否则会瞎切一通。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>故障转移解决什么问题？为什么个人助理特别需要它？</li>
+                    <li>两层循环各自换什么？在哪拼起来？</li>
+                    <li>profile 排序为什么 OAuth &gt; token &gt; api_key？同类型内怎么排？</li>
+                    <li>冷却和指数退避各防什么？</li>
+                    <li>为什么要先做错误分类再决定恢复策略？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+sed -n '500,560p' src/agents/model-fallback.ts          # 外层
+sed -n '805,860p' src/agents/pi-embedded-runner/run.ts  # 内层 while
+sed -n '160,196p' src/agents/auth-profiles/order.ts     # 排序打分</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>Agent 执行循环</strong>——一条消息怎么变成 LLM 调用、工具调用、回复？会话怎么串行排队防并发写坏？<code>session.prompt()</code> 触发点 + 订阅式输出观察 + 上下文溢出自动压缩。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 Pi 内核</a>
+                <a href="openclaw-day08.html" style="color:#f97316;">Day 08 · Agent 执行循环 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
