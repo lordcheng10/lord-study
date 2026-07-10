@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · Gateway 控制平面 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#e11d48);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">Gateway 控制平面 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 网关的职责</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 服务器组成</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · bind 绑定</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 拉起渠道</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · WebSocket JSON-RPC</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · server-methods</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 角色与作用域</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 入口</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day04.html" class="nav-link" style="color:#f97316;">Day 04 消息旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 入门与全景</span>
+            <h1 class="part-title">Gateway 控制平面</h1>
+            <p class="part-desc">Gateway 是把渠道、大脑、原生设备粘起来的中枢。今天看它怎么起服务、怎么按 <code>bind</code> 控制暴露范围、怎么拉起渠道、以及它对外的 WebSocket JSON-RPC 接口。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>网关的职责</h1></div>
+            <div class="card">
+                <p>Day 01 说过 Gateway 是"控制平面"。具体它负责：</p>
+                <ul>
+                    <li><strong>渠道生命周期</strong>：拉起/停止/监控每个渠道账号的连接（L04）。</li>
+                    <li><strong>路由</strong>：把入站消息路由到对的 agent/会话（Day 04）。</li>
+                    <li><strong>对外接口</strong>：WebSocket JSON-RPC，供 Web UI、原生 App（node/operator）、CLI 调用（L05）。</li>
+                    <li><strong>各种服务方法</strong>：聊天、cron、发现、TTS、审批等（L06）。</li>
+                </ul>
+                <div class="anno">代码在 <code>src/gateway/</code>：<code>server*</code>（各服务模块）、<code>call.ts</code>（连接/绑定）、<code>server-channels.ts</code>（渠道编排）、<code>server-methods/</code>（RPC 方法）。<b>它不生成回复、不懂平台协议——只协调。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>服务器组成</h1></div>
+            <div class="card">
+                <p><code>src/gateway/</code> 按功能拆成许多 <code>server-*.ts</code>：<code>server-channels</code>（渠道）、<code>server-chat</code>（聊天/agent 事件）、<code>server-cron</code>（定时）、<code>server-discovery</code>（设备发现）、<code>server-http</code>（HTTP + 钩子）、<code>server-broadcast</code>（广播）、<code>server-browser</code>、<code>server-close</code>…</p>
+                <div class="anno">读法：<b>一个大网关拆成多个职责单一的 server 模块，组合成完整服务。</b>这种"按能力切文件"的组织方式贯穿整个项目（呼应 Day 19 的单文件 ≤500 行约束）。健康探针 <code>/healthz</code>（存活）、<code>/readyz</code>（就绪）由 HTTP server 提供。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>bind 绑定（安全关键）</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/gateway/call.ts:152
+const bindMode = config.gateway?.bind ?? "loopback";   // 默认只监听本机
+// :186 安全检查：阻止所有明文 ws:// 连非回环地址（CWE-319, CVSS 9.8）
+//   "SECURITY ERROR: Gateway URL uses plaintext ws:// to a non-loopback address"
+//   建议：keep gateway.bind=loopback + SSH 隧道，或用 wss/Tailscale</code></pre>
+                <div class="baby"><span class="t">bind = "谁能连到我"</span>
+                <strong><code>bind=loopback</code>（默认）：网关只监听 <code>127.0.0.1</code>，只有本机能连——最安全。<code>bind=lan</code>：监听局域网，手机等设备能连，但必须配 token（Day 20）。</strong>网关连着你所有聊天账号、能执行命令，暴露范围必须谨慎。代码里还硬性拦截"用明文 ws:// 连非本机地址"——因为那样密码/消息在网络上裸奔（CWE-319 是这个漏洞的官方编号，CVSS 9.8 是最高危级别）。<strong>非本机必须用加密 wss 或走 SSH 隧道/Tailscale。这是"默认最严、要放开得显式且安全"的又一体现。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>拉起渠道</h1></div>
+            <div class="card">
+                <p><code>startChannelInternal</code>（<code>src/gateway/server-channels.ts:149</code>）——网关拉起每个渠道账号（Day 14 详看过）：</p>
+<pre><code class="language-typescript">// 1. getChannelPlugin(channelId) 取插件，读 plugin.gateway.startAccount
+// 2. plugin.config.listAccountIds(cfg) 枚举多账号
+// 3. 检查 isEnabled / isConfigured
+// 4. 建 AbortController，写 running:true
+// 5. startAccount({ ..., abortSignal, setStatus, channelRuntime })  ← 连接、开始收消息
+// 6. .finally 回写 running:false（配合外层重连自动重启）</code></pre>
+                <div class="anno">读法：<b>网关按注册表逐个拉起已配置渠道，用 <code>abortSignal</code> 统一管停、<code>setStatus</code> 收状态、崩了自动重启。</b>这就是"控制平面管理渠道生命周期"的落地。（Day 13-14 已从渠道角度看过，这里从网关角度再看一遍。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>WebSocket JSON-RPC</h1></div>
+            <div class="card">
+                <p>网关对外提供 WebSocket JSON-RPC 接口（Day 18 从 App 角度见过）：帧 <code>type</code> = <code>req</code>/<code>res</code>/<code>event</code>，客户端有 Web UI、原生 App（node/operator 角色）、CLI。</p>
+                <div class="baby"><span class="t">为什么用 WebSocket 而不是普通 HTTP？</span>
+                普通 HTTP 是"你问一句、我答一句"，服务端没法主动找你。<strong>但网关需要<strong>主动推送</strong>——新消息来了、agent 有了新回复、要你审批一个命令，都得实时推给客户端。WebSocket 是双向长连接，服务端可随时推 event。</strong>所以协议设计成 req（客户端请求）/res（响应）/event（服务端主动推）三类帧。这也是为什么部署时不能让机器休眠（Day 20，长连接要保持）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>server-methods（RPC 方法）</h1></div>
+            <div class="card">
+                <p>网关暴露的具体方法在 <code>src/gateway/server-methods/</code>（如 <code>tts.ts</code>，Day 15 见过），还有 <code>server-chat.ts</code>（聊天/agent 事件）、<code>server-cron.ts</code>（定时任务）等。客户端通过 RPC 调用这些方法。</p>
+                <div class="anno">读法：<b>每个方法对应一个客户端能"请求网关做"的操作：发消息、订阅 agent 事件、管理 cron、触发 TTS、执行审批。方法受作用域（scope）门控（L07）。</b>方法作用域定义在 <code>src/gateway/method-scopes.ts</code>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>角色与作用域</h1></div>
+            <div class="card">
+                <p>客户端连接时声明角色（Day 18）：</p>
+                <ul>
+                    <li><strong>node</strong>：设备节点，暴露相机/定位等能力给助理。</li>
+                    <li><strong>operator</strong>：操作者，用于控制/配置（Web UI、CLI）。</li>
+                </ul>
+                <p>方法按 scope 门控（<code>method-scopes.ts</code>）——不同角色/token 能调的方法不同。</p>
+                <div class="anno">读法：<b>角色 + 作用域 = 权限控制：一个只连来暴露相机的 node，不该能改配置或执行任意命令。</b>结合 Day 17 的信任模型：通过网关认证的是可信操作者，但作用域仍限制"每个连接具体能做什么"，做最小权限。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>网关的四大职责？它不做什么？</li>
+                    <li>bind=loopback vs lan 的区别？为什么拦截明文 ws:// 连非本机？</li>
+                    <li>startChannelInternal 怎么拉起渠道？</li>
+                    <li>为什么用 WebSocket（req/res/event 三类帧）？</li>
+                    <li>node vs operator 角色？作用域门控什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+ls src/gateway/ | grep '^server' | head -20
+sed -n '150,200p' src/gateway/call.ts        # bind + 安全检查
+sed -n '149,170p' src/gateway/server-channels.ts
+ls src/gateway/server-methods/ 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>一条消息的完整旅程</strong>——把前三天串起来，端到端追踪：渠道收到 → 归一化 → 路由 → Agent → 回复原路返回，每一站的代码位置。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 入口</a>
+                <a href="openclaw-day04.html" style="color:#f97316;">Day 04 · 一条消息的完整旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

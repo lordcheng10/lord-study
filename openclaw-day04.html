@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 一条消息的完整旅程 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:10px 12px 10px 42px;border:1px solid var(--border-color);border-radius:8px;margin:8px 0;font-size:12.5px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:10px;top:10px;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#f97316,#e11d48);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:12px}
+        .flow .step b{color:#f97316}.flow .step code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#e11d48);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">一条消息的完整旅程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 全景七站</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ①渠道收到</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ②归一化</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③路由</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④Agent 想+做</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤订阅输出</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ⑥⑦回复原路返回</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 Gateway</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day05.html" class="nav-link" style="color:#f97316;">Day 05 配置 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 入门与全景</span>
+            <h1 class="part-title">一条消息的完整旅程</h1>
+            <p class="part-desc">把前三天串起来：你在 Telegram 发"北京天气？"，到收到回复，中间穿过了哪七站、每站在哪段代码。这是理解 OpenClaw 的主轴，后面每周都在放大其中一段。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>全景七站</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step"><b>渠道收到</b>：Telegram 监听拿到原生消息 <code>src/telegram/monitor.ts</code></div>
+                    <div class="step"><b>归一化</b>：转成统一 <code>MsgContext</code> + 清洗 <code>finalizeInboundContext</code></div>
+                    <div class="step"><b>路由</b>：决定哪个 agent/会话处理 <code>src/routing/resolve-route.ts</code></div>
+                    <div class="step"><b>Agent 想+做</b>：故障转移 → Pi 循环 <code>agent-runner-execution.ts</code> → <code>runEmbeddedPiAgent</code></div>
+                    <div class="step"><b>订阅输出</b>：观察 Pi 事件流转成回调 <code>subscribeEmbeddedPiSession</code></div>
+                    <div class="step"><b>选渠道</b>：按 <code>OriginatingChannel</code> 决定发回哪 <code>channel-selection.ts</code></div>
+                    <div class="step"><b>投递</b>：调 outbound adapter 发回 Telegram <code>outbound/deliver.ts</code></div>
+                </div>
+                <div class="anno">读法：<b>七站 = 进（1-2）→ 路由（3）→ 想+做（4-5）→ 出（6-7）。每站都在某周被放大：归一化/渠道在 W3、Agent 在 W2、配置在 Day 05。</b>今天走一遍全程，建立整体感。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① 渠道收到</h1></div>
+            <div class="card">
+                <p>Gateway 启动时拉起的渠道监听（Day 03 L04）在后台等消息。Telegram 用 grammY runner 长轮询（<code>src/telegram/monitor.ts:77</code>），有新消息就触发处理。</p>
+                <div class="anno">读法：<b>每个渠道有自己的"收消息"方式（Telegram 轮询、Slack/Discord WebSocket，Day 14），但收到后都进同一条后续管线。</b>这一步是平台特有的，之后就统一了。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② 归一化</h1></div>
+            <div class="card">
+                <p>渠道把平台原生消息映射成统一的 <code>MsgContext</code>（<code>templating.ts:14</code>，~170 字段），再调 <code>finalizeInboundContext</code>（<code>inbound-context.ts:37</code>）统一清洗（换行、剥系统标签、安全默认）。</p>
+                <div class="baby"><span class="t">为什么这步至关重要？</span>
+                这是"把二十多种平台的方言翻译成一种通用语"的时刻（Day 15 详讲）。<strong>翻译完成后，后面所有代码（路由、Agent、回复）就只需认识 MsgContext 这一种格式，不用管消息来自哪个平台。</strong>还会记下 <code>OriginatingChannel</code>（从哪来）——第 6 站要靠它决定"回哪去"。清洗步骤（剥离恶意系统标签、默认拒绝命令授权）是第一道安全关。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ 路由</h1></div>
+            <div class="card">
+                <p><code>src/routing/resolve-route.ts:26-59</code>：<code>ResolveAgentRouteInput</code> → <code>ResolvedAgentRoute</code>，决定"这条消息该由哪个 agent、哪个会话处理"。<code>matchedBy</code> 支持多级绑定：<code>binding.peer</code>（按对端）/ <code>binding.guild+roles</code>（Discord 服务器+角色）/ <code>binding.team</code>（Slack 团队）/ <code>binding.channel</code> / <code>default</code>。</p>
+                <div class="baby"><span class="t">为什么需要"路由"？</span>
+                你可能配了多个 agent（工作助理、家庭助理），或不同群走不同人设。<strong>路由就是"接线员"：根据消息来自谁、哪个群、什么角色，把它转接给对的 agent 和会话。</strong>比如"老板发的消息用正式 agent，家人群用轻松 agent"。<code>default</code> 兜底——没匹配到特殊规则就用默认 agent。会话（session）则决定用哪段对话历史（记忆连续性）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ Agent 想+做</h1></div>
+            <div class="card">
+                <p>路由定了 agent，就进大脑（第 2 周主角）：<code>agent-runner-execution.ts:202</code> 启动<strong>两层故障转移</strong>（Day 07）→ <code>runEmbeddedPiAgent</code>（Day 08）→ Pi 的 <code>session.prompt()</code> 跑 ReAct 循环（想 → 调工具 → 再想）。</p>
+                <div class="anno">读法：<b>这一站是整个系列的核心，第 2 周（Day 06-10）整整五天在讲它内部：Pi 内核、故障转移、执行循环、提示词、记忆。</b>今天只需知道"消息在这里被喂给 LLM、模型可能调工具（如 weather）、最终产出回复"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 订阅输出</h1></div>
+            <div class="card">
+                <p>Pi 循环跑的同时，<code>subscribeEmbeddedPiSession</code>（<code>pi-embedded-subscribe.ts:34</code>）订阅它的事件流，把"模型吐的文字增量、工具调用/结果"转成 OpenClaw 回调（<code>onPartialReply</code>/<code>onToolResult</code>…）。</p>
+                <div class="anno">读法：<b>这是"观察者模式"（Day 08）：不打断 Pi 循环，只旁听它发生的每件事，转成流式回复推给渠道。</b>让用户看到"正在查天气""答复逐字蹦出"的实时体验（呼应 Day 15 的流式发送）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>⑥⑦ 回复原路返回</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// ⑥ 选渠道 src/infra/outbound/channel-selection.ts:86 resolveMessageChannelSelection
+//    从 sessionCtx.OriginatingChannel/OriginatingTo 读回"从哪来"→ 决定"回哪去"
+//    多渠道并存时必须显式指定（防发错）
+// ⑦ 投递 src/infra/outbound/deliver.ts:141 createChannelHandler
+//    → loadChannelOutboundAdapter(id)（轻量 loader，只取 outbound）
+//    → 调 sendPayload/sendText/sendMedia（Day 13 的 outbound adapter）</code></pre>
+                <div class="baby"><span class="t">"原路返回"怎么做到的？</span>
+                还记得第 2 站归一化时记下的 <code>OriginatingChannel="telegram"</code> 吗？<strong>现在回复要发出去，就读这个字段——"哦，这消息从 Telegram 来，那答复也发回 Telegram"。</strong>然后只加载 Telegram 的 outbound adapter（不加载它的收消息代码，省内存），调 <code>sendText</code> 把"北京今天晴，25°C"发回你的 Telegram。<strong>一条消息的旅程闭环完成。整个过程渠道、路由、大脑各司其职，靠 MsgContext 这个通用语和 OriginatingChannel 这个"回执地址"串起来。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>一条消息的七站分别是什么？</li>
+                    <li>归一化为什么关键？记下的 OriginatingChannel 后面干嘛用？</li>
+                    <li>路由按什么把消息分给不同 agent？</li>
+                    <li>④⑤两站分别对应第几周的哪些天？</li>
+                    <li>回复怎么做到"原路返回"？为什么用轻量 loader？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+sed -n '26,59p' src/routing/resolve-route.ts             # 路由
+grep -n 'runWithModelFallback\|runEmbeddedPiAgent' src/auto-reply/reply/agent-runner-execution.ts | head
+sed -n '86,120p' src/infra/outbound/channel-selection.ts # 选渠道
+sed -n '141,160p' src/infra/outbound/deliver.ts          # 投递</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：<strong>配置系统与 workspace</strong>——配置怎么加载（env 优先级链 → openclaw.json）、workspace 工作区是什么、bootstrap 文件（SOUL/MEMORY.md）如何塑造助理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 Gateway</a>
+                <a href="openclaw-day05.html" style="color:#f97316;">Day 05 · 配置系统与 workspace &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
