@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · HttpContext 能力 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#22c55e);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">HttpContext 能力 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 请求信息</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 请求级数据存取</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · UserAttribute</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 自定义日志/追踪</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · DisableReroute</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · body 控制回顾</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · RouteCall 与判断</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day13.html" class="nav-link" style="color:#f59e0b;">Day 13 Cluster &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 HTTP 与外部调用</span>
+            <h1 class="part-title">HttpContext 能力：请求的遥控器</h1>
+            <p class="part-desc">Day 04 见过 HttpContext 那一长串接口，今天逐个精讲。它不只是"存数据",更是"操作当前请求的遥控器"——读信息、存中间状态、写日志、控制路由和 body。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>请求信息</h1></div>
+            <div class="card">
+                <p><code>iface/context.go:42-45</code>：<code>Scheme()</code>/<code>Host()</code>/<code>Path()</code>/<code>Method()</code>。这些值在请求头阶段被缓存到 <code>CommonHttpCtx</code> 的 <code>scheme/host/path/method</code> 字段（<code>plugin_wrapper.go:816-819</code>）。</p>
+                <div class="anno">读法：<b>为什么缓存？<strong>请求头处理完后，某些底层值可能不再能直接读（比如响应阶段）。SDK 在头阶段就缓存好，后续任何阶段都能 <code>ctx.Path()</code> 取到——随时可用。</strong>类似的还缓存了 Connection/Upgrade/ContentType 等头（<code>:821-828</code>）用于 <code>IsWebsocket()</code>/<code>IsBinaryRequestBody()</code> 判断。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>请求级数据存取</h1></div>
+            <div class="card">
+                <p><code>SetContext/GetContext</code> + 类型化的 <code>GetBoolContext/GetStringContext/GetByteSliceContext</code>（带默认值）。实现在 <code>plugin_wrapper.go:834-840</code>，底层是 <code>CommonHttpCtx.userContext</code> map。</p>
+<pre><code class="language-go">// 请求头阶段解析出用户名
+ctx.SetContext("user", username)
+// 请求体阶段取出用（同一请求内有效）
+user := ctx.GetStringContext("user", "anonymous")</code></pre>
+                <div class="baby"><span class="t">阶段间传数据的正确方式（重申）</span>
+                <strong>Day 04 强调过：跨阶段传数据一定用请求级 Context，绝不用全局变量（并发请求会串数据）。</strong>类型化的 getter（<code>GetStringContext(key, 默认值)</code>）省去手动类型断言和判空，很贴心。这是写插件时最高频的 API 之一。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>UserAttribute</h1></div>
+            <div class="card">
+                <p><code>SetUserAttribute/GetUserAttribute/SetUserAttributeMap/GetUserAttributeMap</code>（<code>plugin_wrapper.go:842-860</code>）：另一套 map，专门用于"要写进日志/追踪的属性"。</p>
+                <div class="baby"><span class="t">UserAttribute 和 Context 有啥区别？</span>
+                <strong>普通 Context 是"给你自己代码用的中间数据"；UserAttribute 是"要输出到日志/链路追踪的业务属性"</strong>（比如识别出的用户 ID、命中的策略、Token 数）。分开两套是因为用途不同——UserAttribute 里的东西会被 <code>WriteUserAttributeToLog</code> 统一序列化进访问日志。<strong>典型：鉴权插件把用户名放 UserAttribute，日志里就能看到每条请求是谁发的。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>自定义日志 / 追踪</h1></div>
+            <div class="card">
+                <p><code>WriteUserAttributeToLog()</code>（<code>plugin_wrapper.go:862-869</code>）把 UserAttribute 序列化成 JSON 写进访问日志的 <code>custom_log</code> 字段（<code>CustomLogKey</code>）；<code>WriteUserAttributeToLogWithKey(key)</code> 用自定义 key；<code>WriteUserAttributeToTrace()</code> 写进链路追踪 span 标签（<code>TraceSpanTagPrefix</code>）。</p>
+                <div class="anno">读法：<b>它读取现有的 <code>custom_log</code> 属性、合并你的 UserAttribute、写回——<strong>多个插件能往同一条访问日志追加各自的属性。</strong>这样一条请求的访问日志里能看到鉴权插件写的用户、限流插件写的配额、AI 插件写的 Token——全链路可观测。回想上一站 Console 的 Dashboard，数据源头就在这里。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>DisableReroute</h1></div>
+            <div class="card">
+                <p><code>iface/context.go:90-92</code>：<code>DisableReroute()</code>——若在请求头阶段改了请求头，Envoy 默认会重新计算路由；调这个禁止重新路由。<strong>必须在改头操作之前调。</strong></p>
+                <div class="baby"><span class="t">为什么会"重新路由"？会有什么问题？</span>
+                <strong>Envoy 的路由是基于请求头（Host/Path 等）算的。如果你的插件改了这些头，Envoy 觉得"路由条件变了",会重新匹配路由——可能匹配到别的地方，出乎意料。</strong><code>DisableReroute()</code> 告诉 Envoy"我改头是有意的，别重算路由，还用原来那条"。<strong>这是改请求头时的一个大坑，SDK 用这个方法让你显式控制。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>body 控制回顾</h1></div>
+            <div class="card">
+                <p>Day 04/11 提过的 body 控制方法（<code>context.go:61-96</code>）汇总：</p>
+                <ul>
+                    <li><code>DontReadRequestBody()</code>/<code>DontReadResponseBody()</code>：不读。</li>
+                    <li><code>BufferRequestBody()</code>/<code>BufferResponseBody()</code>：缓冲整块。</li>
+                    <li><code>SetRequestBodyBufferLimit(byteSize)</code>：设单请求缓冲上限。</li>
+                    <li><code>NeedPauseStreamingResponse()</code> + <code>PushBuffer/PopBuffer/BufferQueueSize</code>：暂停流式响应、用内部缓冲队列（配合异步 HTTP 调用改写流式响应，Day 19）。</li>
+                </ul>
+                <div class="anno">读法：<b><code>PushBuffer/PopBuffer</code> 那套是给"流式响应期间要调外部服务再改写"的高级场景用的（<code>context.go:69-89</code> 有详细注释）——先 <code>NeedPauseStreamingResponse</code>，异步调用完再 <code>InjectEncodedDataToFilterChain</code> 注入。Day 19 细讲。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>RouteCall 与各种判断</h1></div>
+            <div class="card">
+                <p><code>RouteCall(method, url, headers, body, callback)</code>（<code>context.go:98</code>）：向<strong>当前路由的后端</strong>发起调用（区别于 Day 14 的 HttpCall 指定任意集群）。还有一批判断方法：</p>
+<pre><code class="language-go">HasRequestBody() / HasResponseBody()   // 有没有 body（看头阶段的 endOfStream）
+IsWebsocket()                          // 是不是 WebSocket 升级请求
+IsBinaryRequestBody() / IsBinaryResponseBody()  // body 是不是二进制
+GetExecutionPhase()                    // 当前在哪个阶段（Day 11）</code></pre>
+                <div class="baby"><span class="t">这些判断有什么用？</span>
+                <strong>处理 body 前先判断很重要：是二进制（图片/protobuf）就别当文本处理、是 WebSocket 就别按普通 HTTP 处理、没 body 就别等 body。</strong>这些方法用头阶段缓存的值（<code>context.go:109-117</code> 注释说"随时可调"），让你写出健壮的插件。<strong>比如 AI 插件只处理 JSON body，遇到二进制就跳过。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么请求信息要在头阶段缓存？</li>
+                    <li>Context 和 UserAttribute 的区别？后者干什么用？</li>
+                    <li>自定义日志怎么让多插件往同一条日志追加属性？</li>
+                    <li>DisableReroute 解决什么坑？何时必须调？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '811,870p' pkg/wrapper/plugin_wrapper.go
+sed -n '41,118p' pkg/iface/context.go
+grep -n "WriteUserAttributeToLog\|DisableReroute" pkg/wrapper/plugin_wrapper.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>Cluster 集群抽象</strong>——外部调用要指定"调哪个后端",wasm-go 用 8 种 Cluster 类型（Route/K8s/Nacos/FQDN/Static/Dns/Consul）表达不同来源的后端，看它们怎么拼出 Envoy 集群名。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day11.html" style="color:var(--accent-cyan);">&larr; Day 11</a>
+                <a href="wasm-go-day13.html" style="color:#f59e0b;">Day 13 · Cluster &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

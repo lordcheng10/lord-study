@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · HTTP 请求/响应钩子 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .phase{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+        .phase .p{border:1px solid var(--border-color);border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:8px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .phase .p b{color:#f59e0b}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#22c55e);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">HTTP 钩子 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 请求处理的六个阶段</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 执行阶段枚举</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Action 语义</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · body 整块 vs 流式</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · needBody 判定</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · StreamDone</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 常用宿主调用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day12.html" class="nav-link" style="color:#f59e0b;">Day 12 HttpContext &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 HTTP 与外部调用</span>
+            <h1 class="part-title">HTTP 请求/响应钩子</h1>
+            <p class="part-desc">第 3 周开始处理真实请求。今天理清一个请求经过插件的"六个阶段"（请求头/体、响应头/体、流式、结束），以及每个钩子返回的 <code>Action</code> 分别让网关做什么。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>请求处理的六个阶段</h1></div>
+            <div class="card">
+                <p>一个 HTTP 请求过网关，插件能在这些点介入（对应 Day 05 的 8 个 Process 钩子）：</p>
+                <div class="phase">
+                    <div class="p"><b>① 请求头</b> ProcessRequestHeaders — 最常用，改/读请求头、鉴权、拦截</div>
+                    <div class="p"><b>② 请求体</b> ProcessRequestBody / ProcessStreamingRequestBody — 检查/改请求体</div>
+                    <div class="p"><b>③ 响应头</b> ProcessResponseHeaders — 后端响应回来了，改/读响应头</div>
+                    <div class="p"><b>④ 响应体</b> ProcessResponseBody / ProcessStreamingResponseBody — 改响应体、统计</div>
+                    <div class="p"><b>⑤ 流结束</b> ProcessStreamDone — 请求彻底结束，清理/上报</div>
+                </div>
+                <div class="baby"><span class="t">为什么分这么多阶段？</span>
+                <strong>HTTP 是"流"——头先到、体后到、后端响应又是头先到体后到。插件在不同点能做的事不同：</strong>请求头阶段能鉴权拦截（还没转发），响应体阶段能统计 Token（后端已返回）。<strong>你按需注册钩子，只在关心的阶段介入。</strong>回想 Day 02 的 request-block 只用了①②。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>执行阶段枚举</h1></div>
+            <div class="card">
+                <p><code>iface/context.go:19-27</code>：</p>
+<pre><code class="language-go">type HTTPExecutionPhase int
+const (
+    DecodeHeader HTTPExecutionPhase = iota  // 请求头
+    DecodeData                              // 请求体
+    EncodeHeader                            // 响应头
+    EncodeData                              // 响应体
+    Done                                    // 结束
+)</code></pre>
+                <div class="baby"><span class="t">Decode vs Encode 的术语</span>
+                <strong>Envoy 术语里，"Decode" = 处理请求（客户端→后端方向解码），"Encode" = 处理响应（后端→客户端方向编码）。</strong>所以 DecodeHeader=请求头、EncodeHeader=响应头。你能通过 <code>ctx.GetExecutionPhase()</code>（<code>context.go:99</code>）知道当前在哪个阶段——写通用逻辑时有用。回想 Envoy/Istio 课里的 decode/encode filter，正是同一套概念。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Action 语义</h1></div>
+            <div class="card">
+                <p>头/体钩子返回 <code>types.Action</code>，告诉网关下一步：</p>
+                <ul>
+                    <li><code>ActionContinue</code>：处理完了，继续往下（转发/返回下一阶段）。</li>
+                    <li><code>ActionPause</code>：<strong>暂停</strong>，先别往下走——通常因为发起了异步外部调用（Day 14），等回调里 <code>ResumeHttpRequest()</code> 再继续。</li>
+                </ul>
+                <div class="baby"><span class="t">ActionPause 是 Wasm 插件的精髓</span>
+                <strong>因为不能阻塞（Day 03），插件要"等外部结果"时不能傻等，而是返回 <code>ActionPause</code> 让出控制权。</strong>网关先去处理别的请求，等你的外部调用回调触发、你调 <code>ResumeHttpRequest()</code>，网关再回来继续这个请求。<strong>"暂停—回调—恢复"是异步编程的核心节奏，Day 14 会完整演示。</strong>流式 body 钩子不返回 Action，而是返回处理后的 <code>[]byte</code>（改写内容）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>body：整块 vs 流式</h1></div>
+            <div class="card">
+                <p>body 有两种处理方式：</p>
+                <ul>
+                    <li><strong>整块</strong> <code>ProcessRequestBody(ctx, config, body []byte)</code>：等整个 body 到齐，一次性给你（简单，但大 body 占内存）。</li>
+                    <li><strong>流式</strong> <code>ProcessStreamingRequestBody(ctx, config, chunk []byte, isLastChunk bool) []byte</code>：一块块给你，返回改写后的块（省内存，适合大 body / SSE 流）。</li>
+                </ul>
+                <div class="baby"><span class="t">流式为什么重要（AI 场景）</span>
+                <strong>LLM 的响应是"流式"的（一个字一个字吐出来，SSE）。如果用整块，得等整个回答生成完才处理——延迟高、占内存。流式钩子能"边收边处理边转发"，用户体验好。</strong>ai-statistics、ai-proxy 这类插件（上一站见过）大量用流式响应体处理。<code>isLastChunk</code> 告诉你这是不是最后一块（可以做收尾统计）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>needBody 判定</h1></div>
+            <div class="card">
+                <p><code>NewHttpContext</code>（<code>plugin_wrapper.go:750-772</code>）根据你注册了哪些钩子，决定要不要读 body：</p>
+<pre><code class="language-go">if ctx.vm.onHttpRequestBody != nil || ctx.vm.onHttpStreamingRequestBody != nil {
+    httpCtx.needRequestBody = true
+}
+if ctx.vm.onHttpStreamingRequestBody != nil {
+    httpCtx.streamingRequestBody = true   // 有流式钩子就用流式
+}
+// 响应体同理</code></pre>
+                <div class="anno">读法：<b>没注册 body 钩子 → 不读 body（省内存，呼应 Day 04）；注册了流式钩子 → 用流式；只注册整块钩子 → 缓冲整块。<strong>SDK 根据你的"钩子登记"自动决定 body 读取策略，你无需手动开关（除非想覆盖，用 DontReadBody/BufferBody）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>StreamDone</h1></div>
+            <div class="card">
+                <p><code>ProcessStreamDone(ctx, config)</code>：请求彻底结束（响应完全发完）时调用，无返回值。</p>
+                <div class="baby"><span class="t">StreamDone 干什么？</span>
+                <strong>做"收尾工作":上报这次请求的统计（耗时、Token 数）、清理资源、写自定义日志。</strong>因为它在请求生命周期最末，此时所有数据都齐了。<strong>比如 ai-statistics 插件在这里汇总整个对话的 Token 用量并上报 metric。</strong>这是 Day 12 的自定义日志、Day 18 的 Token 统计常落地的钩子。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>常用宿主调用</h1></div>
+            <div class="card">
+                <p>在钩子里你会用到这些 <code>proxywasm.*</code>（宿主调用，Day 03）：</p>
+<pre><code class="language-go">proxywasm.GetHttpRequestHeader(":path")     // 读单个请求头
+proxywasm.GetHttpRequestHeaders()            // 读所有请求头
+proxywasm.AddHttpRequestHeader(k, v)         // 加请求头
+proxywasm.ReplaceHttpRequestHeader(k, v)     // 改请求头
+proxywasm.SendHttpResponseWithDetail(...)    // 直接返回响应（拦截）
+proxywasm.ResumeHttpRequest()                // 恢复被 Pause 的请求
+proxywasm.GetProperty([]string{"route_name"}) // 读 Envoy 属性</code></pre>
+                <div class="anno">读法：<b>请求头用 <code>:path</code>/<code>:authority</code>/<code>:method</code> 这些"伪头"（HTTP/2 约定，冒号开头）取。<strong>改请求头后若影响路由，记得 <code>ctx.DisableReroute()</code>（Day 12）——否则 Envoy 会重新算路由。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>请求处理的六个阶段？Decode vs Encode？</li>
+                    <li><code>ActionContinue</code> vs <code>ActionPause</code>，Pause 何时用？</li>
+                    <li>body 整块 vs 流式，流式为什么对 AI 重要？</li>
+                    <li>SDK 怎么根据注册的钩子决定读不读 body？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '19,27p' pkg/iface/context.go
+sed -n '750,772p' pkg/wrapper/plugin_wrapper.go
+grep -n "ActionContinue\|ActionPause\|ResumeHttpRequest" examples/*/main.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>HttpContext 能力</strong>——精讲那一长串能力方法：UserAttribute、自定义日志/追踪、DontReadBody、DisableReroute、RouteCall 等，看请求级上下文这个"遥控器"能做什么。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day10.html" style="color:var(--accent-cyan);">&larr; Day 10</a>
+                <a href="wasm-go-day12.html" style="color:#f59e0b;">Day 12 · HttpContext &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

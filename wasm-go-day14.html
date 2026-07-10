@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · HTTP 外部调用 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .flow2 .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;font-size:12px;text-align:center}
+        .flow2 .n b{display:block;color:#f59e0b}
+        .flow2 .a{color:#22c55e;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#22c55e);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">HTTP 调用 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要外部调用</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ClusterClient</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · http-call 例子</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Pause/Resume 节奏</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · HttpCall 内部</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 回调解析响应</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 超时与陷阱</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day15.html" class="nav-link" style="color:#f59e0b;">Day 15 Redis &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 HTTP 与外部调用</span>
+            <h1 class="part-title">HTTP 外部调用</h1>
+            <p class="part-desc">插件常需要"调个外部服务"——鉴权中心、AI 后端、配置服务。今天拆 <code>HttpCall</code>：用昨天的 Cluster 指定后端，异步发起、回调处理，配合 <code>ActionPause → Resume</code> 的节奏。这是 Wasm 异步编程的核心。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要外部调用</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">插件常常不能"就地解决"</span>
+                <strong>很多逻辑需要问别人：鉴权要问鉴权中心"这个 token 有效吗"、AI 网关要调 LLM、限流要问 Redis 当前计数。</strong>这些都要在处理请求的过程中调用外部服务。<strong>但 Wasm 不能阻塞（Day 03）——所以外部调用是"异步回调式"的：发起后立刻返回 <code>ActionPause</code> 让出线程，结果到了在回调里继续。</strong>适应这个思维是写复杂插件的关键。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ClusterClient</h1></div>
+            <div class="card">
+                <p><code>http_wrapper.go:46-86</code>：<code>ClusterClient[C Cluster]</code> 包住一个 Cluster，提供 Get/Post/Put/Delete 等方法：</p>
+<pre><code class="language-go">client := wrapper.NewClusterClient(wrapper.FQDNCluster{FQDN: "api.example.com", Port: 443})
+client.Post("/v1/check", headers, body, callback, 5000)  // 5s 超时
+// Get/Head/Options/Post/Put/Patch/Delete/Connect/Trace/Call 都有（:54-82）</code></pre>
+                <div class="anno">读法：<b><code>ClusterClient</code> 是对 <code>HttpCall</code> 的友好封装——你不用记 HTTP 方法字符串，直接 <code>.Post(...)</code>。泛型参数 <code>C Cluster</code> 让它接受任意一种 Cluster（Day 13）。<strong>这是写插件时发起 HTTP 调用的推荐方式。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>http-call 例子</h1></div>
+            <div class="card">
+                <p><code>examples/http-call/main.go</code> 完整演示（parseConfig 里建 client，请求头钩子里发起调用）：</p>
+<pre><code class="language-go">func parseConfig(json gjson.Result, config *HttpCallConfig) error {
+    cluster := wrapper.FQDNCluster{FQDN: json.Get("fqdn").String(), Port: json.Get("port").Int()}
+    config.client = wrapper.NewClusterClient(cluster)   // 建好 client 存进配置
+    config.requestPath = json.Get("path").String()
+    return nil
+}
+func onHttpRequestHeaders(ctx wrapper.HttpContext, config HttpCallConfig) types.Action {
+    err := config.client.Post(config.requestPath, headers, body,
+        func(statusCode int, responseHeaders http.Header, responseBody []byte) {  // 回调
+            proxywasm.AddHttpRequestHeader("X-External-Response", string(responseBody))
+            proxywasm.ResumeHttpRequest()   // 结果到了 → 恢复请求
+        }, 5000)
+    if err != nil { return types.ActionContinue }
+    return types.ActionPause   // 先暂停，等回调
+}</code></pre>
+                <div class="anno">读法：<b>注意两个关键点：<strong>① 请求头钩子返回 <code>ActionPause</code>（先别转发，等外部结果）；② 回调里处理完调 <code>ResumeHttpRequest()</code>（恢复请求继续转发）。</strong>client 在 parseConfig 阶段建好、存进配置，请求时复用。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Pause / Resume 节奏</h1></div>
+            <div class="card">
+                <div class="flow2">
+                    <span class="n"><b>钩子</b>发起 HttpCall</span><span class="a">→</span>
+                    <span class="n"><b>return</b>ActionPause</span><span class="a">→</span>
+                    <span class="n"><b>网关</b>去处理别的请求</span><span class="a">→</span>
+                    <span class="n"><b>响应到</b>触发回调</span><span class="a">→</span>
+                    <span class="n"><b>回调</b>处理+Resume</span><span class="a">→</span>
+                    <span class="n"><b>网关</b>继续转发</span>
+                </div>
+                <div class="baby"><span class="t">这个节奏一定要记牢</span>
+                <strong>发起异步调用 → 返回 Pause（让出线程）→ 网关空出来干别的 → 你的调用有结果了 → 回调被触发 → 回调里处理结果 + Resume → 请求从暂停处继续。</strong>忘了 Resume 请求就永远卡住（超时）；不返回 Pause 请求会在结果没到时就往下走（拿不到结果）。<strong>Pause 和 Resume 必须成对——这是异步插件最容易出 bug 的地方。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>HttpCall 内部</h1></div>
+            <div class="card">
+                <p><code>http_wrapper.go:90-160</code> 的 <code>HttpCall</code> 底层用 <code>proxywasm.DispatchHttpCall</code>：</p>
+<pre><code class="language-go">// 先剔除用户传的 :method/:path/:authority 伪头（避免冲突，:91-96）
+// 解析 rawURL → authority/path
+authority := cluster.HostName()               // 默认用 Cluster 的 HostName
+if parsedURL.Host != "" { authority = parsedURL.Host }
+// 补上伪头
+headers = append(headers, {":method",method}, {":path",path}, {":authority",authority})
+// 发起（默认超时 500ms）
+proxywasm.DispatchHttpCall(cluster.ClusterName(), headers, body, nil, timeout, func(...) {
+    // 响应回调（见 L06）
+})</code></pre>
+                <div class="anno">读法：<b>看到 Day 13 的伏笔回收了——<code>cluster.ClusterName()</code> 定"发给谁"、<code>cluster.HostName()</code> 定 <code>:authority</code>。<strong><code>DispatchHttpCall</code> 是 proxy-wasm 的宿主调用，把请求交给 Envoy 发出，Envoy 收到响应后触发你的回调。</strong>每次调用生成 <code>requestID</code>（uuid）用于日志追踪。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>回调解析响应</h1></div>
+            <div class="card">
+                <p><code>http_wrapper.go:121-152</code> 回调里解析响应：</p>
+<pre><code class="language-go">respBody, _ := proxywasm.GetHttpCallResponseBody(0, bodySize)
+respHeaders, _ := proxywasm.GetHttpCallResponseHeaders()
+code := http.StatusBadGateway
+for _, h := range respHeaders {
+    if h[0] == ":status" { code, _ = strconv.Atoi(h[1]) }  // 从 :status 伪头取状态码
+    headers.Add(h[0], h[1])
+}
+callback(code, headers, respBody)   // 调你注册的回调，交给你处理</code></pre>
+                <div class="baby"><span class="t">SDK 帮你把原始响应"翻译"成好用的形式</span>
+                <strong>底层拿到的是原始头/体，SDK 帮你解析出状态码（从 <code>:status</code> 伪头）、组装成 <code>http.Header</code>，再调你的回调 <code>callback(code, headers, body)</code>。</strong>你只管在回调里用这三个值做业务（判断成功、读 body、改请求）。<strong>注意日志用 <code>log.UnsafeInfof</code>（Day 16 讲）——因为响应体可能含敏感信息。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>超时与陷阱</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>默认超时 500ms</strong>（<code>:116-119</code>），可传参覆盖（<code>timeoutMillisecond ...uint32</code>）。</li>
+                    <li>超时/失败时回调仍会被调用（<code>code</code> 可能是 <code>502 BadGateway</code>），要处理错误分支。</li>
+                    <li><strong>IO 周期陷阱</strong>：插件逻辑太重 + 高并发时，回调可能来不及在本 IO 周期处理——用 <code>WithMaxRequestsPerIoCycle</code>（Day 10/19）缓解。</li>
+                </ul>
+                <div class="baby"><span class="t">别在回调里忘了 Resume</span>
+                <strong>无论成功失败，回调里都要有明确的下一步：成功用结果 + Resume，失败也要 Resume（或 SendHttpResponse 返回错误）——绝不能让请求悬着。</strong>常见 bug：只在成功分支 Resume，失败时请求卡到超时。<strong>写异步插件的黄金法则：每条路径都要终结请求。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么外部调用必须异步回调？</li>
+                    <li>Pause/Resume 的完整节奏？忘了 Resume 会怎样？</li>
+                    <li>HttpCall 怎么用 Cluster 的 ClusterName/HostName？</li>
+                    <li>回调里怎么拿状态码和 body？默认超时多少？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+cat examples/http-call/main.go
+sed -n '90,160p' pkg/wrapper/http_wrapper.go
+cat examples/complex-http-call/main.go | head -80</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：<strong>Redis 调用</strong>——<code>RedisClusterClient</code> 怎么 Init、Get/Set/Incr/Eval 等命令、以及为什么它也是异步回调式的。限流、计数类插件的必备能力。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day13.html" style="color:var(--accent-cyan);">&larr; Day 13</a>
+                <a href="wasm-go-day15.html" style="color:#f59e0b;">Day 15 · Redis &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · Redis 调用 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#22c55e);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">Redis 调用 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么插件要 Redis</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · RedisClusterClient</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Init 初始化</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 命令方法</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 回调解析 resp</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Eval 与原子性</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 重认证与就绪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day16.html" class="nav-link" style="color:#22c55e;">Day 16 日志 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 HTTP 与外部调用</span>
+            <h1 class="part-title">Redis 调用</h1>
+            <p class="part-desc">第 3 周收官。限流、计数、分布式锁这类需要"跨请求/跨实例共享状态"的插件，靠 Redis。今天看 <code>RedisClusterClient</code>：怎么初始化、怎么发命令、以及它同样是异步回调式的。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么插件要 Redis</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">插件的"共享内存"问题</span>
+                回想 Day 03：<strong>每个 worker 线程一份 Wasm VM，全局变量各自独立。那"全局限流"（所有实例加起来不超过 1000 QPS）怎么算？没法用本地变量，因为每个 VM 各算各的。</strong>解法：<strong>把计数放进 Redis——所有实例、所有 VM 都读写同一个 Redis 计数器，就能做全局限流、全局配额、分布式锁。</strong>Redis 是插件的"共享大脑"。上一站的 ai-token-ratelimit 就靠 Redis 做全局 Token 限流。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>RedisClusterClient</h1></div>
+            <div class="card">
+                <p><code>redis_wrapper.go:111-118</code>：<code>RedisClusterClient[C Cluster]</code>——和 HTTP 一样用 Cluster 指定 Redis 后端（通常是 FQDNCluster 或 StaticIpCluster 指向 Redis 服务）。</p>
+                <div class="anno">读法：<b>接口 <code>RedisClient</code>（<code>:33</code>）定义了一长串方法：<code>Init</code> + 各种 Redis 命令（Get/Set/Incr/Del/Expire/LPush/HGet…）。<strong>和 HTTP 一样，Redis 也复用 Day 13 的 Cluster 抽象——"调哪个 Redis"用 Cluster 表达。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Init 初始化</h1></div>
+            <div class="card">
+                <p><code>redis_wrapper.go:261-324</code> 的 <code>Init(username, password, timeout, opts...)</code>：</p>
+<pre><code class="language-go">// 把配置项拼进 clusterName 的 query 参数：
+//   db=N（选库）、buffer_flush_timeout=3（默认3ms）、max_buffer_size_before_flush=1024
+clusterName = fmt.Sprintf("%s?%s", clusterName, strings.Join(params, "&"))
+// 真正初始化
+err := proxywasm.RedisInit(clusterName, username, password, uint32(timeout))
+if err != nil { c.ready = false; return nil }   // 失败不报错，标记未就绪待重试
+c.ready = true</code></pre>
+                <div class="baby"><span class="t">在 parseConfig 或 OnPluginStart 里 Init</span>
+                <strong>Redis 连接在插件启动阶段初始化一次（不是每请求）。</strong>有意思的是失败时<strong>不返回错误，而是标记 <code>ready=false</code> 待后续重试</strong>（<code>:317-321</code>）——因为插件启动时 Redis 可能还没就绪，硬失败会让插件启不来。<code>buffer_flush_timeout</code>/<code>max_buffer_size</code> 是性能调优：攒一批命令再发，减少往返。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>命令方法</h1></div>
+            <div class="card">
+                <p>SDK 封装了大量 Redis 命令（<code>redis_wrapper.go:346-650+</code>），每个都带回调：</p>
+<pre><code class="language-go">client.Get(key, callback)
+client.Set(key, value, callback)
+client.SetEx(key, value, ttl, callback)      // 带过期
+client.SetNX(key, value, ttl, callback)      // 不存在才设（分布式锁）
+client.Incr(key, callback) / Decr / IncrBy   // 计数
+client.Expire(key, ttl, callback)
+client.LPush/RPush/LPop/LRange ...           // 列表
+client.HGet/HDel/HExists ...                 // 哈希
+client.MGet(keys, cb) / MSet(kvMap, cb)      // 批量</code></pre>
+                <div class="anno">读法：<b>覆盖了 String/List/Hash 等常用类型。<strong>限流常用 <code>Incr</code>+<code>Expire</code>（计数+窗口过期），分布式锁常用 <code>SetNX</code>（原子占锁）。</strong>每个命令都是<strong>异步的——传 callback，结果在回调里拿</strong>（和 HTTP 一样的 Pause/Resume 节奏）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>回调解析 resp</h1></div>
+            <div class="card">
+                <p>回调类型 <code>RedisResponseCallback func(response resp.Value)</code>（<code>redis_wrapper.go:31</code>）。<code>resp.Value</code> 来自 <code>github.com/tidwall/resp</code>——Redis 的 RESP 协议解析库。</p>
+<pre><code class="language-go">client.Incr("counter", func(response resp.Value) {
+    count := response.Integer()   // Redis 返回的整数
+    if count > limit {
+        proxywasm.SendHttpResponseWithDetail(429, ...)  // 超限拦截
+    }
+    proxywasm.ResumeHttpRequest()
+})</code></pre>
+                <div class="baby"><span class="t">RESP 是 Redis 的"说话方式"</span>
+                <strong>Redis 用 RESP 协议返回结果（整数、字符串、数组、错误各有格式）。<code>resp.Value</code> 帮你解析：<code>.Integer()</code> 取整数、<code>.String()</code> 取字符串、<code>.Array()</code> 取数组、<code>.Error()</code> 看有没有错。</strong>你在回调里按预期类型取值。<strong>和 HTTP 回调一样，处理完记得 Resume（如果是在请求处理中调的）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Eval 与原子性</h1></div>
+            <div class="card">
+                <p><code>redis_wrapper.go:332-344</code> 的 <code>Eval(script, numkeys, keys, args, callback)</code>：执行 Lua 脚本。</p>
+                <div class="baby"><span class="t">为什么限流一定要 Lua 脚本？</span>
+                <strong>限流要"读计数 → 判断 → 加一"三步。如果分三次 Redis 命令，并发下会有竞态（两个请求同时读到 99，都以为没超限，结果加到 101）。</strong>Redis 的 <code>Eval</code> 把这三步写成一段 Lua 脚本，<strong>Redis 保证脚本原子执行（中间不被打断）</strong>——彻底消除竞态。<strong>所以生产级限流插件都用 Eval + Lua，而不是分开的 Incr/Get。</strong>上一站 Higress 的限流插件（Day 03 提过的 Redis+Lua）正是这么做的。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>重认证与就绪</h1></div>
+            <div class="card">
+                <p><code>redis_wrapper.go:257-259</code> 的 <code>Ready()</code> 判断连接是否就绪；<code>Command</code>/<code>Eval</code> 等每次执行前先 <code>checkReadyFunc()</code>（<code>:301-313</code>）——若未就绪就尝试重新 <code>RedisInit</code> 认证。</p>
+                <div class="anno">读法：<b>这是"延迟初始化 + 自愈"设计：<strong>Init 失败不致命，后续每次用 Redis 前检查就绪、没就绪就重试认证。</strong>这样即使 Redis 启动慢于插件、或中途重连，插件也能自动恢复，不用重启。<strong>生产环境的健壮性细节。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 3 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周你应该能回答</h3>
+                <ul>
+                    <li>为什么全局限流必须用 Redis 而不能用本地变量？</li>
+                    <li>Redis 命令为什么也是异步回调式？resp.Value 怎么解析？</li>
+                    <li>为什么限流要用 Eval + Lua（原子性）？</li>
+                    <li>Init 失败为什么不报错？重认证怎么自愈？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '31,120p' pkg/wrapper/redis_wrapper.go
+sed -n '325,345p' pkg/wrapper/redis_wrapper.go
+grep -n "func (c \*RedisClusterClient" pkg/wrapper/redis_wrapper.go | head -40</code></pre>
+                <div class="tip"><strong>下周预告 · 第 4 周</strong>：<strong>高级特性与实战</strong>——日志与安全日志、Leader 选举与 SharedData（Redis 之外的另一种共享）、AI Token 用量解析、性能重建机制，最后构建部署 + 五站大串讲收官。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day14.html" style="color:var(--accent-cyan);">&larr; Day 14</a>
+                <a href="wasm-go-day16.html" style="color:#22c55e;">Day 16 · 日志 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
