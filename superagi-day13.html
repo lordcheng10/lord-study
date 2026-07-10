@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 向量记忆 vector store — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
+        .flow2 .n b{display:block;color:#8b5cf6;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">向量记忆 vector store · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 长期记忆 = RAG</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · VectorStore 抽象</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 工厂选向量库</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 写入 add_texts</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 检索 get_matching_text</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Embedding 转向量</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 短期 vs 长期记忆</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 工具市场</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 资源管理 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 工具/记忆/资源</span>
+            <h1 class="part-title">向量记忆 vector store</h1>
+            <p class="part-desc">给智能体"长期记忆"的核心。原理是 RAG——把文本转向量存进向量库，需要时按语义相似度检索回来。今天读 <code>vector_store/</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>长期记忆 = RAG</h1></div>
+            <div class="card">
+                <p>Day 02 讲的 Feed 是<strong>短期记忆</strong>（对话历史，会被压缩）。今天讲<strong>长期记忆</strong>——用向量数据库存，靠语义检索。原理是 <strong>RAG（检索增强生成）</strong>。</p>
+                <div class="baby"><span class="t">RAG 三步（一分钟懂）</span>
+                ① <strong>存</strong>：把文本（智能体的经历、知识）用 embedding 模型转成"向量"（一串数字，代表语义），存进向量库。② <strong>查</strong>：需要时把"当前问题"也转成向量，在向量库找<strong>语义最接近</strong>的那些文本。③ <strong>用</strong>：把检索到的相关文本喂进 LLM 提示，让它"想起"相关记忆再回答。<strong>关键：这是"语义检索"而非"关键词匹配"——问"苹果多少钱"能找到讲"iPhone 定价"的记忆（语义相近），即使没有"苹果"这个词。</strong>这就是智能体拥有"长期记忆"的技术。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>VectorStore 抽象</h1></div>
+            <div class="card">
+                <p><code>VectorStore</code>（<code>vector_store/base.py:7</code>）抽象基类，两个核心方法：</p>
+<pre><code class="language-python">class VectorStore(ABC):
+    @abstractmethod
+    def add_texts(self, texts, metadatas=None, **kwargs):    # 写入记忆
+    @abstractmethod
+    def get_matching_text(self, query, top_k, metadata):    # 按语义检索</code></pre>
+                <div class="anno">读法：<b><code>add_texts</code>（存）+ <code>get_matching_text</code>（查）就是记忆的两个核心操作。</b>基类是抽象——Pinecone/Redis/Qdrant 各实现一遍。<strong>上层代码只依赖这个接口，不关心底层用哪个向量库</strong>（又是面向接口，Day 10 同理）。最小数据单元是 <code>Document</code>（<code>document.py:4</code>，只有 text_content + metadata）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>工厂选向量库</h1></div>
+            <div class="card">
+                <p><code>VectorFactory.get_vector_storage</code>（<code>vector_store/vector_factory.py:15</code>）按类型返回对应实现（Pinecone/Weaviate/Qdrant/Redis）。以 Pinecone 为例（<code>:40</code>）：</p>
+<pre><code class="language-python">if index_name not in pinecone.list_indexes():
+    sample_embedding = embedding_model.get_embedding("sample")
+    pinecone.create_index(index_name, dimension=len(sample_embedding), ...)  # 自动建索引
+index = pinecone.Index(index_name)
+return Pinecone(index, embedding_model, 'text')</code></pre>
+                <div class="anno">读法：<b>工厂封装了每种库的连接、建索引细节——先用样本向量算出维度、索引不存在就自动建。</b>你在配置里写 <code>PINECONE</code> 或 <code>REDIS</code>，工厂负责剩下的。<strong>又见工厂模式（Day 10 的 LLM 工厂同理）——按配置选实现。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>写入 add_texts</h1></div>
+            <div class="card">
+                <p><code>Pinecone.add_texts</code>（<code>vector_store/pinecone.py:71</code>）：</p>
+<pre><code class="language-python">for text, id in zip(texts, ids):
+    metadata[self.text_field] = text          # 把原文也存进 metadata（检索后能取回）
+    vectors.append((id, self.embedding_model.get_embedding(text), metadata))  # 文本→向量
+self.add_embeddings_to_vector_db({"vectors": vectors})</code></pre>
+                <div class="anno">读法：<b>给每段文本生成 id、用 embedding 模型转成向量、连同元数据（含原文）打包 upsert 进向量库。</b>注意<strong>把原文也存进 metadata</strong>——因为向量库存的是向量（数字），检索时得靠 metadata 里的原文取回可读文本。Day 06 的 <code>add_text_to_memory</code> 就调这个把工具结果写入长期记忆。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>检索 get_matching_text</h1></div>
+            <div class="card">
+                <p><code>Pinecone.get_matching_text</code>（<code>pinecone.py:96</code>）：</p>
+<pre><code class="language-python">embed_text = self.embedding_model.get_embedding(query)   # 查询也转向量
+res = self.index.query(embed_text, filter=filters, top_k=top_k, include_metadata=True)
+search_res = self._get_search_text(res, query)   # 拼成 "Chunk0:...\nChunk1:..." 文本
+documents = self._build_documents(res)
+return {"documents": documents, "search_res": search_res}</code></pre>
+                <div class="anno">读法：<b>把查询转成向量，在库里找 top_k 个最相似的，支持 metadata 过滤。</b>返回值同时给<strong>结构化 documents</strong> 和<strong>拼好的 search_res 文本</strong>——后者可直接塞进 LLM 提示做 RAG。</div>
+                <div class="baby"><span class="t">top_k 和 metadata 过滤</span>
+                <strong>top_k</strong>：只取最相似的前 k 条（不是全返回，控量）。<strong>metadata 过滤</strong>：可以只搜"这个智能体的记忆"（按 agent_id 过滤）——不同智能体的记忆隔离。<strong>"语义相似 + 按需过滤 + 取 top-k"是 RAG 检索的标准姿势。</strong>Qdrant 实现同理，返回结构一致。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Embedding 转向量</h1></div>
+            <div class="card">
+                <p><code>OpenAiEmbedding.get_embedding</code>（<code>vector_store/embedding/openai.py:4</code>）——文本→向量这一步，用 <code>text-embedding-ada-002</code>：</p>
+<pre><code class="language-python">def get_embedding(self, text):
+    response = openai.Embedding.create(api_key=..., input=[text], engine=self.model)
+    return response['data'][0]['embedding']   # 返回一串数字（向量）</code></pre>
+                <div class="baby"><span class="t">Embedding 是什么？</span>
+                Embedding 模型把一段文本转成一个<strong>向量</strong>（比如 1536 个浮点数）。<strong>神奇之处：语义相近的文本，向量也相近（在向量空间里距离小）。</strong>"猫"和"小猫"的向量很近，"猫"和"汽车"的很远。<strong>于是"找语义相似的文本"= "找向量距离近的"——这就是语义检索的数学原理。</strong>所有向量库操作都依赖一个 embedding 模型（OpenAI/Palm 等）把文本和查询转成向量。</div>
+                <div class="glossary"><b>注意 <code>vector_embeddings/</code> 目录（易混）</b>：<code>vector_store/</code> 管"运行时智能体记忆的读写"；<code>vector_embeddings/</code> 管"预先把知识库文档批量灌进向量库"的格式适配（接收已切块、已算 embedding 的 chunk）。两者服务不同场景。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>短期 vs 长期记忆</h1></div>
+            <div class="card">
+                <div class="flow2">
+                    <span class="n"><b>短期记忆 Feed</b>对话历史（Day 02）<br>存 DB，会压缩</span>
+                    <span class="a">+</span>
+                    <span class="n"><b>长期记忆 向量库</b>语义可检索<br>存向量库，永久</span>
+                    <span class="a">=</span>
+                    <span class="n" style="border-color:#22c55e"><b>完整记忆</b></span>
+                </div>
+                <div class="baby"><span class="t">两种记忆各管什么？</span>
+                <strong>短期记忆（Feed）</strong>：这次运行的完整对话历史，全塞进上下文（超了就压缩，Day 08）——像"工作记忆"，记得近期每一步。<strong>长期记忆（向量库）</strong>：跨运行的、海量的知识/经历，用语义检索按需召回——像"长期记忆库"，需要时"想起"相关的。<strong>智能体每步：Feed 给近期上下文 + 向量库检索相关长期记忆，两者一起喂 LLM。</strong>Day 06 的 <code>add_text_to_memory</code> 把工具结果写入长期记忆，<code>execute_next_step</code>（Day 06）OpenAI 模型才初始化长期记忆。<strong>短期求全、长期求相关——和人的记忆结构类似。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>RAG 三步是什么？为什么是"语义检索"而非关键词？</li>
+                    <li>VectorStore 的两个核心方法？为什么用抽象接口？</li>
+                    <li>add_texts 为什么把原文也存进 metadata？</li>
+                    <li>Embedding 是什么？为什么"语义相似 = 向量相近"？</li>
+                    <li>短期记忆（Feed）和长期记忆（向量库）各管什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/vector_store
+sed -n '7,38p' base.py                       # 抽象接口
+sed -n '40,52p' vector_factory.py            # 工厂 + 自动建索引
+sed -n '71,101p' pinecone.py                 # add_texts + get_matching_text
+sed -n '4,31p' embedding/openai.py           # get_embedding</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>资源管理 resource manager</strong>——智能体产出/使用的文件怎么存（本地/S3 双写）、灌进向量库、生成摘要。智能体的"工作区"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 工具市场</a>
+                <a href="superagi-day14.html" style="color:var(--accent-green);">Day 14 · 资源管理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

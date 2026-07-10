@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 资源管理 resource manager — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">资源管理 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是资源</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · FileManager 双写</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 路径按 agent 隔离</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Resource 登记表</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 文件灌向量库</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 资源摘要</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 存储可插拔</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 向量记忆</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 数据模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 工具/记忆/资源</span>
+            <h1 class="part-title">资源管理 resource manager</h1>
+            <p class="part-desc">智能体的"工作区"：它读入的输入文件、产出的输出文件怎么存、怎么灌进向量库供检索、怎么生成摘要。读 <code>resource_manager/</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是资源</h1></div>
+            <div class="card">
+                <p>智能体干活会涉及文件——你上传给它的输入文件（PDF、CSV），它产出的输出文件（写的报告、生成的代码）。这些统称<strong>资源（Resource）</strong>，由资源管理器管理。目录 <code>resource_manager/</code>。</p>
+                <div class="baby"><span class="t">为什么需要资源管理？</span>
+                智能体不只是"聊天"，它会<strong>读写文件</strong>（CodingTool 写代码、你给它一个 PDF 让它分析）。这些文件需要：① <strong>存储</strong>（本地或云）；② <strong>隔离</strong>（不同智能体/运行的文件别混）；③ <strong>可检索</strong>（把文件内容灌进向量库，让智能体能"查阅"）；④ <strong>摘要</strong>（让智能体知道"我手头有哪些文件、大概讲什么"）。资源管理器管这一切。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>FileManager 双写</h1></div>
+            <div class="card">
+                <p><code>FileManager</code>（<code>resource_manager/file_manager.py:11</code>）是工具（如 CodingTool、WriteFileTool）读写文件的入口。核心模式："先写本地磁盘，再同步到 S3"：</p>
+<pre><code class="language-python"># write_file (file_manager.py:48)
+final_path = ResourceHelper.get_agent_write_resource_path(file_name, agent=..., agent_execution=...)
+with open(final_path, mode="w") as file:
+    file.write(content)
+self.write_to_s3(file_name, final_path)   # 再同步 S3
+# write_to_s3 (:35)：先在 DB 登记 Resource 记录；storage_type==S3 时才真上传</code></pre>
+                <div class="anno">读法：<b>写文件 = 写本地磁盘 + （如果配了 S3）上传 S3 + 在 DB 登记一条 Resource 记录。</b>Day 03 的 <code>WriteFileTool</code> 就是把活委托给这个 <code>resource_manager.write_file</code>。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>路径按 agent 隔离</h1></div>
+            <div class="card">
+                <p><code>get_agent_write_resource_path</code> 算出 agent + execution 专属的写入路径。</p>
+                <div class="baby"><span class="t">为什么路径要按 agent/execution 隔离？</span>
+                平台同时跑很多智能体、每个智能体跑很多次。如果所有文件都堆在一个目录，会<strong>互相覆盖污染</strong>——A 智能体写的 <code>report.txt</code> 被 B 智能体的同名文件覆盖。<strong>路径按 <code>agent_id + execution_id</code> 隔离</strong>（每个运行有自己的目录），保证互不干扰。<strong>多租户/并发场景，"按身份隔离资源路径"是必须的。</strong>这和 OpenHands 的 workspace 按会话隔离、AutoGPT 用 execution_id 隔离一个道理。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Resource 登记表</h1></div>
+            <div class="card">
+                <p><code>Resource</code> 模型（<code>models/resource.py:6</code>）登记每个文件：</p>
+<pre><code class="language-python">class Resource(DBBaseModel):
+    storage_type = Column(String)   # FILESERVER / S3
+    path = Column(String)
+    channel = Column(String)        # INPUT（用户给的）/ OUTPUT（智能体产的）
+    agent_id / agent_execution_id
+    summary = Column(String)</code></pre>
+                <div class="anno">读法：<b>每个文件在 DB 有一条记录：存在哪（storage_type/path）、是输入还是输出（channel）、属于哪个智能体/运行、内容摘要。</b><code>channel</code> 区分 INPUT/OUTPUT 很实用——摘要时只汇总输入资源（L06）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>文件灌向量库（RAG 入库）</h1></div>
+            <div class="card">
+                <p><code>ResourceManager.save_document_to_vector_store</code>（<code>resource_manager/resource_manager.py:72</code>）用 LlamaIndex 解析文件、灌进向量库：</p>
+<pre><code class="language-python">for docs in documents:
+    docs.metadata["agent_id"] = str(self.agent_id)     # 打标签
+    docs.metadata["resource_id"] = resource_id
+vector_store = LlamaVectorStoreFactory(...).get_vector_store()  # 默认 Redis
+index = VectorStoreIndex.from_documents(documents, storage_context=...)</code></pre>
+                <div class="baby"><span class="t">为什么要把文件灌进向量库？</span>
+                你给智能体一个 100 页的 PDF，不可能整个塞进 LLM 上下文。<strong>把 PDF 切块、灌进向量库（Day 13 的 RAG）——智能体需要时按语义检索出相关的几段，而不是读全文。</strong>打上 <code>agent_id</code> 标签，检索时只召回"本智能体的文件"（隔离）。<strong>这就是"给智能体挂知识库"——它能"查阅"你给的资料，而非死记硬背。</strong>用 LlamaIndex（文档解析 + RAG 框架）做解析和切块。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>资源摘要</h1></div>
+            <div class="card">
+                <p><code>ResourceSummarizer.generate_agent_summary</code>（<code>resource_manager/resource_summary.py:50</code>）把该智能体所有 INPUT 资源的名字拼起来，写进 <code>AgentConfiguration</code> 的 <code>resource_summary</code> 键。<code>LlamaDocumentSummary</code> 用 LLM 生成单个文档的内容摘要。</p>
+                <div class="baby"><span class="t">摘要有什么用？</span>
+                <strong>让智能体在提示里知道"我手头有哪些文件、大概讲什么"</strong>——而不必把整个文件塞进上下文。比如提示里加一句"你有这些资料：竞品分析.pdf、财报.csv"，智能体就知道"需要竞品数据时去查那个 PDF"。<strong>摘要是"文件的目录/索引"——让智能体知道有什么可查，具体内容再用 RAG 检索（L05）。</strong>回忆 Day 08 提示里的 <code>resource_summary</code> 就来自这里。这也是为什么上传文件后会触发后台 <code>summarize_resource</code> 任务（Day 17）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>存储可插拔</h1></div>
+            <div class="card">
+                <p><code>write_to_s3</code> 里 <code>if resource.storage_type == StorageType.S3.value: S3Helper().upload_file(...)</code>——存储后端（FILE/S3）由配置的 <code>StorageType</code> 枚举决定。</p>
+                <div class="baby"><span class="t">为什么存储要可插拔？</span>
+                <strong>本地开发</strong>用文件系统（简单）；<strong>生产/多实例</strong>用 S3（多个 backend/celery 容器共享文件——本地磁盘各容器不通，S3 才行）。<strong>用 <code>StorageType</code> 枚举 + <code>if</code> 分支切换——改配置就换存储后端，业务代码不变。</strong>和 AutoGPT 的 local/S3、Day 10 的 LLM 工厂一个思路——面向接口、可插拔。<code>LlamaVectorStoreFactory</code>（<code>llama_vector_store_factory.py</code>）同理，给文件 RAG 选 Pinecone/Redis/Chroma/Qdrant。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>什么是资源？资源管理要解决哪四件事？</li>
+                    <li>FileManager 的"双写"是什么？</li>
+                    <li>为什么文件路径要按 agent/execution 隔离？</li>
+                    <li>为什么要把文件灌进向量库？摘要有什么用？</li>
+                    <li>存储为什么可插拔（FILE/S3）？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/resource_manager
+sed -n '35,64p' file_manager.py               # 双写
+sed -n '72,109p' resource_manager.py          # 灌向量库
+grep -n 'def generate_agent_summary' resource_summary.py
+sed -n '6,33p' ../models/resource.py          # Resource 表</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>数据模型</strong>——系统地看 35 个 DB 模型的关键几个：DBBaseModel、三层租户、AgentConfiguration、AgentExecution/Feed、Workflow、Tool/Toolkit、记忆相关模型。数据模型就是整个系统的骨架。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 向量记忆</a>
+                <a href="superagi-day15.html" style="color:var(--accent-green);">Day 15 · 数据模型 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
