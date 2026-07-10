@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · 检索器 Retriever — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#38bdf8,#34d399);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">检索器 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 进入在线查询</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseRetriever</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · retrieve 模板方法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · VectorIndexRetriever</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · QueryBundle</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 递归检索</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 各种检索器</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day12.html" class="nav-link" style="color:#38bdf8;">Day 12 查询引擎 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 检索与查询</span>
+            <h1 class="part-title">检索器 Retriever</h1>
+            <p class="part-desc">第 3 周进入 RAG 的"在线查询"阶段。检索器是查询的第一步：给一个问题，找出最相关的 Node。今天精读 <code>BaseRetriever</code> 和 <code>VectorIndexRetriever</code>——retrieve 的模板方法、递归检索、各种检索器变体。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>进入在线查询</h1></div>
+            <div class="card">
+                <p>前两周建好了库（离线摄入 + 索引存储）。第 3 周是"在线查询"：<strong>问题 → 检索（Retriever，今天）→ 后处理（Day 14）→ 合成答案（Synthesizer，Day 13）</strong>，QueryEngine（Day 12）把它们串起来。</p>
+                <div class="baby"><span class="t">检索器 = "找相关内容"的那一步</span>
+                <strong>用户问"公司的退款政策是什么?"——检索器负责从知识库里找出最相关的几个 Node（比如"退款条款"那几段）。它<strong>只找、不生成答案</strong>（生成是后面 Synthesizer 的事）。</strong>检索器返回 <code>List[NodeWithScore]</code>（Node + 相关度分数，Day 02）。<strong>检索质量直接决定答案质量——找错了内容，LLM 再强也答不对。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseRetriever</h1></div>
+            <div class="card">
+                <p><code>base/base_retriever.py:34</code>：<code>class BaseRetriever(PromptMixin, DispatcherSpanMixin)</code>。对外方法 <code>retrieve(query)</code>（<code>:192</code>），子类实现 <code>_retrieve(query_bundle)</code>（<code>:263</code>，抽象方法）。</p>
+                <div class="anno">读法：<b>经典"模板方法模式"：基类 <code>retrieve</code> 定义流程骨架（转换查询、埋点、递归处理），子类只填 <code>_retrieve</code>（真正的检索逻辑）。<strong>VectorIndexRetriever 的 <code>_retrieve</code> 就是"嵌入查询 + 向量库 query"。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>retrieve 模板方法</h1></div>
+            <div class="card">
+                <p><code>base/base_retriever.py:192-227</code>：</p>
+<pre><code class="language-python">def retrieve(self, str_or_query_bundle: QueryType) -> List[NodeWithScore]:
+    dispatcher.event(RetrievalStartEvent(...))       # 埋点（Day 19 可观测）
+    if isinstance(str_or_query_bundle, str):
+        query_bundle = QueryBundle(str_or_query_bundle)  # 字符串 → QueryBundle
+    else:
+        query_bundle = str_or_query_bundle
+    with self.callback_manager.event(CBEventType.RETRIEVE, ...):
+        nodes = self._retrieve(query_bundle)              # ★ 子类实现的真正检索
+        nodes = self._handle_recursive_retrieval(query_bundle, nodes)  # 递归（L06）
+    dispatcher.event(RetrievalEndEvent(..., nodes=nodes))
+    return nodes</code></pre>
+                <div class="baby"><span class="t">基类包办"周边"，子类只管"核心"</span>
+                <strong>retrieve 做了：把字符串包成 QueryBundle、发检索事件（可观测/追踪）、调子类的 <code>_retrieve</code>、处理递归检索、发结束事件。</strong>子类（VectorIndexRetriever 等）只需实现 <code>_retrieve</code> 那一句核心逻辑。<strong>这样"埋点/事件/递归"这些通用逻辑写一次，所有检索器共享——又是模板方法减少重复。</strong>还有 <code>aretrieve</code>（异步版）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>VectorIndexRetriever</h1></div>
+            <div class="card">
+                <p><code>indices/vector_store/retrievers/</code> 的 <code>VectorIndexRetriever._retrieve</code>（简化）：</p>
+<pre><code class="language-python">def _retrieve(self, query_bundle):
+    # 1. 把查询文本嵌入成向量（Day 06 的 get_query_embedding）
+    query_bundle.embedding = self._embed_model.get_query_embedding(query_bundle.query_str)
+    # 2. 构造 VectorStoreQuery（含向量、top_k、filters）
+    query = VectorStoreQuery(query_embedding=..., similarity_top_k=self._similarity_top_k, ...)
+    # 3. 向量库 query（Day 09）
+    result = self._vector_store.query(query)
+    # 4. 把结果（node_id + score）包装成 NodeWithScore 返回
+    return self._build_node_list_from_query_result(result)</code></pre>
+                <div class="baby"><span class="t">把前两周串起来的"检索"</span>
+                <strong>这一段回收了好几天的内容：嵌入查询（Day 06）→ 向量库检索（Day 09）→ 从 docstore 取回 Node（Day 08）→ 包成 NodeWithScore（Day 02）。</strong>Day 07 的 <code>index.as_retriever(similarity_top_k=5)</code> 造的就是它。<strong>这就是"语义检索"的完整落地——问题变向量、找最近邻、返回相关 Node。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>QueryBundle</h1></div>
+            <div class="card">
+                <p><code>schema.py:1449</code> 的 <code>QueryBundle</code>：封装一次查询——<code>query_str</code>（原始问题）、<code>embedding</code>（查询向量）、<code>custom_embedding_strs</code>（用于嵌入的替代文本）等。</p>
+                <div class="baby"><span class="t">为什么查询要包成对象？</span>
+                <strong>一次查询不只是"一个字符串"——它可能带查询向量、可能有"用于检索的文本"和"给用户看的文本"不同（比如查询改写、HyDE 假设文档嵌入）。QueryBundle 把这些打包。</strong>比如 HyDE 技术：先让 LLM 根据问题"编一个假想答案",用假想答案的向量去检索（往往比原问题更接近文档）——这时 <code>query_str</code> 是原问题、<code>custom_embedding_strs</code> 是假想答案。<strong>QueryBundle 让这些高级查询变换成为可能。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>递归检索</h1></div>
+            <div class="card">
+                <p><code>_handle_recursive_retrieval</code>（<code>base/base_retriever.py</code>）：如果检索到的是 <code>IndexNode</code>（指向另一个索引/检索器的节点），就"递归"进去继续检索。</p>
+                <div class="baby"><span class="t">检索到"引用"就顺藤摸瓜</span>
+                <strong>有时一个 Node 不是最终内容，而是"指向别处"的引用（IndexNode，Day 02）——比如"这个摘要对应某份完整文档的检索器"。递归检索遇到 IndexNode 就跟进去，检索它指向的目标。</strong>这支撑了 Day 10 的"两级检索"（DocumentSummaryIndex：先检索摘要 IndexNode，递归进文档内检索）。<strong>让复杂的"分层检索"能自动展开。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>各种检索器</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>VectorIndexRetriever</strong>：向量检索（最常用）。</li>
+                    <li><strong>BM25Retriever</strong>：关键词检索（integration）。</li>
+                    <li><strong>QueryFusionRetriever</strong>：融合多个检索器结果（向量 + 关键词 = 混合检索）。</li>
+                    <li><strong>AutoMergingRetriever</strong>：命中小块自动合并成父块（配 HierarchicalNodeParser）。</li>
+                    <li><strong>RecursiveRetriever</strong>：显式递归检索。</li>
+                </ul>
+                <div class="baby"><span class="t">检索策略是 RAG 调优的重头</span>
+                <strong>纯向量检索有时不够——混合检索（QueryFusion 融合向量+BM25）通常更稳（语义 + 精确词兼顾）；auto-merging 解决"小块命中但上下文不足"。</strong>它们都是 BaseRetriever，接口统一、可组合。<strong>"检索什么内容"比"用什么 LLM"更影响 RAG 效果——所以检索器值得多实验。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>检索器的职责？它返回什么（NodeWithScore）？</li>
+                    <li><code>retrieve</code>（模板）和 <code>_retrieve</code>（子类）怎么分工？</li>
+                    <li>VectorIndexRetriever 的 _retrieve 串起了前几天哪些内容？</li>
+                    <li>QueryBundle 为什么不只是字符串？递归检索干什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '192,265p' base/base_retriever.py
+ls indices/vector_store/retrievers/
+grep -n "def _retrieve\|get_query_embedding\|VectorStoreQuery" indices/vector_store/retrievers/retriever.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>查询引擎 QueryEngine</strong>——把"检索 + 合成"串成端到端问答。精读 <code>RetrieverQueryEngine._query</code>：retrieve → 后处理 → synthesize 三步，看 Day 01 第四行 <code>query()</code> 的真相。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day10.html" style="color:var(--accent-cyan);">&larr; Day 10</a>
+                <a href="llama-index-day12.html" style="color:#38bdf8;">Day 12 · 查询引擎 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

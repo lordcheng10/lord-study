@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · LLM 抽象 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#38bdf8,#34d399);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">LLM 抽象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要抽象 LLM</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseLLM / LLM</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · chat vs complete</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ChatMessage / Role</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 流式</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Settings 全局</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 结构化与工具调用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day16.html" class="nav-link" style="color:#34d399;">Day 16 Workflow &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 检索与查询</span>
+            <h1 class="part-title">LLM 抽象</h1>
+            <p class="part-desc">第 3 周收官。RAG 最后一环——大模型本身。LlamaIndex 把各家 LLM 统一封装成一套接口，让 OpenAI/Claude/本地模型能互换。今天看 <code>LLM</code> 抽象、chat/complete、ChatMessage、流式，以及全局 Settings。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要抽象 LLM</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">各家 LLM 的 API 五花八门</span>
+                <strong>OpenAI、Claude、Gemini、本地 Ollama……每家的 API 参数、返回格式都不同。如果你的 RAG 代码直接调 OpenAI，想换成 Claude 就要大改。</strong>LlamaIndex 定义统一的 <code>LLM</code> 接口——不管底层是谁，都用 <code>llm.chat(messages)</code> / <code>llm.complete(prompt)</code>。<strong>换模型只需换一行（换 integration），业务代码不动。</strong>回想前面所有组件（Reader/Embedding/VectorStore/Retriever）都是"接口统一、实现可换"——LLM 也不例外。这是 LlamaIndex（和所有好框架）的一贯设计。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseLLM / LLM</h1></div>
+            <div class="card">
+                <p><code>base/llms/base.py</code> 的 <code>BaseLLM</code> + <code>llms/llm.py:163</code> 的 <code>LLM</code>（更高层，加了 prompt 处理、query component 等）。核心抽象方法：<code>chat</code>、<code>complete</code>、<code>stream_chat</code>、<code>stream_complete</code>（+ 异步版 <code>achat</code> 等）。</p>
+                <div class="anno">读法：<b>各家 LLM（<code>llama-index-llms-openai</code> 等 integration）继承 <code>LLM</code>，实现这几个方法。<strong>LlamaIndex 内部（合成器 Day 13、Agent Day 17）只调这套统一接口，不关心是哪家。</strong>还有 <code>metadata</code>（模型上下文窗口大小等，PromptHelper Day 13 用它算装箱）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>chat vs complete</h1></div>
+            <div class="card">
+<pre><code class="language-python">llm.complete("请续写：从前有座山")          # 文本补全（输入字符串，输出续写）
+llm.chat([ChatMessage(role="user", content="你好")])  # 对话（输入消息列表，输出回复）</code></pre>
+                <div class="baby"><span class="t">两种交互范式</span>
+                <strong>complete（补全）：老式接口，给一段文本、续写。chat（对话）：现代接口，给一个"消息列表"（含 system/user/assistant 角色），返回下一条回复。</strong>现在的模型都是 chat 式（ChatGPT 那样）。<strong>LlamaIndex 两个都支持，内部会自动转换（chat 模型收到 complete 请求会包装成单条 user 消息）。</strong>RAG 合成答案时，通常用 chat（system 设定"你是问答助手"、user 放"资料+问题"）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ChatMessage / Role</h1></div>
+            <div class="card">
+                <p><code>base/llms/types.py</code>：<code>MessageRole</code>（<code>:53</code>：SYSTEM/USER/ASSISTANT/TOOL/…）、<code>ChatMessage</code>（<code>:1159</code>：role + content，支持多模态内容块）、<code>ChatResponse</code>（<code>:1282</code>）、<code>CompletionResponse</code>（<code>:1300</code>）。</p>
+                <div class="baby"><span class="t">对话的"消息 + 角色"模型</span>
+                <strong>一次对话是一串带角色的消息：SYSTEM（设定人设/规则）、USER（用户说的）、ASSISTANT（模型答的）、TOOL（工具返回的，Day 17 Agent 用）。</strong>ChatMessage 就是"一条消息 = 角色 + 内容"。新版 content 支持多模态（文本/图片块）。<strong>这套"消息-角色"模型是现代 LLM 应用的通用语言——Agent（Day 17）的多轮推理、记忆（Day 18）都基于它。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>流式</h1></div>
+            <div class="card">
+                <p><code>stream_chat</code> / <code>stream_complete</code> 返回一个生成器，逐块产出 <code>ChatResponse</code>（每块含增量 <code>delta</code>）。<code>llm.py:111</code> 的 <code>stream_chat_response_to_tokens</code> 等辅助处理流。</p>
+                <div class="baby"><span class="t">流式 = 边生成边返回</span>
+                <strong>LLM 生成是逐 token 的。流式接口让你"实时"拿到每个 token（delta），而不是等全部生成完。</strong>这样界面能"打字机效果"实时显示（Day 13 合成器的 streaming 就基于它）。<strong>统一的流式接口让所有下游（合成器、Agent、chat engine）都能支持流式，不管底层 LLM 是谁。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Settings 全局</h1></div>
+            <div class="card">
+                <p><code>settings.py</code> 的 <code>Settings</code>：全局默认配置——<code>Settings.llm</code>、<code>Settings.embed_model</code>、<code>Settings.node_parser</code> 等。不显式传时，各组件用 Settings 里的默认。</p>
+<pre><code class="language-python">from llama_index.core import Settings
+from llama_index.llms.openai import OpenAI
+Settings.llm = OpenAI(model="gpt-4o")          # 全局设 LLM
+Settings.embed_model = OpenAIEmbedding()        # 全局设嵌入
+# 之后 VectorStoreIndex / query_engine 不传就用这些</code></pre>
+                <div class="baby"><span class="t">一处设置，全局生效</span>
+                <strong>不用每个组件都传 llm/embed_model——设一次 <code>Settings.llm</code>，所有组件默认用它。</strong>Day 01 的"5 行 RAG"能那么短，就是因为 Settings 提供了默认（或从环境变量读 OpenAI key）。<strong>换模型：改 <code>Settings.llm</code> 一行，全应用生效。</strong>（旧版叫 ServiceContext，已被 Settings 取代——更简洁的全局配置。）</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>结构化与工具调用</h1></div>
+            <div class="card">
+                <p><code>LLM</code> 还提供 <code>structured_predict</code>（让 LLM 返回 Pydantic 对象）和 <code>predict_and_call</code> / 工具调用能力（<code>function_calling</code>）——这是 Agent（Day 17）的基础。</p>
+                <div class="anno">读法：<b><strong>结构化输出</strong>：让 LLM 严格返回某个 schema 的 JSON（Day 13 提过）。<strong>工具调用（function calling）</strong>：LLM 决定"该调哪个函数、传什么参数"——这是 Agent 能"用工具"的底层能力。<strong>第 4 周的 Agent 就靠 LLM 的工具调用能力来自主决策。</strong>LlamaIndex 把各家 LLM 的工具调用也统一封装了。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 3 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周你应该能回答</h3>
+                <ul>
+                    <li>为什么要抽象 LLM 接口？换模型怎么做？</li>
+                    <li>chat 和 complete 的区别？ChatMessage 的角色模型？</li>
+                    <li>流式接口为什么重要？</li>
+                    <li>Settings 全局配置怎么让"5 行 RAG"成立？工具调用是谁的基础？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '163,200p' llms/llm.py
+grep -n "class MessageRole\|class ChatMessage\|class ChatResponse" base/llms/types.py
+grep -n "llm\|embed_model" settings.py | head</code></pre>
+                <div class="tip"><strong>下周预告 · 第 4 周</strong>：<strong>Agent/Workflow/生态</strong>——超越 RAG：事件驱动的 Workflow 引擎、基于它的 Agent（能用工具、多步推理）、聊天引擎与记忆、可观测与评估，最后收官串讲。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day14.html" style="color:var(--accent-cyan);">&larr; Day 14</a>
+                <a href="llama-index-day16.html" style="color:#34d399;">Day 16 · Workflow &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 查询引擎 QueryEngine — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0}
+        .flow2 .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;font-size:12px;text-align:center}
+        .flow2 .n b{display:block;color:#38bdf8}
+        .flow2 .a{color:#34d399;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#38bdf8,#34d399);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">查询引擎 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · QueryEngine 定位</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三个零件</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · _query 三步</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · retrieve + 后处理</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · synthesize</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Response 对象</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 各种查询引擎</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day13.html" class="nav-link" style="color:#38bdf8;">Day 13 响应合成 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 检索与查询</span>
+            <h1 class="part-title">查询引擎 QueryEngine</h1>
+            <p class="part-desc">检索器只"找内容"，查询引擎把"找 + 后处理 + 生成答案"串成端到端问答。今天精读 <code>RetrieverQueryEngine</code>——这就是 Day 01 第四行 <code>query_engine.query(...)</code> 的真相。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>QueryEngine 定位</h1></div>
+            <div class="card">
+                <p><code>query_engine/retriever_query_engine.py:25</code>：<code>class RetrieverQueryEngine(BaseQueryEngine)</code>——最常用的查询引擎。对外方法 <code>query(str)</code>（基类 BaseQueryEngine 提供），子类实现 <code>_query</code>。</p>
+                <div class="baby"><span class="t">QueryEngine = 检索器 + 合成器的组装</span>
+                <strong>检索器只返回相关 Node（Day 11），但用户要的是"一句答案"。QueryEngine 在检索之上加"用 LLM 把 Node 合成答案"——它是"问答"的完整封装。</strong>Day 07 <code>index.as_query_engine()</code> 造的就是它。<strong>输入问题字符串，输出 Response（答案 + 引用的源 Node）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三个零件</h1></div>
+            <div class="card">
+                <p><code>retriever_query_engine.py:39-52</code> 构造：</p>
+<pre><code class="language-python">def __init__(self, retriever, response_synthesizer=None, node_postprocessors=None, ...):
+    self._retriever = retriever                   # 检索器（Day 11）
+    self._response_synthesizer = response_synthesizer or get_response_synthesizer(...)  # 合成器（Day 13）
+    self._node_postprocessors = node_postprocessors or []   # 后处理器（Day 14）</code></pre>
+                <div class="anno">读法：<b>三个可插拔零件：<strong>retriever（找）+ node_postprocessors（筛/重排）+ response_synthesizer（合成答案）</strong>。合成器不传就用默认（<code>get_response_synthesizer</code>）。<strong>这三样正好对应第 3 周 Day 11/14/13——QueryEngine 是它们的"组装厂"。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>_query 三步</h1></div>
+            <div class="card">
+                <p><code>retriever_query_engine.py:202-210</code> 的 <code>_query</code>（问答核心）：</p>
+<pre><code class="language-python">def _query(self, query_bundle: QueryBundle) -> RESPONSE_TYPE:
+    with self.callback_manager.event(CBEventType.QUERY, ...) as query_event:
+        nodes = self.retrieve(query_bundle)              # ① 检索（含后处理）
+        response = self._response_synthesizer.synthesize( # ② 合成答案
+            query=query_bundle, nodes=nodes)
+        query_event.on_end(payload={EventPayload.RESPONSE: response})
+    return response</code></pre>
+                <div class="flow2">
+                    <span class="n"><b>问题</b>QueryBundle</span><span class="a">→</span>
+                    <span class="n"><b>retrieve</b>找 Node</span><span class="a">→</span>
+                    <span class="n"><b>postprocess</b>重排/过滤</span><span class="a">→</span>
+                    <span class="n"><b>synthesize</b>LLM 生成</span><span class="a">→</span>
+                    <span class="n"><b>Response</b>答案</span>
+                </div>
+                <div class="baby"><span class="t">RAG 在线查询的心脏就这两行</span>
+                <strong>_query 就干两件事：<code>retrieve</code>（找相关 Node，含后处理）+ <code>synthesize</code>（喂 LLM 生成答案）。</strong>Day 01 的 <code>query_engine.query("...")</code> 最终跑的就是这里。<strong>整个 RAG 的"检索增强生成"——检索（Retrieval）+ 生成（Generation）——就浓缩在这两行。</strong>简洁得惊人，因为复杂性都封在 retriever 和 synthesizer 里。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>retrieve + 后处理</h1></div>
+            <div class="card">
+                <p><code>retriever_query_engine.py:160-166</code> 的 <code>retrieve</code>：</p>
+<pre><code class="language-python">def retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+    nodes = self._retriever.retrieve(query_bundle)         # 检索器找（Day 11）
+    return self._apply_node_postprocessors(nodes, query_bundle=query_bundle)  # 后处理（Day 14）</code></pre>
+                <div class="anno">读法：<b>QueryEngine 的 retrieve = 检索器检索 + 依次应用后处理器。<strong>后处理器（Day 14）对检索结果重排、过滤、去噪——比如"只留 score>0.7 的""用 rerank 模型重新排序"。</strong>处理完的 Node 才交给合成器。这一层让"检索"和"精修检索结果"解耦。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>synthesize</h1></div>
+            <div class="card">
+                <p><code>retriever_query_engine.py:178-188</code> 的 <code>synthesize</code>：委托给 <code>response_synthesizer.synthesize(query, nodes)</code>（Day 13 精读）。</p>
+                <div class="baby"><span class="t">合成 = 把 Node 和问题喂给 LLM 生成答案</span>
+                <strong>检索到的几个 Node（相关片段）+ 用户问题，一起塞进提示词，让 LLM 生成一句连贯的答案。这就是"生成"（Generation）。</strong>但如果片段太多塞不下上下文怎么办？如果要综合多个片段呢？——这些由 Synthesizer 的不同模式（refine/tree_summarize，Day 13）处理。<strong>QueryEngine 只管"把 Node 交给 Synthesizer",怎么合成是 Day 13 的事。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Response 对象</h1></div>
+            <div class="card">
+                <p><code>query</code> 返回 <code>Response</code>（<code>response/</code>）：含 <code>response</code>（答案文本）、<code>source_nodes</code>（生成答案所依据的 Node）、<code>metadata</code>。</p>
+                <div class="baby"><span class="t">source_nodes = 可溯源（RAG 的关键卖点）</span>
+                <strong>Response 不只给答案，还带 <code>source_nodes</code>——"这个答案是基于这几个片段生成的"。这实现了 Day 01 说的"可溯源":用户能看到答案的依据、点进原文档核实。</strong>这是 RAG 相对纯 LLM 的重要优势（能追责、能验证）。<strong><code>print(response)</code> 显示答案，<code>response.source_nodes</code> 拿依据。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>各种查询引擎</h1></div>
+            <div class="card">
+                <p><code>query_engine/</code> 下还有很多：</p>
+                <ul>
+                    <li><strong>RouterQueryEngine</strong>：多个引擎，LLM 选一个（Day 10 提过的路由）。</li>
+                    <li><strong>SubQuestionQueryEngine</strong>：把复杂问题拆成子问题，分别查再汇总。</li>
+                    <li><strong>CitationQueryEngine</strong>：答案带引用编号。</li>
+                    <li><strong>SQLQueryEngine</strong>：把问题转成 SQL 查数据库。</li>
+                    <li><strong>RetrieverQueryEngine</strong>：本课主角（通用 RAG）。</li>
+                </ul>
+                <div class="baby"><span class="t">查询引擎 = 不同的"问答策略"</span>
+                <strong>简单问答用 RetrieverQueryEngine；复杂问题（"对比 A 和 B 的财报")用 SubQuestion 拆解；多数据源用 Router 分派。</strong>它们都是 BaseQueryEngine（统一 <code>query</code> 接口），能互换、能嵌套。<strong>第 4 周会看到 Agent 把 QueryEngine 当"工具"用——RAG 成为智能体的一种能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>QueryEngine 和 Retriever 的区别？</li>
+                    <li>QueryEngine 的三个零件？<code>_query</code> 的两步？</li>
+                    <li>Response 的 source_nodes 怎么实现"可溯源"？</li>
+                    <li>RouterQueryEngine / SubQuestion 各解决什么问题？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '39,60p' query_engine/retriever_query_engine.py
+sed -n '160,210p' query_engine/retriever_query_engine.py
+ls query_engine/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>响应合成 Synthesizer</strong>——检索到的片段太多、要综合怎么办？精读几种合成模式：refine（逐个精炼）、compact（压缩填充）、tree_summarize（树形汇总）。这决定答案怎么"攒"出来。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day11.html" style="color:var(--accent-cyan);">&larr; Day 11</a>
+                <a href="llama-index-day13.html" style="color:#38bdf8;">Day 13 · 响应合成 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

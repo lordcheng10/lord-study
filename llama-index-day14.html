@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 后处理与提示词 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#38bdf8,#34d399);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">后处理与提示词 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 后处理的位置</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseNodePostprocessor</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 相似度过滤</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · rerank 重排</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 上下文窗口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · prompts 模板</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · PromptMixin</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day15.html" class="nav-link" style="color:#38bdf8;">Day 15 LLM 抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 检索与查询</span>
+            <h1 class="part-title">后处理与提示词</h1>
+            <p class="part-desc">检索到的 Node 在喂给 LLM 前，常要"精修"——过滤噪声、重排、补充上下文。今天看 postprocessor（后处理器）和 prompts（提示词模板系统）。它们是提升 RAG 质量的两个关键杠杆。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>后处理的位置</h1></div>
+            <div class="card">
+                <p>回想 Day 12：QueryEngine 的 <code>retrieve</code> = 检索器检索 + <code>_apply_node_postprocessors</code>。后处理夹在"检索"和"合成"之间。</p>
+                <div class="baby"><span class="t">"检索给一堆候选，后处理精挑细选"</span>
+                <strong>检索器返回 top-k（比如 10 个），但这 10 个未必都好——可能有些相关度低、有些重复、有些需要补上下文。后处理器在合成前"精修"这批 Node：过滤掉差的、重新排序、补充相邻块。</strong>好比初筛出 10 份简历，HR 再精挑 3 份。<strong>后处理是"两阶段检索"（粗检索 + 精排）的精排阶段——对 RAG 质量提升显著。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseNodePostprocessor</h1></div>
+            <div class="card">
+                <p><code>postprocessor/</code> 的 <code>BaseNodePostprocessor</code>：核心方法 <code>postprocess_nodes(nodes, query_bundle) -> List[NodeWithScore]</code>——输入一批带分数的 Node，输出精修后的。</p>
+                <div class="anno">读法：<b>又是"输入 Node 列表、输出 Node 列表"的统一接口——所以多个后处理器能串成链（QueryEngine 的 <code>node_postprocessors</code> 列表，依次应用）。<strong>可以先过滤、再重排、再取窗口——像流水线。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>相似度过滤</h1></div>
+            <div class="card">
+                <p><code>postprocessor/</code> 的 <code>SimilarityPostprocessor</code>：按 <code>similarity_cutoff</code> 过滤——只保留相似度分数高于阈值的 Node。</p>
+                <div class="baby"><span class="t">"宁缺毋滥"，扔掉弱相关</span>
+                <strong>检索的 top-k 是"最相似的 k 个",但如果库里根本没有相关内容，这 k 个可能都是"矮子里拔将军"（分数很低）。把它们喂给 LLM 反而误导（让它基于无关内容瞎答）。</strong>SimilarityPostprocessor 设个阈值（如 0.7），低于的直接扔——<strong>宁可少给几个，也不给无关的。这能减少幻觉。</strong>如果全被过滤掉，说明"知识库里没答案",比硬答强。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>rerank 重排</h1></div>
+            <div class="card">
+                <p>重排类后处理器（如 <code>LLMRerank</code>、integration 里的 <code>CohereRerank</code>/<code>SentenceTransformerRerank</code>）：用一个更强的模型重新给候选打分排序。</p>
+                <div class="baby"><span class="t">"两阶段检索"的精排（RAG 提效神器）</span>
+                <strong>向量检索快但不够准（只看向量相似）。rerank 用专门的"重排模型"（cross-encoder）或 LLM，把"查询 + 每个候选"一起看、给出更准的相关度分，重新排序。</strong>流程：向量粗检索取 top-20（快、召回全）→ rerank 精排取 top-5（准）。<strong>这是提升 RAG 准确率最有效的技巧之一——粗检索保召回、rerank 保精度。</strong>代价是 rerank 要额外调模型（慢/花钱），但值得。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>上下文窗口</h1></div>
+            <div class="card">
+                <p><code>MetadataReplacementPostProcessor</code> / <code>PrevNextNodePostprocessor</code>：配合 Day 04 的 SentenceWindow / Day 02 的 PREV/NEXT 关系，把命中的小块"扩展"成带上下文的内容。</p>
+                <div class="baby"><span class="t">"命中一句，给出一段"</span>
+                <strong>SentenceWindow 检索（Day 04）：用单句嵌入检索（精准命中），但单句给 LLM 上下文不够。<code>MetadataReplacementPostProcessor</code> 在检索命中后，把 Node 内容<strong>替换</strong>成它 metadata 里存的"前后窗口"（周围几句）——检索用小粒度（准），给 LLM 用大粒度（全）。</strong><code>PrevNextNodePostprocessor</code> 则用 PREV/NEXT 关系取相邻块。<strong>这解决了"检索精度"和"上下文完整"的矛盾——回收 Day 02/04 的伏笔。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>prompts 模板</h1></div>
+            <div class="card">
+                <p><code>prompts/</code>：<code>PromptTemplate</code>（字符串模板 + 变量）、<code>ChatPromptTemplate</code>（多轮消息模板）。RAG 的核心提示词如 <code>DEFAULT_TEXT_QA_PROMPT_TMPL</code>（"根据以下上下文回答问题：{context_str}\n问题：{query_str}"）。</p>
+                <div class="baby"><span class="t">提示词是 RAG 的"说明书"</span>
+                <strong>LLM 怎么用检索到的内容答题，全看提示词怎么写。默认的 QA 提示词类似"这是相关资料：{context}。请只根据资料回答：{question}"——引导 LLM"基于资料、别乱编"。</strong><code>PromptTemplate</code> 用 <code>{变量}</code> 占位，运行时填入检索内容和问题。<strong>调 RAG 效果时，改提示词（比如加"如果资料里没有就说不知道"）常有奇效——比换模型便宜。</strong>refine 模式（Day 13）还有专门的"精炼提示词"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>PromptMixin</h1></div>
+            <div class="card">
+                <p><code>prompts/mixin.py</code> 的 <code>PromptMixin</code>：让组件（检索器/合成器/查询引擎）能"暴露和替换"自己用的提示词——<code>get_prompts()</code> / <code>update_prompts()</code>。</p>
+                <div class="anno">读法：<b>回想 Day 11 <code>BaseRetriever(PromptMixin, ...)</code>——很多组件都 mix 了它。<strong>好处：你能一行 <code>query_engine.update_prompts({...})</code> 换掉深层组件的提示词，不用改源码。</strong>比如把默认英文提示词换成中文、加约束。<strong>这让"提示词工程"可以在应用层灵活做，不必动框架。</strong>提示词是 RAG 最易调、最见效的地方。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>后处理在检索和合成之间做什么？为什么是"精排"？</li>
+                    <li>相似度过滤为什么能减少幻觉？</li>
+                    <li>rerank（两阶段检索）为什么是提效神器？</li>
+                    <li>上下文窗口后处理怎么解决"命中精度 vs 上下文完整"的矛盾？</li>
+                    <li>提示词为什么是 RAG 最易调的杠杆？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls postprocessor/
+grep -n "class SimilarityPostprocessor\|similarity_cutoff\|def postprocess_nodes" postprocessor/node.py | head
+ls prompts/
+grep -n "DEFAULT_TEXT_QA_PROMPT\|class PromptTemplate" prompts/default_prompts.py prompts/base.py 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：<strong>LLM 抽象</strong>——最后一块拼图。LLM 怎么被统一封装（chat/complete/流式）、ChatMessage/Role、以及 LlamaIndex 怎么让 OpenAI/Claude/本地模型互换。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day13.html" style="color:var(--accent-cyan);">&larr; Day 13</a>
+                <a href="llama-index-day15.html" style="color:#38bdf8;">Day 15 · LLM 抽象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

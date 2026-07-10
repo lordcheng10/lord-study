@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 响应合成 Synthesizer — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:5px 8px;text-align:left;vertical-align:top}
+        th{background:var(--bg-secondary);color:#38bdf8}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#38bdf8,#34d399);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">响应合成 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 合成的难题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ResponseMode</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · refine 逐个精炼</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · compact 压缩</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · tree_summarize</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · PromptHelper 装填</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 流式与结构化</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day14.html" class="nav-link" style="color:#38bdf8;">Day 14 后处理 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 检索与查询</span>
+            <h1 class="part-title">响应合成 Synthesizer</h1>
+            <p class="part-desc">检索到的片段可能很多、可能塞不下 LLM 上下文——怎么把它们"攒"成一个答案？这就是响应合成。今天看几种合成模式：refine、compact、tree_summarize，它们决定答案的质量和成本。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>合成的难题</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"片段太多，一次塞不下"怎么办</span>
+                <strong>检索可能返回很多相关片段（top_k=10、每块 1000 token = 上万 token），加上 LLM 上下文有限——不能无脑全塞进一个提示词。而且要"综合"多个片段得出连贯答案，不是简单拼接。</strong>响应合成器（Synthesizer）解决这个：<strong>用不同策略把 N 个片段"合成"成一个答案</strong>——有的逐个精炼、有的压缩填满、有的树形汇总。<strong>合成模式直接影响答案质量、LLM 调用次数（成本）、延迟。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ResponseMode</h1></div>
+            <div class="card">
+                <p><code>response_synthesizers/type.py:4-51</code> 的 <code>ResponseMode</code>：</p>
+<pre><code class="language-python">class ResponseMode(str, Enum):
+    REFINE = "refine"                  # 逐个片段精炼答案
+    COMPACT = "compact"                # 压缩填满上下文再精炼（默认）
+    SIMPLE_SUMMARIZE = "simple_summarize"  # 全拼一起总结（塞不下就截断）
+    TREE_SUMMARIZE = "tree_summarize"  # 树形两两汇总
+    ACCUMULATE / COMPACT_ACCUMULATE    # 每片段独立答再累积
+    NO_TEXT / CONTEXT_ONLY / GENERATION  # 特殊模式</code></pre>
+                <div class="anno">读法：<b><code>response_synthesizers/</code> 每个模式一个文件（refine.py/compact_and_refine.py/tree_summarize.py…）。<code>factory.py</code> 的 <code>get_response_synthesizer</code> 按 mode 造对应合成器（Day 12 默认用 COMPACT）。<strong>下面拆三个最重要的。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>refine 逐个精炼</h1></div>
+            <div class="card">
+                <p><code>response_synthesizers/refine.py</code>：</p>
+<pre><code class="language-bash">1. 用片段1 + 问题 → LLM 生成初版答案
+2. 用片段2 + 初版答案 + 问题 → LLM "在已有答案基础上，结合片段2 精炼"
+3. 用片段3 + 上版答案 → 继续精炼
+... 每个片段调一次 LLM，答案层层完善</code></pre>
+                <div class="baby"><span class="t">"滚雪球"式完善答案</span>
+                <strong>refine 一个片段一个片段地过：先用第一个片段答一版，再拿第二个片段"补充/修正"这版答案，如此叠加。每个片段都被完整看到（不会因塞不下被截断）。</strong>优点：不丢信息、答案精细。缺点：<strong>N 个片段 = N 次 LLM 调用（慢、贵）</strong>。适合片段多、要精确综合的场景。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>compact 压缩（默认）</h1></div>
+            <div class="card">
+                <p><code>response_synthesizers/compact_and_refine.py</code>：先把多个片段"塞满"一个提示词（尽量填满上下文窗口），塞不下的再走 refine。</p>
+                <div class="baby"><span class="t">compact = refine 的省钱版</span>
+                <strong>refine 每片段调一次 LLM 太贵。compact 先"打包":把能塞进一个上下文的片段合并成一次调用（少调 LLM），塞不下的剩余部分再 refine。</strong>比如 10 个片段，若 3 个能塞满一次，就 3+3+4 三次调用（而非 refine 的 10 次）。<strong>这是 LlamaIndex 的默认模式——在"信息完整"和"少调 LLM"间取平衡。</strong>大多数场景用它就好。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>tree_summarize 树形汇总</h1></div>
+            <div class="card">
+                <p><code>response_synthesizers/tree_summarize.py</code>：把片段两两（或成组）用 LLM 汇总成中间摘要，中间摘要再汇总，层层向上直到一个最终答案（树形归并）。</p>
+                <div class="baby"><span class="t">适合"总结大量内容"</span>
+                <strong>tree_summarize 像"淘汰赛"：一堆片段 → 分组各自汇总 → 得到几个中间摘要 → 再汇总 → 最终一个。</strong>优点：<strong>能处理超多片段（层级归并，每层并行），特别适合"总结整份长文档"。</strong>因为每层可并行调 LLM，比 refine 快。缺点：中间汇总可能丢细节。<strong>问"总结这本书讲了什么"用它；问"退款政策的具体条款"用 compact/refine（要精确细节）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>PromptHelper 装填</h1></div>
+            <div class="card">
+                <p><code>indices/prompt_helper.py</code> 的 <code>PromptHelper</code>：负责"把多少片段塞进一个提示词"的计算——根据 LLM 的上下文窗口、留给答案的空间，算出每次能装多少 Node 文本。</p>
+                <div class="anno">读法：<b>合成器背后靠 PromptHelper 做"装箱":<strong>它知道 LLM 上下文有多大、要留多少给输出，算出提示词里能塞多少检索内容、需要分几批。</strong>compact 的"尽量塞满"、refine 的"每次一个"都靠它计算边界。<strong>它防止"塞爆上下文"报错——自动分批。</strong>这是 RAG 工程化的关键细节（不同 LLM 上下文大小不同，要动态适配）。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>流式与结构化</h1></div>
+            <div class="card">
+                <p>合成器支持 <code>streaming=True</code>（答案边生成边返回，改善体验）和结构化输出（<code>output_cls</code>，让 LLM 返回 Pydantic 对象而非纯文本）。</p>
+                <div class="baby"><span class="t">流式：让用户"立刻看到答案在打字"</span>
+                <strong>LLM 生成答案要几秒——流式让答案"一个字一个字"实时显示（像 ChatGPT 那样），不用干等。</strong>合成器把 LLM 的流式输出透传出来。<strong>结构化输出</strong>则让答案变成程序能用的对象（如 <code>{"answer": ..., "confidence": ...}</code>），适合要把 RAG 结果接入下游程序的场景。<strong>这些是生产 RAG 的体验/集成能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要"合成"而不是简单拼接片段？</li>
+                    <li>refine / compact / tree_summarize 各怎么工作、各适合什么？</li>
+                    <li>为什么 compact 是默认（省 LLM 调用）？</li>
+                    <li>PromptHelper 解决什么"装箱"问题？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '1,55p' response_synthesizers/type.py
+ls response_synthesizers/
+grep -n "def get_response_synthesizer\|ResponseMode" response_synthesizers/factory.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>后处理 + 提示词</strong>——检索到的 Node 在合成前先"精修"：postprocessor 重排（rerank）、相似度过滤、取上下文窗口；以及 prompts 模板系统怎么组织所有提示词。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day12.html" style="color:var(--accent-cyan);">&larr; Day 12</a>
+                <a href="llama-index-day14.html" style="color:#38bdf8;">Day 14 · 后处理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
