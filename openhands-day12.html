@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 工具体系 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .note{border:1px dashed #8b5cf6;background:rgba(139,92,246,.06);border-radius:8px;padding:11px 14px;margin:12px 0;font-size:12.5px} .note b{color:#8b5cf6}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#22c55e}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">工具体系 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工具 = 三件套</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 参数 schema 是关键</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · LLM 如何"选中"工具</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · bash 工具</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 文件编辑工具</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 浏览器工具</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · MCP 接入海量工具</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 SDK</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 Runtime &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 Agent 大脑</span>
+            <h1 class="part-title">工具体系</h1>
+            <p class="part-desc">工具（tool）是 Agent 的"双手"。今天讲一个工具由什么组成、LLM 怎么选中并调用它、几个核心工具的门道，以及 MCP 如何让 Agent 接入海量外部工具。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工具 = 三件套</h1></div>
+            <div class="card">
+                <div class="note"><b>代码位置</b>：工具实现在外部包 <code>openhands-tools==1.34.0</code>。本课结合前端里的 Action/Observation 类型（工具的"输入输出契约"）+ 通用工具设计讲清原理。</div>
+                <p>任何一个工具，本质是三样东西：</p>
+                <table class="k">
+                    <tr><th>组成</th><th>是什么</th><th>例（bash 工具）</th></tr>
+                    <tr><td>名字 + 描述</td><td>给 LLM 看的"这工具干嘛用"</td><td>execute_bash："执行 bash 命令"</td></tr>
+                    <tr><td>参数 schema</td><td>调用时要填哪些参数（JSON Schema）</td><td>command, is_input, timeout</td></tr>
+                    <tr><td>执行函数</td><td>真正干活的代码，产出 Observation</td><td>在沙箱跑命令、返回输出</td></tr>
+                </table>
+                <div class="baby"><span class="t">工具和 Action 什么关系？</span>
+                一一对应！工具的"参数 schema"= 对应 Action 的字段（Day 02）。LLM 调用 <code>execute_bash</code> 工具、填 <code>command="ls"</code> → SDK 生成一个 <code>ExecuteBashAction{command:"ls"}</code> → 执行函数在沙箱跑它 → 产出 <code>ExecuteBashObservation</code>。<strong>工具是"能力的定义"，Action 是"一次具体调用"，Observation 是"调用结果"。三位一体。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>参数 schema 是关键</h1></div>
+            <div class="card">
+                <p>工具定义会被转成 OpenAI function calling 格式的 JSON，发给 LLM（Day 03 的 SystemPromptEvent.tools）。大致长这样：</p>
+<pre><code class="language-json">{
+  "type": "function",
+  "function": {
+    "name": "execute_bash",
+    "description": "在沙箱里执行一条 bash 命令",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {"type": "string", "description": "要执行的命令"},
+        "is_input": {"type": "boolean", "description": "是否向运行中的进程输入"}
+      },
+      "required": ["command"]
+    }
+  }
+}</code></pre>
+                <div class="anno">读法：<b>这段 JSON 就是"教 LLM 怎么用这个工具"的说明书——工具叫什么、干嘛、有哪些参数、哪些必填。</b>LLM 读了它，就知道"想跑命令时，我该输出一个 name=execute_bash、command 填某值的 tool call"。</div>
+                <div class="baby"><span class="t">为什么 description 写得好坏很重要？</span>
+                LLM 完全靠 description 理解"什么时候该用这个工具、参数该填什么"。描述含糊，LLM 就会乱用或填错参数。所以工具的 name/description/参数说明<strong>本质是一种"给 AI 的提示词工程"</strong>——写清楚了，Agent 才聪明。这也是为什么好的 Agent 框架在工具描述上很下功夫。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>LLM 如何"选中"工具</h1></div>
+            <div class="card">
+                <p>流程（Day 11 的 step 细化）：① 把所有工具的 JSON 定义 + 当前对话历史发给 LLM；② LLM 回复里带一个（或多个）<code>tool_calls</code>，指明"调哪个工具、参数是什么"；③ SDK 按 <code>tool_call.function.name</code> 找到对应工具，把 <code>arguments</code> 解析成 Action。</p>
+                <div class="glossary"><b>可能一次调多个工具</b>：Day 03 的 ActionEvent 有个 <code>llm_response_id</code> 字段——同一次 LLM 响应里的多个并行动作用它归组。比如 LLM 一次说"同时读这三个文件"，就产生三个并行的 ActionEvent。<strong>并行工具调用能加速任务</strong>（一次 LLM 往返干多件事）。每个工具调用还带 <code>tool_call_id</code>，结果 Observation 用 <code>action_id</code> 配对回去（Day 03）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>bash 工具（最核心）</h1></div>
+            <div class="card">
+                <p>对应 <code>ExecuteBashAction</code>（Day 02）。它不是"跑一次性命令"那么简单——它维护一个<strong>持久的终端会话</strong>：</p>
+                <ul>
+                    <li>命令在同一个 shell 会话里执行，所以 <code>cd</code> 之后的路径、设的环境变量都保留（有状态）。</li>
+                    <li><code>is_input=true</code>：向正在运行的交互程序输入（如回答 y/n）。</li>
+                    <li><code>reset=true</code>：终端卡死时重建会话。</li>
+                    <li>结果 <code>ExecuteBashObservation</code> 带 <code>exit_code</code>、输出内容、还从终端提示符 PS1 抓取当前工作目录等元数据。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要"持久终端"而不是每次开新的？</span>
+                因为真实工作是<strong>有上下文</strong>的：你 <code>cd project && source venv/bin/activate</code> 之后，希望后续命令都在这个目录、这个虚拟环境里跑。如果每条命令都开一个全新 shell，这些状态就丢了。持久终端让 Agent 像人一样"在一个终端里连续操作"。<strong>从 PS1 抓工作目录这种细节，是为了让 Agent 始终知道"我现在在哪个目录"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>文件编辑工具（str_replace 模式）</h1></div>
+            <div class="card">
+                <p>对应 <code>FileEditorAction</code>（Day 02 精读过）。5 个子命令：<code>view</code>（看）、<code>create</code>（建）、<code>str_replace</code>（查找替换）、<code>insert</code>（插入）、<code>undo_edit</code>（撤销）。结果 <code>FileEditorObservation</code> 带 <code>old_content</code>/<code>new_content</code>（改前改后对比）。</p>
+                <div class="glossary"><b>为什么 Observation 要带"改前改后"？</b> ① 前端能渲染成 diff（绿加红删），你一眼看清 Agent 改了啥；② Agent 自己也能核对"我这次改动符合预期吗"；③ <code>undo_edit</code> 能靠它回滚。<strong>Day 02 讲过 str_replace 省 token、防误伤——今天补上：它的 Observation 设计还服务于"可视化 + 可核对 + 可撤销"。</strong>好工具不仅动作设计好，结果反馈也设计好。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>浏览器工具</h1></div>
+            <div class="card">
+                <p>对应 <code>Browser*Action</code>（10 个，如 navigate/click/type）。底层用 <code>browsergym</code> + <code>playwright</code>（真实浏览器自动化，见 <code>pyproject.toml</code>）。结果 <code>BrowserObservation</code> 带 <code>output</code> 和 <code>screenshot_data</code>（base64 网页截图）。</p>
+                <div class="baby"><span class="t">Agent 怎么"看"网页？</span>
+                两条信息：① 网页的<strong>可访问性树/文本</strong>（哪些按钮、链接、输入框，带编号）——LLM 靠它决定"点第几个元素";② <strong>截图</strong>——多模态 LLM 能"看图"理解页面布局。所以浏览器 Observation 既给文本又给截图。<strong>让 Agent 上网查文档、复现网页 bug、甚至操作 Web 应用——这大大扩展了它能干的活。</strong>需要 <code>enable_browser</code> 打开（Day 04）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>MCP：接入海量外部工具</h1></div>
+            <div class="card">
+                <p>对应 <code>MCPToolAction</code>（Day 02）。<strong>MCP（Model Context Protocol）</strong>是一个开放协议，让工具/数据源用标准方式暴露给 AI。OpenHands 支持接入 MCP server（配置 <code>[mcp]</code> 段，支持 sse/shttp/stdio 三种传输）。</p>
+                <div class="glossary"><b>MCP 的意义：工具生态标准化</b>。有了 MCP 适配，社区里海量的 MCP server（数据库、文件系统、GitHub、Slack、各种 SaaS……就是本教程运行环境里那些 <code>mcp__*</code> 工具用的协议）都能<strong>直接变成你 OpenHands Agent 的工具</strong>，你几乎不用自己写。<code>fastmcp</code>+<code>mcp</code> 是依赖（<code>pyproject.toml</code>）。<strong>"定义标准接口 → 生态自动繁荣"——和 eino 的 eino-ext、组件接口是同一个哲学。接口标准化是生态的地基。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>一个工具由哪三件套组成？和 Action/Observation 什么关系？</li>
+                    <li>参数 schema 为什么关键？description 写好坏为什么影响大？</li>
+                    <li>LLM 怎么选中并调用工具？并行工具调用靠什么归组？</li>
+                    <li>bash 工具为什么要"持久终端"？文件工具的 Observation 为什么带改前改后？</li>
+                    <li>MCP 带来什么？和 eino-ext 哪里像？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 对照 Action 类型看工具契约
+sed -n '25,214p' frontend/src/types/v1/core/base/action.ts | head -60
+# MCP / 浏览器依赖
+grep -iE 'mcp|browsergym|playwright' pyproject.toml
+# 配置里的 MCP 段
+sed -n '/\[mcp\]/,/^\[/p' config.template.toml | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>Runtime 运行时</strong>——Action 产生后，怎么被送进沙箱真正执行、Observation 怎么回来。运行时抽象、本地/Docker/远程三种实现，以及它和沙箱的关系。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 SDK</a>
+                <a href="openhands-day13.html" style="color:var(--accent-green);">Day 13 · Runtime 运行时 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

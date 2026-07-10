@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · Agent SDK 概念 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .note{border:1px dashed #8b5cf6;background:rgba(139,92,246,.06);border-radius:8px;padding:11px 14px;margin:12px 0;font-size:12.5px}
+        .note b{color:#8b5cf6}
+        .loop3{display:flex;flex-direction:column;gap:6px;max-width:440px;margin:14px auto}
+        .loop3 .s{display:flex;gap:10px;align-items:center;border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .loop3 .s .n{width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">Agent SDK 概念 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 先说清楚代码在哪</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Agent 的一步（step）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 三要素：LLM/工具/上下文</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · create_agent 真实调用</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 内置 Agent 与工具集</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 会话状态与历史</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 停下来的条件</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 装配</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 工具体系 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 Agent 大脑</span>
+            <h1 class="part-title">Agent SDK 概念</h1>
+            <p class="part-desc">进入工人的大脑。Agent 循环的核心逻辑在外部包 <code>openhands-sdk</code>，但我们能从本仓的调用方式 + 前两周的事件模型，把它的工作原理讲透。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>先说清楚：代码在哪</h1></div>
+            <div class="card">
+                <div class="note"><b>诚实声明</b>：Agent 循环的实现在外部包 <code>openhands-sdk==1.34.0</code>（源自 <code>OpenHands/software-agent-sdk</code> 仓库），<strong>不在本仓库</strong>。本课基于三样真实材料讲清它的原理：① 前两周读的 Action/Observation 事件模型（前端类型）；② 本仓 <code>app_server</code> 里构建/调用 Agent 的真实代码（<code>create_agent</code>、<code>get_default_tools</code>）；③ OpenHands 公开的 CodeAct 设计。凡涉及外部包的地方都会标注。</div>
+                <div class="baby"><span class="t">别慌，你已经懂一大半了</span>
+                Agent 的"输入输出"你其实早就学过了——它<strong>吃事件历史、吐 Action</strong>（Day 02/03），然后环境执行产生 Observation 喂回来。这周只是把"大模型如何决定下一个 Action"这个中间过程讲清楚。<strong>核心循环你在 Day 05 已经见过，本周是放大细节。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Agent 的"一步"（step）</h1></div>
+            <div class="card">
+                <p>Agent 的核心是一个 <code>step</code>（一步）方法。每一步做的事：</p>
+                <div class="loop3">
+                    <div class="s"><span class="n">1</span>把"系统提示 + 事件历史"整理成消息，发给 LLM</div>
+                    <div class="s"><span class="n">2</span>LLM 返回"要调用哪个工具、参数是什么"（tool call）</div>
+                    <div class="s"><span class="n">3</span>把 tool call 转成一个 Action（Day 02）</div>
+                    <div class="s"><span class="n">4</span>Action 交给运行时执行 → 得到 Observation（Day 13）</div>
+                    <div class="s"><span class="n">5</span>Observation 追加进历史，进入下一步</div>
+                </div>
+                <div class="anno">读法：<b>"一步"= 一次 LLM 调用 + 一个 Action 的产生。</b>整个任务 = 反复 step，直到 LLM 决定结束（产生 FinishAction）。这就是 Day 01 那张"感知→决策→行动→观察→循环"图的代码化。</div>
+                <div class="glossary">现代 Agent 靠 LLM 的 <strong>function calling（函数调用）</strong>能力实现步进：你把可用工具的定义（名字、参数 schema）告诉 LLM，LLM 就能在回复里结构化地说"我要调用 execute_bash，command='ls'"。SDK 把这个 tool call 解析成 <code>ExecuteBashAction</code>。<strong>function calling 是"让大模型可靠地选工具、填参数"的关键机制</strong>——没有它，就得靠解析自由文本，极不可靠。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Agent 三要素：LLM / 工具 / 上下文</h1></div>
+            <div class="card">
+                <p>从本仓构建 Agent 的代码能反推出 Agent 由三部分组成（<code>live_status_app_conversation_service.py:1760</code>）：</p>
+<pre><code class="language-python">configured_agent_settings = user.agent_settings.model_copy(update={
+    'llm': llm,                    # ① 大脑：用哪个大模型
+    'tools': tools,                # ② 双手：能用哪些工具
+    'mcp_config': mcp_config,      # 扩展工具（MCP）
+    'agent_context': AgentContext( # ③ 上下文：系统提示、密钥等
+        system_message_suffix=..., secrets=secrets)})
+agent = configured_agent_settings.create_agent()   # 组装成 Agent</code></pre>
+                <div class="anno">读法：<b>Agent = LLM（大脑）+ tools（双手）+ context（人设与环境）。</b><code>create_agent()</code>（外部包方法）把这三样组装成一个可运行的 Agent 对象。改任何一样都能得到一个不同行为的 Agent——换更强的模型、给更多工具、改系统提示定制人设。</div>
+                <div class="baby"><span class="t">类比：招一个员工</span>
+                LLM = 这个员工的"智力"（用 GPT-4 还是 Claude）；tools = 给他配的"工具箱"（能不能上网、能不能改代码）；context = 他的"岗位说明书 + 门禁卡"（你是干什么的、有哪些权限密钥）。<strong>同一套流程，配不同的智力/工具/说明书，就得到不同能力的 Agent。</strong>这也解释了 Day 04 那些 <code>enable_*</code> 开关——它们就是在配"工具箱里放哪些工具"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>create_agent 与规划型 Agent</h1></div>
+            <div class="card">
+                <p>本仓在构建 Agent 时会根据类型选不同工具集（<code>:1760</code>）：</p>
+<pre><code class="language-python">if agent_type == AgentType.PLAN:
+    tools = get_planning_tools(plan_path=plan_path)      # 规划型：专注做计划
+else:
+    register_builtins_agents(enable_browser=True)
+    tools = get_default_tools(enable_browser=True,
+                              enable_sub_agents=...)      # 默认：全能工具集</code></pre>
+                <div class="anno">读法：<b>OpenHands 有不止一种 Agent。<code>PLAN</code> 型是"规划者"——它的工具集专注于"拆解任务、写计划（PLAN.md）"，不直接改代码；默认型是"执行者"——工具齐全，直接干活。</b>这呼应 Day 05 提到的"主对话 + planning 子 agent 两条并行连接"。</div>
+                <div class="glossary"><b>为什么要分规划者和执行者？</b> 复杂任务先规划再执行效果更好——就像人接到大项目先列计划再动手。规划型 Agent 产出计划，执行型 Agent 照计划干。两者协作（Day 18 的 microagents、子 Agent 委派 TaskAction 也是类似思路）。<code>register_builtins_agents</code> 注册内置 Agent 类型供选用。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>内置 Agent 与默认工具集</h1></div>
+            <div class="card">
+                <p><code>get_default_tools()</code>（外部包 <code>openhands-tools</code>）返回默认 Agent 的工具清单——正好对应 Day 02 的动作全家福：bash 执行、文件编辑、浏览器、搜索（glob/grep）、思考、结束、任务清单等。<code>enable_browser</code>/<code>enable_sub_agents</code> 等参数控制放不放某些工具。</p>
+                <div class="baby"><span class="t">串起来（Day 02+04+11）</span>
+                配置 <code>[agent]</code> 的 <code>enable_*</code> 开关（Day 04）→ 决定 <code>get_default_tools</code> 返回哪些工具（Day 11）→ 这些工具的定义写进 SystemPromptEvent 告诉 LLM（Day 03）→ LLM 据此产出对应的 Action（Day 02）。<strong>"配置→工具集→系统提示→动作"这条链，把散落各周的知识彻底焊死了。</strong>默认 Agent 就是大名鼎鼎的 CodeActAgent（Day 15 精读它的独特之处）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>会话状态与历史</h1></div>
+            <div class="card">
+                <p>Agent 每一步都需要"完整的历史"来决策（否则失忆）。这个历史就是 Day 03 的<strong>事件流</strong>——所有 Action/Observation/Message 按时间累积。Agent step 前，SDK 把这些事件转成 LLM 能理解的消息序列（system + user + assistant + tool 消息）。</p>
+                <div class="glossary"><b>历史会越来越长</b>——这就是 Day 03 讲的<strong>历史压缩（CondensationEvent）</strong>要解决的问题。配置 <code>[condenser]</code> 段选策略（<code>noop</code>/<code>recent</code>/<code>llm</code> 摘要等）。当历史逼近 LLM 上下文窗口上限时，压缩器把老事件折叠成摘要，腾出空间。<strong>Agent 能跑长任务（几百步），靠的就是"历史累积 + 适时压缩"这对组合。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Agent 什么时候停下来</h1></div>
+            <div class="card">
+                <p>step 循环的三个出口：</p>
+                <ul>
+                    <li><strong>正常结束</strong>：LLM 产出 <code>FinishAction</code>（Day 02）——它认为任务完成了，附一句给用户的话。</li>
+                    <li><strong>达到上限</strong>：循环步数超过 <code>max_iterations</code>（默认 500）或花费超过 <code>max_budget_per_task</code>（Day 04）——强制熔断。</li>
+                    <li><strong>等待人工</strong>：confirmation mode 下遇到高危动作暂停等确认（Day 17）；或 Agent 主动向用户提问。</li>
+                </ul>
+                <div class="baby"><span class="t">谁决定"任务做完了"？</span>
+                主要是 <strong>LLM 自己</strong>——当它判断目标达成，就产出 FinishAction。步数/预算上限只是防失控的安全网，正常任务用不到。所以 Agent 好不好用，很大程度取决于 LLM 的判断力和系统提示的质量。<strong>这和 eino 教程里 ReAct Agent 的收尾逻辑一模一样——模型不再要工具、给出最终答案即结束。天下 Agent 一大抄（褒义）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Agent 循环代码在哪？（外部包 openhands-sdk）</li>
+                    <li>Agent 的"一步"做什么？function calling 起什么作用？</li>
+                    <li>Agent 三要素？（LLM / tools / context）</li>
+                    <li>规划型和执行型 Agent 的区别？</li>
+                    <li>Agent 靠什么决策？（累积历史 + 压缩）什么时候停？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：看本仓怎么调用 SDK</h3>
+<pre><code class="language-bash"># 构建 Agent 的真实代码（本仓调用外部包）
+grep -n 'create_agent\|get_default_tools\|get_planning_tools\|register_builtins_agents' \
+  openhands/app_server/app_conversation/live_status_app_conversation_service.py
+# 确认外部包依赖
+grep 'openhands-sdk\|openhands-tools' pyproject.toml</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>工具体系 openhands-tools</strong>——一个工具怎么定义（名字 + 参数 schema + 执行函数）、LLM 怎么"选中并调用"它、bash/文件/浏览器工具各自的门道，以及 MCP 如何接入海量外部工具。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 装配</a>
+                <a href="openhands-day12.html" style="color:var(--accent-green);">Day 12 · 工具体系 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
