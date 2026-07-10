@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次对话的完整旅程 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .journey { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+        .jstep { display:flex; align-items:center; gap:12px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:11px 14px; transition:all .3s; }
+        .jstep.lit { border-color:var(--accent-orange); box-shadow:0 0 14px rgba(245,158,11,.3); }
+        .jstep .n { flex-shrink:0; width:28px;height:28px;border-radius:50%; background:var(--layer); color:#fff; display:flex;align-items:center;justify-content:center; font-size:12px;font-weight:700; }
+        .jstep .txt { flex:1; } .jstep .txt b { font-size:13px; } .jstep .txt small { display:block; font-size:11px; color:var(--text-muted); font-family:'SF Mono',monospace; }
+        .jstep .layer-tag { font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; color:#fff; background:var(--layer); }
+        .lyUI{--layer:#06b6d4} .lyLoop{--layer:#f59e0b} .lyAPI{--layer:#8b5cf6} .lyTool{--layer:#22c55e}
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .recap4{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+        .rc{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:11px 13px;font-size:12.5px;color:var(--text-secondary)} .rc b{color:var(--accent-orange)}
+        @media(max-width:768px){ .recap4{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">一次对话的完整旅程 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一个真实场景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 端到端旅程动画</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 输入 → 提交</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 第一轮：模型要工具</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 第二轮：结果回填</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 收尾与显示</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 第 1 周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 Ink 入门</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 QueryEngine &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次对话的完整旅程</h1>
+            <p class="part-desc">把前 4 天串起来。跟着一句真实需求，看代码怎么在 UI → 循环 → API → 工具各层之间流转，最后把结果显示回屏幕。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一个真实场景</h1></div>
+            <div class="card">
+                <p>设想你在终端里输入：</p>
+                <div class="card highlight-card" style="margin:12px 0;"><p style="margin:0;font-family:'SF Mono',monospace;color:var(--accent-cyan);">› 帮我看看 utils.ts 里的 fetchData，给它加上失败重试</p></div>
+                <p>接下来发生的事，会用到前 4 天学的每一块：Day 02 的启动（界面已经跑起来了）、Day 04 的 UI（输入框接收、消息渲染）、Day 03 的循环（turn 转起来）。今天我们把它走成一条<strong>端到端的旅程</strong>，标清每一步在哪个文件。</p>
+                <p>这个任务模型大概会分两轮：<strong>第一轮</strong>——"我得先读这个文件"（调 Read 工具）；<strong>第二轮</strong>——看完内容后"我来改它"（调 Edit 工具）；然后收尾。正好演示循环转两圈。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>端到端旅程动画</h1></div>
+            <div class="card">
+                <p>下面每一步会依次高亮，颜色代表它属于哪一层（🔵UI / 🟠循环 / 🟣API / 🟢工具）：</p>
+                <div class="journey" id="journey">
+                    <div class="jstep lyUI" data-i="0"><div class="n">1</div><div class="txt"><b>输入框接收 & 提交</b><small>PromptInput → onSubmit → REPL.onQuery (REPL.tsx:3614)</small></div><span class="layer-tag">UI</span></div>
+                    <div class="jstep lyLoop" data-i="1"><div class="n">2</div><div class="txt"><b>QueryEngine 起一个 turn</b><small>submitMessage → for await query() (QueryEngine.ts:688)</small></div><span class="layer-tag">循环</span></div>
+                    <div class="jstep lyLoop" data-i="2"><div class="n">3</div><div class="txt"><b>queryLoop 压缩上下文 + 调模型</b><small>while(true) → deps.callModel (query.ts:460/899)</small></div><span class="layer-tag">循环</span></div>
+                    <div class="jstep lyAPI" data-i="3"><div class="n">4</div><div class="txt"><b>API 流式：模型说"我要 Read"</b><small>queryModel SSE → tool_use block (claude.ts:2075)</small></div><span class="layer-tag">API</span></div>
+                    <div class="jstep lyLoop" data-i="4"><div class="n">5</div><div class="txt"><b>检测到 tool_use → needsFollowUp</b><small>query.ts:1090</small></div><span class="layer-tag">循环</span></div>
+                    <div class="jstep lyTool" data-i="5"><div class="n">6</div><div class="txt"><b>执行 Read 工具（含权限检查）</b><small>runTools → Read.call (Day 07/08)</small></div><span class="layer-tag">工具</span></div>
+                    <div class="jstep lyLoop" data-i="6"><div class="n">7</div><div class="txt"><b>结果拼回，进第二轮</b><small>messages.concat(assistant, toolResults) (query.ts:2044)</small></div><span class="layer-tag">循环</span></div>
+                    <div class="jstep lyAPI" data-i="7"><div class="n">8</div><div class="txt"><b>第二轮：模型说"我要 Edit"</b><small>再次 callModel → tool_use</small></div><span class="layer-tag">API</span></div>
+                    <div class="jstep lyTool" data-i="8"><div class="n">9</div><div class="txt"><b>执行 Edit（弹权限卡等你批准）</b><small>useCanUseTool → 权限弹窗 (Day 09)</small></div><span class="layer-tag">工具</span></div>
+                    <div class="jstep lyLoop" data-i="9"><div class="n">10</div><div class="txt"><b>第三轮：模型只给文字，不再要工具</b><small>!needsFollowUp → return completed (query.ts:1647)</small></div><span class="layer-tag">循环</span></div>
+                    <div class="jstep lyUI" data-i="10"><div class="n">11</div><div class="txt"><b>结果渲染到屏幕</b><small>onQueryEvent → setMessages → Messages 列表 (REPL.tsx:3223)</small></div><span class="layer-tag">UI</span></div>
+                </div>
+                <div class="glossary">看这条旅程你会发现：<strong>循环层（橙）是绝对的中枢</strong>——它反复在"调 API（紫）"和"跑工具（绿）"之间来回，UI（蓝）只在头尾出现（接收输入、显示结果）。这正是 Day 03 那个"圈"的展开：转了三圈（读→改→收尾），每圈一次 API + 可能一次工具。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>第 1 步：输入 → 提交</h1></div>
+            <div class="card">
+                <p>你敲完回车。Day 04 讲过 <code>PromptInput</code> 的 <code>useTextInput</code> 判定"普通 Enter = 提交"（<code>useTextInput.ts:248</code>），把文本上抛给 REPL 的 <code>onSubmit</code>，进而 <code>onQuery</code>（<code>REPL.tsx:3614</code>）。关键一步是<strong>并发守卫</strong>：</p>
+<pre><code class="language-typescript">// REPL.tsx:3614 —— onQuery 先原子占位
+if (!queryGuard.tryStart()) {
+  enqueue(input)     // 上一个查询还在跑？把这条排队，稍后消费
+  return
+}
+// 抢到锁，才真正发起查询</code></pre>
+                <div class="glossary"><b>为什么要并发守卫？</b> 用户可能在 Agent 还在干活时又敲了一句。不能同时跑两个 turn（会乱套）。<code>QueryGuard.tryStart()</code> 原子地"抢锁"——抢到才开始，没抢到就把输入塞进队列（<code>useQueueProcessor</code>），等当前 turn 结束后再自动消费。这保证了"一次只跑一个 turn，但你的输入不会丢"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>第一轮：模型要读文件</h1></div>
+            <div class="card">
+                <p>REPL 用 <code>for await</code> 消费 <code>query(...)</code> 的产出（<code>REPL.tsx:3510</code>）：</p>
+<pre><code class="language-typescript">// REPL.tsx:3510
+for await (const event of query({ messages, systemPrompt, canUseTool, ... }))
+  onQueryEvent(event);   // 每个事件更新 UI</code></pre>
+                <p>循环层（<code>query.ts</code>）第一轮：压缩上下文 → 调模型。模型看到你的需求 + 可用工具清单，决定"我得先读 utils.ts"，于是流式返回里带一个 <code>tool_use</code> 块（工具名 Read、参数 <code>{file_path: ".../utils.ts"}</code>）。</p>
+                <ul>
+                    <li>API 层（<code>claude.ts:2075</code>）把流式增量拼成完整 assistant 消息，同时透传 stream_event（Day 04 讲的"边流边显"）。</li>
+                    <li>循环层检测到 tool_use 块 → <code>needsFollowUp = true</code>（<code>query.ts:1090</code>）。</li>
+                    <li>UI 层同时把"● 我先看一下这个文件"这段文字流式显示出来（Day 04 的 streamingText）。</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>执行工具 + 结果回填</h1></div>
+            <div class="card">
+                <p>因为 <code>needsFollowUp</code>，循环层跑工具（<code>query.ts:1671</code> 的 <code>runTools</code>）。Read 是只读工具，权限检查大概率直接放行（在工作目录内，Day 09 讲），读到文件内容。</p>
+                <p>然后关键的<strong>回填</strong>（Day 03 讲过）——工具结果变成一条 user 消息，拼进下一轮（<code>query.ts:2044</code>）：</p>
+<pre><code class="language-typescript">messages = 历史.concat(
+  assistantMessages,   // 模型说"我要 Read"
+  toolResults          // "这是 utils.ts 的内容：export function fetchData()..."
+)
+// continue → 第二轮 callModel，模型现在"看到了"文件内容</code></pre>
+                <p>第二轮：模型基于文件内容，决定"我来改"，返回一个 Edit 的 tool_use（old_string=原函数，new_string=带重试的版本）。这次 Edit 是<strong>写</strong>操作，会触发权限流（Day 09）——UI 弹出一张权限卡问你"允许修改 utils.ts 吗？"。你批准后，Edit 执行、结果回填，进第三轮。</p>
+                <div class="glossary"><b>为什么读不弹窗、改要弹窗？</b> 因为读文件（在工作目录内）风险低、默认放行；而写文件会改变你的代码，风险高，默认要你确认。这个"按风险区别对待"的权限系统就是 Day 09 的主题。你也能配置成 <code>acceptEdits</code> 模式让编辑自动放行。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>收尾与显示</h1></div>
+            <div class="card">
+                <p>第三轮：模型改完了，这次只返回文字"✓ 已给 fetchData 加上 3 次重试，用指数退避"，<strong>没有 tool_use 块</strong>。于是 <code>!needsFollowUp</code>，循环走停止路径 <code>return {reason:'completed'}</code>（<code>query.ts:1647</code>）。</p>
+                <p>回到会话层，QueryEngine 抽取最后一条 assistant 文本，yield 一个 <code>type:'result'</code>（<code>QueryEngine.ts:1194</code>）。UI 层的 <code>onQueryEvent</code> 一路把这些消息 <code>setMessages(old =&gt; [...old, msg])</code>（<code>REPL.tsx:3223</code>）追加进列表，Day 04 的 Messages 组件把它们渲染出来。<code>queryGuard</code> 释放锁，如果刚才有排队的输入，现在自动消费。</p>
+                <div class="glossary"><b>一次 turn 就此结束</b>。你看到的最终画面：你的问题、几条"● Read(utils.ts) / Edit(utils.ts)"的工具行、以及最后的完成总结。背后是循环转了三圈、两次工具执行、一次权限确认、全程 token 和成本被自动记账（Day 17）。<strong>这就是 Claude Code 干一件事的完整机理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>第 1 周收官</h1></div>
+            <div class="card">
+                <div class="recap4">
+                    <div class="rc"><b>Day 01</b> 项目全景：逆向 CLI、Bun/TS/Ink、模块地图</div>
+                    <div class="rc"><b>Day 02</b> 启动链：cli.tsx fast-path → main/init → Ink 挂载</div>
+                    <div class="rc"><b>Day 03</b> Agent 循环：三层结构、turn、工具回填、停止</div>
+                    <div class="rc"><b>Day 04</b> Ink UI：组件树、消息渲染、流式、ref 真值源</div>
+                </div>
+                <p style="margin-top:12px;">你现在已经能把"敲回车 → 看到结果"整条链讲出来了。这是全项目的<strong>骨架</strong>。接下来三周是往骨架上填肉：</p>
+                <ul>
+                    <li><strong>第 2 周（核心引擎）</strong>：QueryEngine 深入、工具系统、内置工具、权限、上下文管理——把 Day 03/05 里"一笔带过"的循环细节和工具执行钻透。</li>
+                    <li><strong>第 3 周（扩展能力）</strong>：Slash 命令、MCP、Skills、Hooks、子代理——Agent 怎么被外部能力增强。</li>
+                    <li><strong>第 4 周（平台化）</strong>：会话记忆、配置模型成本、TUI 深入、远程控制、构建收官。</li>
+                </ul>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周自测</h3>
+                <ul>
+                    <li>能不能不看图，自己把"一次对话旅程"的 11 步大致讲出来？</li>
+                    <li>循环层为什么是中枢？UI 只在哪两处出现？</li>
+                    <li>并发守卫 QueryGuard 解决什么？</li>
+                    <li>为什么读文件不弹窗、改文件弹窗？</li>
+                    <li>turn 结束的判据是什么？（模型不再返回 tool_use 块）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：亲自跟一次真实旅程</h3>
+<pre><code class="language-bash"># 用 dev 模式跑起来，真的发一句需求，观察工具行
+bun run dev
+# 输入：读一下 package.json 告诉我版本号
+# 观察：● Read(package.json) 工具行 → 回答里出现版本号
+# 这就是循环转了一圈：调模型→要 Read→执行→回填→收尾
+
+# 想看代码怎么走，在这几个点打 console.error 观察：
+# REPL.tsx:3510 (for await)、query.ts:1090 (检测 tool_use)、query.ts:1647 (completed)</code></pre>
+                <div class="tip"><strong>第 2 周预告 · Day 06</strong>：从宏观进入微观。Day 06 深入 <strong>QueryEngine</strong> 源码——那个驱动 turn 的生成器到底怎么写的、状态怎么跨 turn 保持、usage/成本怎么统计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 Ink 入门</a>
+                <a href="claude-code-src-day06.html" style="color:var(--accent-green);">Day 06 · QueryEngine 深入 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const steps = Array.from(document.querySelectorAll('#journey .jstep'));
+            let i = 0;
+            setInterval(() => { steps.forEach(s=>s.classList.remove('lit')); steps[i].classList.add('lit'); i=(i+1)%steps.length; }, 650);
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
