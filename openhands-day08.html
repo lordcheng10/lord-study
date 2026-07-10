@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · 事件系统源码 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
+        .flow2 .n b{display:block;color:#f97316;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">事件系统源码 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一个反直觉的事实</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 事件读取 REST 接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 存储模板方法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 文件存储与权限前缀</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · webhook 事件入口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · on_event 做四件事</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 回调不持连接的设计</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 会话</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 沙箱 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 app_server 编排层</span>
+            <h1 class="part-title">事件系统源码</h1>
+            <p class="part-desc">事件是 OpenHands 的血液。今天读 app_server 侧的事件系统——你会发现它<b>只做持久化和查询，不做实时推送</b>。为什么？这背后是个漂亮的架构取舍。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一个反直觉的事实</h1></div>
+            <div class="card">
+                <p>你可能以为 app_server 会用 WebSocket/SSE 把事件实时推给前端。<strong>但实际上：<code>event/</code> 和 <code>status/</code> 目录里没有任何 SSE / WebSocket / event-stream 代码。</strong>app_server 侧的事件只有两件事：</p>
+                <div class="flow2">
+                    <span class="n"><b>入站</b>webhook<br>agent-server 推事件进来</span>
+                    <span class="a">→</span>
+                    <span class="n"><b>持久化</b>存成文件</span>
+                    <span class="a">→</span>
+                    <span class="n"><b>出站</b>REST 只读<br>前端查历史</span>
+                </div>
+                <div class="baby"><span class="t">那"实时看 Agent 打字"靠什么？</span>
+                靠<strong>前端直连沙箱里 agent-server 的 WebSocket</strong>（Day 05 讲过）。所以分工是：<strong>实时流</strong>走"前端↔沙箱"直连（低延迟）；<strong>持久化存档</strong>走"沙箱→app_server webhook"（可靠）；<strong>历史回看</strong>走"前端→app_server REST"（可查询）。app_server 不掺和实时推送这条链——它专心做"可靠的记账员"。<strong>这个分工让每条链路都只做自己最擅长的事。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>事件读取 REST 接口</h1></div>
+            <div class="card">
+                <p><code>event_router.py</code>，前缀 <code>/conversation/{conversation_id}/events</code>，三个<strong>只读</strong>端点：</p>
+<pre><code class="language-python"># event_router.py
+GET  .../events/search    # 搜事件（按 kind/时间过滤 + 分页）
+GET  .../events/count     # 数事件总数
+GET  .../events           # 批量取事件</code></pre>
+                <div class="anno">读法：<b>全是 GET（只读）——app_server 不提供"写事件"的公开 API。</b>为什么？因为事件只能由 agent-server 产生（通过 webhook 写入，L05），前端只能"查"不能"造"。<code>search</code> 支持分页，前端刷新页面重进时就靠它把历史事件拉回来重建界面。</div>
+                <div class="glossary">服务抽象 <code>EventService</code>（<code>event_service.py:18</code>）的方法：<code>get_event</code>/<code>search_events</code>/<code>count_events</code>/<code>save_event</code>（注释明确 <code>save</code> "不属于 REST API"，仅内部 webhook 用）+ <code>iter_events_for_export</code>（导出整个会话）。读写分离得很干净。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>存储的"模板方法"设计</h1></div>
+            <div class="card">
+                <p><code>event_service_base.py</code> 是存储基类，用<strong>模板方法模式</strong>：基类写好 search/count/save 的<strong>编排逻辑</strong>，把三个"怎么读写一条"的原语留给子类实现：</p>
+<pre><code class="language-python"># 基类实现编排，子类填原语（概念）
+class EventServiceBase(EventService):
+    async def search_events(self, ...):   # 编排：并发读所有文件→内存过滤→排序→分页
+        paths = self._search_paths(...)                  # ← 子类实现
+        events = await self._load_events_from_paths(paths)  # 并发+信号量限流
+        return 过滤排序分页(events)
+    # 三个留给子类的原语：
+    async def _load_event(self, path): ...    # 子类：怎么读一条
+    async def _store_event(self, event): ...  # 子类：怎么写一条
+    def _search_paths(self, ...): ...         # 子类：去哪找</code></pre>
+                <div class="anno">读法：<b>基类负责"搜索该怎么并发、怎么排序分页"这套通用流程；子类只负责"一条事件具体怎么读、怎么写、存哪"。</b>于是新增一种存储后端（文件→S3→GCS），只要实现三个原语，编排逻辑完全复用。</div>
+                <div class="baby"><span class="t">模板方法模式，一句话</span>
+                "<strong>骨架在父类，血肉在子类。</strong>"父类定好"做事的步骤顺序"（模板），把每一步的"具体怎么做"开成空方法让子类填。就像"泡茶模板：烧水→放茶叶→倒水→等待"，具体用什么茶、水温多少由子类定。这样"流程"只写一遍，"细节"按需扩展。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>文件存储与"权限前缀"</h1></div>
+            <div class="card">
+                <p><code>FilesystemEventService</code>（<code>filesystem_event_service.py:17</code>）：一个事件存一个 JSON 文件，用 Pydantic 的 <code>model_validate_json</code>/<code>model_dump_json</code> 读写。路径设计是关键（<code>event_service_base.py:66</code>）：</p>
+<pre><code class="language-python">def get_conversation_path(self, ...):
+    # 路径 = {prefix}/{user_id}/{V1_CONVERSATIONS_DIR}/{conversation_id.hex}
+    return f'{prefix}/{user_id}/conversations/{conversation_id.hex}'</code></pre>
+                <div class="anno">读法：<b>存储路径里<strong>嵌入了 user_id</strong>。</b>源码注释点明：<strong>权限控制的唯一手段，就是这个带 user_id 的严格路径前缀</strong>。查某会话事件时，路径由"当前登录用户的 user_id"拼成——你根本拼不出别人的路径，也就读不到别人的事件。</div>
+                <div class="baby"><span class="t">用"路径前缀"做权限，聪明在哪？</span>
+                不用额外写一堆"这个用户能不能看这个会话"的检查代码——<strong>把用户隔离直接编码进存储路径</strong>。你的事件在 <code>/data/你的id/...</code>，别人在 <code>/data/他的id/...</code>，物理上就分开了。想越权？你手里的 user_id 拼出的路径永远指向你自己的目录。简单、不易出错。<strong>把安全约束"结构化"进数据布局，好过散落各处的 if 检查。</strong>（云存储版 <code>AwsEventService</code>/<code>GoogleCloudEventService</code> 同理，只是把文件换成对象存储。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>webhook：事件"进来"的地方</h1></div>
+            <div class="card">
+                <p>事件从哪写入？<code>webhook_router.py</code>（前缀 <code>/webhooks</code>）。沙箱里的 agent-server 每产生事件就回调这里。鉴权靠 <code>valid_sandbox</code>（<code>:250</code>）校验 <code>X-Session-API-Key</code> 头：</p>
+<pre><code class="language-python"># webhook_router.py
+@router.post('/webhooks/events/{conversation_id}')
+async def on_event(conversation_id, events, sandbox=Depends(valid_sandbox), ...):
+    # valid_sandbox：校验 X-Session-API-Key → 反查 sandbox → 切换成沙箱属主用户上下文
+    ...</code></pre>
+                <div class="anno">读法：<b>agent-server 带着启动时注入的 <code>session_api_key</code> 来敲门，<code>valid_sandbox</code> 验钥匙、找到对应沙箱、把请求上下文切换成"这个沙箱的属主用户"。</b>于是后续存事件时，就能用正确的 user_id 拼路径（L04）。钥匙 + 用户上下文切换 = 安全地接收来自沙箱的事件。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>on_event 做的四件事</h1></div>
+            <div class="card">
+                <p><code>on_event</code>（<code>webhook_router.py:468</code>）收到一批事件后：</p>
+                <ol>
+                    <li><strong>并发落库</strong>：把所有事件 <code>save_event</code> 存下来。</li>
+                    <li><strong>处理特殊事件</strong>：stats 事件、执行状态变化、Agent 主动切模型（<code>SwitchLLMObservation</code>）等 → 更新会话记录。</li>
+                    <li><strong>终态打点</strong>：任务结束时 <code>_track_conversation_terminal</code> 做分析埋点。</li>
+                    <li><strong>后台跑回调</strong>：<code>background_tasks.add_task(_run_callbacks_in_bg_and_close, ...)</code>。</li>
+                </ol>
+                <div class="glossary">回调处理器（<code>EventCallbackProcessor</code> 抽象）里最典型的是 <code>SetTitleCallbackProcessor</code>——根据前几条消息<strong>自动生成会话标题</strong>（就像 ChatGPT 自动给对话起名）。Day 07 讲过"启动时总是确保挂上这个回调"，现在看到它在这里被触发。<strong>还记得 Day 07 的"薄代理原则"吗？——业务副作用统一走这里的 webhook 回调，而不是塞进代理端点。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>"回调不持有 DB 连接"的性能设计</h1></div>
+            <div class="card">
+                <p><code>_run_callbacks_in_bg_and_close</code>（<code>:583</code>）的注释解释了一个精妙的性能考量：<strong>回调处理器运行时不持有 DB 连接</strong>。</p>
+                <div class="baby"><span class="t">为什么这很重要？</span>
+                想象 Agent 高速运转，每秒产生几十个事件 → 每秒几十次 webhook → 如果每个 webhook 的回调都"占着一个数据库连接慢慢跑"，数据库连接池<strong>瞬间被打满</strong>，整个服务卡死。所以设计成：webhook 主流程快速存完事件、<strong>释放连接</strong>，回调逻辑丢到后台<strong>不占连接</strong>地跑。<strong>面对突发流量，"尽快释放稀缺资源"是保命的设计。</strong></div>
+                <div class="glossary"><b>还有个模块加载即执行的细节</b>：<code>_import_all_tools()</code>（<code>:630</code>）在模块加载时就预先 import 所有工具类型。为什么？因为 webhook 收到的事件 JSON 里含工具相关的多态类型，反序列化 <code>Event</code> 时必须所有类型都已注册，否则会失败。<strong>提前 import = 保证反序列化时类型齐全。</strong>另有 <code>on_conversation_update</code>（<code>:348</code>）处理会话 start/pause/resume/delete 的回调。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>app_server 侧事件为什么"只存不推"？实时流靠什么？</li>
+                    <li>事件 REST 为什么全是只读？谁能写事件？</li>
+                    <li>模板方法模式在存储里怎么体现？</li>
+                    <li>为什么用"带 user_id 的路径前缀"做权限隔离？</li>
+                    <li>为什么回调要"不持有 DB 连接"地后台跑？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -n 'search\|count\|save_event' openhands/app_server/event/event_service.py
+grep -n 'get_conversation_path\|user_id\|_load_event\|_store_event' openhands/app_server/event/event_service_base.py
+grep -n 'def on_event\|valid_sandbox\|_run_callbacks_in_bg\|_import_all_tools' openhands/app_server/event_callback/webhook_router.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>Sandbox 沙箱管理</strong>——AI 的"隔离工作间"怎么用 Docker 供给、暂停、回收，双容器回调闭环怎么建立（注入 session_key + webhook 地址），以及密钥如何"按需下发"不进镜像。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 会话</a>
+                <a href="openhands-day09.html" style="color:var(--accent-green);">Day 09 · 沙箱管理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

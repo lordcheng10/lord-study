@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Sandbox 沙箱管理 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .loop2{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .loop2 .box{border-radius:9px;padding:11px 13px;min-width:150px}
+        .loop2 .mgr{background:rgba(139,92,246,.1);border:1px solid #8b5cf6} .loop2 .mgr b{color:#8b5cf6}
+        .loop2 .wk{background:rgba(245,158,11,.1);border:1px solid #f59e0b} .loop2 .wk b{color:#f59e0b}
+        .loop2 .a{color:var(--text-muted);font-weight:800;font-size:12px;text-align:center}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Sandbox 沙箱管理 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 沙箱是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 服务抽象与状态</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Record vs Info</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SandboxSpec 镜像模板</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Docker 供给全流程</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 回调闭环的建立</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 密钥按需下发</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 事件</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 服务装配 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 app_server 编排层</span>
+            <h1 class="part-title">Sandbox 沙箱管理</h1>
+            <p class="part-desc">沙箱是 AI 的"隔离工作间"——安全的地基。今天读它怎么用 Docker 供给/暂停/回收，双容器回调闭环怎么建立，密钥如何"按需下发"永不进镜像。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>沙箱是什么（再强调一次）</h1></div>
+            <div class="card">
+                <p>沙箱（sandbox）= 一个隔离的执行环境（通常是 Docker 容器），里面跑着 agent-server，AI 在其中敲命令、改文件。它和你的宿主机隔离——AI 在里面折腾坏了，删容器重建即可。</p>
+                <div class="loop2">
+                    <div class="box mgr"><b>app_server（宿主）</b><br>供给/暂停/删除沙箱<br>记录沙箱身份</div>
+                    <div class="a">— 拉起 / 注入密钥+回调地址 →<br>← webhook 回推事件 —</div>
+                    <div class="box wk"><b>sandbox 容器</b><br>跑 agent-server<br>执行 Action</div>
+                </div>
+                <div class="glossary">本课对应源码目录：<code>sandbox/</code>（服务与实现）+ <code>sandbox_spec/</code>（镜像模板）。核心实现是 <code>docker_sandbox_service.py</code>。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>服务抽象与状态</h1></div>
+            <div class="card">
+                <p><code>SandboxService</code>（<code>sandbox_service.py:30</code>）抽象了沙箱的全部操作：<code>search / get / start / resume / pause / delete</code>。基类还实现两个通用能力：</p>
+<pre><code class="language-python"># sandbox_service.py
+async def wait_for_sandbox_running(self, ...):   # :93 轮询直到 RUNNING，可选校验 /alive
+    # 避免"容器起了但 agent-server 没就绪"的竞态
+async def pause_old_sandboxes(self, ...):          # :223 超上限时按创建时间暂停最老的
+    # 资源回收</code></pre>
+                <div class="anno">读法：<b><code>wait_for_sandbox_running</code> 解决竞态——容器 <code>docker run</code> 返回不代表里面的 agent-server 已经能接请求，所以要轮询它的 <code>/alive</code> 探活。</b><code>pause_old_sandboxes</code> 是资源回收——沙箱是重资源（每个一个容器），超过配额就暂停最久没用的那个（像手机自动关掉后台老应用）。</p>
+                <p style="margin:8px 0 0">状态枚举 <code>SandboxStatus</code>（<code>sandbox_models.py:9</code>）：<code>STARTING / RUNNING / PAUSED / ERROR / MISSING</code>。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>SandboxRecord vs SandboxInfo（一个性能取舍）</h1></div>
+            <div class="card">
+                <p>沙箱有两个模型，区别很重要（<code>sandbox_models.py</code>）：</p>
+                <ul>
+                    <li><code>SandboxRecord</code>（<code>:33</code>）：只有 <code>id + owner</code> 的<strong>持久化身份</strong>。轻量，存库。</li>
+                    <li><code>SandboxInfo</code>（<code>:48</code>）：完整实时信息——<code>status</code>、<code>session_api_key</code>、<code>exposed_urls</code>（含 AGENT_SERVER/VSCODE 等命名 URL）。需要查 Docker 才能拼出。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要拆成两个？</span>
+                源码注释点明：<strong>鉴权时只需要"这个沙箱属于谁"——用轻量的 Record 就够，不必去调 Docker API 查完整状态（慢）</strong>。比如 webhook 进来要验"这个 session_key 对应的沙箱属主是谁"，查 Record 即可，毫秒级。只有真要用沙箱（连它、显示状态）时才去查 Docker 拼出 Info。<strong>把"轻量身份"和"重量状态"分开，让高频的鉴权路径不被慢的 Docker 查询拖累。</strong>这和 Day 07 的 Info/实时 分离是同一种思路。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SandboxSpec：镜像模板</h1></div>
+            <div class="card">
+                <p><code>SandboxSpecInfo</code>（<code>sandbox_spec_models.py:8</code>）是"创建沙箱的模板"——类比 Docker Image 之于 Container：</p>
+<pre><code class="language-python">class SandboxSpecInfo:
+    id: str            # 镜像名
+    command: str       # 启动命令
+    initial_env: dict  # 初始环境变量
+    working_dir: str</code></pre>
+                <div class="glossary"><b>默认镜像与版本绑定</b>：默认镜像 = <code>ghcr.io/openhands/agent-server:{agent-server版本}-python</code>（<code>sandbox_spec_service.py:33</code>）——<strong>镜像版本与本地装的 openhands-agent-server 版本绑死</strong>。为什么？防止"沙箱里的 agent-server 版本"和"app_server 期望的版本"不匹配导致 SDK 不兼容。<code>get_agent_server_env</code>（<code>:154</code>）还会自动把 <code>LLM_*</code>/<code>LMNR_*</code> 前缀的环境变量转发进容器——这样双容器架构下 LLM 配置才能在沙箱内生效。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Docker 供给全流程 start_sandbox</h1></div>
+            <div class="card">
+                <p><code>docker_sandbox_service.py:385</code> 的 <code>start_sandbox</code> 是供给核心：</p>
+<pre><code class="language-python"># start_sandbox 概念流程
+# 1. pause_old_sandboxes 先腾配额
+# 2. resolve_sandbox_spec 定镜像
+# 3. 生成随机 sandbox_id 和 session_api_key = base62(os.urandom(32))
+# 4. 组装环境变量，注入两个关键值（见 L06）
+# 5. 端口映射、CORS、volumes、KVM device
+# 6. docker_client.containers.run(..., detach=True, init=True)   # init=True 用 tini 收僵尸进程
+# 7. _container_to_sandbox_info 把容器映射成 SandboxInfo</code></pre>
+                <div class="anno">读法：<b>供给一个沙箱 = 生成身份密钥 → 组装环境和网络 → <code>docker run</code> 起容器 → 把容器信息包成 SandboxInfo。</b>细节体现工程严谨：<code>session_api_key</code> 用 <code>os.urandom(32)</code> 生成（密码学随机，不可猜）；<code>init=True</code> 让容器用 tini 作为 1 号进程回收僵尸进程（长期运行容器的最佳实践）。</div>
+                <div class="glossary"><code>resume</code>/<code>pause</code>/<code>delete</code>（<code>:518</code>）分别对应 docker unpause+start、pause、stop+remove。状态映射 <code>_docker_status_to_sandbox_status</code>（<code>:119</code>）里有个细节——Docker 的 <code>exited</code> 被映射成 <code>PAUSED</code>（因为对 OpenHands 语义来说，退出的容器只是"暂停了"，还能 resume 恢复）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>回调闭环的建立（架构精髓）</h1></div>
+            <div class="card">
+                <p>第 4 步注入的"两个关键值"（<code>docker_sandbox_service.py:418</code>）是双进程架构的命门：</p>
+<pre><code class="language-python">env_vars[SESSION_API_KEY_VARIABLE] = session_api_key   # 'OH_SESSION_API_KEYS_0'
+env_vars[WEBHOOK_CALLBACK_VARIABLE] = (                # 'OH_WEBHOOKS_0_BASE_URL'
+    f'http://host.docker.internal:{self.host_port}/api/v1/webhooks')</code></pre>
+                <div class="baby"><span class="t">这两行是整个双进程架构的"脐带"</span>
+                启动容器时，app_server 往容器环境里塞了：① <strong>一把钥匙</strong>（session_api_key）——沙箱以后回来汇报事件时用它证明"我是合法的那个沙箱"；② <strong>一个回家地址</strong>（webhook URL，用 <code>host.docker.internal</code> 让容器能访问到宿主机的 app_server）。于是沙箱里的 agent-server 每产生一个事件，就拿钥匙、按这个地址把事件 POST 回 app_server（Day 08 的 <code>on_event</code> 接收）。<strong>没有这两行，管家和工人就失联了。</strong>这就是 Day 05 说的"回推闭环"的建立瞬间。</div>
+                <div class="glossary"><code>host.docker.internal</code> 是 Docker 提供的特殊域名，让容器内部能访问到宿主机——因为 app_server 跑在宿主机上，容器要靠它找到回家的路。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>密钥按需下发（不进镜像）</h1></div>
+            <div class="card">
+                <p>Agent 干活常需要密钥（比如访问私有仓库的 token、调某 API 的 key）。这些敏感密钥<strong>绝不打进镜像、也不在启动时全塞进容器</strong>，而是<strong>用时才实时下发</strong>（<code>sandbox_router.py:157</code>）：</p>
+<pre><code class="language-python"># 容器内需要某密钥时，用 session key 回调 app_server 拿：
+GET /sandboxes/{id}/settings/secrets/{name}
+# app_server 校验 session_key 与该 sandbox 匹配（_valid_sandbox_from_session_key），才返回密钥值</code></pre>
+                <div class="baby"><span class="t">为什么密钥要"按需下发"而不是一次性给全？</span>
+                安全最小化。如果启动时把所有密钥一股脑塞进容器环境变量，那么：① 密钥会出现在容器的 <code>env</code> 里、可能被日志/子进程看到；② 万一镜像被导出，密钥就泄漏了。<strong>"按需下发"= 沙箱真正要用某个密钥时，才凭钥匙来管家单独领取那一个</strong>。密钥永远不落在镜像里，容器里也只有当下用到的那个。<strong>最小暴露面 = 最小泄漏风险。</strong>这是处理机密信息的黄金准则。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>wait_for_sandbox_running 解决什么竞态？pause_old_sandboxes 干嘛？</li>
+                    <li>SandboxRecord 和 SandboxInfo 为什么要拆开？</li>
+                    <li>SandboxSpec 是什么？默认镜像为什么和版本绑定？</li>
+                    <li>start_sandbox 注入的"两个关键值"是什么？建立了什么？</li>
+                    <li>密钥为什么"按需下发"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -n 'wait_for_sandbox_running\|pause_old_sandboxes' openhands/app_server/sandbox/sandbox_service.py
+grep -n 'class SandboxRecord\|class SandboxInfo\|SandboxStatus' openhands/app_server/sandbox/sandbox_models.py
+grep -n 'def start_sandbox\|SESSION_API_KEY_VARIABLE\|WEBHOOK_CALLBACK\|os.urandom' openhands/app_server/sandbox/docker_sandbox_service.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>server 服务装配</strong>——FastAPI 的中间件（CORS/缓存/限流）、生命周期钩子与 Alembic 自动迁移、鉴权是怎么加上的，以及 v1_router 如何汇总所有路由。收官 app_server 编排层。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 事件</a>
+                <a href="openhands-day10.html" style="color:var(--accent-green);">Day 10 · 服务装配 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
