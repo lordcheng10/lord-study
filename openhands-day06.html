@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · app_server 架构总览 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
+        table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">app_server 架构总览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 管家的职责边界</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 顶层模块地图</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · app.py 应用装配</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · config.py 控制中心</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 依赖注入 Injector</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 改环境变量换实现</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三层 Service 结构</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 会话生命周期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 app_server 编排层</span>
+            <h1 class="part-title">app_server 架构总览</h1>
+            <p class="part-desc">进入本仓真正的核心。今天先看"管家"的模块地图、FastAPI 应用怎么装配，以及贯穿全代码库的灵魂——Injector 依赖注入机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>先明确管家的职责边界</h1></div>
+            <div class="card">
+                <p>回忆 Day 05：<code>app_server</code> 是"管家/网关层"，它<strong>不亲自跑 Agent</strong>（那是沙箱里 agent-server 的活）。管家只干这些：</p>
+                <ul>
+                    <li>管理用户、会话（conversation）的生命周期</li>
+                    <li>供给/暂停/回收沙箱（sandbox）</li>
+                    <li>持久化事件、鉴权</li>
+                    <li>对沙箱里的 agent-server 做代理转发（浏览器连不上沙箱时）</li>
+                </ul>
+                <div class="glossary"><b>一个重要事实</b>：<code>openhands/server/*.py</code> 现在全是"向后兼容的转发壳"（deprecated）——<code>server/app.py</code> 只有一行 re-export <code>app_server.app</code>。真正的实现<strong>全部</strong>在 <code>openhands/app_server/</code>。所以这一周我们只看 app_server。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>顶层模块地图</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>模块目录</th><th>职责</th><th>本周</th></tr>
+                    <tr><td><code>app_conversation/</code></td><td>会话创建、启动编排、增删改查、导出</td><td>Day 07</td></tr>
+                    <tr><td><code>event/</code></td><td>事件持久化与查询（REST 只读 + save）</td><td>Day 08</td></tr>
+                    <tr><td><code>event_callback/</code></td><td>接收 agent-server 推送的事件 webhook</td><td>Day 08</td></tr>
+                    <tr><td><code>sandbox/</code> + <code>sandbox_spec/</code></td><td>沙箱供给/暂停/删除；spec 是镜像模板</td><td>Day 09</td></tr>
+                    <tr><td><code>config_api/</code></td><td>LLM 模型清单、AppMode 等配置型 API</td><td>—</td></tr>
+                    <tr><td><code>app_lifespan/</code></td><td>启动/关闭钩子、DB 迁移（Alembic）</td><td>Day 10</td></tr>
+                    <tr><td><code>user*/</code> <code>settings/</code> <code>secrets/</code></td><td>用户、鉴权、设置、密钥、Git 集成</td><td>—</td></tr>
+                    <tr><td><code>v1_router.py</code></td><td>汇总所有子路由，统一前缀 <code>/api/v1</code></td><td>Day 10</td></tr>
+                </table>
+                <div class="baby"><span class="t">怎么记这张地图？</span>
+                抓三个主角：<strong>app_conversation（会话）、event（事件）、sandbox（沙箱）</strong>——这正是 Day 05 旅程里的三个关键动作（建会话、记事件、管沙箱）。其余是配套（配置、用户、生命周期）。<strong>把主角记牢，本周就有主线了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>app.py：应用装配点</h1></div>
+            <div class="card">
+                <p><code>app_server/app.py</code> 是 FastAPI 应用的"组装车间"——它只做拼装，不含业务逻辑：</p>
+<pre><code class="language-python"># app_server/app.py（简化）
+app = FastAPI(
+    lifespan=combine_lifespans(*lifespans),          # 合并多个生命周期钩子
+    routes=[Mount(path='/mcp', app=mcp_app)],        # 挂载 MCP 子应用
+)
+app.include_router(v1_router.router)                 # 业务 API（/api/v1/*）
+app.include_router(health_router)                    # 探活
+if os.path.exists('./frontend/build'):
+    app.mount('/', SPAStaticFiles(...))              # 挂前端单页应用
+# 中间件：CORS、缓存控制、限流
+app.add_middleware(LocalhostCORSMiddleware)
+app.add_middleware(CacheControlMiddleware)
+app.add_middleware(RateLimitMiddleware, ...)</code></pre>
+                <div class="anno">读法：<b>app.py 就像一张"总装配单"——把路由、中间件、静态文件、生命周期钩子拼到一个 FastAPI app 上。</b>它自己不写任何业务，所有具体服务都通过 config.py（L04）注入进来。这种"装配与实现分离"让入口文件保持清爽、易读。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>config.py：整个 app_server 的控制中心</h1></div>
+            <div class="card">
+                <p>核心是一个 Pydantic 模型 <code>AppServerConfig</code>（<code>config.py:191</code>），字段分三类：基础配置、<strong>Injector（注入器）字段</strong>、Services。关键的是那一堆 Injector 字段：</p>
+<pre><code class="language-python">class AppServerConfig(BaseModel):
+    # 基础
+    persistence_dir: str
+    web_url: str
+    # ★ 一堆"注入器"——每个都是 XxxServiceInjector | None
+    event: EventServiceInjector | None = None
+    sandbox: SandboxServiceInjector | None = None
+    app_conversation: AppConversationServiceInjector | None = None
+    user: UserServiceInjector | None = None
+    # ...</code></pre>
+                <div class="anno">读法：<b>config 里每个"能力"（事件/沙箱/会话/用户…）都是一个"注入器"字段，初始为 None。</b>启动时 <code>config_from_env()</code> 根据环境变量，把每个 None 填上一个<strong>具体实现</strong>。这是"根据部署模式选实现"的中枢。</div>
+                <div class="baby"><span class="t">什么是"注入器"？先建直觉</span>
+                想象一个插座面板，上面标着"事件服务插槽""沙箱服务插槽"。config 就是这块面板，插槽默认空着。启动时，系统根据环境（你想用 Docker 还是远程？文件存储还是云存储？）往每个插槽插入对应的"实现模块"。业务代码要用某个能力，就从插槽取——不关心插的是哪个具体实现。<strong>这就是"依赖注入"，下一课详解。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>依赖注入 Injector（本周最重要的设计）</h1></div>
+            <div class="card">
+                <p><code>services/injector.py:12</code> 定义了统一的 <code>Injector</code> 抽象，一份实现同时服务两种使用场景：</p>
+<pre><code class="language-python">class Injector(Generic[T], ABC):
+    @abstractmethod
+    async def inject(self, state, request=None) -> AsyncGenerator[T, None]: ...
+
+    @contextlib.asynccontextmanager
+    async def context(self, state, request=None):     # 用法1：后台任务 async with
+        async for result in self.inject(state, request): yield result
+
+    async def depends(self, request):                 # 用法2：FastAPI Depends 注入
+        async for result in self.inject(request.state, request): yield result</code></pre>
+                <div class="anno">读法：<b>一个 <code>inject()</code> 方法，包装出两种用法：<code>context()</code> 给后台任务用（<code>async with</code>），<code>depends()</code> 给 FastAPI 路由参数用（<code>Depends(...)</code>）。</b>无论从哪进来，拿到的都是同一个构造好的服务实例。</div>
+                <div class="glossary"><b>为什么要"一份实现两种用法"？</b> 因为服务在两种场景都要用：① 处理 HTTP 请求时（走 FastAPI 的 Depends 自动注入）；② 在后台任务里（比如 Day 05 那个"启动会话后台消费剩余进度"，得手动 <code>async with</code>）。统一抽象避免了写两套。<code>state</code>（请求级共享状态）还能让同一请求内的多个注入<strong>复用</strong>同一个 db 连接/http 客户端，不重复构造。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>"改环境变量就换实现"的魔法</h1></div>
+            <div class="card">
+                <p>看 <code>config_from_env()</code> 里选沙箱实现的真实代码（<code>config.py:332</code>）：</p>
+<pre><code class="language-python">if os.getenv('RUNTIME') == 'remote':
+    config.sandbox = RemoteSandboxServiceInjector(...)   # 远程沙箱
+elif os.getenv('RUNTIME') in ('local', 'process'):
+    config.sandbox = ProcessSandboxServiceInjector()     # 本地进程
+else:
+    config.sandbox = DockerSandboxServiceInjector(...)   # 默认 Docker</code></pre>
+                <div class="anno">读法：<b>一个 <code>RUNTIME</code> 环境变量，决定往"沙箱插槽"插入哪种实现。</b>业务代码里所有"要沙箱"的地方都用同一个接口 <code>SandboxService</code>，完全不知道背后是 Docker 还是远程还是本地进程——换实现只需改环境变量，业务代码一行不动。</div>
+                <div class="baby"><span class="t">这个模式为什么强大？</span>
+                同一份代码，本地开发用 <code>RUNTIME=local</code>（快、不用 Docker），生产用 <code>RUNTIME=docker</code>（隔离），大规模用 <code>RUNTIME=remote</code>（远程集群）。事件存储同理：本地用文件、云上用 AWS S3/GCP。<strong>"面向接口编程 + 依赖注入"让一套代码适配所有部署形态</strong>——这和 eino 教程里反复强调的"接口与实现分离"是同一个道理，是所有大型系统的通用功夫。底层还用了 <code>DiscriminatedUnion</code>，能直接从环境变量/JSON 反序列化出正确的实现子类。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三层 Service 结构（普遍套路）</h1></div>
+            <div class="card">
+                <p>app_server 里几乎每个能力都用同一种三层结构（以会话为例）：</p>
+                <ul>
+                    <li><strong>抽象接口</strong>：<code>AppConversationService</code>（定义"该有哪些方法"）</li>
+                    <li><strong>Mixin 基类</strong>：<code>AppConversationServiceBase</code>（放公共能力，如 git 相关）</li>
+                    <li><strong>具体实现</strong>：<code>LiveStatusAppConversationService</code>（真正干活）</li>
+                </ul>
+                <div class="glossary"><b>还有"模板方法"模式</b>：比如事件存储基类 <code>EventServiceBase</code> 实现了 search/count/save 的<strong>编排逻辑</strong>，但把"具体怎么读一个文件 <code>_load_event</code>、怎么写 <code>_store_event</code>"留给子类（文件系统 / AWS / GCP）填。<strong>基类定框架、子类填细节</strong>——这样加一种新存储，只需实现三个原语方法，不用重写编排逻辑。这套"抽象接口 + 基类 + 实现 + 模板方法"是本周你会反复见到的骨架。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>app_server 的职责边界？server 目录现在是什么？</li>
+                    <li>三个主角模块是？（会话/事件/沙箱）</li>
+                    <li>app.py 干什么？（只做装配）</li>
+                    <li>Injector 依赖注入怎么做到"一份实现两种用法"？</li>
+                    <li>"改环境变量换实现"是怎么实现的？为什么强大？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '1,90p' openhands/app_server/app.py            # 应用装配
+grep -n 'Injector' openhands/app_server/config.py | head -20   # 一堆注入器字段
+grep -n "getenv('RUNTIME')\|SandboxServiceInjector" openhands/app_server/config.py
+sed -n '12,40p' openhands/app_server/services/injector.py     # Injector 抽象</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：深入<strong>会话生命周期</strong>——从 <code>start_app_conversation</code> 那个 HTTP 请求，到 <code>_start_app_conversation</code> 的启动状态机全流程（拉沙箱→clone→建 Agent→READY），以及"生成器即进度流"的巧妙设计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a>
+                <a href="openhands-day07.html" style="color:var(--accent-green);">Day 07 · 会话生命周期 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

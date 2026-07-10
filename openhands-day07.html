@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 会话生命周期 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .sm{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:14px 4px;justify-content:center}
+        .sm .st{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:7px;padding:6px 10px;font-size:11px;font-weight:700}
+        .sm .st.r{border-color:#22c55e;color:#22c55e} .sm .st.e{border-color:#ef4444;color:#ef4444} .sm .a{color:#f97316;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">会话生命周期 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三个会话数据模型</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 启动任务状态机</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 生成器即进度流</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 路由：返回后台继续</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 启动核心全流程</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 构建 Agent</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 薄代理与删除</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 总览</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 事件系统 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 app_server 编排层</span>
+            <h1 class="part-title">会话生命周期</h1>
+            <p class="part-desc">会话（conversation）是核心概念。今天从数据模型到启动状态机，逐层读"一个会话如何被创建和启动"，并见识"生成器即进度流"这个贯穿始终的巧妙设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三个会话数据模型</h1></div>
+            <div class="card">
+                <p><code>app_conversation_models.py</code> 里有三个关键模型，分工明确：</p>
+                <ul>
+                    <li><code>AppConversationInfo</code>（<code>:110</code>）：<strong>要落库</strong>的会话元数据（id、sandbox_id、repo、分支、llm_model、tags…），不含实时状态。</li>
+                    <li><code>AppConversation</code>（<code>:195</code>）：= Info + <strong>实时字段</strong>（sandbox_status、execution_status、conversation_url、session_api_key）。运行时拼装，<strong>不落库</strong>。</li>
+                    <li><code>AppConversationStartRequest</code>（<code>:221</code>）：启动参数（repo、branch、initial_message、llm_model、agent_type…）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要区分"落库的"和"实时的"？</span>
+                会话有些信息是<strong>静态、需要永久保存</strong>的（它绑了哪个仓库、用哪个模型）——存数据库。有些是<strong>动态、时刻在变</strong>的（沙箱现在是运行还是暂停、Agent 现在跑到哪了）——这些去实时查沙箱，没必要也不应该存库（存了立刻就过期）。<code>Info</code>（存档）+ 实时字段拼成 <code>AppConversation</code>（完整视图）。<strong>把"持久事实"和"瞬时状态"分开，是数据建模的基本卫生。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>启动任务状态机</h1></div>
+            <div class="card">
+                <p>启动会话很慢（拉容器、clone、装环境要几十秒），所以用一个"启动任务"对象 <code>AppConversationStartTask</code> 承载进度，它是一个状态机（<code>app_conversation_models.py:288</code>）：</p>
+                <div class="sm">
+                    <span class="st">WORKING</span><span class="a">→</span>
+                    <span class="st">WAITING_FOR_SANDBOX</span><span class="a">→</span>
+                    <span class="st">PREPARING_REPOSITORY</span><span class="a">→</span>
+                    <span class="st">RUNNING_SETUP_SCRIPT</span><span class="a">→</span>
+                    <span class="st">SETTING_UP_GIT_HOOKS</span><span class="a">→</span>
+                    <span class="st">SETTING_UP_SKILLS</span><span class="a">→</span>
+                    <span class="st">STARTING_CONVERSATION</span><span class="a">→</span>
+                    <span class="st r">READY</span>
+                    <span class="a">/</span><span class="st e">ERROR</span>
+                </div>
+                <div class="anno">读法：<b>每个状态就是"启动进度的一个阶段"。</b>WAITING_FOR_SANDBOX=正在等沙箱起来，PREPARING_REPOSITORY=正在克隆仓库，STARTING_CONVERSATION=正在沙箱内创建会话，READY=可以聊了。任何一步出错就进 ERROR。前端按这些状态显示进度条文案（Day 05 见过）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>"生成器即进度流"设计</h1></div>
+            <div class="card">
+                <p>启动方法的签名很特别（<code>app_conversation_service.py:81</code>）——它返回一个<strong>异步生成器</strong>，反复 yield 同一个 task 的最新状态：</p>
+<pre><code class="language-python">async def start_app_conversation(
+    self, start_request: AppConversationStartRequest
+) -> AsyncGenerator[AppConversationStartTask, None]:
+    # 每完成一步，就 yield 一次更新后的 task
+    yield task  # WORKING
+    # ...拉沙箱...
+    yield task  # WAITING_FOR_SANDBOX
+    # ...clone...
+    yield task  # PREPARING_REPOSITORY
+    # ...
+    yield task  # READY</code></pre>
+                <div class="anno">读法：<b>不是"调用一次、等几十秒、返回最终结果"，而是"每推进一步就吐一个中间状态"。</b>调用方 <code>for</code> 循环消费，一路看到进度，直到 READY 或 ERROR。</div>
+                <div class="baby"><span class="t">生成器（generator）是什么？为什么适合这里？</span>
+                普通函数 <code>return</code> 一次就结束。生成器用 <code>yield</code> 能<strong>"吐一个值、暂停、下次继续吐"</strong>，像挤牙膏。这里完美契合"慢启动的多阶段进度"——每完成一个阶段 yield 一次，消费者立刻能拿到并显示，不用干等到最后。<strong>同一个生成器，既能被后台任务慢慢消费，也能被 <code>StreamingResponse</code> 包成流式 HTTP 响应直接吐给前端</strong>（<code>/stream-start</code> 端点就这么干）。一份逻辑两种消费方式——优雅。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>路由：先返回、再后台继续</h1></div>
+            <div class="card">
+                <p>启动端点 <code>start_app_conversation</code>（<code>app_conversation_router.py:364</code>）有个巧妙处理：只取生成器的<strong>第一个</strong>值就返回，剩下的进度放后台消费：</p>
+<pre><code class="language-python">set_db_session_keep_open(request.state, True)     # 请求返回后别关连接
+set_httpx_client_keep_open(request.state, True)
+async_iter = app_conversation_service.start_app_conversation(start_request)
+result = await anext(async_iter)                  # 只取第一个（初始 task）立即返回
+# ...
+asyncio.create_task(_consume_remaining(async_iter, db_session, httpx_client))  # 剩余进度后台跑</code></pre>
+                <div class="anno">读法：<b><code>anext(async_iter)</code> 取生成器第一个产出（初始 task）就 return 给前端——用户马上看到"会话已创建，正在启动"，不用等几十秒的完整启动。</b>后面的阶段用 <code>asyncio.create_task</code> 丢到后台继续跑（进度通过别的通道给前端）。</div>
+                <div class="glossary"><b>为什么要 <code>keep_open</code> 连接？</b> 正常情况下，HTTP 请求返回后 FastAPI 会关闭这个请求的 db/http 连接。但这里后台任务还要继续用它们跑剩余启动流程，所以显式标记"别关"，由后台任务用完再关。<strong>这是"HTTP 请求已响应、但工作在后台继续"这类场景的经典处理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>启动核心全流程 _start_app_conversation</h1></div>
+            <div class="card">
+                <p>真正的启动逻辑在 <code>live_status_app_conversation_service.py:361</code> 的 <code>_start_app_conversation</code>——会话逻辑的心脏。串起来就是 Day 05 那条旅程：</p>
+<pre><code class="language-python"># 概念流程（每步 yield 一个状态）
+# 1. 取 user_id；有 parent_conversation_id 则继承父会话配置（复用同一沙箱/repo/model）
+# 2. _wait_for_sandbox_start：找一个在跑的沙箱，或 start_sandbox 新建，
+#                             轮询 wait_for_sandbox_running 直到容器 RUNNING 且 agent-server /alive
+# 3. _seed_sandbox_profiles：把用户的 LLM profiles 同步进沙箱
+# 4. 算 working_dir → 建 AsyncRemoteWorkspace
+# 5. run_setup_scripts：clone 仓库、跑 setup.sh、装 git hooks、加载 skills
+# 6. 构建 Agent（见 L06）
+# 7. POST {agent_server_url}/api/conversations 在沙箱里真正创建会话
+# 8. 落库 AppConversationInfo
+# 9. 注册事件回调（总是确保有 SetTitleCallbackProcessor 自动生成标题）
+# 10. 状态置 READY；处理排队的 pending 消息
+# 异常 → 状态置 ERROR，detail 经 redact_text_secrets 脱敏</code></pre>
+                <div class="anno">读法：<b>这十步就是 Day 05 旅程的代码版。</b>重点体会几个细节：② 会<strong>复用</strong>已有沙箱（省资源）；② 轮询等 agent-server <code>/alive</code>（避免"容器起了但服务没就绪"的竞态）；⑨ <strong>总是</strong>挂一个自动生成标题的回调；异常时错误信息<strong>脱敏</strong>（<code>redact_text_secrets</code>，防止密钥泄漏到日志）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>构建 Agent（第6步细看）</h1></div>
+            <div class="card">
+                <p><code>_build_start_conversation_request_for_user</code>（<code>:1610</code>）组装出要交给 agent-server 的 Agent 配置：</p>
+<pre><code class="language-python">if agent_type == AgentType.PLAN:
+    tools = get_planning_tools(plan_path=plan_path)     # 规划型 Agent
+else:
+    register_builtins_agents(enable_browser=True)
+    tools = get_default_tools(enable_browser=True, enable_sub_agents=...)  # 默认工具集
+configured_agent_settings = user.agent_settings.model_copy(update={
+    'llm': llm, 'tools': tools, 'mcp_config': mcp_config or {},
+    'agent_context': AgentContext(system_message_suffix=..., secrets=secrets)})
+agent = configured_agent_settings.create_agent()</code></pre>
+                <div class="anno">读法：<b>根据 agent_type 选工具集（规划型 vs 默认），再把 LLM、工具、MCP 配置、密钥组装进 agent 设置，最后 <code>create_agent()</code>。</b>这个 agent 配置会随"创建会话"请求送进沙箱里的 agent-server，由它真正实例化并运行。可选附加 <code>SwitchLLMTool</code>（多模型时让 Agent 自己切换模型）。</div>
+                <div class="glossary">LLM 配置在 <code>_configure_llm</code>（<code>:1215</code>），强制 <code>stream=True</code>（流式，Day 03 的打字机效果靠它）、<code>usage_id='agent'</code>（用量归属）。注意：<strong>app_server 只是"组装并转交"Agent 配置，真正的 Agent 循环在沙箱里跑</strong>——再次印证管家/工人分工。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>薄代理与删除</h1></div>
+            <div class="card">
+                <p>会话建好后，很多操作（发消息、看 diff、下载文件）前端无法直连沙箱，就由 app_server <strong>代理转发</strong>。这些端点刻意做成"薄代理"——只转发、不加逻辑：</p>
+<pre><code class="language-python"># send-message 端点（router:441）文档原话：convenience wrapper，不做额外处理
+# 把消息直接转发到沙箱 agent-server 的 /api/conversations/{id}/events</code></pre>
+                <div class="baby"><span class="t">为什么发消息要做成"薄代理"，不加业务逻辑？</span>
+                因为前端有<strong>两条路</strong>能给 Agent 发消息：① 直连沙箱 agent-server；② 走 app_server 代理。如果代理这条路偷偷加了额外处理，两条路的行为就不一致了，埋下诡异 bug。所以 OpenHands 定了"薄代理原则"：代理端点只转发，任何自定义业务逻辑统一走 <strong>webhook 回调</strong>（Day 08）。<strong>保证多条路径行为一致，是分布式系统避免玄学 bug 的纪律。</strong></div>
+                <div class="glossary"><b>删除会话</b>（<code>DELETE /{id}</code>，<code>router:928</code>）：删会话记录；如果这个沙箱没有别的会话在用了，后台任务 <code>_finalize_sandbox_delete</code> 先<strong>归档 workspace</strong>（保留你的工作成果）再删容器。所有代理端点都靠 <code>_get_agent_server_context</code>（<code>:134</code>）解析出"会话→沙箱→暴露URL→agent_server_url"这条链路，再转发。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>三个会话模型的分工？为什么区分落库/实时？</li>
+                    <li>启动状态机有哪些阶段？为什么需要它？</li>
+                    <li>"生成器即进度流"是什么？好在哪？</li>
+                    <li>路由为什么"先返回、后台继续"？keep_open 为什么？</li>
+                    <li>薄代理原则是什么？为什么删会话要先归档 workspace？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -n 'class AppConversationInfo\|class AppConversation\|StartTaskStatus' openhands/app_server/app_conversation/app_conversation_models.py
+grep -n 'def start_app_conversation\|anext\|create_task' openhands/app_server/app_conversation/app_conversation_router.py
+grep -n 'def _start_app_conversation\|_wait_for_sandbox_start\|redact_text_secrets' openhands/app_server/app_conversation/live_status_app_conversation_service.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>事件系统源码</strong>——app_server 侧的事件是"REST 只读 + webhook 入站 + 文件存储"，为什么实时推送反而不在这（而靠前端直连沙箱）。读 webhook 回调闭环和模板方法式的存储设计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 总览</a>
+                <a href="openhands-day08.html" style="color:var(--accent-green);">Day 08 · 事件系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
