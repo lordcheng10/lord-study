@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次 invoke 的完整旅程 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .journey{display:flex;flex-direction:column;gap:0;margin:16px 0}
+        .journey .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-left:2px solid var(--border-color);padding-left:16px;margin-left:8px;position:relative}
+        .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#14b8a6}
+        .journey .step .num{font-size:10px;font-weight:800;color:#14b8a6;flex-shrink:0;margin-top:2px}
+        .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#6366f1);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">invoke 完整旅程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 追踪一段代码</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① 输入灌入 State</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② 超步1 跑 agent</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ 路由决定去向</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④ 超步2 跑 tools</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤ 循环回 agent</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ⑥ 结果流出</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 条件边</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 Pregel &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次 invoke 的完整旅程</h1>
+            <p class="part-desc">把前四天串成故事线：一次 <code>graph.invoke()</code>，输入怎么流入状态、超步怎么推进、节点怎么跑、路由怎么走、循环怎么转、结果怎么出。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>追踪一段代码</h1></div>
+            <div class="card">
+<pre><code class="language-python"># 一个 ReAct 风格的小图（我们追踪它的 invoke）
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
+
+builder = StateGraph(State)
+builder.add_node("agent", call_llm)     # 调 LLM
+builder.add_node("tools", run_tools)    # 执行工具
+builder.add_edge(START, "agent")
+builder.add_conditional_edges("agent", should_continue)  # 要工具→tools，否则→END
+builder.add_edge("tools", "agent")      # 回头边=循环
+graph = builder.compile()
+
+graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行</code></pre>
+                <div class="anno">读法：<b>一个经典 ReAct 图：agent 节点 + tools 节点 + 条件边（判断要不要工具）+ 回头边（循环）。</b>下面逐超步追踪 invoke 的执行。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① 输入灌入 State</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><b>输入进 START 通道</b>：<code>{"messages": [用户问题]}</code> 通过特殊 START 通道分发到 State 的 messages 键（经 add_messages reducer 写入）。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><b>START → agent</b>：START 边点亮 agent 的触发通道（Day 04），agent 成为超步 1 要跑的节点。</div></div>
+                </div>
+                <div class="anno">读法：<b>invoke 的输入被 START 通道分发进共享 State，然后 START→agent 的边让 agent 待执行。</b>此刻超步 0 结束，进入超步 1。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② 超步 1：跑 agent</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><b>Plan</b>：Pregel 引擎（Day 06）发现 agent 的触发通道被更新了，选它执行。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><b>Execution</b>：agent 节点读 State（messages），调 LLM，LLM 输出"我要调 get_weather 工具"，节点返回 <code>{"messages": [带 tool_calls 的 AI 消息]}</code>。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b"><b>Update</b>：超步末，用 add_messages reducer 把 AI 消息追加进 State.messages。</div></div>
+                </div>
+                <div class="anno">读法：<b>超步 = Plan（选节点）→ Execution（并行跑）→ Update（写回状态）三阶段（Day 06）。</b>agent 跑完，State 里多了一条带 tool_calls 的 AI 消息。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ 路由决定去向</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><b>条件边触发</b>：agent 有条件边，路由函数 <code>should_continue</code> 读 State——最后一条消息有 tool_calls → 返回 "tools"。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><b>点亮 tools</b>：路由结果翻译成"往 tools 的触发通道写"（Day 04）→ tools 成为超步 2 要跑的节点。</div></div>
+                </div>
+                <div class="baby"><span class="t">路由就是"看状态决定下一步"</span>
+                agent 跑完，条件边的路由函数看 State 里最新的 AI 消息："它带了 tool_calls，说明想调工具" → 路由到 tools 节点。如果 AI 消息没有 tool_calls（直接回答了），就路由到 END。<strong>这就是 Agent"要不要继续"的判断——完全基于状态。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ 超步 2：跑 tools</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><b>Plan</b>：引擎发现 tools 触发通道更新，选它跑。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><b>Execution</b>：tools 节点读 State 里的 tool_calls，执行 get_weather(北京)，得到"25℃"，返回 <code>{"messages": [Tool 结果消息]}</code>。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b"><b>Update</b>：Tool 消息追加进 State.messages。</div></div>
+                </div>
+                <div class="anno">读法：<b>tools 节点执行工具、把结果作为 Tool 消息追加进 State。</b>现在 State.messages 有：用户问题 + AI(要调工具) + Tool(25℃)。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 循环回 agent</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><b>回头边</b>：<code>add_edge("tools", "agent")</code> → tools 跑完点亮 agent 触发通道 → 超步 3 又跑 agent。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><b>agent 再判断</b>：agent 读 State（现在有工具结果了），调 LLM。LLM 看到"25℃"，生成最终答案"北京今天 25 度"——<strong>不再带 tool_calls</strong>。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b"><b>路由走 END</b>：条件边路由函数发现最新 AI 消息<strong>没有 tool_calls</strong> → 返回 END → 图停机。</div></div>
+                </div>
+                <div class="baby"><span class="t">循环怎么结束？</span>
+                每轮 agent 后都判断"还要调工具吗"。前面轮次要（有 tool_calls），就去 tools、再循环回来。<strong>直到某轮 LLM 觉得信息够了、直接给答案（不带 tool_calls），路由就走 END，循环结束。</strong>是 LLM 自己决定何时停——这就是 ReAct 的自主性。Day 04 的回头边让它能循环，条件边让它能停。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>⑥ 结果流出</h1></div>
+            <div class="card">
+                <p>图停机后，<code>invoke</code> 返回<strong>最终的完整 State</strong>——<code>{"messages": [用户问题, AI(要工具), Tool(25℃), AI(最终答案)]}</code>。你取最后一条 AI 消息就是答案。</p>
+                <div class="glossary"><b>每步都存了检查点</b>（如果配了 checkpointer，Day 11）：超步 0/1/2/3 之间各存一次快照。所以这次运行能被恢复、时间旅行、或在中间中断等人工。<strong>整个旅程 = 输入灌入 State → 超步循环（Plan/Execution/Update）+ 路由 + 回头边 → LLM 决定结束 → 返回最终 State。</strong>这就是 LangGraph 执行一个 Agent 的全貌。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 1 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 1 周（Day 01-05）你已建立完整心智</h3>
+                <ul>
+                    <li><b>Day 01</b> 全景：LangGraph 是什么、和 LangChain 关系</li>
+                    <li><b>Day 02</b> StateGraph：节点+边+状态、compile 成 Pregel</li>
+                    <li><b>Day 03</b> State 与 reducers：局部更新怎么合并（add_messages）</li>
+                    <li><b>Day 04</b> 条件边与路由：if/router、循环、通道触发</li>
+                    <li><b>Day 05</b> 完整旅程：超步循环 + 路由 + 回头边</li>
+                </ul>
+                <p style="margin-top:8px">你已理解"一个图如何被执行"的全局。下周（Day 06-10）深入 <strong>Pregel 引擎</strong>——BSP 超步、通道、执行循环、编译。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：跑一个真图观察</h3>
+<pre><code class="language-python"># 用 stream 观察每一步（Day 18 详讲）
+for chunk in graph.stream({"messages": [("user","北京天气?")]}, stream_mode="updates"):
+    print(chunk)   # 看到 agent → tools → agent 一步步的更新</code></pre>
+                <div class="tip"><strong>下周预告 · Day 06</strong>：深入 <strong>Pregel / BSP 模型</strong>——LangGraph 用 Google Pregel 的"超步（super-step）"执行图。Plan/Execution/Update 三阶段、快照隔离、节点靠通道触发。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 条件边</a>
+                <a href="langgraph-day06.html" style="color:var(--accent-green);">Day 06 · Pregel 引擎 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

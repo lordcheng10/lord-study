@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 条件边与路由 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .gd{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .gd .n{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);text-align:center}
+        .gd .n b{display:block;color:#14b8a6;font-size:11px} .gd .a{color:#6366f1;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#6366f1);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">条件边与路由 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 条件边 = if/router</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 路由函数</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · path_map 与自动推断</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 返回列表=并发扇出</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 循环（回头边）</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 通道触发机制</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 汇合 barrier</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 State</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 invoke 旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">条件边与路由</h1>
+            <p class="part-desc">让图学会"if/router"。<code>add_conditional_edges</code> 用一个路由函数看状态、决定下一步去哪。这是 ReAct Agent"要不要继续调工具"的核心。读 <code>graph/_branch.py</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>条件边 = if/router</h1></div>
+            <div class="card">
+                <p>普通边（Day 02）是"固定连接"——a 之后一定是 b。<strong>条件边</strong>（<code>add_conditional_edges</code>，<code>state.py:969</code>）是"运行时决定"——从某节点出来后，跑一个路由函数、用它的返回值决定下一个去哪。</p>
+                <div class="gd">
+                    <span class="n"><b>agent 节点</b>调 LLM</span><span class="a">→</span>
+                    <span class="n"><b>路由函数</b>看状态</span>
+                    <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+                        <span><span class="a">返回 "tools"→</span> <span class="n">tools 节点</span></span>
+                        <span><span class="a">返回 END→</span> <span class="n">结束</span></span>
+                    </span>
+                </div>
+                <div class="baby"><span class="t">条件边就是图里的"岔路口"</span>
+                普通边是"直路"，条件边是"看情况走哪条路的岔路口"。<strong>ReAct Agent 的核心判断"LLM 想调工具吗？想就去 tools 节点，不想就结束"就是一条条件边。</strong>有了它，图能表达"根据状态走不同路径"的复杂控制流。和 eino Graph 的 Branch、CrewAI Flow 的 @router 一个概念。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>路由函数</h1></div>
+            <div class="card">
+<pre><code class="language-python">def should_continue(state) -> Literal["tools", "__end__"]:
+    last = state["messages"][-1]
+    return "tools" if last.tool_calls else END   # 看状态返回下一节点名
+
+builder.add_conditional_edges("agent", should_continue)</code></pre>
+                <div class="anno">读法：<b>路由函数（<code>path</code>）读 state、返回"目标节点名"（字符串）。</b>框架据此决定下一个跑哪个节点。<code>add_conditional_edges</code> 把它包装成 <code>BranchSpec</code> 存进 <code>self.branches</code>（<code>state.py:1014</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>path_map 与自动推断</h1></div>
+            <div class="card">
+                <p><code>path_map</code>（可选）把路由函数的返回值映射到真实节点名。若路由函数返回类型标注 <code>Literal["a","b"]</code>，<code>BranchSpec.from_path</code>（<code>_branch.py:110</code>）自动推断 path_map：</p>
+<pre><code class="language-python">if get_origin(rtn_type) is Literal:
+    path_map_ = {name: name for name in get_args(rtn_type)}   # 从 Literal 自动推断</code></pre>
+                <div class="baby"><span class="t">为什么要 path_map / Literal 注解？</span>
+                主要为了<strong>可视化和校验</strong>——框架需要提前知道"这个路由可能去哪些节点"才能画出图、检查目标节点都存在。<strong>你给路由函数标 <code>-> Literal["tools", "__end__"]</code>，框架就自动知道所有可能的分支目标。</strong>不标也能跑（返回值直接当节点名），但标了更清晰、可视化更准。<strong>"从类型注解自动推断"——又是 LangGraph 的约定优于配置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>返回列表 = 并发扇出</h1></div>
+            <div class="card">
+                <p>路由函数<strong>可以返回一个列表</strong> → 同时触发多个目标节点（<code>_branch.py:_finish:192</code>）：</p>
+<pre><code class="language-python">def route(state):
+    return ["node_a", "node_b", "node_c"]   # 同时触发三个节点并行跑</code></pre>
+                <div class="baby"><span class="t">扇出（fan-out）= 一变多</span>
+                返回单个名字 = 走一条路；返回列表 = <strong>同时启动多个节点并行执行</strong>（fan-out/扇出）。用途：比如"同时问三个不同的专家节点"、map-reduce 的 map 阶段。<strong>还可以返回 <code>Send</code> 对象做动态并发</strong>（为每个数据项派一个任务，真正的 map-reduce）。<strong>条件边不只是"二选一"，还能"一变多"——图的表达力很强。</strong>配合 Day 03 的 reducer（多个并行节点的输出用 reducer 合并），扇出后能优雅汇总。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>循环（回头边）</h1></div>
+            <div class="card">
+                <p>条件边 + 普通回头边 = 循环（ReAct Agent 的核心）：</p>
+<pre><code class="language-python">builder.add_conditional_edges("agent", should_continue)  # agent 后判断
+builder.add_edge("tools", "agent")   # ★ tools 跑完回到 agent（回头边 = 循环）</code></pre>
+                <div class="anno">读法：<b>agent → 条件边（要工具就去 tools，不要就 END）→ tools 跑完 → 回头边把它连回 agent → agent 再判断…… 直到某轮不再要工具，走 END。</b>这就是 ReAct 循环的图结构。</div>
+                <div class="baby"><span class="t">"循环"就是图里有一条回头边</span>
+                传统编程用 <code>while</code> 循环。<strong>LangGraph 里"循环"= 图里有一条边指回之前的节点</strong>（tools → agent）。Agent 反复"调 LLM → 调工具 → 回到 LLM"就是在这个环里转，直到条件边判断"够了"走向 END。<strong>把循环表达成"图里的环"——清晰、可持久化（每轮存检查点）、可中断。</strong>这和 eino Graph 的"回头边=循环"、Day 16 的 create_react_agent 完全一致。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>通道触发机制（边怎么"启动"下一个节点）</h1></div>
+            <div class="card">
+                <p>初学者最困惑：边到底怎么"启动"下游节点？答案是<strong>通道触发</strong>（编译时焊接，<code>state.py:1512</code>）：</p>
+                <ul>
+                    <li>每个节点有个专属触发通道 <code>branch:to:&lt;节点名&gt;</code>，节点"订阅"它作为触发条件。</li>
+                    <li>普通边 <code>a→b</code>（<code>attach_edge</code>）：让 a 跑完往 <code>branch:to:b</code> 通道写一下 → 点亮 b。</li>
+                    <li>条件边（<code>attach_branch</code>）：把路由函数的输出（目标节点集合）翻译成"往哪些 <code>branch:to:*</code> 通道写"。</li>
+                </ul>
+                <div class="baby"><span class="t">节点不直接调用彼此</span>
+                关键设计：<strong>节点之间不直接互相调用，而是通过"写通道 → 通道触发订阅者"解耦。</strong>a 跑完不是"调用 b"，而是"往 b 的触发通道写一下"，下一超步引擎发现 b 的触发通道被更新了就跑 b。<strong>好处：同一超步能并发跑多个节点，引擎在步末统一合并所有写入（Day 06 的 Pregel）。</strong>这个"发布-订阅"解耦是并发、可中断、可重放的根基——Day 07 详讲通道。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>汇合 barrier</h1></div>
+            <div class="card">
+                <p>Day 02 的多起点边 <code>add_edge(["a","b"], "c")</code>（等 a、b 都完成才跑 c）靠 <code>NamedBarrierValue</code> 通道实现（<code>state.py:1546</code>）——一个"栅栏"通道，等所有起点都写过才放行 c。</p>
+                <div class="baby"><span class="t">barrier（栅栏）= 等齐再走</span>
+                扇出（L04）是"一变多"，汇合（fan-in）是"多变一"——比如三个并行节点都完成后，才跑"汇总"节点。<strong><code>NamedBarrierValue</code> 是一道栅栏：记录"还差谁没到"，所有上游都写过了才放行下游。</strong>这样"等所有并行分支完成再汇总"就自动成立。<strong>扇出 + 汇合 = map-reduce：先分成多路并行（map），再等齐汇总（reduce）。</strong>LangGraph 的图能优雅表达这种并行模式。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>条件边和普通边的区别？路由函数怎么工作？</li>
+                    <li>path_map / Literal 注解为什么有用？</li>
+                    <li>路由返回列表 = 什么（扇出）？</li>
+                    <li>循环怎么用"回头边"表达？</li>
+                    <li>通道触发机制：边怎么"启动"下游？汇合 barrier 怎么实现？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/graph
+sed -n '969,1017p' $P/state.py | head -30    # add_conditional_edges
+sed -n '110,225p' $P/_branch.py | head -50   # BranchSpec / _finish
+grep -n 'attach_edge\|attach_branch\|NamedBarrierValue\|branch:to' $P/state.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：把前四天串成故事线——<strong>一次 invoke 的完整旅程</strong>：从输入流入 State，到超步执行节点、路由、循环，到结果流出。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 State</a>
+                <a href="langgraph-day05.html" style="color:var(--accent-green);">Day 05 · invoke 旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
