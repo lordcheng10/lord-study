@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Agent 间委派 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">Agent 间委派 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 委派是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 委派被做成"工具"</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两个委派工具</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _execute 核心</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 名字容错</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工具怎么注入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么用"工具"实现</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 执行循环</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 Planning &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Crew 编排深入</span>
+            <h1 class="part-title">Agent 间委派 delegation</h1>
+            <p class="part-desc">多智能体的"协作"具体怎么发生？一个 Agent 怎么"喊同事帮忙"？今天揭示：委派被巧妙地实现成了"工具"，复用 Agent 已有的工具调用能力。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>委派是什么</h1></div>
+            <div class="card">
+                <p><strong>委派（delegation）</strong>= 一个 Agent 把某件事交给另一个 Agent 去做。<code>allow_delegation=True</code> 的 Agent（或层级模式的经理，Day 06）才有这能力。</p>
+                <div class="baby"><span class="t">用团队打比方</span>
+                写手 Agent 写着写着发现"我需要一个具体的数据，但这是研究员的专长"。如果它 <code>allow_delegation=True</code>，就能<strong>"喊研究员帮忙查一下"</strong>——把这个子任务委派给研究员，拿到结果后继续自己的工作。层级模式的经理更是把整个任务都委派给合适的下属。<strong>委派 = 团队成员之间互相求助/分派——这就是"协作"的具体机制。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>委派被做成"工具"（精妙设计）</h1></div>
+            <div class="card">
+                <p>关键洞察：CrewAI 没有另造一套"协作协议"，而是把委派实现成 Agent 的<strong>工具（tool）</strong>。<code>AgentTools.tools()</code>（<code>tools/agent_tools/agent_tools.py:22</code>）生成两个工具：</p>
+<pre><code class="language-python">delegate_tool = DelegateWorkTool(agents=self.agents, ...)  # 把整件事交给同事做
+ask_tool = AskQuestionTool(agents=self.agents, ...)        # 只是问同事一个问题</code></pre>
+                <div class="anno">读法：<b>委派 = 给 Agent 装一个"委派工具"。</b>Agent 想找同事帮忙时，就像调用普通工具（Day 07）一样"调用委派工具"——填上"找谁、什么任务/问题"。这样多 Agent 协作<strong>复用了 Agent 已有的 function-calling 能力</strong>，不用另造轮子。</div>
+                <div class="baby"><span class="t">为什么这个设计聪明？</span>
+                Agent 本来就会"用工具"（Day 07 的 ReAct）。把"找同事帮忙"也包装成一个工具，Agent 就能用它<strong>已经掌握的方式</strong>去协作——不需要学一套新的"协作 API"。对框架来说，也不用维护单独的多 Agent 通信机制。<strong>用已有的抽象（工具）去实现新需求（协作）——这是优雅设计的标志。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>两个委派工具</h1></div>
+            <div class="card">
+                <p>两者共享基类 <code>BaseAgentTool</code>（<code>base_agent_tools.py:15</code>），区别只在参数：</p>
+                <ul>
+                    <li><code>DelegateWorkTool</code>（<code>delegate_work_tool.py</code>）：参数 <code>task</code>（要做的事）+ <code>context</code> + <code>coworker</code>（找谁）。"把这件事交给同事做完"。</li>
+                    <li><code>AskQuestionTool</code>（<code>ask_question_tool.py</code>）：参数 <code>question</code>（问题）+ <code>context</code> + <code>coworker</code>。"只是问同事一个问题"。</li>
+                </ul>
+                <div class="glossary"><b>为什么分"委派整件事"和"只问一个问题"？</b> 粒度不同。有时你需要同事<strong>完整做一件事</strong>（"帮我写一段代码"），有时只需要<strong>问一句</strong>（"这个 API 的参数是什么？"）。分成两个工具，让委派方能精确表达意图，也让被委派方知道该做多少。两者的 <code>_run</code> 都转调基类的 <code>_execute</code>。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>_execute：委派的核心</h1></div>
+            <div class="card">
+                <p><code>BaseAgentTool._execute</code>（<code>base_agent_tools.py:46</code>）做三件事：</p>
+<pre><code class="language-python"># 1. 规范化同事名字（容错，L05）
+# 2. 按 role 找到目标 agent（找不到返回可用同事列表）
+# 3. 动态新建一个 Task 交给目标 agent 执行（:112-120）
+task_with_assigned_agent = Task(
+    description=task, agent=selected_agent,
+    expected_output=I18N_DEFAULT.slice("manager_request"),
+)
+return selected_agent.execute_task(task_with_assigned_agent, context)</code></pre>
+                <div class="anno">读法：<b>委派的本质 = "临时造一个 Task，指定目标 agent，让它执行，拿回结果"。</b>没有神秘的通信机制——就是动态创建一个新任务、调目标 agent 的 <code>execute_task</code>（Day 02）、返回结果。委派方拿到这个结果，继续自己的 ReAct 循环。</div>
+                <div class="baby"><span class="t">串起来看</span>
+                写手 Agent（在自己的 ReAct 循环里）→ 决定调"委派工具"、参数 coworker="研究员"、task="查 X 的数据" → <code>_execute</code> 临时造一个 Task 交给研究员 Agent → 研究员跑<strong>它自己的 ReAct 循环</strong>完成 → 结果作为"工具返回值"回到写手 → 写手继续写。<strong>一个 Agent 的执行嵌套了另一个 Agent 的执行——这就是多智能体协作在代码层的真身。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>名字容错 sanitize_agent_name</h1></div>
+            <div class="card">
+                <p><code>_execute</code> 第一步就规范化同事名字（<code>base_agent_tools.py:20</code>）——小写、去引号、合并空白，再按 role 模糊匹配。</p>
+                <div class="baby"><span class="t">为什么需要这么多容错？（源码注释点明了）</span>
+                因为<strong>弱一点的模型经常把同事名字写得乱七八糟</strong>——加引号（<code>"研究员"</code>）、大小写不一致、多余空格、甚至编成非法 JSON。如果严格匹配，委派就总失败。所以框架做了大量容错：规范化名字、模糊匹配 role、<strong>找不到时返回"可用同事列表"的友好错误</strong>（而不是直接崩），让模型看到列表后重新选。<strong>"假设模型会犯错并优雅兜底"——又一次体现 Agent 框架的健壮性哲学（Day 07）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>委派工具怎么注入</h1></div>
+            <div class="card">
+                <p>委派工具在 <code>_prepare_tools</code>（<code>crew.py:1606</code>）里按需注入：</p>
+<pre><code class="language-python">if getattr(agent, "allow_delegation", False):
+    if self.process == Process.hierarchical:
+        tools = self._update_manager_tools(task, tools)   # 给经理注入
+    elif agent:
+        tools = self._add_delegation_tools(task, tools)   # 给普通 agent 注入</code></pre>
+                <div class="anno">读法：<b>只有 <code>allow_delegation=True</code> 的 agent 才被注入委派工具。</b><code>_add_delegation_tools</code>（<code>crew.py:1781</code>）把"除自己之外"的所有 agent 作为可委派对象。层级模式的经理（Day 06）则总是被注入——它的全部工具就是委派工具（Day 06 讲的"经理不能带普通工具"）。</div>
+                <div class="glossary">所以：<strong>顺序模式下</strong>某个 agent 设了 <code>allow_delegation=True</code>，它就能在需要时喊别的同事帮忙；<strong>层级模式下</strong>经理靠委派工具把每个任务分派给下属。两种协作场景，同一套委派工具机制。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么用"工具"实现委派（设计回味）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>复用能力</strong>：Agent 本就会用工具，委派复用这个能力，零学习成本。</li>
+                    <li><strong>统一循环</strong>：委派发生在 Agent 的 ReAct 循环里，和调普通工具没区别，执行引擎不用特殊处理。</li>
+                    <li><strong>自然嵌套</strong>：被委派的 Agent 跑自己的循环，结果作为工具返回值——天然支持多层协作。</li>
+                    <li><strong>LLM 友好</strong>：模型擅长"选工具、填参数"，委派用这个它熟悉的方式表达。</li>
+                </ul>
+                <div class="glossary"><b>这是"命令模式 + 工具抽象"的结合</b>：委派被封装成一个可调用的命令对象（工具），协作复用 LLM 的 function-calling。<strong>回味 Day 13 的 OpenHands——它也把"子 Agent 委派"实现为 TaskAction/子 Agent 工具；eino 也推荐"Agent-as-Tool"。三个框架不约而同——因为"把协作做成工具"确实是最优雅的方案。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>委派是什么？谁有委派能力？</li>
+                    <li>委派为什么被实现成"工具"？聪明在哪？</li>
+                    <li>两个委派工具的区别？</li>
+                    <li>_execute 的本质是什么？（临时造 Task 交给目标 agent）</li>
+                    <li>为什么需要大量的名字容错？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/tools/agent_tools
+sed -n '15,130p' $P/base_agent_tools.py         # _execute + 名字容错
+cat $P/delegate_work_tool.py $P/ask_question_tool.py
+grep -n '_add_delegation_tools\|allow_delegation' ../../crew.py 2>/dev/null || \
+  grep -n '_add_delegation_tools\|allow_delegation' lib/crewai/src/crewai/crew.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>Planning 规划</strong>——复杂任务执行前先"制定计划"。看两套规划：Crew 级（开工前一次性生成计划塞进任务描述）和 Step 级（执行中动态观察、按需重规划）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 执行循环</a>
+                <a href="crewai-day09.html" style="color:var(--accent-green);">Day 09 · Planning &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

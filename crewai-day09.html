@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Planning 规划 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
+        .vs .c.a{border-color:#ef4444;background:rgba(239,68,68,.05)} .vs .c.b{border-color:#8b5cf6;background:rgba(139,92,246,.05)}
+        .vs .c h4{margin:0 0 6px;font-size:13px} .vs .c.a h4{color:#ef4444} .vs .c.b h4{color:#8b5cf6} .vs .c li{font-size:11.5px;color:var(--text-secondary);margin:4px 0}
+        @media(max-width:768px){.vs{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Planning 规划 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要规划</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两套规划</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Crew 级规划触发</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · CrewPlanner 干什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 计划塞进任务描述</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Step 级观察重规划</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 一次调用省 token</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 委派</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 任务输出 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 Crew 编排深入</span>
+            <h1 class="part-title">Planning 规划</h1>
+            <p class="part-desc">复杂任务，先做计划再动手效果更好。CrewAI 有两套规划：Crew 级（开工前一次性生成计划）和 Step 级（执行中动态观察、按需重规划）。今天讲清它们的区别与实现。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要规划</h1></div>
+            <div class="card">
+                <p>直接让 Agent 硬做复杂任务，它容易"走一步看一步"、缺乏全局规划、跑偏。<strong>先制定计划再执行</strong>——像人接到大项目先列提纲——能显著提升成功率。</p>
+                <div class="baby"><span class="t">规划的价值：给 AI 一张"路线图"</span>
+                想象让 Agent"写一份市场调研报告"。没有计划，它可能想到哪写到哪，遗漏关键部分。有计划：先明确"① 定义市场范围 → ② 收集竞品数据 → ③ 分析趋势 → ④ 给建议"，Agent 照这张路线图走，产出更完整、更有条理。<strong>规划 = 把"复杂任务"分解成"清晰步骤"，降低 AI 迷路的概率。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两套规划（别混淆）</h1></div>
+            <div class="card">
+                <div class="vs">
+                    <div class="c a"><h4>📋 Crew 级规划（静态）</h4>
+                        <ul><li><b>开工前一次性</b>生成计划</li><li>由 <code>crew.planning=True</code> 触发</li><li>把每个任务的详细步骤塞进任务描述</li><li>"开工前定好整体计划"</li></ul>
+                    </div>
+                    <div class="c b"><h4>🔍 Step 级观察（动态）</h4>
+                        <ul><li><b>执行中每一步</b>后观察</li><li>由 <code>PlannerObserver</code> 实现</li><li>看情况判断计划是否还成立、要不要改</li><li>"边做边看、动态调整"</li></ul>
+                    </div>
+                </div>
+                <div class="baby"><span class="t">一句话区分</span>
+                <strong>Crew 级 = "开工前写好作战计划"</strong>（静态，一次性）；<strong>Step 级 = "打仗过程中随时评估战况、必要时改计划"</strong>（动态，持续）。两者可配合：先有整体计划，执行中再动态微调。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Crew 级规划的触发</h1></div>
+            <div class="card">
+                <p>触发点在 <code>prepare_kickoff</code>（<code>crews/utils.py:355</code>）——kickoff 一开始、任务执行前就跑：</p>
+<pre><code class="language-python">if crew.planning:
+    crew._handle_crew_planning()   # 开工前生成计划</code></pre>
+                <div class="anno">读法：<b>只要你建 Crew 时设了 <code>planning=True</code>，kickoff 会在任何任务执行<strong>之前</strong>先跑一次规划。</b>这符合"先规划后执行"的直觉——规划发生在最前面。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>CrewPlanner 干什么</h1></div>
+            <div class="card">
+                <p><code>_handle_crew_planning</code>（<code>crew.py:1417</code>）委托给 <code>CrewPlanner</code>（<code>utilities/planning_handler.py:37</code>）：</p>
+                <ul>
+                    <li><code>_create_planning_agent</code>（<code>:80</code>）：造一个专门的"规划 Agent"（role="Task Execution Planner"），默认用 <code>gpt-5.4-mini</code>（便宜的规划模型）。</li>
+                    <li><code>_create_tasks_summary</code>（<code>:137</code>）：把所有任务（描述、期望输出、负责的 agent、工具）汇总成文本。</li>
+                    <li>让规划 Agent 输出结构化的 <code>PlannerTaskPydanticOutput</code>——每个任务一条 <code>PlanPerTask</code>（含 task_number + plan 详细步骤）。</li>
+                </ul>
+                <div class="baby"><span class="t">用一个专门的"规划师"</span>
+                注意：规划不是让干活的 Agent 自己规划，而是<strong>专门造一个"规划师 Agent"</strong>来通盘看所有任务、给每个任务写详细步骤。用便宜模型（mini）做规划——因为规划是"想清楚步骤"，不需要最强模型，省钱。<strong>结构化输出（每任务一条 plan）让后面能精确地把计划对应回每个任务。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>计划塞进任务描述</h1></div>
+            <div class="card">
+                <p>规划师产出计划后，回到 <code>crew.py:1435</code>，把每个任务的计划<strong>追加到它的 description 后面</strong>：</p>
+<pre><code class="language-python"># crew.py:1435-1443（概念）
+task.description += plan_map[task_number]   # 把该任务的详细步骤附加到描述</code></pre>
+                <div class="anno">读法：<b>规划的落地方式很朴素——把"该任务的详细步骤"直接拼进任务描述。</b>于是实际执行这个任务的 Agent，在 prompt 里就看到了"我该分几步做、每步做什么"的指引，产出更有条理。</div>
+                <div class="baby"><span class="t">为什么用"拼进描述"这么简单的方式？</span>
+                因为 Agent 执行任务时本就会读 <code>task.description</code>（拼进 prompt）。把计划附加进去，Agent 自然就"看到"了计划——<strong>不需要新增任何机制</strong>。规划的产出（计划文本）通过已有的"任务描述→prompt"通道传递给执行者。<strong>又是"复用已有通道"的朴素智慧。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Step 级观察重规划 PlannerObserver</h1></div>
+            <div class="card">
+                <p><code>PlannerObserver</code>（<code>agents/planner_observer.py:39</code>）实现 ReAct 里的"观察"阶段——<strong>每一步执行后都跑</strong>（不只失败时）。核心方法 <code>observe</code>（<code>:113</code>）让 LLM 返回结构化的 <code>StepObservation</code>：</p>
+<pre><code class="language-python"># StepObservation 字段
+step_completed_successfully   # 这步成功了吗
+key_information_learned       # 学到了什么新信息
+remaining_plan_still_valid    # 剩余计划还成立吗
+needs_full_replan             # 需要彻底重新规划吗
+suggested_refinements         # 建议怎么微调</code></pre>
+                <div class="anno">读法：<b>每执行一步，观察者就问 LLM："这步干得怎样？学到了什么？原计划还行吗？要不要改？"</b>——这让 Agent 能<strong>边做边评估、动态调整</strong>，而不是死守开工前定的计划。发现计划不对就 <code>needs_full_replan</code>，微调则用 <code>suggested_refinements</code>。</div>
+                <div class="baby"><span class="t">为什么"每步都观察"而不只在失败时？</span>
+                因为很多"跑偏"不是明显的失败——比如某步查到了意外信息，可能让后续计划部分失效。只在失败时观察会错过这些。<strong>每步都反思，能及早发现"虽然没报错但方向不对"的情况。</strong>还有 <code>heuristic_observation</code>（<code>:87</code>）降级模式——当关掉 observe 或 reasoning_effort=low 时，不调 LLM、仅凭执行元数据生成观察，省 token。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>一次调用省 token 的巧思</h1></div>
+            <div class="card">
+                <p><code>apply_refinements</code>（<code>planner_observer.py:215</code>）有个关键优化——注释明确写了 <strong>"No LLM call needed"</strong>：</p>
+                <div class="baby"><span class="t">observe 一次调用，同时返回"分析"和"修订建议"</span>
+                天真的做法：第一次调 LLM 分析"这步怎样"，第二次调 LLM"那你说怎么改"。CrewAI 的做法：<strong>observe 那一次 LLM 调用就同时返回分析结果 <strong>和</strong> 具体的修订建议（<code>suggested_refinements</code>），然后直接把修订应用到剩余计划，不用第二次调 LLM</strong>。省了一半的规划开销。<strong>"一次调用拿全所需信息"——在 Agent 里，每省一次 LLM 调用就是省钱省时间。这是成本经济学的精细体现。</strong></div>
+                <div class="glossary">观察者还通过事件总线广播 <code>StepObservationStarted/Completed/Failed</code>（Day 18 的事件系统），可观测性好。<strong>整套 Step 级规划：每步观察 + 一次调用拿分析和修订 + heuristic 降级——智能与成本的精细平衡。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么规划能提升复杂任务成功率？</li>
+                    <li>两套规划的区别？（Crew 级静态 vs Step 级动态）</li>
+                    <li>Crew 级规划为什么用一个专门的"规划师 Agent"+便宜模型？</li>
+                    <li>计划怎么传给执行者？（拼进任务描述）</li>
+                    <li>observe 为什么"每步都跑"？一次调用省 token 的巧思是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '37,140p' $P/utilities/planning_handler.py | head -50   # CrewPlanner
+sed -n '1417,1445p' $P/crew.py                                  # 计划塞进描述
+sed -n '39,230p' $P/agents/planner_observer.py | head -60       # PlannerObserver</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>Task 输出/上下文/guardrail</strong>——深入任务的结构化输出、上下文链三态（复习+源码）、以及 guardrail 护栏"校验+带反馈重试"机制（含"用 LLM 校验 LLM"）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 委派</a>
+                <a href="crewai-day10.html" style="color:var(--accent-green);">Day 10 · 任务输出与护栏 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
