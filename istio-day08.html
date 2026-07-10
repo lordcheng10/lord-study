@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Listener/Route/Cluster Builder — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">三大 Builder · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · BuildListeners</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ListenerBuilder</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 入站 vs 出站</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · BuildClusters</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ClusterBuilder</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · applyDestinationRule</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Route 翻译</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 配置生成</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day09.html" class="nav-link" style="color:#7c4dff;">Day 09 Push 模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 xDS 生成</span>
+            <h1 class="part-title">Listener/Route/Cluster Builder</h1>
+            <p class="part-desc">深入 core 层的三大 Builder：怎么把 Istio 配置一步步构造成 Envoy 的 Listener、Cluster、Route 对象。这里是"高层意图变成 Envoy 具体配置"的真正现场。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>BuildListeners</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/listener.go:100 BuildListeners
+// 按 node.Type 分派：
+//   SidecarProxy → buildSidecarListeners
+//   Waypoint     → buildWaypointListeners
+//   Router       → buildGatewayListeners
+// 最后 builder.patchListeners()（EnvoyFilter 补丁，Day 17）+ getListeners() 汇总</code></pre>
+                <div class="anno">读法：<b>生成 Listener（Envoy 课的监听器）先看 proxy 类型：sidecar（业务 Pod 旁的）、waypoint（ambient 模式）、router（网关）各有不同的 listener 构造逻辑。<strong>生成后还要过一遍 EnvoyFilter 补丁</strong>（Day 17，Higress 重度使用）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ListenerBuilder</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/listener_builder.go:58 ListenerBuilder
+// 聚合：inboundListeners / outboundListeners / gatewayListeners
+//       virtualInbound/OutboundListener / httpProxyListener
+// 持有 authnBuilder(mTLS) / authzBuilder(授权) / mseIngressBuilder(Higress)
+// 链式流水线：appendSidecarInboundListeners().appendSidecarOutboundListeners()
+//             .buildHTTPProxyListener().buildVirtualOutboundListener()</code></pre>
+                <div class="baby"><span class="t">Builder 模式 = "流水线式组装复杂对象"</span>
+                Listener 配置很复杂（入站、出站、TLS、过滤器链…）。<strong><code>ListenerBuilder</code> 用"建造者模式"：一个持有中间状态的对象，链式调用一串 <code>appendXxx</code> 方法，每步往里加一部分，最后 <code>getListeners()</code> 汇总输出。</strong>好比组装流水线，每个工位加一个部件。<strong>注意它持有 <code>authnBuilder</code>（生成 mTLS 配置，Day 15）和 <code>authzBuilder</code>（生成 RBAC，Day 15）——安全策略就是在构造 Listener 时织进去的。</strong>Higress 加了 <code>mseIngressBuilder</code>。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>入站 vs 出站</h1></div>
+            <div class="card">
+                <p>sidecar 有两个方向的 listener：<strong>入站（inbound）</strong>——处理"别人访问我"的流量（<code>listener_inbound.go</code>）；<strong>出站（outbound）</strong>——处理"我访问别人"的流量（<code>buildSidecarOutboundListeners</code>）。</p>
+                <div class="baby"><span class="t">为什么 sidecar 要管两个方向？</span>
+                回想 Day 11 的 iptables 劫持——Pod 的所有进出流量都被劫持到 Envoy。<strong>所以 sidecar Envoy 要处理两类：入站（别的服务调用本 Pod，走 15006 端口，Day 11）——这里应用 mTLS 验证、授权（Day 15）；出站（本 Pod 调用别的服务，走 15001）——这里应用路由、负载均衡。</strong>两个方向的 listener 配置逻辑不同。<strong>入站关心"谁能访问我、怎么验证"，出站关心"我要去哪、怎么去"。</strong>还有 virtualInbound/virtualOutbound 作为兜底 listener。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>BuildClusters</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/cluster.go:56 BuildClusters
+//   选定 service 集合（Gateway 用 GatewayServices，sidecar 用 SidecarScope.Services()）
+//   → buildClusters（:219）按 proxy.Type 分派
+//   outbound clusters + blackhole/passthrough + inbound + SDS cluster
+//   → normalizeClusters 去重 → 包成 discovery.Resource</code></pre>
+                <div class="anno">读法：<b>生成 Cluster（Envoy 课的集群）时，<strong>用 SidecarScope 限定的服务集合</strong>（Day 05——只给这个 proxy 需要的服务建 cluster，不建全网格的）。除了正常 outbound/inbound cluster，还有 blackhole（丢弃未知流量）、passthrough（透传）等特殊 cluster。</b>这直接体现了"配置收敛"的价值。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ClusterBuilder</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/cluster_builder.go:103 ClusterBuilder
+// 持有 proxy 全上下文：serviceTargets/clusterID/sidecarScope/
+//   supportsIPv4/6/locality/proxyView/cache
+// 强调：影响 cluster 的字段都要进缓存 key（Day 07 缓存）</code></pre>
+                <div class="anno">读法：<b><code>ClusterBuilder</code> 持有生成一个 cluster 所需的全部 proxy 上下文。注释强调"影响结果的字段都要进缓存 key"——因为"带 Proxy 翻译"，同一个服务对不同 proxy 可能生成不同 cluster（locality/IP 版本不同），缓存 key 必须区分。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>applyDestinationRule</h1></div>
+            <div class="card">
+                <p><code>cluster_builder.go:307</code> <code>applyDestinationRule</code>：把 DestinationRule（Day 03）的策略应用到 cluster——负载均衡（Envoy 课 Day 14）、连接池、离群检测（熔断，Envoy 课 Day 15 的 outlier）、上游 TLS。</p>
+                <div class="baby"><span class="t">这里就是"高层 CRD → Envoy 配置"的翻译现场</span>
+                你在 DestinationRule 里写"用 LEAST_REQUEST 负载均衡、连接池上限 100、连续 5 次 5xx 熔断"。<strong><code>applyDestinationRule</code> 就把这些高层描述翻译成 Envoy Cluster 里的具体字段——<code>lbPolicy</code>、<code>circuitBreakers</code>、<code>outlierDetection</code>（正是你在 Envoy 课 Day 14-15 学的那些！）。</strong>subset（版本子集）也在这里展开成多个 Envoy cluster。<strong>看，Istio 课和 Envoy 课在这里精确对接：Istio 生成的，正是 Envoy 消费的。你两门课都学了，就能看到完整的"生成→消费"闭环。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Route 翻译</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/route/route.go:400
+// BuildHTTPRoutesForVirtualService(node, vs, port, gatewayNames, opts) []*route.Route
+//   逐条 vs.Http 规则翻译成 Envoy route.Route
+//   遇 IsCatchAllRoute 提前 break（路由按序匹配，后续不可达）</code></pre>
+                <div class="anno">读法：<b>VirtualService 的每条 <code>http</code> 规则（匹配 + 路由目标 + 重试/超时/故障注入）被翻译成一个 Envoy <code>route.Route</code>。<strong>遇到"catch-all"（匹配一切）规则就停——因为路由按序匹配，后面的永远匹配不到</strong>（呼应 Envoy 课 Day 09 Router）。</b>Higress 加了 per-route filter 支持（<code>BuildHTTPRoutesForVirtualServiceWithHTTPFilters</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>BuildListeners 按什么分派？生成后为什么要 patch？</li>
+                    <li>ListenerBuilder 用什么模式？为什么持有 authn/authz builder？</li>
+                    <li>sidecar 的入站/出站 listener 各处理什么方向？</li>
+                    <li>BuildClusters 怎么用 SidecarScope 收敛？</li>
+                    <li>applyDestinationRule 翻译出哪些 Envoy 配置？（和 Envoy 课对接）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func.*BuildListeners\|func.*buildSidecarListeners' pilot/pkg/networking/core/listener.go
+grep -n 'func.*BuildClusters\|applyDestinationRule' pilot/pkg/networking/core/cluster.go pilot/pkg/networking/core/cluster_builder.go
+grep -n 'BuildHTTPRoutesForVirtualService' pilot/pkg/networking/core/route/route.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>Push 与事件模型</strong>——配置一变，怎么触发推送？<code>ConfigUpdate → debounce（100ms 合并）→ Push → PushQueue → 各 proxy</code>。这条链是控制面的"神经系统"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 配置生成</a>
+                <a href="istio-day09.html" style="color:#7c4dff;">Day 09 · Push 与事件模型 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

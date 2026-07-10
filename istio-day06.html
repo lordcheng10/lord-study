@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · xDS DiscoveryServer — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">xDS DiscoveryServer · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · DiscoveryServer</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ADS 入口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 收发分离</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 首请求初始化</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ShouldRespond</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 通配 vs 非通配</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 请求优先</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 PushContext</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day07.html" class="nav-link" style="color:#7c4dff;">Day 07 配置生成 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 xDS 生成</span>
+            <h1 class="part-title">xDS DiscoveryServer</h1>
+            <p class="part-desc">第 2 周进入核心：istiod 怎么向 Envoy 提供配置。今天看 <code>DiscoveryServer</code>——ADS gRPC 服务端的骨架：一条流怎么收请求、发配置，以及 xDS 协议精髓 ACK/NACK 状态机。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>DiscoveryServer</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/discovery.go:68 DiscoveryServer 核心字段
+Generators map[string]XdsResourceGenerator // :77 typeURL→生成器（Day 02 注册的）
+pushChannel chan *PushRequest              // :99 debounce 输入（Day 09）
+pushQueue  *PushQueue                       // :102 待推送队列
+adsClients map[string]*Connection           // :108 活跃连接表
+concurrentPushLimit chan struct{}           // :84 并发推送信号量
+Cache model.XdsCache                        // :122</code></pre>
+                <div class="anno">读法：<b><code>DiscoveryServer</code> 是 xDS 服务的中枢：持有生成器路由表（Day 02）、活跃连接表、推送队列、缓存。<code>Register()</code>（<code>:200</code>）把它注册为 ADS gRPC 服务实现。<code>Start()</code>（<code>:217</code>）起 5 个后台协程（<code>handleUpdates</code> debounce、<code>sendPushes</code> 消费队列等）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ADS 入口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/ads.go:182 StreamAggregatedResources → Stream（:187）
+// :204 server 未 ready 直接返回 Unavailable（防 Envoy 拿空配置）
+// :214 限流 WaitForRequestLimit
+// :219 认证 s.authenticate(ctx)
+// :231 newConnection(peerAddr, stream) 后进入通用流循环 xds.Stream(con)</code></pre>
+                <div class="baby"><span class="t">ADS = "一条流管所有配置"</span>
+                回想 Envoy 课 Day 12：Envoy 用 ADS（聚合发现服务）把所有 xDS 类型复用一条 gRPC 流。<strong>istiod 这边的 <code>StreamAggregatedResources</code> 就是这条流的服务端入口——Envoy 连上来，一条双向 gRPC 流承载所有类型的请求和响应。</strong>连接建立前有三道关：ready 检查（Day 02 的门禁）、限流（防连接风暴）、认证（Day 14 的 mTLS）。过了才建 <code>Connection</code> 开始服务。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>收发分离</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/xds/server.go（通用 xDS 流框架，ADS/SDS 复用）
+// Stream（:234）：
+//   :243 起 go Receive(ctx) 单独协程做阻塞 Recv()
+//   :250 等 <-con.initialized（首请求完成初始化后才服务）
+//   :252 主循环：select 处理 reqChan（请求/ACK/NACK）和 pushChannel（推送）</code></pre>
+                <div class="baby"><span class="t">为什么收和发要分两个协程？</span>
+                一条 gRPC 流上，既有 Envoy 发来的请求/ACK（收），也有 istiod 主动推的配置（发）。<strong>如果一个协程既阻塞等收、又要发，会互相卡住。所以拆开：一个 <code>Receive</code> 协程专门阻塞收请求塞进 <code>reqChan</code>；主循环用 select 同时等"reqChan（有请求来了）"和"pushChannel（有配置要推）"，哪个来了处理哪个。</strong>这是并发编程里"收发解耦"的经典模式（Envoy 课 Day 04 的事件循环也是类似思路）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>首请求初始化</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/xds/server.go Receive（:295）循环 Recv()
+//   首个请求（:322）必须带 Node.Id → ctx.Initialize(req.Node)
+//   → initConnection（ads.go:239）：解析 node id → model.Proxy
+//     addCon 注册进 adsClients（此后才被 push 遍历到）
+//     computeProxyState 算 SidecarScope/labels（Day 05）
+//     MarkInitialized() 关闭 initialized 通道 → 主循环开始服务</code></pre>
+                <div class="anno">读法：<b>Envoy 连上后第一个请求必须报上自己是谁（<code>Node.Id</code>）。istiod 据此解析成 <code>model.Proxy</code>、算出它的 SidecarScope（Day 05，决定它能看到什么）、注册进活跃连接表。<strong>初始化完成才 <code>MarkInitialized</code>，主循环才开始给它发配置</strong>——保证配置生成时 proxy 信息完备。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ShouldRespond（协议精髓）</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/xds/server.go ShouldRespond（:352）—— 拆解 Envoy 的三类消息
+// :358 request.ErrorDetail != nil → NACK（记录 reject，不响应）
+// :381 ResponseNonce=="" 或 previousInfo==nil → 初始请求/重连（响应）
+// :390 nonce 与 NonceSent 不匹配 → 陈旧 nonce（忽略）
+// :406 nonce 匹配 + 无资源增删 → ACK（不响应）
+// :438 有新增订阅 → 响应</code></pre>
+                <div class="baby"><span class="t">ACK / NACK / 请求：三合一的判定</span>
+                回想 Envoy 课 Day 11 的 ACK/NACK。<strong>问题：Envoy 发来的消息在同一个 API 里不区分"这是新请求、还是对上次下发的确认（ACK）、还是拒绝（NACK）"。<code>ShouldRespond</code> 就是那个拆分器：</strong>带 error → NACK（配置有问题，记下来）；nonce 匹配且无新订阅 → ACK（收到了，啥也不用做）；nonce 空/不匹配或有新订阅 → 真请求（要生成并响应）。<strong>这是 xDS 最终一致性协议的服务端核心——搞懂它就理解了"istiod 和 Envoy 怎么对话"。</strong>nonce（一次性随机数）用来对上"这个确认针对哪次下发"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>通配 vs 非通配</h1></div>
+            <div class="card">
+                <p><code>IsWildcardTypeURL</code>（<code>server.go:114</code>）：CDS/LDS 是<strong>通配类型</strong>（缺失即删除，必须全量），SecretType/EndpointType/RouteType/ECDS 是<strong>非通配</strong>（可只发订阅的子集）。</p>
+                <div class="baby"><span class="t">这就是 EDS 能增量的协议基础</span>
+                回想 Envoy 课 Day 15：端点（EDS）变化最频繁。<strong>如果每次一个 Pod 增删都全量重发所有集群的所有端点，开销巨大。xDS 协议规定：CDS/LDS 是"根类型"——发送的就是全部，没发的视为删除（所以必须全量）；EDS/RDS/SDS 是"非根类型"——可以只发变化的那些，没发的不删除。</strong>于是 EDS 能做增量推送（只发变化的服务的端点）。<strong>这个"通配 vs 非通配"的区分，是 istiod 高频端点更新优化的协议前提。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>请求优先</h1></div>
+            <div class="card">
+                <p>主循环（<code>server.go:252-292</code>）先用非阻塞 select 优先处理 <code>reqChan</code>（请求/ACK，成本低），再在第二个 select 里同时等请求和推送——注释解释"请求优先、避免推送饿死请求"。</p>
+                <div class="anno">读法：<b>请求（尤其 ACK）处理很快且重要（要及时确认 Envoy 的状态），推送（生成配置）较重。所以设计成"有请求先处理请求，没请求才处理推送"——防止推送任务把请求处理"饿死"。</b>这是并发调度里的优先级设计。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>DiscoveryServer 持有哪些核心结构？</li>
+                    <li>ADS 入口连接前的三道关？</li>
+                    <li>为什么收发要分两个协程？</li>
+                    <li>首请求为什么必须带 Node.Id？初始化做什么？</li>
+                    <li>ShouldRespond 怎么拆分 ACK/NACK/请求？通配 vs 非通配的意义？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'type DiscoveryServer struct\|func.*StreamAggregatedResources' pilot/pkg/xds/discovery.go pilot/pkg/xds/ads.go
+grep -n 'func.*ShouldRespond\|func IsWildcardTypeURL' pkg/xds/server.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>配置生成总览</strong>——istiod 怎么把 CRD 翻译成 Envoy xDS？<code>ConfigGenerator</code> 接口、<code>XdsResourceGenerator</code> 生成器、CDS 生成器范例。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 PushContext</a>
+                <a href="istio-day07.html" style="color:#7c4dff;">Day 07 · 配置生成总览 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 配置生成总览 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#00acc1);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">配置生成总览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ConfigGenerator</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · XdsResourceGenerator</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CDS 生成器范例</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 薄封装 + 委托</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 增量生成</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · EDS 独立路径</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 缓存</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 DiscoveryServer</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day08.html" class="nav-link" style="color:#7c4dff;">Day 08 Builder &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 xDS 生成</span>
+            <h1 class="part-title">配置生成总览</h1>
+            <p class="part-desc">istiod 最核心的工作：把 CRD + 服务翻译成 Envoy xDS。今天看翻译层的骨架：<code>ConfigGenerator</code> 顶层接口、<code>XdsResourceGenerator</code> 生成器接口、以及 CDS 生成器怎么"薄封装 + 委托"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ConfigGenerator</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/configgen.go:29
+type ConfigGenerator interface {
+  BuildListeners(node, req) []*listener.Listener        // :33 LDS
+  BuildClusters(node, req) ([]*discovery.Resource, ...)  // :36 CDS
+  BuildHTTPRoutes(node, req, routeNames) (...)           // :44 RDS
+  BuildNameTable(node, push) *NameTable                  // :51 DNS
+  BuildExtensionConfiguration(...) [...]                 // :54 ECDS
+}</code></pre>
+                <div class="anno">读法：<b><code>ConfigGenerator</code> 是"翻译引擎"的顶层接口——每个 <code>Build*</code> 方法负责生成一类 Envoy 资源。<code>BuildScopedRoutes</code>（<code>:47</code>）是 Higress 定制的 SRDS（大规模路由优化）。实现体 <code>ConfigGeneratorImpl</code> 只持有一个缓存。</b>这些 Build 方法就是"CRD → xDS"翻译的入口。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>XdsResourceGenerator</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/context.go:288
+type XdsResourceGenerator interface {
+  Generate(proxy *Proxy, w *WatchedResource, req *PushRequest) (Resources, ...)
+}
+type XdsDeltaResourceGenerator interface {  // 支持增量
+  XdsResourceGenerator
+  GenerateDeltas(...) (Resources, DeletedResources, ...)
+}</code></pre>
+                <div class="baby"><span class="t">两层生成器：xDS 层 vs core 层</span>
+                有两组"生成器"，别混：<strong>①xDS 层的 <code>XdsResourceGenerator</code>（Day 02 注册的 CdsGenerator/LdsGenerator…）——每个 typeURL 一个，是"路由入口"；②core 层的 <code>ConfigGenerator</code>（<code>BuildClusters</code> 等）——真正的翻译逻辑。</strong>xDS 层生成器是<strong>薄封装</strong>，收到请求后判断要不要推、然后委托给 core 层的 Build 方法干活。<strong>这种"入口层 + 逻辑层"分离，让 xDS 协议处理和配置翻译逻辑解耦。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CDS 生成器范例</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/cds.go:122 CdsGenerator.Generate
+func (c CdsGenerator) Generate(proxy, w, req) (...) {
+  req, needsPush := cdsNeedsPush(req, proxy)         // 判断要不要推
+  if !needsPush { return nil, ... }                  // 不推直接返回
+  clusters, logs := c.ConfigGenerator.BuildClusters(proxy, req)  // 委托 core 层
+  return clusters, logs, nil
+}</code></pre>
+                <div class="anno">读法：<b>典型的薄封装：先 <code>cdsNeedsPush</code> 判断（这个 proxy 需要重新生成 CDS 吗），需要才调 core 层的 <code>BuildClusters</code>。LDS/RDS 生成器结构完全一样。</b>RDS 特殊：是"点名订阅"（Envoy 只订阅它需要的 route），所以只生成订阅的那些。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>薄封装 + 委托</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么要"判断要不要推"？</span>
+                Day 05 讲了"依赖跟踪"——不是每次配置变更都要给每个 proxy 重发所有类型。<strong><code>cdsNeedsPush</code> 就是判断"这次变更，这个 proxy 的 CDS 需要重新生成吗"。比如只改了某个 RDS 相关配置，CDS 没变，就跳过 CDS 生成。</strong>这避免了无谓的重新翻译（翻译是有成本的）。<strong>这是三级优化（Day 05/09）在生成层的体现——连"要不要生成"都精打细算。</strong>不需要就返回 nil，Envoy 那边就保持现有 CDS 不变。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>增量生成</h1></div>
+            <div class="card">
+                <p>支持增量的生成器实现 <code>GenerateDeltas</code>。CDS 的 <code>GenerateDeltas</code>（<code>cds.go:132</code>）调 <code>BuildDeltaClusters</code>——解析 cluster 名（<code>outbound|port|subset|hostname</code>），据 <code>ConfigsUpdated</code> 只算增删的集群。</p>
+                <div class="anno">读法：<b>Delta（增量）模式下，只生成/删除"变化的"资源，不重发全部。<code>BuildDeltaClusters</code> 根据"哪些 ServiceEntry/DestinationRule 变了"精确算出要增删哪些集群。</b>Envoy 课讲的 Delta xDS 就是消费这个。全量模式（SotW）则用 <code>Generate</code>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>EDS 独立路径</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/xds/eds.go:84 EdsGenerator —— 不走 ConfigGeneratorImpl！
+// 直接用内存 endpoint 索引 EndpointIndex
+// Generate（:117）→ buildEndpoints：查缓存命中直接返回，
+//   否则 builder.BuildClusterLoadAssignment(EndpointIndex) 现算
+// EDSUpdate（:47）：端点变化直接触发 push，不重算 PushContext</code></pre>
+                <div class="baby"><span class="t">EDS 为什么"特殊对待"？</span>
+                回想 Day 01/05：端点是<strong>最高频</strong>变更资源（Pod 扩缩容随时发生）。<strong>如果每次端点变化都重建整张 PushContext（Day 05），开销巨大。所以 EDS 走独立优化路径：不经过 PushContext、不重算快照，而是直接用一个内存里的 <code>EndpointIndex</code>，端点变了就增量更新这个索引并推送。</strong>其他 xDS（CDS/LDS/RDS）依赖 PushContext，EDS 绕开它。<strong>这是"把最高频的操作抽出来单独优化"的工程智慧——针对热点做专门的快路径。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>缓存</h1></div>
+            <div class="card">
+                <p>生成结果会缓存（<code>DiscoveryServer.Cache</code>）。因为"带 Proxy 翻译"（Day 01），很多 proxy 的配置其实相同（同命名空间、同 SidecarScope），缓存能大幅减少重复翻译。EDS 有专门的缓存（<code>eds.Cache.Get(&builder)</code>）。</p>
+                <div class="anno">读法：<b>缓存 key 要包含"所有影响生成结果的因素"（<code>cluster_builder.go</code> 强调这点）。同样输入 → 同样输出 → 缓存命中直接返回，不重新翻译。</b>这是"带 Proxy 翻译"成本高的必要补偿——用缓存把重复翻译省下来。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ConfigGenerator 的 Build* 方法各生成什么？</li>
+                    <li>xDS 层生成器和 core 层生成器怎么分工？</li>
+                    <li>CDS 生成器的"薄封装 + 委托"模式？</li>
+                    <li>为什么要判断"要不要推"？增量生成怎么做？</li>
+                    <li>EDS 为什么走独立路径？缓存为什么重要？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'type ConfigGenerator interface\|BuildClusters\|BuildListeners' pilot/pkg/networking/core/configgen.go
+sed -n '122,141p' pilot/pkg/xds/cds.go
+grep -n 'type EdsGenerator\|func.*EDSUpdate' pilot/pkg/xds/eds.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>Listener/Route/Cluster Builder</strong>——深入 core 层的三大 Builder，看它们怎么把 Istio 配置一步步构造成 Envoy 的 Listener、Route、Cluster 对象。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 DiscoveryServer</a>
+                <a href="istio-day08.html" style="color:#7c4dff;">Day 08 · Listener/Route/Cluster Builder &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
