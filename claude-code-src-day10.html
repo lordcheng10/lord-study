@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 上下文与 Token 管理 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .ladder{display:flex;flex-direction:column;gap:4px}
+        .rung{display:flex;gap:12px;align-items:center;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:10px 13px}
+        .rung .lv{flex-shrink:0;font-size:11px;font-weight:700;color:#fff;background:var(--rc,var(--accent-purple));border-radius:6px;padding:3px 8px;min-width:70px;text-align:center}
+        .rung p{margin:0;font-size:12.5px;color:var(--text-secondary)} .rung b{color:var(--text-primary)}
+        .bar-demo{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:14px;margin:8px 0}
+        .ctxbar{height:26px;border-radius:6px;background:linear-gradient(90deg,#22c55e 0%,#22c55e 55%,#f59e0b 55%,#f59e0b 78%,#ef4444 78%);position:relative;overflow:hidden}
+        .ctxbar span{position:absolute;top:0;bottom:0;border-left:2px dashed rgba(255,255,255,.5);font-size:9px;color:#fff;padding-left:3px;display:flex;align-items:center}
+        .marks{display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:5px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">上下文与 Token 管理 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 上下文窗口的约束</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 每轮开头的瘦身阶梯</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · microcompact 微压缩</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · autocompact 大摘要</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 阈值与预测式压缩</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Stop hook 续命</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · token budget 用满预算</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 权限系统</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 Slash 命令 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">上下文与 Token 管理</h1>
+            <p class="part-desc">对话越长，塞给模型的东西越多，迟早撑爆"上下文窗口"。今天讲 Claude Code 怎么层层瘦身、必要时大摘要，以及各种"续命"和"刹车"机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>上下文窗口的约束</h1></div>
+            <div class="card">
+                <p>大模型每次请求能接受的 token 有上限，叫<strong>上下文窗口（context window）</strong>。Agent 干活时，每一轮都要把"之前所有对话 + 工具结果 + 系统提示 + CLAUDE.md"全塞进去。干得越久，这堆东西越大，早晚超窗口。</p>
+                <div class="glossary"><b>token 是什么？</b> 模型处理文本的最小单位，大致 1 个 token ≈ 0.75 个英文单词 / 1-2 个汉字。"上下文窗口 20 万 token"意思是这次请求（历史+新内容）加起来最多 20 万 token。超了 API 直接报错。所以长对话必须<strong>主动瘦身</strong>——这就是 compaction（压缩）。</div>
+                <p>Claude Code 的策略是<strong>分级瘦身</strong>：先用最轻的手段（删过期内容），不够再用重的（大摘要）。全在 <code>queryLoop</code> 每轮开头做（<code>query.ts:523-741</code>）。</p>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>每轮开头的瘦身阶梯</h1></div>
+            <div class="card">
+                <p>循环层每轮调模型<strong>之前</strong>，按"从轻到重"的顺序做多级瘦身（<code>query.ts:523</code> 起）：</p>
+                <div class="ladder">
+                    <div class="rung" style="--rc:#22c55e"><span class="lv">最轻</span><p><b>裁掉 compact 边界前的历史</b>：上次大摘要之后，边界之前的老消息不再带（<code>query.ts:523</code>）</p></div>
+                    <div class="rung" style="--rc:#22c55e"><span class="lv">轻</span><p><b>释放旧 toolUseResult 大对象</b>：把已经用不到的大工具结果对象删掉省内存（<code>:542</code>）</p></div>
+                    <div class="rung" style="--rc:#06b6d4"><span class="lv">中</span><p><b>tool-result 预算</b>：每条工具结果超过大小上限就替换内容（<code>:567</code>）</p></div>
+                    <div class="rung" style="--rc:#06b6d4"><span class="lv">中</span><p><b>snip</b>：删除僵尸/过期消息（<code>:589</code>，feature 门控）</p></div>
+                    <div class="rung" style="--rc:#f59e0b"><span class="lv">较重</span><p><b>microcompact 微压缩</b>：清空旧工具结果内容，不动结构（<code>:601</code>，L03）</p></div>
+                    <div class="rung" style="--rc:#ef4444"><span class="lv">最重</span><p><b>autocompact 大摘要</b>：调 LLM 把历史压成摘要（<code>:652</code>，L04）</p></div>
+                </div>
+                <div class="glossary"><b>为什么分这么多级？</b> 大摘要（autocompact）要<strong>额外调一次 LLM</strong>——花钱、花时间、还可能丢信息。所以能用便宜手段（删过期、清空旧工具结果）解决就绝不上大摘要。这跟 gov-agents 教程里"能用代码就别用 LLM"是同一个成本哲学：<strong>先用确定性的廉价手段，实在不行才动用昂贵的 LLM。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>microcompact：清空旧工具结果</h1></div>
+            <div class="card">
+                <p><code>microcompactMessages</code>（<code>src/services/compact/microCompact.ts:257</code>）是"较重但不调 LLM"的一档。它<strong>就地清空旧工具结果的内容</strong>，但保留消息结构：</p>
+<pre><code class="language-typescript">// microCompact.ts:36 —— 把旧 tool_result 的内容换成占位
+"[Old tool result content cleared]"
+// 结构（哪条消息、tool_use_id 对应关系）都不动，只是把大块内容清掉</code></pre>
+                <div class="glossary"><b>为什么"清内容留结构"？</b> 因为 Anthropic 协议要求每个 <code>tool_use</code> 必须有对应的 <code>tool_result</code>（Day 03 讲过），不能直接删掉工具结果消息（会破坏配对、API 报错）。但那些很久以前的工具结果内容（比如 20 轮前读的一个文件）模型早就不需要了。于是把<strong>内容</strong>换成"[已清空]"占位、保留<strong>结构</strong>——既省了 token 又不破坏协议。这是"在协议约束下尽量瘦身"的巧妙折中。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>autocompact：大摘要（最后手段）</h1></div>
+            <div class="card">
+                <p>轻手段都不够时，上 <code>autoCompactIfNeeded</code>（<code>src/services/compact/autoCompact.ts:270</code>）——<strong>调一次 LLM 把前面的历史压缩成一段摘要</strong>：</p>
+                <ul>
+                    <li>fork 一次 LLM 调用生成摘要（<code>compact.ts:411</code> 的 <code>compactConversation</code>）。</li>
+                    <li>压缩产物 = <code>buildPostCompactMessages</code>（<code>compact.ts:336</code>）：一个<strong>边界标记</strong> + <strong>摘要消息</strong> + 保留的尾部消息 + attachments。</li>
+                    <li>之后 <code>messagesForQuery = postCompactMessages</code>，并 yield 摘要消息（<code>query.ts:726</code>）。</li>
+                </ul>
+                <p>会话层（<code>QueryEngine.ts:958</code>）收到 <code>compact_boundary</code> 后，会把边界之前的消息从 <code>mutableMessages</code> 里 splice 掉以便垃圾回收。这就是你有时看到的 "Compacting conversation…" + 一条摘要。你也能手动 <code>/compact</code> 触发（Day 11）。</p>
+                <div class="glossary"><b>"边界标记"是什么？</b> 一个特殊消息，标记"从这里往前的历史已被摘要替代"。Day 02/06 提过的 <code>getMessagesAfterCompactBoundary</code> 就靠它——每轮只带边界之后的消息 + 那段摘要。相当于给对话"打了个存档点"，之前的浓缩成一句话，之后的照常。<b>fork 一次 LLM</b> 指开一个独立的小请求专门做摘要，不影响主对话。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>阈值与预测式压缩</h1></div>
+            <div class="card">
+                <p>什么时候触发 autocompact？<code>autoCompact.ts</code> 算出几档水位线：</p>
+                <div class="bar-demo">
+                    <div class="ctxbar">
+                        <span style="left:55%">autocompact</span>
+                        <span style="left:78%">error</span>
+                    </div>
+                    <div class="marks"><span>0</span><span>有效窗口 = 模型窗口 − 预留摘要输出</span><span>满</span></div>
+                </div>
+                <ul>
+                    <li>有效窗口 = 模型窗口 − 预留给摘要输出的空间（<code>getEffectiveContextWindowSize</code>，<code>:33</code>）。</li>
+                    <li>autocompact 阈值 = 有效窗口 − buffer（buffer 随窗口大小变：800k 窗口留 50k，普通留 13k，<code>:62</code>）。</li>
+                    <li><code>calculateTokenWarningState</code>（<code>:122</code>）算出 warning / error / autocompact / blocking 各档。</li>
+                </ul>
+                <p><strong>预测式压缩</strong>（<code>query.ts:852</code>）更聪明：即使当前没超，如果"当前 tokens + 本轮预计增长"会超窗口，就<strong>提前</strong>压缩——避免这一轮跑到一半才发现超了。</p>
+                <div class="glossary"><b>为什么要预留摘要输出空间、要 buffer？</b> 因为压缩本身也要生成 token（摘要文本）；而且下一轮模型的回复也要占空间。如果卡到窗口边缘才压缩，可能"连生成摘要的空间都没有了"。留 buffer + 预测式提前压，是给系统留出腾挪余地。<strong>不要等撞墙才刹车，要预判着减速</strong>——这是资源管理的通用智慧。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Stop hook：能"逼"模型继续</h1></div>
+            <div class="card">
+                <p>Day 03 提过——模型说"我完事了"（不再要工具），一轮本该结束。但停止前会跑 <strong>Stop hooks</strong>（<code>query.ts:1557</code>，<code>handleStopHooks</code> 在 <code>src/query/stopHooks.ts:62</code>）：</p>
+<pre><code class="language-typescript">// query.ts:1557 附近
+const stopResult = yield* handleStopHooks(...)
+if (stopResult.preventContinuation) return { reason: 'stop_hook_prevented' }
+if (stopResult.blockingErrors) {
+  // ★ hook 说"还没达标" → 把错误插回消息，continue，逼模型继续干
+  messages.push(...blockingErrorsAsMessages)
+  stopHookActive = true
+  continue   // 不结束，回循环顶再来一轮
+}</code></pre>
+                <div class="glossary"><b>Stop hook 的用途</b>：你可以配一个 Stop hook（Day 14），在模型想收工时检查"活干完了吗"——比如"测试还没过""还有 TODO 没做"。如果不满意，hook 返回 blockingErrors，循环就把这些当作新消息喂回去，相当于对模型说"不行，接着弄"。这让你能强制 Agent"不达标不许停"。<code>stopHooks.ts</code> 还顺带在后台做提示建议、抽取记忆、auto dream 等（<code>:137</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>token budget：鼓励用满预算</h1></div>
+            <div class="card">
+                <p>还有一个反方向的机制（<code>feature('TOKEN_BUDGET')</code>，<code>query.ts:1598</code>）——<strong>token 预算</strong>。它不是省 token，而是"你给了这么多预算，别没干够就收工"：</p>
+                <ul>
+                    <li><code>checkTokenBudget</code>（<code>src/query/tokenBudget.ts:45</code>）：如果还没用到预算的 90%（<code>COMPLETION_THRESHOLD=0.9</code>）且非"收益递减"，就返回 continue，插一条 nudge 消息让模型继续（<code>query.ts:1606</code>）。</li>
+                    <li>但如果 <code>continuationCount >= 3</code> 且每次增量 <code>< 500</code> token（<code>DIMINISHING_THRESHOLD</code>），判为"收益递减"→ 停（<code>tokenBudget.ts:59</code>）。</li>
+                </ul>
+                <div class="glossary"><b>为什么要"鼓励用满预算"？</b> 有时模型会过早收工（"我觉得差不多了"），但其实任务还能做得更完整。给它一个预算目标 + nudge，鼓励它多探索、多验证。同时用"收益递减检测"防止它为凑预算而空转（连续几轮几乎没产出就停）。这是"既防偷懒又防空耗"的平衡——和 Stop hook 一起，构成了对"何时该停"的精细控制。</div>
+                <p>把 Day 03 的停止原因和今天连起来：一轮结束前要过 prompt-too-long 恢复 → max-tokens 恢复 → Stop hooks → token budget，全通过才真 <code>completed</code>。<strong>"结束"不是一个简单判断，而是一串协商。</strong></p>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周收官自测</h3>
+                <ul>
+                    <li>上下文窗口是什么约束？为什么长对话要压缩？</li>
+                    <li>瘦身阶梯从轻到重有哪些级？为什么先轻后重？</li>
+                    <li>microcompact 为什么"清内容留结构"？</li>
+                    <li>autocompact 的边界标记起什么作用？</li>
+                    <li>Stop hook 怎么"逼"模型继续？token budget 又怎么防它偷懒/空耗？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 读每轮开头的瘦身阶梯
+sed -n '523,666p' src/query.ts | head -80
+
+# 2. 读微压缩
+sed -n '30,60p' src/services/compact/microCompact.ts
+
+# 3. 读大摘要与阈值
+sed -n '33,120p' src/services/compact/autoCompact.ts
+
+# 4. 读 Stop hook 续命 + token budget
+sed -n '1557,1631p' src/query.ts
+cat src/query/tokenBudget.ts
+
+# 5. 实操：长对话里手动 /compact，观察摘要
+bun run dev   # 聊几轮后输入 /compact</code></pre>
+                <div class="tip"><strong>第 3 周预告 · Day 11</strong>：核心引擎讲完了！第 3 周转向"扩展能力"。Day 11 讲 <strong>Slash 命令系统</strong>——"/help /model /compact" 这些命令怎么定义、注册、解析分派，以及一个关键洞察：skills、插件命令、MCP prompt 本质上都是同一种 Command。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 权限系统</a>
+                <a href="claude-code-src-day11.html" style="color:var(--accent-green);">Day 11 · Slash 命令系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
