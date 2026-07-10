@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · Task 输出与护栏 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .loop{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .loop .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-secondary);text-align:center}
+        .loop .a{color:#f97316;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">任务输出与护栏 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 本日主题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 结构化输出三选一</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 上下文链三态复习</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · guardrail 是什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 校验+带反馈重试</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · LLM 校验 LLM</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 签名校验前移</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 Planning</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 Flow &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 Crew 编排深入（收官）</span>
+            <h1 class="part-title">Task 输出与护栏</h1>
+            <p class="part-desc">第2周收官。深入任务的结构化输出、上下文链（复习+源码）、以及 guardrail 护栏——"校验 + 带反馈重试"这套让任务输出质量有保障的机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>本日主题</h1></div>
+            <div class="card">
+                <p>Day 03 快速过了 Task，今天补齐三个进阶点：<strong>结构化输出</strong>（让 AI 吐规范数据）、<strong>上下文链</strong>（任务间数据传递，源码级）、<strong>guardrail</strong>（输出质检）。这三个决定了"任务产出能不能被程序可靠地用"。</p>
+                <div class="baby"><span class="t">为什么这三个很关键？</span>
+                把 AI 接进真实软件系统，最怕"AI 的输出不靠谱"——格式乱、内容错、缺关键项。结构化输出解决"格式规范"、上下文链解决"任务间正确传递"、guardrail 解决"内容质检"。<strong>这三个是"让 AI 产出可用于生产"的工程保障。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>结构化输出：三选一</h1></div>
+            <div class="card">
+                <p>Task 有三种约束输出格式的方式（互斥，<code>task.py</code>）：</p>
+                <ul>
+                    <li><code>output_pydantic=Model</code>（<code>:179</code>）：输出解析成 Pydantic 对象。</li>
+                    <li><code>output_json=Model</code>（<code>:169</code>）：输出为 JSON（符合该 schema）。</li>
+                    <li><code>response_model=Model</code>（<code>:189</code>）：走 <strong>LLM 原生结构化输出</strong>（最可靠）。</li>
+                </ul>
+                <div class="anno">读法：<b>校验器 <code>check_output</code>（<code>task.py:548</code>）保证 output_json 和 output_pydantic 不同时设。</b>产出后 <code>_export_output</code> 把结果转成对应形态，封进 TaskOutput 的 pydantic/json_dict 字段（Day 03）。</div>
+                <div class="baby"><span class="t">response_model 为什么最可靠？</span>
+                <code>output_pydantic</code> 是"让模型自由输出，再由框架解析成对象"（解析可能失败）；<code>response_model</code> 用<strong>模型的原生结构化输出能力</strong>——模型在生成时就被约束必须符合 schema（约束解码），几乎不会格式错。<strong>现代模型优先用 response_model。</strong>这和 Day 07 讲的"原生函数调用 > 文本解析"是同一个道理——能让模型原生结构化就别自己解析。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>上下文链三态（源码复习）</h1></div>
+            <div class="card">
+                <p>Day 03/05 讲过，这里看源码 <code>_get_context</code>（<code>crew.py:1827</code>）：</p>
+<pre><code class="language-python">def _get_context(task, task_outputs):
+    if not task.context:                    # context=[] 空列表 → 隔离，不看上文
+        return ""
+    return (aggregate_raw_outputs_from_task_outputs(task_outputs)  # NOT_SPECIFIED → 前面所有
+            if task.context is NOT_SPECIFIED
+            else aggregate_raw_outputs_from_tasks(task.context))   # 指定列表 → 只这些</code></pre>
+                <div class="anno">读法：<b>三态用一个字段的三种取值优雅表达：默认（NOT_SPECIFIED）拼前面所有任务、指定列表只拼那些、空列表谁都不看。</b>这是"合理默认 + 精确控制"的 API 平衡艺术（Day 03 baby box 讲过）。</div>
+                <div class="glossary">还有个安全校验 <code>validate_context_no_future_tasks</code>（<code>crew.py:839</code>，Day 04 见过）——context 不能依赖<strong>后面</strong>的任务，防止"任务 1 依赖任务 3 输出"的时间悖论。<strong>依赖必须指向过去，这个约束在建 Crew 时就检查。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>guardrail：输出的"质检员"</h1></div>
+            <div class="card">
+                <p>护栏（guardrail）= 任务产出后，先"质检"是否合格，不合格就带着反馈重跑。Task 的 <code>guardrail</code>（<code>task.py:246</code>）有两种：</p>
+                <ul>
+                    <li><strong>函数护栏</strong>：你写个函数校验（如"检查输出是否包含至少 5 个要点"）。</li>
+                    <li><strong>字符串护栏</strong>：写自然语言描述（如"确保输出是专业、正式的语气"），框架用一个 LLM 来判断合不合规。</li>
+                </ul>
+                <div class="baby"><span class="t">质检为什么重要？</span>
+                AI 有时会产出"看起来完成了但不合要求"的结果——比如你要 5 个要点它给了 3 个，或语气不对。如果不检查就直接用，质量没保障。<strong>guardrail 在任务产出和"交付"之间加一道关卡：不合格打回重做。</strong>这让最终输出的质量可控——尤其对生产系统重要。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>校验 + 带反馈重试</h1></div>
+            <div class="card">
+                <p>护栏执行 <code>_invoke_guardrail_function</code>（<code>task.py:1246</code>）的核心是一个重试循环：</p>
+                <div class="loop">
+                    <span class="n">任务产出</span><span class="a">→</span>
+                    <span class="n">跑护栏校验</span><span class="a">→</span>
+                    <span class="n" style="border-color:#22c55e">通过 → 交付</span>
+                    <span class="a">/</span>
+                    <span class="n" style="border-color:#ef4444">失败 → 把原因当反馈重跑</span><span class="a">↺</span>
+                </div>
+<pre><code class="language-python"># task.py:1264（精简）
+for attempt in range(max_attempts):
+    result = process_guardrail(output=task_output, guardrail=guardrail)
+    if result.success:
+        return task_output          # 通过（结果可能被护栏改写）
+    if attempt >= self.guardrail_max_retries:
+        raise Exception("failed guardrail validation after retries")
+    context = 把失败原因格式化成反馈
+    result = agent.execute_task(task=self, context=context, ...)  # 带反馈重跑</code></pre>
+                <div class="anno">读法：<b>护栏失败不是直接报错，而是把"失败原因"作为反馈重新喂给 Agent，让它改进后重跑，最多 <code>guardrail_max_retries</code> 次（默认 3）。</b>这是"带反馈的自我修正"——和 Day 07 的解析自愈一个思路。支持多护栏串联，每个独立计数。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>LLM 校验 LLM</h1></div>
+            <div class="card">
+                <p>字符串护栏由 <code>LLMGuardrail</code>（<code>tasks/llm_guardrail.py:49</code>）实现——它内部临时建一个"Guardrail Agent"，让<strong>另一个 LLM</strong>来判断输出是否符合描述：</p>
+<pre><code class="language-python"># llm_guardrail.py:98 __call__ 返回 (True, 原文) 或 (False, 反馈)
+# 内部：一个"质检 Agent"判断输出合不合规，返回 LLMGuardrailResult(valid, feedback)</code></pre>
+                <div class="baby"><span class="t">"用 LLM 校验 LLM" 是什么套路？</span>
+                干活的 Agent 产出结果 → <strong>另一个专门的"质检 Agent"</strong>读这个结果，对照你的要求（"是否专业正式"）判断合不合格、给反馈。这是当下很流行的模式（也叫 LLM-as-a-judge）。<strong>好处：质检标准可以用自然语言写（灵活），不用写死代码规则。</strong>坏处：多一次 LLM 调用（成本）。所以简单规则用函数护栏（免费、确定），主观/复杂标准用字符串护栏（LLM 判断，灵活）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>签名校验前移</h1></div>
+            <div class="card">
+                <p><code>validate_guardrail_function</code>（<code>task.py:302</code>）在你创建 Task 时就校验函数护栏的签名——<strong>必须恰好一个参数，返回类型若标注必须是 <code>Tuple[bool, Any]</code></strong>。</p>
+                <div class="baby"><span class="t">为什么创建时就检查函数签名？</span>
+                护栏函数必须符合约定格式（收一个参数、返回 <code>(是否通过, 结果/反馈)</code>）。如果你写错了（比如返回单个值），运行到护栏那步才崩就晚了。<strong>创建 Task 时就检查签名，写错立刻报错——又是"fail-fast、错误前移"</strong>（Day 04 的声明式校验、eino 的编译期检查，同一哲学，本教程第 N 次出现）。<strong>你会发现优秀框架都痴迷于"尽早暴露错误"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 2 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 2 周（Day 06-10）你已深入 Crew 编排</h3>
+                <ul>
+                    <li><b>Day 06</b> Process：顺序/层级复用同一引擎</li>
+                    <li><b>Day 07</b> ReAct 执行循环：两种模式 + 解析自愈</li>
+                    <li><b>Day 08</b> 委派：做成工具、复用 function-calling</li>
+                    <li><b>Day 09</b> Planning：静态 Crew 级 + 动态 Step 级</li>
+                    <li><b>Day 10</b> 任务输出与护栏：结构化 + 上下文链 + guardrail</li>
+                </ul>
+                <p style="margin-top:8px">你已掌握 Crew（自主 Agent 团队）的方方面面。下周（Day 11-15）进入另一范式 <strong>Flow（事件驱动工作流）</strong> + 工具 + LLM。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '1246,1300p' $P/task.py                     # guardrail 重试循环
+sed -n '302,360p' $P/task.py                       # 签名校验
+sed -n '49,110p' $P/tasks/llm_guardrail.py         # LLM 校验 LLM</code></pre>
+                <div class="tip"><strong>下周预告 · Day 11</strong>：进入 <strong>Flow（事件驱动工作流）</strong>——Crew 是"让 Agent 自主协作"，Flow 是"你精确控制步骤顺序"的确定性编排。看它与 Crew 的本质区别，以及"编写层/中间表示/执行层"三段式架构。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 Planning</a>
+                <a href="crewai-day11.html" style="color:var(--accent-green);">Day 11 · Flow &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
