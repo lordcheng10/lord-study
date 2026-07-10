@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · Events 事件系统 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">Events 事件系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 事件总线是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · CrewAIEventsBus</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 注册监听 @on</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · emit 触发</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 丰富的事件类型</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 自定义监听器</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么用事件解耦</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 Knowledge</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 脚手架 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 记忆/知识/生态</span>
+            <h1 class="part-title">Events 事件系统</h1>
+            <p class="part-desc">贯穿全框架的事件总线。前面反复出现的 <code>CrewKickoffStartedEvent</code>/<code>ToolUsageStartedEvent</code>/<code>LLMCallStartedEvent</code> 都走它。今天看它如何解耦日志、遥测、集成。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>事件总线是什么</h1></div>
+            <div class="card">
+                <p>CrewAI 在运行的关键节点（Crew 开工、任务开始/完成、工具调用、LLM 调用……）都会<strong>发出事件</strong>。事件总线（event bus）负责把这些事件分发给<strong>监听者</strong>。代码在 <code>events/</code>。</p>
+                <div class="baby"><span class="t">用"广播电台"打比方</span>
+                框架各处在关键时刻"广播"消息：<strong>"Crew 开工了！""某工具被调用了！""LLM 返回了！"</strong>。事件总线就是电台，谁想听就"订阅"。想加日志的订阅所有事件打印、想做监控的订阅统计耗时、想集成 Langfuse 的订阅上报追踪——<strong>它们都不用改框架核心代码，只需订阅事件</strong>。这就是"发布-订阅"模式，也是可观测性的基础。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>CrewAIEventsBus</h1></div>
+            <div class="card">
+                <p>核心是 <code>CrewAIEventsBus</code>（<code>events/event_bus.py:95</code>），全局单例 <code>crewai_event_bus</code>。两个核心操作：注册监听（<code>on</code>）和触发（<code>emit</code>）。</p>
+                <div class="anno">读法：<b>全局单例意味着整个应用共享同一个事件总线。</b>框架各处 <code>crewai_event_bus.emit(...)</code> 发事件，你的监听器 <code>@crewai_event_bus.on(...)</code> 接事件——通过这个共享总线连接。<strong>这和 OpenHands 的事件、Flow 的 <code>FlowStartedEvent</code>（Day 11）都是同一套 crewai 事件总线。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>注册监听 @on</h1></div>
+            <div class="card">
+<pre><code class="language-python"># event_bus.py:245
+@crewai_event_bus.on(CrewKickoffStartedEvent)
+def log_start(source, event):
+    print(f"Crew 开工了：{event.crew_name}")
+# 支持 depends_on 声明依赖顺序（某监听器要在另一个之后跑）</code></pre>
+                <div class="anno">读法：<b><code>@crewai_event_bus.on(某事件类型)</code> 装饰一个函数，该函数就成为"这个事件的监听器"——事件发生时自动被调用，收到 source（谁发的）和 event（事件详情）。</b>你想在 Crew 开工时做点什么？注册一个监听 <code>CrewKickoffStartedEvent</code> 的函数即可。</div>
+                <div class="glossary"><b><code>depends_on</code> 声明依赖</b>：某些监听器有先后要求（比如"初始化 trace"必须在"记录 span"之前）。<code>depends_on</code> 让总线按依赖顺序执行监听器。这是比朴素发布-订阅更精细的调度。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>emit 触发</h1></div>
+            <div class="card">
+                <p><code>emit(source, event)</code>（<code>event_bus.py:572</code>）触发事件，按依赖顺序执行所有监听该事件的 handler：</p>
+                <ul>
+                    <li>同步 handler 在线程池执行。</li>
+                    <li>异步 handler 是 fire-and-forget（发了不等）。</li>
+                    <li><strong>流式 chunk 事件强制同步保序</strong>——因为流式输出必须按顺序，不能乱。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么流式事件要"强制同步保序"？</span>
+                大多数事件（日志、监控）谁先谁后无所谓，可以异步并发处理（快）。但<strong>流式输出的 chunk 事件不行</strong>——"你""好""吗"三个字的事件如果乱序处理，前端显示就成了"吗你好"。所以流式 chunk 事件<strong>强制按顺序同步处理</strong>。<strong>大部分求快（异步），关键的求正确（同步保序）——因场景而异的处理，是成熟框架的细节。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>丰富的事件类型</h1></div>
+            <div class="card">
+                <p><code>events/types/</code> 里有 20+ 类事件，覆盖框架各处：</p>
+                <ul>
+                    <li><code>crew_events</code>：CrewKickoffStarted/Completed…</li>
+                    <li><code>agent_events</code> / <code>task_events</code>：Agent/Task 的生命周期</li>
+                    <li><code>llm_events</code>：LLMCallStarted/…（Day 15 见过）</li>
+                    <li><code>tool_usage_events</code>：ToolUsageStarted/Finished（Day 14 见过）</li>
+                    <li><code>memory_events</code> / <code>knowledge_events</code>：记忆/知识操作（Day 16/17）</li>
+                    <li><code>flow_events</code>：FlowStarted/MethodExecution…（Day 11）</li>
+                    <li><code>reasoning_events</code>：StepObservation…（Day 9 的规划观察）</li>
+                </ul>
+                <div class="glossary"><b>这解释了前面所有"发事件"的地方</b>！Day 5 的 CrewKickoffStarted、Day 9 的 StepObservation、Day 11 的 FlowStarted、Day 14 的 ToolUsage、Day 15 的 LLMCall——它们全走这套事件总线。<strong>事件系统是把整个框架各处"串起来做可观测"的中枢。理解它，前面散落的"发事件"就都连成一张网了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>自定义监听器</h1></div>
+            <div class="card">
+                <p>做法：继承 <code>BaseEventListener</code>（<code>base_event_listener.py</code>），实现 <code>setup_listeners</code>，构造时自动注册：</p>
+<pre><code class="language-python">class MyListener(BaseEventListener):
+    def setup_listeners(self, bus):
+        @bus.on(CrewKickoffCompletedEvent)
+        def on_done(source, event):
+            上报到你的监控系统(event.token_usage)
+
+MyListener()   # 构造即注册</code></pre>
+                <div class="baby"><span class="t">这能做什么实际的事？</span>
+                ① <strong>日志/审计</strong>：记录 Crew 每一步干了啥。② <strong>成本监控</strong>：在 LLMCall 事件里累加 token、算钱。③ <strong>接入可观测平台</strong>：Langfuse、OpenTelemetry（<code>pyproject.toml</code> 里有 opentelemetry 依赖）——把执行过程画成 trace。④ <strong>业务集成</strong>：任务完成时发 Slack 通知。<strong>全都不用改框架代码，写个监听器订阅相应事件即可。</strong>这就是事件解耦的威力。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么用事件解耦</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>核心逻辑纯净</strong>：Crew/Agent/Task 只管干活、发事件，不掺杂日志/监控/上报代码。</li>
+                    <li><strong>横切关注点分离</strong>：日志、遥测、集成这些"横切"需求，通过监听器挂在外部——加/删/改都不动核心。</li>
+                    <li><strong>可扩展</strong>：想加新的观测/集成？写个监听器，零侵入。</li>
+                </ul>
+                <div class="glossary"><b>这是 AOP（面向切面编程）思想</b>——和 eino 的 callbacks（Day 16）、OpenHands 的事件流是同一个哲学：<strong>把"日志/监控/追踪"这类横切关注点，从业务逻辑里剥离出来，用事件/回调在外部统一处理。</strong>三个框架不约而同用事件/回调做可观测——因为这确实是解耦横切关注点的最佳实践。<strong>你学会一个，就懂了所有框架的可观测层。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>事件总线是什么？"广播电台"怎么理解？</li>
+                    <li>@on 注册监听、emit 触发怎么用？</li>
+                    <li>为什么流式 chunk 事件要强制同步保序？</li>
+                    <li>有哪些事件类型？它们把前面哪些天串起来了？</li>
+                    <li>自定义监听器能做什么？事件解耦的好处（AOP）？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/events
+grep -n 'class CrewAIEventsBus\|def on\|def emit' $P/event_bus.py | head
+ls $P/types/                                      # 20+ 事件类型
+sed -n '1,40p' $P/base_event_listener.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>项目脚手架与 YAML 配置</strong>——真实项目怎么组织。@CrewBase 装饰器、用 YAML 定义 agents/tasks（config/agents.yaml）、@agent/@task/@crew 装饰器、CLI 脚手架。这是生产项目的标准写法。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 Knowledge</a>
+                <a href="crewai-day19.html" style="color:var(--accent-green);">Day 19 · 项目脚手架 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

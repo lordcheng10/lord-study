@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 项目脚手架与 YAML — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">项目脚手架与 YAML · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两种写法</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · CLI 脚手架</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · YAML 定义 agents</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · @CrewBase 装饰器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · @agent/@task/@crew</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 自动加载配置</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么 YAML 分离</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 Events</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day20.html" class="nav-link" style="color:var(--accent-green);">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 记忆/知识/生态</span>
+            <h1 class="part-title">项目脚手架与 YAML 配置</h1>
+            <p class="part-desc">真实项目怎么组织。前面都是编程式写法，生产项目更常用 <b>@CrewBase + YAML</b> 的声明式写法。今天讲这套标准结构。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种写法</h1></div>
+            <div class="card">
+                <p>定义 Crew 有两种写法：</p>
+                <ul>
+                    <li><strong>编程式</strong>（前面一直用的）：手动 <code>Agent(...)</code> → <code>Task(...)</code> → <code>Crew(...)</code> → <code>kickoff()</code>。适合快速实验。</li>
+                    <li><strong>声明式（@CrewBase + YAML）</strong>：agents/tasks 的配置写在 <code>config/*.yaml</code>，Python 里用装饰器组装。<strong>官方推荐用于真实项目。</strong></li>
+                </ul>
+                <div class="baby"><span class="t">为什么真实项目用声明式？</span>
+                编程式把"配置（角色、目标、任务描述）"和"代码逻辑"混在一起，改个提示词要动 Python 代码。<strong>声明式把配置抽到 YAML 文件</strong>——产品经理/非程序员也能改角色和任务描述、能 code review 配置变更、能给不同环境用不同 YAML。<strong>"配置与代码分离"是工程化的标志。</strong>这是本日的核心。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>CLI 脚手架</h1></div>
+            <div class="card">
+                <p>CrewAI 提供命令行脚手架快速建项目（<code>lib/cli</code>）：</p>
+<pre><code class="language-bash">crewai create crew my_project    # 生成标准项目结构
+# 生成：
+# my_project/
+#   src/my_project/
+#     config/agents.yaml   ← agent 配置
+#     config/tasks.yaml    ← task 配置
+#     crew.py              ← @CrewBase 组装
+#     main.py              ← 入口
+crewai run                       # 运行</code></pre>
+                <div class="anno">读法：<b><code>crewai create</code> 生成一套标准目录结构——配置在 <code>config/</code> 的 YAML、组装逻辑在 <code>crew.py</code>。</b>这是 CrewAI 项目的"标准姿势"，团队协作、部署都基于它。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>YAML 定义 agents/tasks</h1></div>
+            <div class="card">
+<pre><code class="language-yaml"># config/agents.yaml
+researcher:
+  role: "{topic} 行业资深研究员"
+  goal: "找到关于 {topic} 的最新可靠资料"
+  backstory: "你深耕这个行业十年……"
+
+# config/tasks.yaml
+research_task:
+  description: "研究 {topic} 的最新进展"
+  expected_output: "5 条要点的资料清单"
+  agent: researcher</code></pre>
+                <div class="anno">读法：<b>Agent 的 role/goal/backstory（Day 02）、Task 的 description/expected_output（Day 03）全写在 YAML 里，用名字（researcher、research_task）标识。</b><code>{topic}</code> 占位符照样能用（Day 02 的插值）。这些 YAML 就是"配置"，纯文本、易读易改。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>@CrewBase 装饰器</h1></div>
+            <div class="card">
+                <p>Python 里用 <code>@CrewBase</code>（<code>project/crew_base.py</code>，元类 <code>CrewBaseMeta</code> <code>:193</code>）把 YAML 和代码粘起来：</p>
+<pre><code class="language-python">@CrewBase
+class MyProjectCrew:
+    agents: List[BaseAgent]     # 会被自动填充
+    tasks: List[Task]
+
+    @agent
+    def researcher(self) -> Agent:
+        return Agent(config=self.agents_config['researcher'],   # ← 读 YAML 配置
+                     tools=[SerperDevTool()])
+    @task
+    def research_task(self) -> Task:
+        return Task(config=self.tasks_config['research_task'])
+    @crew
+    def crew(self) -> Crew:
+        return Crew(agents=self.agents, tasks=self.tasks, process=Process.sequential)</code></pre>
+                <div class="anno">读法：<b><code>@CrewBase</code> 让类自动从 <code>config/agents.yaml</code>、<code>config/tasks.yaml</code> 加载配置到 <code>self.agents_config</code>/<code>self.tasks_config</code>。</b>你在 <code>@agent</code> 方法里用 <code>config=self.agents_config['researcher']</code> 引用 YAML 里的配置，再补上代码里才能给的东西（如 tools）。</div>
+                <div class="baby"><span class="t">分工：YAML 管"文字配置"，Python 管"代码对象"</span>
+                <strong>YAML</strong> 放"能用文字表达的"（角色、目标、任务描述）——非程序员也能改。<strong>Python</strong> 放"必须是代码的"（工具实例、自定义逻辑、流程）。<code>config=...</code> 把两者拼起来。<strong>各放各的位置，改配置不碰代码、改逻辑不碰配置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>@agent / @task / @crew 装饰器</h1></div>
+            <div class="card">
+                <p>这些装饰器（<code>project/annotations.py</code>）标记方法的角色：</p>
+                <ul>
+                    <li><code>@agent</code>（<code>:78</code>）：标记"这是一个 agent 定义方法"，返回的 Agent 被收集进 <code>self.agents</code>。</li>
+                    <li><code>@task</code>（<code>:66</code>）：同理收集进 <code>self.tasks</code>。</li>
+                    <li><code>@crew</code>（<code>:180</code>）：标记组装 Crew 的方法。</li>
+                    <li><code>@before_kickoff</code>/<code>@after_kickoff</code>（<code>:42/:54</code>）：开工前/后的钩子。</li>
+                    <li>还有 <code>@llm</code>/<code>@tool</code>/<code>@callback</code> 等。</li>
+                </ul>
+                <div class="baby"><span class="t">又见"装饰器贴元数据"（呼应 Day 12 Flow）</span>
+                和 Flow 的装饰器一样，这些 <code>@agent</code>/<code>@task</code> 也是"贴标签"——标记方法的身份，让 <code>@CrewBase</code> 元类在类创建时<strong>自动收集</strong>所有 <code>@agent</code> 方法的返回值填进 <code>self.agents</code>。你不用手动维护一个 agents 列表，装饰器帮你收集。<strong>声明式（贴标签）比命令式（手动 append）更省心、更不易出错。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>自动加载配置</h1></div>
+            <div class="card">
+                <p><code>@CrewBase</code> 的元类 <code>CrewBaseMeta</code> 在类创建时调 <code>load_configurations</code>（<code>crew_base.py:368</code>）自动读取 <code>config/agents.yaml</code> 和 <code>config/tasks.yaml</code>，并把 <code>@agent</code>/<code>@task</code> 方法收集进 <code>self.agents</code>/<code>self.tasks</code>。</p>
+                <div class="glossary"><b>元类（metaclass）是什么？</b> "类的类"——控制类<strong>怎么被创建</strong>。普通装饰器作用于函数/方法，元类作用于整个类的创建过程。<code>CrewBaseMeta</code> 在你的 Crew 类被定义时就介入：读 YAML、扫描 <code>@agent</code>/<code>@task</code> 方法、准备好一切。<strong>这是 Python 的高级特性，让 @CrewBase 能"魔法般"地把 YAML 和方法自动组装。</strong>你不用懂元类也能用，但知道"背后是元类在自动加载"就不觉得神秘了。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么 YAML 分离（工程价值）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>非程序员可改</strong>：产品/运营能直接改 agent 的角色、任务描述，不碰代码。</li>
+                    <li><strong>提示词迭代快</strong>：调 prompt 是 Agent 开发的核心工作，YAML 里改比在 Python 字符串里改清爽得多。</li>
+                    <li><strong>可 review、可版本管理</strong>：配置变更在 git 里一目了然。</li>
+                    <li><strong>多环境</strong>：不同环境（测试/生产）可用不同 YAML。</li>
+                </ul>
+                <div class="glossary"><b>这和 OpenHands 的 skills/microagents（Day 18）、eino 的配置化异曲同工</b>——都是"把 AI 行为的可变部分（提示词、配置）从代码里抽出来"，让迭代更快、协作更容易。<strong>Agent 开发的一大工作量是调提示词，把提示词放 YAML 是工程化的必然选择。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>两种写法（编程式 vs 声明式）的区别？真实项目用哪个？</li>
+                    <li>CLI 脚手架生成什么结构？</li>
+                    <li>YAML 里放什么、Python 里放什么？</li>
+                    <li>@agent/@task/@crew 装饰器怎么工作？（贴标签+元类自动收集）</li>
+                    <li>为什么把配置抽到 YAML？工程价值？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+grep -n '@agent\|@task\|@crew\|before_kickoff' $P/project/annotations.py | head
+grep -n 'class CrewBaseMeta\|load_configurations\|agents_config' $P/project/crew_base.py | head
+# 看 README 里的 @CrewBase 示例
+grep -n 'CrewBase\|agents.yaml' README.md | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>构建测试与收官串讲</strong>——项目怎么测、从零搭一个 Crew 的清单、常见坑、全 20 天知识地图、以及 CrewAI 贯穿始终的设计哲学。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 Events</a>
+                <a href="crewai-day20.html" style="color:var(--accent-green);">Day 20 · 收官 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
