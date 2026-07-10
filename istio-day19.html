@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · Operator 与安装 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">Operator 与安装 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 新版 render 模型</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · IstioOperator</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 组件表</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · GenerateManifest</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 输入优先级</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · profile 三层</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 依赖图安装</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 istioctl</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day20.html" class="nav-link" style="color:#66bb6a;">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 遥测/扩展/安装</span>
+            <h1 class="part-title">Operator 与安装</h1>
+            <p class="part-desc"><code>istioctl install</code> 怎么把 Istio 装进集群？今天看安装机制：新版纯 render 模型（客户端渲染 Helm + server-side apply）、IstioOperator 配置、组件依赖图。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>新版 render 模型</h1></div>
+            <div class="card">
+                <div class="glossary"><b>重要：新版 operator 已无集群内 controller</b>：本版本是<strong>纯 render 模型</strong>——<code>istioctl install</code> 在<strong>客户端</strong>渲染 Helm chart 并 server-side apply，<strong>不再有集群内 operator controller、不再有 IstioOperator CRD</strong>。（老教程/博客可能还讲"装个 operator 监听 CRD"，那是旧模型。）</div>
+                <div class="baby"><span class="t">"render 模型" vs 旧"controller 模型"</span>
+                <strong>旧模型：集群里跑一个 operator controller，watch IstioOperator CRD，据此在集群内 reconcile 出 Istio 组件。新模型更简单：<code>istioctl install</code> 直接在你的电脑上（客户端）把 Helm chart 渲染成 K8s 清单，然后 apply 到集群——没有常驻 controller。</strong>好处：更简单、更可预测、少一个要维护的组件。<code>operator/</code> 目录是纯上游 Istio（无 Higress 定制）——Higress 的定制在 pilot/proxy 层。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>IstioOperator</h1></div>
+            <div class="card">
+<pre><code class="language-go">// operator/pkg/apis/types.go:65 IstioOperatorSpec
+//   Profile / Hub / Tag / Namespace / Revision / MeshConfig / Components / Values
+// :217 BoolValue（三态）：GetValueOrTrue（:241 默认启用语义）</code></pre>
+                <div class="anno">读法：<b><code>IstioOperator</code> 是安装配置（虽然不再是集群内 CRD，仍是配置格式）：选哪个 profile、镜像仓库（Hub/Tag）、启用哪些组件、MeshConfig 覆盖。<strong>三态 BoolValue</strong>（true/false/未设）让"未设"能表达"用默认"（<code>GetValueOrTrue</code>）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>组件表</h1></div>
+            <div class="card">
+<pre><code class="language-go">// operator/pkg/component/component.go:142 AllComponents：
+//   Base（base chart，CRD+集群资源）
+//   Pilot（istio-control/istio-discovery，产出 istiod Deployment）
+//   IngressGateways / EgressGateways（默认关）
+//   Cni（默认关）/ Ztunnel（ambient）</code></pre>
+                <div class="anno">读法：<b>Istio 由这几个组件组成，每个对应一个 Helm chart。<strong>Base</strong>（CRD 等基础）+ <strong>Pilot</strong>（istiod，核心）是必装；网关、CNI、ztunnel 按需。</b>安装就是渲染这些组件的 chart。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>GenerateManifest</h1></div>
+            <div class="card">
+<pre><code class="language-go">// operator/pkg/render/manifest.go:44 GenerateManifest
+//   MergeInputs（合并配置）→ 校验 → 遍历 AllComponents 逐个 helm.Render → postProcess
+// operator/cmd/mesh/install.go:141 Install → GenerateManifest（:161）→ InstallManifests（:192）</code></pre>
+                <div class="anno">读法：<b>安装核心：<code>GenerateManifest</code> 把 IstioOperator 配置 + <code>--set</code> 合并，逐组件用 Helm 渲染成 K8s YAML，后处理（应用 k8s.* patch）。<code>InstallManifests</code> 再 server-side apply 到集群。</b><code>istioctl manifest generate</code> 只渲染不 apply（供审查）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>输入优先级</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># manifest.go:249 MergeInputs 优先级（后者胜）：
+内置默认 < profile < 集群探测 < -f 文件 < --set
+# translateIstioOperatorToHelm：spec.hub→global.hub、spec.meshConfig→meshConfig …</code></pre>
+                <div class="baby"><span class="t">又是"分层覆盖"（配置系统的通用模式）</span>
+                安装配置来自多处：内置默认、选的 profile、集群探测结果、你的 <code>-f</code> 文件、命令行 <code>--set</code>。<strong>优先级从低到高——越"具体、越靠近命令行"的越优先。</strong>这和 Envoy 的模板路径优先级（Day 13）、OpenClaw 的 env 链、Istio 自己的 exportTo 层级都是同一个思想：<strong>提供合理默认，允许逐层覆盖。</strong><code>translateIstioOperatorToHelm</code> 把 IstioOperator 字段翻译成 Helm values（因为底层是 Helm chart）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>profile 三层</h1></div>
+            <div class="card">
+                <p><code>manifests/zzz_profile.yaml</code> 用巧妙技巧实现"默认 &lt; profile &lt; 用户输入"三层合并：把内置默认藏在 <code>.Values._internal_defaults_do_not_set</code>，运行时读 <code>files/profile-&lt;name&gt;.yaml</code>，<code>mustMergeOverwrite $defaults $profile</code>，再 merge 用户 Values。</p>
+                <div class="baby"><span class="t">profile = "预设的安装套餐"</span>
+                Istio 有多个 profile（安装套餐）：<code>default</code>（生产）、<code>demo</code>（全功能演示）、<code>minimal</code>（最小）、<code>ambient</code>（无 sidecar 模式）等。<strong>profile 就是"一组预调好的配置默认值"——选 demo 就自动开启全套遥测/追踪，选 minimal 就只装核心。</strong>你在 profile 基础上再用 <code>--set</code> 微调。<strong>这让"装一个合理的 Istio"变成一行命令（<code>istioctl install --set profile=demo</code>），不用手调几百个参数。</strong>两套 profile 别混：operator 级（IstioOperator 形态）和 chart 级（纯 Helm values）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>依赖图安装</h1></div>
+            <div class="card">
+<pre><code class="language-go">// operator/pkg/install/install.go:106 install()：按依赖图并发 apply
+//   componentDependencies（:293）：Base→Pilot；Pilot→{Cni,Ingress,Egress}；Cni→Ztunnel
+//   serverSideApply（FieldManager:"istio-operator"）→ prune（按 owner label 清孤儿）</code></pre>
+                <div class="baby"><span class="t">为什么安装要讲依赖顺序？</span>
+                组件之间有依赖：<strong>Base（含 CRD）必须先装——否则后面的组件引用的 CRD 还不存在；Pilot（istiod）要在网关之前——网关连 istiod 拿配置。</strong>所以按依赖图有序安装：Base → Pilot → 网关/CNI → Ztunnel。同层可并发。<strong>安装完还 <code>prune</code>——按 owner label 删除"上次装了但这次没有"的孤儿资源（比如你从 demo 切到 minimal，多余的组件被清理）。</strong>这保证集群状态和你的配置一致。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>新版 render 模型 vs 旧 controller 模型的区别？</li>
+                    <li>IstioOperator 配置什么？三态 BoolValue 的意义？</li>
+                    <li>Istio 由哪几个组件组成？</li>
+                    <li>GenerateManifest → Install 的流程？输入优先级？</li>
+                    <li>profile 是什么？为什么安装要讲依赖顺序？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func GenerateManifest\|func MergeInputs' operator/pkg/render/manifest.go
+grep -n 'AllComponents\|componentDependencies' operator/pkg/component/component.go operator/pkg/install/install.go
+ls manifests/profiles/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>收官串讲</strong>——Istio 全景回顾、控制面/数据面完整闭环，以及<strong>它和 Higress 的关系</strong>（xDS-over-MCP、pkg/ali 定制），承上启下引出下一站 Higress。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 istioctl</a>
+                <a href="istio-day20.html" style="color:#66bb6a;">Day 20 · 收官串讲 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
