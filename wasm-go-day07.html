@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · RuleMatcher 规则匹配 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#7c4dff}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#f59e0b);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">RuleMatcher · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要规则匹配</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · _rules_ 配置格式</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 五种 Category</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · RuleConfig 结构</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 解析四类匹配</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · category 推断</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Host 匹配三型</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day08.html" class="nav-link" style="color:#7c4dff;">Day 08 运行时匹配 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 配置与匹配</span>
+            <h1 class="part-title">RuleMatcher 规则匹配</h1>
+            <p class="part-desc">同一个插件，能对不同路由/域名/服务用不同配置——这靠 <code>_rules_</code> 机制。今天拆 <code>rule_matcher.go</code>：配置怎么写、怎么被拆成一条条带匹配条件的规则。这是 wasm-go 最有特色的能力。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要规则匹配</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">一个插件，多套配置</span>
+                想象一个限流插件：<strong>路由 A 限 100 QPS，路由 B 限 50 QPS，其余路由限 10 QPS。</strong>如果每个路由都装一份插件太浪费。<strong>更好的做法：装一份插件，配置里写多条规则——"匹配路由 A 用配置 X、匹配路由 B 用配置 Y、其余用全局配置"。</strong>请求来了先匹配用哪条规则的配置。<code>RuleMatcher</code> 就干这个：<strong>把"按位置区分配置"的能力做进 SDK，所有插件白拿。</strong></div>
+                <div class="anno">读法：<b>回想上一站 Higress/Console：插件实例有 GLOBAL/DOMAIN/ROUTE/SERVICE 四作用域——那些作用域最终就编码成这里的 <code>_rules_</code> 配置，由 wasm-go 的 RuleMatcher 在数据面解析匹配。<strong>控制面写、数据面读的闭环。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>_rules_ 配置格式</h1></div>
+            <div class="card">
+                <p>常量在 <code>rule_matcher.go:46-52</code>：<code>_rules_</code>、<code>_match_route_</code>、<code>_match_domain_</code>、<code>_match_service_</code>、<code>_match_route_prefix_</code>。配置长这样：</p>
+<pre><code class="language-yaml"># 顶层键（除 _rules_）= 全局配置
+block_urls: ["/global"]
+# _rules_ = 规则数组
+_rules_:
+- _match_route_: ["route-a"]     # 匹配路由 route-a
+  block_urls: ["/a-only"]
+- _match_domain_: ["*.example.com"]  # 匹配域名
+  block_urls: ["/example-only"]</code></pre>
+                <div class="anno">读法：<b>配置里 <code>_rules_</code> 之外的键构成"全局配置",<code>_rules_</code> 里每一项是一条规则（含匹配条件 + 该规则专属配置）。<strong>这套约定由 wasm-go 定义，控制面（Higress/Console）按它生成配置。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>五种 Category</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:30-37</code>：</p>
+<pre><code class="language-go">const (
+    Route Category = iota  // 按路由名匹配（_match_route_）
+    Host                   // 按域名匹配（_match_domain_）
+    Service                // 按服务名匹配（_match_service_）
+    RoutePrefix            // 按路由名前缀匹配（_match_route_prefix_）
+    RouteAndService        // 路由 + 服务都匹配
+)</code></pre>
+                <div class="baby"><span class="t">五种匹配维度</span>
+                <strong>Route（精确路由名）、Host（域名）、Service（后端服务名）、RoutePrefix（路由名前缀）、RouteAndService（同时满足路由和服务）。</strong>不同插件按需选：入口鉴权常按域名/路由，AI 相关常按服务（对应某个 LLM upstream）。<strong>一条规则的 category 由它写了哪种 <code>_match_xxx_</code> 自动推断（L06）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>RuleConfig 结构</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:57-64</code>：</p>
+<pre><code class="language-go">type RuleConfig[PluginConfig any] struct {
+    category     Category
+    routes       map[string]struct{}    // 匹配的路由名集合
+    services     map[string]struct{}
+    routePrefixs map[string]struct{}
+    hosts        []HostMatcher          // 域名匹配（带类型）
+    config       PluginConfig           // 这条规则专属的配置
+}</code></pre>
+                <div class="anno">读法：<b>用 <code>map[string]struct{}</code> 存路由/服务集合——这是 Go 里"集合"的惯用法（<code>struct{}</code> 不占内存，只用 key 判存在）。查一个路由名在不在，<code>map</code> 的 O(1) 比遍历 slice 快。<code>RuleMatcher</code>（<code>:116-120</code>）持有 <code>[]RuleConfig</code> + <code>globalConfig</code> + <code>hasGlobalConfig</code>。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>解析四类匹配</h1></div>
+            <div class="card">
+                <p><code>ParseRuleConfig</code>（<code>:182+</code>）对每条规则调四个 parse 方法（<code>:307+</code>）：</p>
+<pre><code class="language-go">rule.routes       = m.parseRouteMatchConfig(ruleJson)      // 读 _match_route_
+rule.hosts        = m.parseHostMatchConfig(ruleJson)       // 读 _match_domain_
+rule.services     = m.parseServiceMatchConfig(ruleJson)    // 读 _match_service_
+rule.routePrefixs = m.parseRoutePrefixMatchConfig(ruleJson) // 读 _match_route_prefix_</code></pre>
+                <p>例如 <code>parseRouteMatchConfig</code>（<code>:307-317</code>）把 <code>_match_route_</code> 数组读进 <code>map[string]struct{}</code>。</p>
+                <div class="anno">读法：<b>四个 parse 各读一种匹配键，把值收进对应集合。<strong>一条规则可以同时写多种匹配键（比如既 route 又 service）——但 category 只能是一种，由 L06 的优先级决定。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>category 推断</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:233-247</code>：解析完四类匹配后，按"有没有"推断 category：</p>
+<pre><code class="language-go">if boolToInt(hasRoute)+boolToInt(hasService)+boolToInt(hasHosts)+boolToInt(hasRoutePrefix) == 0 {
+    return errors.New("...at least one of _match_route_/_match_domain_/_match_service_/_match_route_prefix_...")
+}
+if hasRoute {
+    rule.category = Route
+    if hasService { rule.category = RouteAndService }  // 路由+服务
+} else if hasHosts {
+    rule.category = Host
+} else if hasService {
+    rule.category = Service
+} else {
+    rule.category = RoutePrefix
+}</code></pre>
+                <div class="baby"><span class="t">推断的优先级</span>
+                <strong>先看有没有路由：有路由 + 有服务 = RouteAndService，只有路由 = Route；没路由看域名 = Host；再看服务 = Service；都没有看前缀 = RoutePrefix。</strong>并且强制"至少写一种匹配条件",否则报错（一条规则不能什么都不匹配）。<strong>这个推断让配置更简洁——你写哪个 <code>_match_</code>，category 自动定。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Host 匹配三型</h1></div>
+            <div class="card">
+                <p>域名匹配比路由复杂（要支持通配）。<code>MatchType</code>（<code>:39-44</code>）：<code>Prefix</code>（<code>*.example.com</code>）/ <code>Exact</code>（<code>www.example.com</code>）/ <code>Suffix</code>（<code>example.*</code>）。<code>HostMatcher</code>（<code>:54-57</code>）存 <code>matchType + host</code>。</p>
+                <div class="baby"><span class="t">为什么域名要三种匹配？</span>
+                域名常带通配符：<code>*.example.com</code>（前缀通配，匹配所有子域名）、<code>example.*</code>（后缀通配）、精确域名。<strong>SDK 解析域名时判断通配符位置，归类成 Prefix/Suffix/Exact，运行时（明天）用对应逻辑匹配。</strong>这比路由名（只精确或前缀）更细。<code>GenerateHashKey</code>（<code>:67-113</code>）还能为规则生成稳定哈希键（用于规则级隔离的备份定位，Day 09）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要 <code>_rules_</code>？和 Console 的四作用域什么关系？</li>
+                    <li>五种 Category 分别按什么匹配？</li>
+                    <li>为什么用 <code>map[string]struct{}</code> 存路由集合？</li>
+                    <li>category 怎么从 <code>_match_xxx_</code> 推断？域名为什么要三种匹配型？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '30,64p' pkg/matcher/rule_matcher.go
+sed -n '225,247p' pkg/matcher/rule_matcher.go
+sed -n '307,330p' pkg/matcher/rule_matcher.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>运行时匹配 GetMatchConfig</strong>——请求来了，SDK 怎么用 <code>:authority</code>/<code>route_name</code>/<code>cluster_name</code> 逐条规则匹配，选出该用哪份配置。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day06.html" style="color:var(--accent-cyan);">&larr; Day 06</a>
+                <a href="wasm-go-day08.html" style="color:#7c4dff;">Day 08 · 运行时匹配 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

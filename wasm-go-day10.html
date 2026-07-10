@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · OnPluginStart 生命周期 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .step{display:flex;gap:12px;align-items:flex-start;margin:9px 0}
+        .step .n{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#7c4dff,#f59e0b);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0}
+        .step .c{flex:1;font-size:13px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#f59e0b);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">生命周期 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · OnPluginStart 全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · prePluginStart 钩子</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · IO 并发限制</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 读配置 + pluginID</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 调 ParseRuleConfig</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · tick 定时任务</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 完整时序图</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day11.html" class="nav-link" style="color:#f59e0b;">Day 11 HTTP 钩子 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 配置与匹配</span>
+            <h1 class="part-title">OnPluginStart 生命周期</h1>
+            <p class="part-desc">第 2 周收官。前面拆了配置解析和规则匹配，今天把它们串进插件"开机时序"：<code>OnPluginStart</code> 从头到尾干了什么。这是插件从"被加载"到"就绪接客"的完整过程。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>OnPluginStart 全景</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:637-727</code> 的 <code>OnPluginStart</code>（Plugin 级上下文的方法）是插件"开机"的总控。它返回 <code>OnPluginStartStatusOK</code>/<code>Failed</code> 告诉网关"启动成功没"。</p>
+                <div class="baby"><span class="t">什么时候被调用？</span>
+                <strong>网关加载插件 wasm、创建 PluginContext 后，就调 <code>OnPluginStart</code>——每次配置变更（Higress 下发新配置）也会重新走一遍。</strong>它是"配置生效"的入口：读进配置、解析、注册定时任务、设参数。<strong>返回 Failed 会让插件启动失败（配置不合法时保护网关）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>prePluginStart 钩子</h1></div>
+            <div class="card">
+                <p><code>:638-643</code>：先执行用户注册的前置钩子（<code>PrePluginStartOrReload</code> 选项，Day 05）：</p>
+<pre><code class="language-go">if ctx.vm.prePluginStartOrReload != nil {
+    err := ctx.vm.prePluginStartOrReload(ctx)
+    if err != nil {
+        log.Errorf("prePluginStartOrReload hook failed: %v", err)
+        return types.OnPluginStartStatusFailed
+    }
+}</code></pre>
+                <div class="anno">读法：<b>给插件一个"配置解析前先做点事"的口子（比如初始化外部连接、预热缓存）。失败就直接启动失败。<strong>这是生命周期第一步。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>IO 并发限制</h1></div>
+            <div class="card">
+                <p><code>:645-652</code>：若配了 <code>maxRequestsPerIoCycle</code>（Day 05 的选项），调 <code>setGlobalMaxRequestsPerIoCycle</code>（Day 03 见过的 <code>CallForeignFunction</code>）。</p>
+                <div class="baby"><span class="t">这个限制为什么重要（Day 19 详讲）</span>
+                <strong>当插件逻辑复杂、要做外部调用（HTTP/Redis）时，一个 IO 周期里挤太多并发请求，会导致外部调用的回调来不及在本周期处理、误判超时。</strong>限制每个 IO 周期的并发请求数能缓解。<strong>注意它是全局生效的（多插件设置时取最小值），所以是"启动时设一次"的全局参数。</strong>今天先知道它在启动流程里被设置，Day 19 讲为什么要它。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>读配置 + pluginID</h1></div>
+            <div class="card">
+                <p><code>:653-680</code>：读取并预处理配置：</p>
+<pre><code class="language-go">data, err := proxywasm.GetPluginConfiguration()   // 拿到配置字节
+globalOnTickFuncs = nil                            // 重置 tick（重载时清旧的）
+// 校验 JSON 合法性
+if !gjson.ValidBytes(data) { return Failed }
+// 提取 _plugin_id_ 用于日志标识，然后从配置里删掉
+pluginID := gjson.GetBytes(data, PluginIDKey).String()
+if pluginID != "" {
+    ctx.vm.log.ResetID(pluginID)
+    data, _ = sjson.DeleteBytes([]byte(data), PluginIDKey)
+}
+jsonData = gjson.ParseBytes(data)</code></pre>
+                <div class="anno">读法：<b><code>_plugin_id_</code> 是控制面注入的插件实例标识——提取出来设为日志 ID，这样这个实例的所有日志都带同一个 ID 好排查，再从配置里删掉（不污染业务配置）。<strong><code>globalOnTickFuncs = nil</code> 很关键：配置重载时先清空旧的定时任务，避免重复注册。</strong>用 sjson 删字段（对应 Day 01 说的 sjson 改 JSON）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>调 ParseRuleConfig</h1></div>
+            <div class="card">
+                <p><code>:700-716</code>：把配置交给昨天讲的 <code>ParseRuleConfig</code>（RuleMatcher 的方法），拆全局 + 规则：</p>
+<pre><code class="language-go">err = ctx.ParseRuleConfig(ctx, jsonData,
+    func(js gjson.Result, cfg *PluginConfig) error {           // 全局解析
+        return ctx.vm.parseConfig(ctx, []byte(js.Raw), cfg)
+    },
+    parseOverrideConfig,                                        // 规则解析（可能为 nil）
+)
+if err != nil { return types.OnPluginStartStatusFailed }</code></pre>
+                <div class="anno">读法：<b>这里把 Day 06（parseConfig）、Day 07-08（RuleMatcher）、Day 09（override）全串起来了：<strong>OnPluginStart 是把你注册的解析函数真正跑起来、生成规则表的地方。</strong>解析失败则插件启动失败。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>tick 定时任务</h1></div>
+            <div class="card">
+                <p><code>:717-725</code>：若解析阶段注册了 tick 函数（<code>RegisterTickFunc</code>，<code>:116-118</code>），设置 100ms 的 tick 周期：</p>
+<pre><code class="language-go">if globalOnTickFuncs != nil {
+    ctx.onTickFuncs = globalOnTickFuncs
+    proxywasm.SetTickPeriodMilliSeconds(100)   // 每 100ms 触发 OnTick
+}</code></pre>
+                <p><code>OnTick</code>（<code>:730-737</code>）遍历注册的 tick 函数，到点就执行（各自的 <code>tickPeriod</code> 必须是 100 的倍数）。</p>
+                <div class="baby"><span class="t">tick 能干什么？</span>
+                <strong>定时任务——比如每秒刷新一次令牌桶（限流）、每 5 秒上报一次指标、定期续租 Leader（Day 17）。</strong>你在 parseConfig 里 <code>wrapper.RegisterTickFunc(1000, func(){...})</code> 注册"每秒执行"。<strong>底层 tick 固定 100ms 一跳，SDK 按你设的周期判断该不该执行你的函数——所以周期必须是 100 的倍数。</strong>这是插件里做"周期性后台工作"的唯一途径（Wasm 不能自己开线程）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>完整时序图</h1></div>
+            <div class="card">
+                <div class="step"><div class="n">1</div><div class="c">网关加载 wasm → <code>init()</code> 里 <code>SetCtx</code> 注册好 VM 上下文</div></div>
+                <div class="step"><div class="n">2</div><div class="c"><code>NewPluginContext</code> 造 Plugin 上下文</div></div>
+                <div class="step"><div class="n">3</div><div class="c"><code>OnPluginStart</code>：prePluginStart → 设 IO 限制 → 读配置+pluginID → ParseRuleConfig → 注册 tick</div></div>
+                <div class="step"><div class="n">4</div><div class="c">就绪。请求到来 → <code>NewHttpContext</code> 造请求上下文（按注册的钩子决定要不要读 body）</div></div>
+                <div class="step"><div class="n">5</div><div class="c">各阶段调你的钩子（<code>GetMatchConfig</code> 先选好 config）；<code>OnTick</code> 后台跑定时任务</div></div>
+                <div class="tip">第 1 周（生命周期/Context）+ 第 2 周（配置/匹配）到此形成闭环。第 3 周进入"请求真正来了怎么处理"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 2 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周你应该能回答</h3>
+                <ul>
+                    <li>OnPluginStart 的几个步骤（前置钩子→IO限制→读配置→解析→tick）？</li>
+                    <li><code>_plugin_id_</code> 为什么提取出来又删掉？</li>
+                    <li>配置重载时为什么先 <code>globalOnTickFuncs = nil</code>？</li>
+                    <li>tick 定时任务能干什么？为什么周期必须是 100 的倍数？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '637,737p' pkg/wrapper/plugin_wrapper.go
+sed -n '103,118p' pkg/wrapper/plugin_wrapper.go   # RegisterTickFunc</code></pre>
+                <div class="tip"><strong>下周预告 · 第 3 周</strong>：<strong>HTTP 与外部调用</strong>——请求/响应各阶段钩子与 Action 语义、HttpContext 的丰富能力、Cluster 8 种集群抽象、以及最有挑战的 HttpCall/RedisCall 异步回调式外部调用。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day09.html" style="color:var(--accent-cyan);">&larr; Day 09</a>
+                <a href="wasm-go-day11.html" style="color:#f59e0b;">Day 11 · HTTP 钩子 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

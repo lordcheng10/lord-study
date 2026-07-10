@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · 配置解析 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#7c4dff}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#f59e0b);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">配置解析 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么有这么多变体</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 四个函数类型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · gjson 用法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · raw 变体</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · WithContext 变体</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · hasCustomConfig</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 空配置处理</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day07.html" class="nav-link" style="color:#7c4dff;">Day 07 RuleMatcher &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 配置与匹配</span>
+            <h1 class="part-title">配置解析：ParseConfig 家族</h1>
+            <p class="part-desc">昨天见过 <code>ParseConfig</code>，其实它有一大家子变体（raw/context/rule）。今天理清这些变体各自适合什么场景，以及底层怎么统一处理，让你写插件时选对那一个。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么有这么多变体</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:61-67</code> 定义了一堆解析函数类型：<code>ParseConfigFunc</code>、<code>ParseRawConfigFunc</code>、<code>ParseConfigWithContextFunc</code>、<code>ParseRawConfigWithContextFunc</code>、<code>ParseRuleConfigFunc</code>…</p>
+                <div class="baby"><span class="t">别被吓到——本质就一件事</span>
+                它们都是"把配置读进你的结构体"，只是<strong>输入形式不同</strong>：拿到的是 gjson 还是原始 <code>[]byte</code>？需不需要 PluginContext？是全局配置还是规则配置？<strong>90% 的插件用最简单的 <code>ParseConfig(json, config)</code> 就够。</strong>其他变体是给特殊需求准备的（比如配置不是 JSON 而是二进制、解析时需要访问 Leader 状态）。今天认全它们，但记住默认选最简单那个。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>四个主要变体</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>选项</th><th>回调签名</th><th>何时用</th></tr>
+                    <tr><td>ParseConfig</td><td>(json gjson.Result, config *T) error</td><td>默认，配置是 JSON</td></tr>
+                    <tr><td>ParseRawConfig</td><td>(configBytes []byte, config *T) error</td><td>配置非 JSON / 自己解析</td></tr>
+                    <tr><td>ParseConfigWithContext</td><td>(ctx PluginContext, json, config) error</td><td>解析时要访问插件上下文</td></tr>
+                    <tr><td>ParseOverrideConfig</td><td>global + rule 两个函数</td><td>支持规则级覆盖（Day 09）</td></tr>
+                </table>
+                <div class="anno">读法：<b>它们最终都被 <code>Apply</code> 统一成内部的 <code>ParseRawConfigWithContextFunc</code>（<code>ctx.parseConfig</code> 字段）——SDK 内部只存最"全"的那种，其余变体在 Apply 里适配（补 gjson 转换、补空 context）。<strong>对外提供多种简写、对内统一一种，是减少内部分支的好设计。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>gjson 用法</h1></div>
+            <div class="card">
+                <p>回顾 request-block 的用法，gjson 常用套路：</p>
+<pre><code class="language-go">json.Get("blocked_code").Int()        // 取整数
+json.Get("case_sensitive").Bool()      // 取布尔
+json.Get("blocked_message").String()   // 取字符串
+json.Get("block_urls").Array()         // 取数组，返回 []gjson.Result
+json.Get("nested.field").Exists()      // 点号访问嵌套 + 判断存在
+</code></pre>
+                <div class="baby"><span class="t">gjson 的哲学：不解析成结构体</span>
+                传统做法要先定义一个和 JSON 结构一模一样的 struct，再反序列化。<strong>gjson 反其道——JSON 就放那儿不动，你要哪个字段就按路径 <code>Get</code> 现取。</strong>好处：<strong>省内存（不构造中间对象）、灵活（配置字段可有可无）、快。</strong>代价是取错路径不会编译报错（运行时才发现）。Wasm 环境看重体积和性能，gjson 是最优选。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>raw 变体</h1></div>
+            <div class="card">
+                <p><code>ParseRawConfig(f)</code>（<code>:172-174</code>）：回调收到原始 <code>[]byte</code> 而非 gjson。</p>
+                <div class="anno">读法：<b>什么时候要 raw？当配置<strong>不是 JSON</strong>（比如是 YAML、protobuf、或自定义格式），或你想用别的库解析（如 <code>yaml.Unmarshal</code>）。<code>ParseConfig</code> 底层其实就是 <code>ParseRawConfig</code> 外面套了 <code>gjson.ParseBytes</code>（<code>Apply :144-147</code>）——所以 raw 更底层、更自由。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>WithContext 变体</h1></div>
+            <div class="card">
+                <p><code>ParseConfigWithContext(f)</code>（<code>:168-170</code>）：回调多一个 <code>PluginContext</code> 参数。</p>
+                <div class="baby"><span class="t">解析配置时为什么可能需要 context？</span>
+                <code>PluginContext</code>（Day 04）能访问 <code>DoLeaderElection</code>、<code>GetFingerPrint</code>、规则隔离开关等。<strong>如果你的插件在解析配置阶段就要判断"我是不是 Leader"、或读取插件指纹来做初始化，就用带 context 的变体。</strong>大多数插件解析时用不到这些，用普通 <code>ParseConfig</code> 即可。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>hasCustomConfig</h1></div>
+            <div class="card">
+                <p><code>NewCommonVmCtxWithOptions</code>（<code>:532-541</code>）里有段有意思的逻辑：</p>
+<pre><code class="language-go">if ctx.parseConfig == nil {
+    var config PluginConfig
+    if unsafe.Sizeof(config) != 0 {   // 配置类型非空
+        panic("the `parseConfig` is missing in NewCommonVmCtx's arguments")
+    }
+    ctx.hasCustomConfig = false        // 配置类型是空 struct，允许没有 parseConfig
+    ctx.parseConfig = parseEmptyPluginConfig[PluginConfig]
+}</code></pre>
+                <div class="baby"><span class="t">这段在防什么？</span>
+                <strong>如果你定义了一个有字段的配置类型，却忘了注册 <code>ParseConfig</code>——那配置永远解析不了，肯定是 bug。SDK 用 <code>unsafe.Sizeof</code> 检测：配置类型非空但没 parseConfig → 直接 panic 提醒你。</strong>但如果配置类型是空 struct（<code>struct{}</code>，插件不需要配置），就允许省略 parseConfig。<strong>这是"在启动时尽早报错"的防呆设计——比运行时静默出错友好得多。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>空配置处理</h1></div>
+            <div class="card">
+                <p><code>OnPluginStart</code>（<code>:637-680</code>，明天细讲）里读配置：<code>data, err := proxywasm.GetPluginConfiguration()</code>；若 <code>len(data)==0</code> 且 <code>hasCustomConfig</code> 为真，会 <code>log.Warn("config is empty, but has ParseConfigFunc")</code>。还会校验 JSON 合法性 <code>gjson.ValidBytes</code>。</p>
+                <div class="anno">读法：<b>另一处防呆：你写了 parseConfig 却没配任何配置 → 警告（可能是忘配了）。<strong>还有个细节：配置里的 <code>_plugin_id_</code>（<code>PluginIDKey</code>）会被提取出来 <code>ResetID</code> 用于日志标识，然后从配置里删掉——这样日志能标出是哪个插件实例。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ParseConfig 的四个主要变体各适合什么场景？</li>
+                    <li>gjson"不解析成结构体"的哲学，好处和代价？</li>
+                    <li>raw 变体和 WithContext 变体分别解决什么？</li>
+                    <li><code>hasCustomConfig</code> 的 panic 防呆在防什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '61,67p' pkg/wrapper/plugin_wrapper.go
+sed -n '132,174p' pkg/wrapper/plugin_wrapper.go
+sed -n '532,541p' pkg/wrapper/plugin_wrapper.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>RuleMatcher 规则匹配</strong>——插件配置里的 <code>_rules_</code> 是怎么回事，四种匹配类别（路由/域名/服务/路由前缀）的数据结构，以及配置怎么被拆成一条条规则。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day05.html" style="color:var(--accent-cyan);">&larr; Day 05</a>
+                <a href="wasm-go-day07.html" style="color:#7c4dff;">Day 07 · RuleMatcher &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

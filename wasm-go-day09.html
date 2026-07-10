@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 全局配置 vs 规则配置 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#f59e0b);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">全局vs规则 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两种解析方式</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ParseOverrideConfig</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 继承 + 覆盖</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 全局配置先解析</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 规则级隔离</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 从备份恢复</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 容错策略对比</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day10.html" class="nav-link" style="color:#7c4dff;">Day 10 生命周期 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 配置与匹配</span>
+            <h1 class="part-title">全局配置 vs 规则配置</h1>
+            <p class="part-desc">昨天匹配出"用哪份配置"。今天看两份配置怎么关联：规则配置能"继承"全局配置再覆盖部分字段。还有一个生产级特性——规则级隔离：一条规则配错不拖垮其他规则。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种解析方式</h1></div>
+            <div class="card">
+                <p><code>ParseRuleConfig</code>（<code>rule_matcher.go:182</code>）接受两个解析函数：</p>
+                <ul>
+                    <li><code>parsePluginConfig</code>：独立解析一份配置（全局或规则各自解析）。</li>
+                    <li><code>parseOverrideConfig</code>：解析规则配置时能拿到全局配置做基础（继承+覆盖）。</li>
+                </ul>
+                <div class="baby"><span class="t">两种模式对应两种心智</span>
+                <strong>模式一（ParseConfig）：全局和每条规则各自独立解析，互不相干。</strong>模式二（ParseOverrideConfig）：<strong>先解析全局配置，规则配置以全局为"底",只覆盖它写了的字段。</strong>好比模式二是"继承默认设置再改几项",模式一是"每处都从头填"。<strong>大多数插件用模式一；需要"规则继承全局默认值"时用模式二。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ParseOverrideConfig</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:218-223</code>：</p>
+<pre><code class="language-go">func ParseOverrideConfig[PluginConfig any](
+    f ParseConfigFunc[PluginConfig],       // 解析全局配置
+    g ParseRuleConfigFunc[PluginConfig],   // 解析规则配置（带 global 参数）
+) CtxOption[PluginConfig] {
+    return &parseOverrideConfigOption[PluginConfig]{parseConfigF: f, parseRuleConfigF: g}
+}
+// 规则解析函数签名（:65）：
+// func(json gjson.Result, global PluginConfig, config *PluginConfig) error
+//                          ↑ 全局配置作为基础传进来</code></pre>
+                <div class="anno">读法：<b>规则解析函数 <code>g</code> 多了个 <code>global PluginConfig</code> 参数——这就是"继承"的入口。<strong>你在 <code>g</code> 里通常先 <code>*config = global</code>（拷贝全局作为默认），再按规则 JSON 覆盖需要改的字段。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>继承 + 覆盖（典型写法）</h1></div>
+            <div class="card">
+<pre><code class="language-go">func parseGlobalConfig(json gjson.Result, config *MyConfig) error {
+    config.timeout = json.Get("timeout").Int()   // 全局默认 timeout
+    config.retries = json.Get("retries").Int()
+    return nil
+}
+func parseRuleConfig(json gjson.Result, global MyConfig, config *MyConfig) error {
+    *config = global                              // 1. 先继承全局
+    if json.Get("timeout").Exists() {
+        config.timeout = json.Get("timeout").Int() // 2. 只覆盖本规则写了的
+    }
+    return nil
+}</code></pre>
+                <div class="baby"><span class="t">为什么这么设计好？</span>
+                <strong>你在全局设一次通用默认（超时 5s、重试 3 次），各规则只写"我要改的那项"（路由 A 超时改成 10s），其余字段自动继承全局。</strong>配置更 DRY（不重复），改全局默认能一处生效。这跟 CSS 的层叠、面向对象的继承是同一个思想——<strong>公共部分往上提，差异部分往下覆盖。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>全局配置先解析</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:200-215</code>：<code>ParseRuleConfig</code> 先解析全局（<code>_rules_</code> 外的顶层键），存进 <code>m.globalConfig</code> + 置 <code>hasGlobalConfig=true</code>，再解析每条规则（此时能把 globalConfig 传给 override 函数）。</p>
+                <div class="anno">读法：<b>顺序很关键——<strong>必须先有全局配置，规则才能继承它</strong>。若全局解析失败会记 <code>globalConfigError</code>，但只要有成功的规则仍可继续（<code>:210-214</code>）。空配置（<code>keyCount==0</code>）则直接把整份配置当全局（<code>:191-194</code>），这对应"整个插件全局启用"的最简情况。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>规则级隔离</h1></div>
+            <div class="card">
+                <p><code>iface/context.go:32-35</code> 的 <code>EnableRuleLevelConfigIsolation</code> 开关，配合 <code>ParseRuleConfig</code>（<code>rule_matcher.go:255-292</code>）的容错逻辑：</p>
+                <div class="baby"><span class="t">"一颗老鼠屎不坏一锅汤"</span>
+                默认情况下，只要有<strong>一条规则配置解析失败，整个插件的配置更新就失败</strong>（<code>:280</code> 直接 return err）——太脆弱。<strong>开启规则级隔离后：一条规则解析失败，只跳过这条，其他规则照常生效</strong>（<code>:257-278</code>）。生产环境里，运维改错了某一条路由的插件配置，不至于让所有路由的这个插件都挂掉。<strong>这是把"故障爆炸半径"缩到最小的稳健设计。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>从备份恢复</h1></div>
+            <div class="card">
+                <p>规则级隔离还有第二层保护（<code>rule_matcher.go:258-273</code>）：一条规则解析失败时，尝试 <code>loadRuleJsonFromBackup</code> 加载上次成功的配置；成功解析的规则会 <code>storeRuleToBackup</code> 存进备份（<code>:284-291</code>）。备份用规则的 <code>GenerateHashKey</code>（Day 07）定位。</p>
+                <div class="baby"><span class="t">"回滚到上次能用的版本"</span>
+                <strong>不仅"跳过坏规则",还能"用这条规则上次成功的配置顶上"。</strong>比如路由 A 的限流规则原本是 100 QPS（成功过、存了备份），这次运维改成非法值解析失败——隔离模式下，路由 A 继续用备份里的 100 QPS，而不是完全失去限流。<strong>备份存哪？用 SharedData（Day 17）跨 VM 共享。这是配置系统的"容灾"能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>容错策略对比</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:298-305</code> 收尾的两种模式对比：</p>
+<pre><code class="language-go">// 隔离模式：全失败且无备份 → 报错；否则用成功的（含备份恢复的）
+if isRuleLevelIsolation && len(successfulRules)==0 && hasAnyRuleParseError {
+    return fmt.Errorf("all rules failed to parse and no previous successful config available")
+// 非隔离模式：只要有一条失败就整体失败（前面已 return）；这里是"一条都没解析出"
+} else if !isRuleLevelIsolation && len(successfulRules)==0 {
+    return fmt.Errorf("no valid rules parsed")
+}</code></pre>
+                <div class="anno">读法：<b>非隔离=严格（一错全错，适合"配置必须完全正确"的场景）；隔离=宽松（尽量多生效，适合"部分可用好过完全不可用"的生产场景）。<strong>由插件通过 <code>EnableRuleLevelConfigIsolation()</code> 自己选，SDK 两种都支持。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ParseConfig 和 ParseOverrideConfig 的区别？</li>
+                    <li>规则配置怎么"继承+覆盖"全局配置？为什么好？</li>
+                    <li>规则级隔离解决什么问题？默认为什么脆弱？</li>
+                    <li>"从备份恢复"怎么做？备份存哪？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '218,230p' pkg/wrapper/plugin_wrapper.go
+sed -n '182,305p' pkg/matcher/rule_matcher.go
+grep -n "loadRuleJsonFromBackup\|storeRuleToBackup" pkg/matcher/rule_matcher.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第 2 周收官）</strong>：<strong>OnPluginStart 生命周期</strong>——把配置加载、pluginID 识别、tick 定时任务注册、IO 并发限制串成插件启动的完整时序。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day08.html" style="color:var(--accent-cyan);">&larr; Day 08</a>
+                <a href="wasm-go-day10.html" style="color:#7c4dff;">Day 10 · 生命周期 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

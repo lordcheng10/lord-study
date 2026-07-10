@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · 运行时匹配 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#f59e0b);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">运行时匹配 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 匹配发生在哪</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三个运行时属性</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 逐条规则匹配</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Host 匹配实现</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 兜底全局配置</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 匹配顺序即优先级</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 钩子里怎么用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day09.html" class="nav-link" style="color:#7c4dff;">Day 09 全局vs规则 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 配置与匹配</span>
+            <h1 class="part-title">运行时匹配 GetMatchConfig</h1>
+            <p class="part-desc">昨天配置被拆成一条条规则。今天看请求真正来时，<code>GetMatchConfig</code> 怎么用当前请求的域名/路由/服务，从这些规则里挑出"该用哪份配置"。这是控制面配置在数据面生效的最后一环。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>匹配发生在哪</h1></div>
+            <div class="card">
+                <p>还记得 Day 04 说 <code>CommonPluginCtx</code> 内嵌了 <code>RuleMatcher</code>。当请求进入某个处理钩子前，SDK 会调 <code>GetMatchConfig()</code> 选出当前请求该用的配置，再把它作为 <code>config</code> 参数传给你的钩子。</p>
+                <div class="baby"><span class="t">你的钩子拿到的 config 是"已经匹配好的"</span>
+                <strong>你写 <code>onHttpRequestHeaders(ctx, config)</code> 时，那个 <code>config</code> 已经是"针对当前请求匹配出来的正确配置"了——你不用自己判断"这个请求该用哪条规则"。</strong>SDK 在调你之前就 <code>GetMatchConfig</code> 选好了。这就是 RuleMatcher 内嵌在 PluginCtx 的意义：<strong>把匹配透明化，插件作者只管写业务。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三个运行时属性</h1></div>
+            <div class="card">
+                <p><code>GetMatchConfig</code>（<code>rule_matcher.go:122-140</code>）开头取当前请求的三个关键信息：</p>
+<pre><code class="language-go">host, _ := proxywasm.GetHttpRequestHeader(":authority")       // 域名
+routeName, _ := proxywasm.GetProperty([]string{"route_name"}) // Envoy 匹配的路由名
+serviceName, _ := proxywasm.GetProperty([]string{"cluster_name"}) // 后端集群名</code></pre>
+                <div class="baby"><span class="t">这三个值从哪来？</span>
+                <strong><code>:authority</code> 是 HTTP/2 的域名伪头（就是 Host）；<code>route_name</code> 和 <code>cluster_name</code> 是 Envoy 处理这个请求时算出来的"属性"</strong>（回想 Envoy/Istio 课：Envoy 先做路由匹配，选出 route 和 cluster）。<strong>wasm-go 通过 <code>GetProperty</code> 从 Envoy 拿这些运行时信息——插件站在 Envoy 已经算好的结果上做二次匹配。</strong>这就是为什么 category 有 Route/Service——它们对应 Envoy 的 route/cluster。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>逐条规则匹配</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:140-176</code>：遍历所有规则，按 category 判断是否命中：</p>
+<pre><code class="language-go">for _, rule := range m.ruleConfig {
+    if rule.category == Host && m.hostMatch(rule, host) {
+        return &rule.config, nil
+    }
+    if rule.category == Route {
+        if _, ok := rule.routes[string(routeName)]; ok { return &rule.config, nil }
+    }
+    if rule.category == Service && m.serviceMatch(rule, string(serviceName)) {
+        return &rule.config, nil
+    }
+    if rule.category == RouteAndService {
+        if _, ok := rule.routes[string(routeName)]; ok && m.serviceMatch(rule, string(serviceName)) {
+            return &rule.config, nil
+        }
+    }
+    if rule.category == RoutePrefix {
+        for routePrefix := range rule.routePrefixs {
+            if strings.HasPrefix(string(routeName), routePrefix) { return &rule.config, nil }
+        }
+    }
+}</code></pre>
+                <div class="anno">读法：<b>Route 用 <code>map</code> 查（O(1)），Service/Host 调专用匹配（要处理通配），RoutePrefix 遍历前缀做 <code>HasPrefix</code>，RouteAndService 要两个条件都满足。<strong>命中第一条就返回它的 config——所以规则顺序 = 优先级（L06）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Host 匹配实现</h1></div>
+            <div class="card">
+                <p><code>hostMatch</code> 按昨天的三种 <code>MatchType</code> 处理通配：</p>
+                <ul>
+                    <li><strong>Exact</strong>：域名完全相等。</li>
+                    <li><strong>Prefix</strong>（<code>*.example.com</code>）：请求域名以 <code>.example.com</code> 结尾。</li>
+                    <li><strong>Suffix</strong>（<code>example.*</code>）：请求域名以 <code>example.</code> 开头。</li>
+                </ul>
+                <div class="anno">读法：<b>通配符 <code>*</code> 的位置决定匹配方式。<code>serviceMatch</code> 同理处理服务名（Higress 的服务名带命名空间/端口后缀，可能需要前缀匹配）。<strong>这些细节 SDK 都封好了，你配 <code>*.example.com</code> 就自动是前缀通配。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>兜底全局配置</h1></div>
+            <div class="card">
+                <p><code>rule_matcher.go:176-180</code>：所有规则都没命中时——</p>
+<pre><code class="language-go">    if m.hasGlobalConfig {
+        return &m.globalConfig, nil   // 用全局配置兜底
+    }
+    return nil, nil                    // 没有全局配置，返回 nil
+}</code></pre>
+                <div class="baby"><span class="t">全局配置 = 默认规则</span>
+                <strong>规则匹配是"特殊情况特殊处理",没命中任何规则的请求，就用全局配置（那些写在 <code>_rules_</code> 外面的顶层键）。</strong>好比"VIP 走 VIP 通道，其余走普通通道"。<strong>如果连全局配置都没有，返回 <code>nil</code>——你的钩子拿到 nil config 要小心处理（通常意味着这个请求不该被这个插件处理）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>匹配顺序即优先级</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">"命中第一条即返回"的含义</span>
+                <code>GetMatchConfig</code> 是 <strong>从上到下遍历规则，命中第一条就返回</strong>。所以<strong>规则在配置里的顺序 = 优先级</strong>：越靠前越优先。<strong>控制面（Console/Higress）生成配置时会按作用域优先级（SERVICE > ROUTE > DOMAIN，回想上一站 Day 09）排好序,让更具体的规则排在前面。</strong>这样"路由级配置覆盖域名级配置"的语义就自然实现了——具体的先命中。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>钩子里怎么用（透明）</h1></div>
+            <div class="card">
+                <p>对插件作者，这一切是透明的。你只需：</p>
+<pre><code class="language-go">func onHttpRequestHeaders(ctx wrapper.HttpContext, config MyConfig) types.Action {
+    // config 已经是匹配出来的正确配置，直接用
+    if config.enabled { /* ... */ }
+    return types.ActionContinue
+}</code></pre>
+                <div class="anno">读法：<b>SDK 在调这个钩子前已经跑完 <code>GetMatchConfig</code>，把结果作为 <code>config</code> 传进来。<strong>你从不直接调 <code>GetMatchConfig</code>——它是 SDK 的内部机制。这正是好 SDK 的标志：复杂的匹配藏在背后，作者只见到"当前该用的配置"。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>匹配何时发生？钩子拿到的 config 是原始的还是匹配好的？</li>
+                    <li>三个运行时属性（:authority/route_name/cluster_name）从哪来？</li>
+                    <li>为什么"命中第一条即返回"意味着顺序=优先级？</li>
+                    <li>没命中任何规则时怎么办？config 可能是 nil 吗？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '122,180p' pkg/matcher/rule_matcher.go
+grep -n "hostMatch\|serviceMatch" pkg/matcher/rule_matcher.go pkg/matcher/utils.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>全局配置 vs 规则配置</strong>——<code>ParseOverrideConfig</code> 怎么让规则配置"继承+覆盖"全局配置，以及"规则级隔离"容错机制（一条规则解析失败不影响其他，还能从备份恢复）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day07.html" style="color:var(--accent-cyan);">&larr; Day 07</a>
+                <a href="wasm-go-day09.html" style="color:#7c4dff;">Day 09 · 全局vs规则 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
