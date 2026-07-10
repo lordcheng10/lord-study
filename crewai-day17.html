@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Knowledge 知识与 RAG — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow2{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
+        .flow2 .n b{display:block;color:#06b6d4;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Knowledge 知识与 RAG · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 知识 vs 记忆</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三层架构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 知识源与切块</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 各种文件源</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 存储与 RAG 检索</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 挂到 Agent/Crew</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 检索注入 prompt</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 Memory</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 Events &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 记忆/知识/生态</span>
+            <h1 class="part-title">Knowledge 知识与 RAG</h1>
+            <p class="part-desc">给 Agent 灌外部资料（文档/PDF/网页），让它基于你的知识库回答。今天讲知识源、切块、向量库检索，以及如何把 RAG 知识接给 Agent。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>知识 vs 记忆（先分清）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>记忆（Memory，Day 16）</strong>：Agent 在运行中<strong>自己积累的经历</strong>（做过什么、学到什么）。</li>
+                    <li><strong>知识（Knowledge，今天）</strong>：你<strong>外部灌给它的资料</strong>（产品手册、公司文档、PDF、网页）。</li>
+                </ul>
+                <div class="baby"><span class="t">用人打比方</span>
+                <strong>记忆</strong> = 员工干活过程中记住的事（"上次这个客户投诉过 X"）。<strong>知识</strong> = 你发给员工的<strong>参考资料</strong>（产品说明书、公司规章）。员工回答问题时，既靠自己的经历（记忆），也翻参考资料（知识）。<strong>两者都用 RAG（向量检索）技术，但来源不同：记忆是内生的、知识是外灌的。</strong>代码在 <code>knowledge/</code> 目录。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三层架构</h1></div>
+            <div class="card">
+                <div class="flow2">
+                    <span class="n"><b>Knowledge</b>集合入口</span><span class="a">→</span>
+                    <span class="n"><b>KnowledgeSource</b>加载+切块</span><span class="a">→</span>
+                    <span class="n"><b>KnowledgeStorage</b>嵌入+向量库+检索</span>
+                </div>
+                <p><code>Knowledge</code>（<code>knowledge/knowledge.py</code>）是入口，管理多个 <code>KnowledgeSource</code>（各种资料源），底层用 <code>KnowledgeStorage</code>（默认 ChromaDB 向量库）。</p>
+                <div class="anno">读法：<b>Knowledge=总管、Source=资料源（负责把 PDF/文本读进来并切块）、Storage=向量库（负责嵌入和检索）。</b>三层各司其职：加载 → 切块 → 向量化存储 → 检索。这是标准的 RAG 管道结构。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>知识源与切块</h1></div>
+            <div class="card">
+                <p>抽象基类 <code>BaseKnowledgeSource</code>（<code>base_knowledge_source.py:16</code>）定义切块参数和方法：</p>
+<pre><code class="language-python">chunk_size = 4000        # 每块字符数
+chunk_overlap = 200      # 相邻块重叠字符数
+# _chunk_text (:43) 固定字符窗口滑动切块
+return [text[i:i+chunk_size]
+        for i in range(0, len(text), chunk_size - chunk_overlap)]</code></pre>
+                <div class="baby"><span class="t">为什么要"切块"？为什么块之间要"重叠"？</span>
+                <strong>切块</strong>：一份长文档（几万字）不能整个喂给模型（太长、检索不精准）。切成小块（4000 字），每块单独向量化——检索时能精准定位到相关的那一小块。<strong>重叠</strong>：如果硬切，一句话可能被切成两半（前半在块1、后半在块2），检索时哪块都不完整。<strong>让相邻块重叠 200 字，保证跨边界的内容不被割裂。</strong>这是 RAG 切块的经典技巧。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>各种文件源</h1></div>
+            <div class="card">
+                <p>具体知识源（都实现 <code>load_content</code>）：</p>
+                <ul>
+                    <li><code>StringKnowledgeSource</code>：直接切一段字符串。</li>
+                    <li><code>PDFKnowledgeSource</code>：用 pdfplumber 逐页抽取文本。</li>
+                    <li>CSV / Excel / JSON / TextFile 各自实现。</li>
+                    <li><code>CrewDoclingSource</code>（<code>crew_docling_source.py:82</code>）：特殊——用 docling 的 <strong>HierarchicalChunker 做语义切块</strong>（而非固定字符窗口），支持 PDF/DOCX/MD/HTML/URL。</li>
+                </ul>
+                <div class="baby"><span class="t">"语义切块"比"固定字符切块"好在哪？</span>
+                固定字符切块可能把一个完整的段落/章节从中间切开。<strong>语义切块（HierarchicalChunker）按文档的结构（标题、段落、列表）来切</strong>——每块是一个语义完整的单元。检索时召回的块更连贯、更有意义。<strong>处理结构化文档（有标题层级的 PDF/Markdown）时，语义切块效果明显更好。</strong>普通文本用固定切块够了。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>存储与 RAG 检索</h1></div>
+            <div class="card">
+                <p>默认 <code>KnowledgeStorage</code>（<code>knowledge_storage.py:22</code>）基于 ChromaDB：</p>
+                <ul>
+                    <li><code>_init_client</code>（<code>:37</code>）：用 <code>build_embedder</code> 构造嵌入函数、建专属 Chroma collection（前缀 <code>knowledge_&lt;name&gt;</code>）。</li>
+                    <li><code>save</code>（<code>:105</code>）：把文本块交给 client 嵌入 + upsert。</li>
+                    <li><code>search</code>（<code>:59</code>）：RAG 检索——多个 query 交向量库做相似度检索，受 <code>limit</code>（默认 5）和 <code>score_threshold</code>（默认 0.6）约束。</li>
+                </ul>
+                <div class="anno">读法：<b>知识块被向量化存进 ChromaDB；查询时把问题也向量化，找最相似的块。</b><code>score_threshold=0.6</code> 过滤掉不够相关的（相似度低于 0.6 的不返回）——保证喂给 Agent 的是真正相关的知识，不是勉强凑数的。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>挂到 Agent/Crew</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Crew</strong>：字段 <code>knowledge_sources</code>/<code>knowledge</code>（<code>crew.py:340/358</code>），<code>create_crew_knowledge()</code>（<code>crew.py:675</code>）构建 <code>Knowledge(collection_name="crew")</code> 并加载源。</li>
+                    <li><strong>Agent</strong>：<code>set_knowledge()</code>（<code>agent/core.py:408</code>）构建 <code>Knowledge(collection_name=self.role)</code>——每个 agent 有自己的知识库（按 role 命名）。</li>
+                </ul>
+<pre><code class="language-python">from crewai.knowledge.source.pdf_knowledge_source import PDFKnowledgeSource
+
+pdf_source = PDFKnowledgeSource(file_paths=["产品手册.pdf"])
+agent = Agent(role="客服", goal="...", knowledge_sources=[pdf_source])
+# 现在这个客服 agent 回答问题时会自动查产品手册</code></pre>
+                <div class="baby"><span class="t">Crew 级 vs Agent 级知识</span>
+                <strong>Crew 级</strong>：整个团队共享的知识（公司通用文档）。<strong>Agent 级</strong>：某个 agent 专属的知识（客服 agent 有产品手册，法务 agent 有合同模板）。<strong>按需分配——不用给每个 agent 灌所有资料，各自拿自己领域的。</strong>这和 Day 16 记忆的 scope 分层思路一致。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>检索注入 prompt</h1></div>
+            <div class="card">
+                <p>任务执行时，<code>handle_knowledge_retrieval</code>（<code>agent/utils.py:119</code>）是关键——它做三件事：</p>
+<pre><code class="language-python"># 1. 用 LLM 把任务改写成检索 query（agent._get_knowledge_search_query, core.py:1300）
+# 2. 查询 agent 和 crew 的知识库
+# 3. 用 extract_knowledge_context 把命中片段追加到 task_prompt：
+agent_knowledge_snippets = query_func([agent.knowledge_search_query], ...)
+if agent_knowledge_snippets:
+    task_prompt += extract_knowledge_context(agent_knowledge_snippets)  # 前缀 "Additional Information: "</code></pre>
+                <div class="anno">读法：<b>第 1 步很妙——不是直接拿任务描述去检索，而是<strong>先用 LLM 把任务改写成一个更适合检索的 query</strong>。</b>然后查知识库、把命中的知识片段（带"Additional Information:"前缀）拼进 prompt。于是 Agent 看到任务时，prompt 里已经带上了相关资料。</div>
+                <div class="baby"><span class="t">为什么要"用 LLM 改写检索 query"？</span>
+                任务描述可能很长、很啰嗦，直接拿去做向量检索效果不好。<strong>先让 LLM 提炼出"这个任务的核心检索意图"</strong>（比如任务是"写一篇关于我们新产品定价策略的分析"，改写成检索 query "产品定价策略"），检索更精准。<strong>这是 RAG 的进阶技巧——query 改写（query rewriting）提升检索质量。</strong>和 Day 16 RecallFlow 的 analyze_query 一个思路。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>知识和记忆的区别？（外灌资料 vs 内生经历）</li>
+                    <li>三层架构（Knowledge/Source/Storage）各干什么？</li>
+                    <li>为什么要切块？块之间为什么重叠？语义切块好在哪？</li>
+                    <li>score_threshold 过滤什么？</li>
+                    <li>为什么"用 LLM 改写检索 query"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/knowledge
+sed -n '16,60p' $P/source/base_knowledge_source.py    # 切块
+sed -n '22,110p' $P/storage/knowledge_storage.py | head -40   # 存储+检索
+grep -n 'handle_knowledge_retrieval\|_get_knowledge_search_query' \
+  lib/crewai/src/crewai/agent/utils.py lib/crewai/src/crewai/agent/core.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>Events 事件系统</strong>——贯穿全框架的事件总线。前面反复出现的 <code>XxxStartedEvent</code>/<code>XxxCompletedEvent</code> 都走它。看它如何解耦日志、遥测、监听器，以及怎么写自定义监听器。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 Memory</a>
+                <a href="crewai-day18.html" style="color:var(--accent-green);">Day 18 · Events &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

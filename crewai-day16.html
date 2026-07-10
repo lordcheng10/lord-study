@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · Memory 记忆系统 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .warn{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:11px 14px;margin:12px 0;font-size:12.5px}
+        .warn b{color:#f59e0b}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">Memory 记忆系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 重要变迁：统一记忆</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · MemoryRecord 数据模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 综合打分公式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · remember 保存</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · recall 检索（RAG）</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两条 Flow 流水线</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Agent 怎么用记忆</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 LLM</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 Knowledge &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 记忆/知识/生态</span>
+            <h1 class="part-title">Memory 记忆系统</h1>
+            <p class="part-desc">让 Agent"记住"东西。今天讲 CrewAI 的记忆系统——注意它<b>已从经典"四类记忆"重构为统一记忆</b>，用 scope + categories + importance 组织，靠 embedding + RAG 检索。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>重要变迁：统一记忆（先澄清）</h1></div>
+            <div class="card">
+                <div class="warn"><b>⚠️ 版本变迁</b>：CrewAI <strong>已废弃</strong>经典的四类记忆（ShortTermMemory / LongTermMemory / EntityMemory / ContextualMemory）。如果你看旧文档找 <code>ShortTermMemory</code> 这些类，在新源码里<strong>找不到</strong>了。取而代之的是<strong>统一智能记忆（unified memory）</strong>：一个 <code>Memory</code> 类，用 <strong>scope（作用域）+ categories（类别）+ importance（重要度）</strong>这些维度组织记忆。</div>
+                <div class="baby"><span class="t">怎么理解这个变迁？</span>
+                旧设计把记忆<strong>按类型分成四个类</strong>（短期、长期、实体、上下文），各管各的。新设计<strong>用一个统一 Memory，靠"维度标签"组织</strong>——一条记忆可以标注它的作用域（是团队级还是个人级）、类别、重要度。<strong>这更灵活</strong>：不用硬分类，而是给每条记忆打标签，检索时按这些维度综合排序。你可以用这些新维度去类比旧的"短期/长期"帮助理解迁移。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>MemoryRecord 数据模型</h1></div>
+            <div class="card">
+                <p><code>MemoryRecord</code>（<code>memory/types.py:20</code>）——单条记忆：</p>
+<pre><code class="language-python">content: str          # 记忆内容
+scope: str            # 作用域，如 /company/team/user（层级）
+categories: list      # 类别标签
+importance: float     # 重要度 0-1
+embedding: list       # 向量（用于语义检索）
+private: bool</code></pre>
+                <div class="anno">读法：<b>一条记忆不只是"一段文字"，还带 scope（属于哪个层级）、categories（分类）、importance（多重要）、embedding（语义向量）。</b>这些维度让记忆能被<strong>精准地组织和检索</strong>——比如"只召回团队级、重要度高、和当前问题语义相关的记忆"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>综合打分公式（检索排序的核心）</h1></div>
+            <div class="card">
+                <p>检索时，每条候选记忆按 <code>compute_composite_score</code>（<code>types.py:345</code>）综合打分：</p>
+<pre><code class="language-python">composite = semantic_weight * similarity      # 语义相似度
+          + recency_weight  * decay           # 时间新鲜度（越近越高）
+          + importance_weight * importance     # 重要度
+# decay = 0.5^(age_days / half_life_days)   ← 半衰期衰减
+# 默认权重：semantic=0.5 / recency=0.3 / importance=0.2</code></pre>
+                <div class="baby"><span class="t">为什么综合三个维度打分？</span>
+                只看"语义相似"不够好——一条<strong>很相关但很久以前、无关紧要</strong>的记忆，可能不如一条<strong>较相关但很新、很重要</strong>的记忆有用。所以综合三项：① <strong>语义相似</strong>（和当前问题相关吗）② <strong>新鲜度</strong>（多久以前的，用半衰期衰减——越老权重越低）③ <strong>重要度</strong>（这条记忆本身重不重要）。<strong>加权求和 = 模拟人类记忆的检索：既看相关性，也看"最近发生的"和"印象深刻的"。</strong>这比单纯的向量相似度检索聪明得多。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>remember：保存记忆</h1></div>
+            <div class="card">
+                <p><code>Memory</code> 类（<code>memory/unified_memory.py:76</code>），默认用便宜模型分析、<code>lancedb</code> 存储、OpenAI embedding。保存用 <code>remember()</code>（<code>:430</code>）/ <code>remember_many()</code>（<code>:523</code>，批量）：</p>
+                <div class="anno">读法：<b>保存不是简单地"存一行文字"——<code>_encode_batch</code> 会构造一个 <code>EncodingFlow</code>（一条 Flow 流水线，L06）来处理：嵌入向量化、去重、找相似、LLM 分析字段、批量入库。</b>所以"记住一件事"背后是一套智能的编码流程。</div>
+                <div class="glossary"><b>注意这里用到了 Flow（Day 11-13）</b>！记忆的保存和检索都用 Flow 流水线实现——CrewAI 用自己的 Flow 能力来搭内部功能。这说明 Flow 不只是给用户用的，框架自己也用它来组织复杂的多步逻辑。<strong>吃自己的狗粮（dogfooding）——好设计的标志。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>recall：检索记忆（RAG）</h1></div>
+            <div class="card">
+                <p><code>recall()</code>（<code>unified_memory.py:681</code>）——按查询召回相关记忆。分两种深度：</p>
+                <ul>
+                    <li><code>shallow</code>：直接 embed 查询 + <code>storage.search</code> 向量检索（快）。</li>
+                    <li><code>deep</code>（默认）：走 <code>RecallFlow</code>（L06）——自适应深度检索，能递归深挖。</li>
+                </ul>
+                <div class="baby"><span class="t">RAG 检索是什么（记忆的核心机制）</span>
+                RAG = 检索增强。<strong>把记忆内容变成向量存起来，检索时把"当前问题"也变成向量，找语义最接近的记忆。</strong>底层用 LanceDB（向量库）：<code>search</code>（<code>lancedb_storage.py:371</code>）做向量搜索 + <code>scope LIKE 'prefix%'</code> 前缀过滤（只搜相关作用域）+ 距离转分数。找回的记忆再按 L03 的综合分排序。<strong>这就是让 Agent"想起相关往事"的技术——语义检索，而非关键词匹配。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>两条 Flow 流水线</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>EncodingFlow</strong>（<code>encoding_flow.py:75</code>）：5 步<strong>保存</strong>流水线——批量嵌入 → 批内去重 → 并发找相似 → LLM 分析（推断字段/是否合并）→ 批量 insert/update/delete → 存库。</li>
+                    <li><strong>RecallFlow</strong>（<code>recall_flow.py:58</code>）：自适应<strong>检索</strong>流水线——分析查询 → 选候选 scope → 向量搜索 → <code>@router</code> 按置信度决定要不要深挖 → 可递归探索 → 综合结果。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么保存也要这么复杂（去重、合并）？</span>
+                因为如果每次都无脑追加，记忆库会<strong>塞满重复、矛盾的内容</strong>——"用户喜欢咖啡"存 10 遍，或者新记忆和旧记忆冲突。EncodingFlow 在存之前先<strong>去重、找相似的旧记忆、用 LLM 判断"该新增还是更新合并"</strong>——保持记忆库干净、一致。<strong>好的记忆系统不只是"存"，更是"智能地维护"。</strong>RecallFlow 的 <code>@router</code> 自适应深挖（Day 12 的 router）则让"简单问题浅查、复杂问题深挖"，省 token。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Agent/Crew 怎么用记忆</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>Crew</strong>：<code>memory=True</code> 时 <code>create_crew_memory()</code>（<code>crew.py:627</code>）建一个 <code>Memory(root_scope="/crew/&lt;name&gt;")</code>，并给 agent 注入 recall/remember 工具（<code>_add_memory_tools</code>，<code>crew.py:1751</code>）。</li>
+                    <li><strong>Agent</strong>：任务执行前 <code>_retrieve_memory_context</code>（<code>agent/core.py:537</code>）召回相关记忆、拼进 prompt：</li>
+                </ul>
+<pre><code class="language-python"># agent/core.py:537（概念）
+matches = unified_memory.recall(query, limit=5)      # 召回 top5 相关记忆
+memory = "Relevant memories:\n" + "\n".join(m.format() for m in matches)
+task_prompt += memory   # 拼进任务提示</code></pre>
+                <div class="anno">读法：<b>记忆通过两种方式起作用：① 自动召回相关记忆拼进 prompt（被动）；② 作为工具让 Agent 主动 recall/remember（主动）。</b>被动召回让 Agent "自然想起相关往事"，主动工具让它能"特意记住某事"或"特意查某记忆"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CrewAI 记忆的重要变迁是什么？（四类 → 统一记忆）</li>
+                    <li>MemoryRecord 有哪些维度？综合打分的三项？</li>
+                    <li>为什么综合"相似度+新鲜度+重要度"排序？</li>
+                    <li>保存为什么要去重/合并？RAG 检索是什么？</li>
+                    <li>Agent 用记忆的两种方式？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/memory
+sed -n '20,80p' $P/types.py                    # MemoryRecord
+sed -n '345,380p' $P/types.py                  # 综合打分
+grep -n 'def remember\|def recall\|EncodingFlow\|RecallFlow' $P/unified_memory.py | head
+grep -n '_retrieve_memory_context' ../agent/core.py 2>/dev/null || \
+  grep -n '_retrieve_memory_context' lib/crewai/src/crewai/agent/core.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>Knowledge 知识与 RAG</strong>——记忆是"Agent 自己积累的经历"，知识是"你外部灌给它的资料"（文档/PDF/网页）。看知识源、切块、向量库、如何把 RAG 知识接给 Agent。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 LLM</a>
+                <a href="crewai-day17.html" style="color:var(--accent-green);">Day 17 · Knowledge &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
