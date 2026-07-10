@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · Agent 循环总览 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .loopd { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:6px; padding:18px 4px; }
+        .loopd .n { background:var(--bg-secondary); border:2px solid var(--border-color); border-radius:11px; padding:11px 13px; font-size:12px; text-align:center; min-width:90px; transition:all .3s; }
+        .loopd .n b { display:block; font-size:12.5px; color:var(--text-primary); } .loopd .n small { font-size:10px; color:var(--text-muted); }
+        .loopd .n.lit { border-color:var(--accent-orange); box-shadow:0 0 15px rgba(245,158,11,.4); transform:translateY(-3px); }
+        .loopd .n.lit b { color:var(--accent-orange); }
+        .loopd .a { color:var(--accent-purple); font-weight:800; font-size:16px; }
+        .loopd .back { width:100%; text-align:center; color:var(--accent-green); font-weight:700; font-size:12px; margin-top:4px; }
+        .three-layer { display:flex; flex-direction:column; gap:0; }
+        .tl { padding:14px 16px; border:1px solid var(--border-color); }
+        .tl:first-child{border-radius:9px 9px 0 0} .tl:last-child{border-radius:0 0 9px 9px}
+        .tl h4 { font-size:14px; margin:0 0 4px; } .tl .f { font-size:11px; font-family:'SF Mono',monospace; color:var(--text-muted); }
+        .tl p { font-size:12.5px; color:var(--text-secondary); margin:5px 0 0; }
+        .tl.a{background:rgba(236,72,153,.07)} .tl.a h4{color:var(--accent-pink)}
+        .tl.b{background:rgba(245,158,11,.07)} .tl.b h4{color:var(--accent-orange)}
+        .tl.c{background:rgba(139,92,246,.07)} .tl.c h4{color:var(--accent-purple)}
+        .tl .arrow{text-align:center;color:var(--text-muted);font-size:14px;padding:2px 0}
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">Agent 循环总览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一次 turn 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三层结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 循环 8 步走一遍</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 关键：怎么判断继续</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工具结果怎么回填</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 什么时候停</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · generator 串流</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 启动链</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 Ink 入门 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 建立心智</span>
+            <h1 class="part-title">Agent 循环总览</h1>
+            <p class="part-desc">你在输入框敲了句话回车——Agent 内部那个"圈"就开始转了。今天从宏观讲清这个循环怎么转、什么时候停。源码细节留到 Day 06。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一次 turn（回合）是什么</h1></div>
+            <div class="card">
+                <p>先定义一个核心词——<strong>turn（回合）</strong>：你发一条消息后，模型可能<strong>来回调用好几轮工具</strong>，直到给出不含工具调用的最终回答。这"一来一回若干轮直到收尾"整体，就是一个 turn。</p>
+                <div class="loopd" id="loopDemo">
+                    <span class="n" data-i="0"><b>你输入</b><small>一条需求</small></span><span class="a">→</span>
+                    <span class="n" data-i="1"><b>拼请求</b><small>+上下文+工具</small></span><span class="a">→</span>
+                    <span class="n" data-i="2"><b>模型流式回</b><small>文字/工具调用</small></span><span class="a">→</span>
+                    <span class="n" data-i="3"><b>执行工具</b><small>读写/跑命令</small></span><span class="a">→</span>
+                    <span class="n" data-i="4"><b>结果回填</b><small>喂回消息</small></span>
+                    <span class="back" id="backLabel">↑ 若模型还想调工具 → 回到"拼请求"再来一轮；若不调了 → 收尾结束</span>
+                </div>
+                <div class="glossary"><b>关键直觉</b>：模型每次回复要么是"最终答案"（纯文字），要么是"我要用某个工具"。<strong>只要它还在要工具，循环就继续；一旦它只给文字不要工具了，这一 turn 就结束。</strong> 这一句话是理解全部的钥匙。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三层结构：谁负责什么</h1></div>
+            <div class="card">
+                <p>这个循环在代码里分成清晰的三层，各司其职（三层用 generator 的 <code>yield*</code> 串起来）：</p>
+                <div class="three-layer">
+                    <div class="tl a"><h4>① 会话层 QueryEngine</h4><div class="f">src/QueryEngine.ts</div><p>一个会话一个实例。每次你发消息 = 一个"用户回合"。负责：拼 system prompt、把内部消息转成对外 SDK 消息、统计 token/成本、产出最终 result。</p></div>
+                    <div class="arrow">▼ 消费</div>
+                    <div class="tl b"><h4>② 循环层 query / queryLoop</h4><div class="f">src/query.ts</div><p>★ 真正的 agent loop：<code>while(true)</code> 反复"调模型→检测工具→跑工具→拼回消息→再调模型"，直到没有工具调用（或触发停止条件）。</p></div>
+                    <div class="arrow">▼ 调用</div>
+                    <div class="tl c"><h4>③ API 层 queryModel</h4><div class="f">src/services/api/claude.ts</div><p>真正打 Anthropic API，把 SSE 流式事件累积成完整的 assistant 消息，同时把原始流事件透传出去（给 UI 做打字机效果）。</p></div>
+                </div>
+                <div class="glossary"><b>generator（生成器）+ <code>yield*</code></b>：JS 里能"边算边产出"的函数（<code>async function*</code>）。<code>yield</code> 吐出一个值，调用方能一个个消费。<code>yield*</code> 是"把另一个 generator 产出的东西原样转发出去"。这三层就是层层 <code>yield*</code>：API 层吐出的被循环层消费/再吐，循环层吐出的被会话层消费/转成 SDK 消息再吐给最外层。<strong>这套结构让"流式"能一路穿透三层直达界面。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>循环 8 步走一遍</h1></div>
+            <div class="card">
+                <p>把一次 turn 拆成 8 步（对应真实代码位置，Day 06 再逐行）：</p>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>用户消息进入</h4><p><code>QueryEngine.submitMessage(prompt)</code>（<code>QueryEngine.ts:217</code>）：处理 slash 命令/附件，push 进消息列表。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>进入循环层</h4><p><code>QueryEngine.ts:688</code> 的 <code>for await (const message of query({...}))</code> 消费循环层的全部产出。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>压缩上下文 + 调模型</h4><p><code>queryLoop</code> 的 <code>while(true)</code>（<code>query.ts:460</code>）每轮：先瘦身上下文，再 <code>deps.callModel(...)</code> 流式拿模型响应。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>检测工具调用</h4><p>流式过程中，assistant 消息里若有 <code>tool_use</code> 块，就收集起来并置 <code>needsFollowUp=true</code>（<code>query.ts:1090</code>）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>执行工具</h4><p>若 needsFollowUp，跑 <code>runTools(...)</code>（<code>query.ts:1671</code>）：只读工具并发、写工具串行（Day 07 讲）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">6</div><div class="flow-content"><h4>结果拼回，进下一轮</h4><p><code>messages = 旧消息.concat(assistant消息, 工具结果)</code>（<code>query.ts:2044</code>），<code>continue</code> 回循环顶。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">7</div><div class="flow-content"><h4>直到不再要工具</h4><p>某轮 <code>!needsFollowUp</code>（模型只给文字）→ 走停止路径 <code>return {reason:'completed'}</code>（<code>query.ts:1647</code>）。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">8</div><div class="flow-content"><h4>产出最终结果</h4><p>回到 QueryEngine，抽取最后一条 assistant 文本，yield 一个 <code>type:'result'</code>（<code>QueryEngine.ts:1194</code>）。</p></div></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>关键：怎么判断"要不要继续"</h1></div>
+            <div class="card">
+                <p>你可能以为"看模型返回的 <code>stop_reason</code> 是不是 tool_use 就行"。<strong>但代码里明确注释说这个不可靠</strong>（<code>query.ts:751</code>）。它改用一个更硬的判据：</p>
+<pre><code class="language-typescript">// query.ts:1090 —— 唯一的"继续循环"信号
+const msgToolUseBlocks = content.filter(c =&gt; c.type === 'tool_use')
+if (msgToolUseBlocks.length &gt; 0) {
+  toolUseBlocks.push(...msgToolUseBlocks)
+  needsFollowUp = true          // ← 流式过程中只要出现过 tool_use block，就必须再来一轮
+}</code></pre>
+                <div class="glossary"><b>为什么不信 stop_reason？</b> 流式响应里 <code>stop_reason</code> 可能不准或滞后。而"这次回复里到底有没有工具调用块"是<strong>确定的事实</strong>。用事实（有没有 tool_use block）而非信号（stop_reason 字段）来决定循环——这是一个很典型的"用确定性判据代替不可靠信号"的健壮性设计。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工具结果怎么回填给模型</h1></div>
+            <div class="card">
+                <p>这是循环能"转起来"的关键——工具跑完，结果要变成模型下一轮能看到的输入。每个工具产出一条 <strong>user 角色</strong>、含 <code>tool_result</code> 块的消息（<code>query.ts:1673</code>），回合末尾拼进下一轮：</p>
+<pre><code class="language-typescript">// query.ts:2043 —— 三者拼成下一轮输入
+const next = {
+  messages: messagesForQuery.concat(assistantMessages, toolResults),
+  //          历史             +  模型这轮的回复   +  工具执行结果
+}
+state = next    // continue → 下一轮 callModel 就带着 tool_result 再问模型</code></pre>
+                <div class="glossary"><b>为什么工具结果是"user 消息"？</b> 因为在 Anthropic 的消息协议里，<code>tool_result</code> 必须以 user 角色回给模型（表示"这是外部世界对你工具调用的回应"）。模型看到自己上一轮说"我要 Read 这个文件"、紧接着一条 user 消息说"这是文件内容：…"，就能接着推理下一步。<strong>循环的本质就是：不断把"模型的动作"和"世界的反馈"拼进对话，让模型基于最新事实继续。</strong></div>
+                <p>健壮性细节：如果已经告诉模型"我调了工具"却因异常没产出结果，<code>yieldMissingToolResultBlocks</code>（<code>query.ts:149</code>）会为每个悬空的 tool_use 补一条 <code>is_error</code> 的结果——否则 API 会报"tool_use 没有对应 tool_result"的错。</p>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>什么时候停：一堆终止原因</h1></div>
+            <div class="card">
+                <p>循环层返回一个 <code>Terminal</code> 类型（<code>src/query/transitions.ts</code>），穷举了所有停止原因。主要几类：</p>
+                <table>
+                    <thead><tr><th>停止原因</th><th>含义</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>completed</code></td><td>正常完成：模型不再调工具（最常见）</td></tr>
+                        <tr><td><code>max_turns</code></td><td>达到最大回合数上限</td></tr>
+                        <tr><td><code>prompt_too_long</code></td><td>上下文太长且压缩也救不回来</td></tr>
+                        <tr><td><code>aborted_streaming / aborted_tools</code></td><td>用户中断（按了 Esc/Ctrl+C）</td></tr>
+                        <tr><td><code>model_error</code></td><td>API 报错</td></tr>
+                        <tr><td><code>stop_hook_prevented / hook_stopped</code></td><td>Stop hook 拦截（Day 14）</td></tr>
+                    </tbody>
+                </table>
+                <p>其中最有意思的是 <strong>Stop hook 能"逼"模型继续干</strong>（<code>query.ts:1557</code>）：模型说"我完事了"，但如果配置了 Stop hook 且它返回"还没达标"，循环会把错误插回消息并 <code>continue</code>——相当于对模型说"不行，接着做"。还有 <strong>token budget</strong>（<code>query.ts:1598</code>）：没花够预算时会插一条 nudge 让模型继续用满。这些"续命"机制 Day 10 细讲。</p>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>流式：deltas 怎么变成界面更新</h1></div>
+            <div class="card">
+                <p>你在终端看到的"逐字蹦出来"的打字机效果，来自 API 层对 SSE 流的处理（<code>claude.ts:2075</code> 的 <code>switch(part.type)</code>）：</p>
+                <ul>
+                    <li><code>content_block_delta</code>：文字增量 push 进缓冲、工具入参 JSON 一段段拼（<code>claude.ts:2150</code>）。</li>
+                    <li><code>content_block_stop</code>：一个块结束，拼成完整的 assistant 消息 yield 出去（<code>claude.ts:2270</code>）。</li>
+                    <li><strong>每处理完一个流事件，还无条件再 yield 一条原始 <code>stream_event</code></strong>（<code>claude.ts:2408</code>）。</li>
+                </ul>
+                <div class="glossary"><b>两种产出，两种用途</b>：API 层同时吐出"累积好的完整消息"（给循环层检测工具调用用）和"原始流事件"（给 UI 做打字机效果用）。会话层默认只把完整消息转成 SDK 消息；只有当调用方要"打字机"时才透传原始事件（<code>QueryEngine.ts:850</code>）。<strong>这就是为什么你既能看到字一个个蹦出来，Agent 又能在整块结束后准确判断该不该调工具。</strong></div>
+                <div class="glossary"><b>SSE</b> = Server-Sent Events，服务器持续往下推的事件流。大模型 API 用它实现"边生成边返回"，而不是等全部生成完才一次性返回——这样你不用干等。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>一个 turn 是什么？循环靠什么判据决定继续？（流式中是否出现 tool_use block）</li>
+                    <li>三层结构各负责什么？（QueryEngine 会话 / query 循环 / queryModel API）</li>
+                    <li>工具结果为什么以 user 消息回填？怎么拼进下一轮？</li>
+                    <li>有哪些停止原因？Stop hook 怎么"逼"模型继续？</li>
+                    <li>为什么 API 层同时吐"完整消息"和"原始流事件"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看会话层怎么消费循环层
+sed -n '217,260p' src/QueryEngine.ts
+sed -n '688,700p' src/QueryEngine.ts
+
+# 2. 看循环层的 while(true) 主体（核心中的核心）
+sed -n '460,470p' src/query.ts        # 循环开始
+sed -n '1079,1103p' src/query.ts      # 检测 tool_use
+sed -n '2032,2045p' src/query.ts      # 拼回下一轮
+
+# 3. 看 API 层流式 switch
+sed -n '2075,2090p' src/services/api/claude.ts
+
+# 4. 看所有停止原因
+sed -n '1,20p' src/query/transitions.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：循环的"大脑"清楚了，那"脸"呢？Day 04 讲 <strong>Ink 终端 UI</strong>——用 React 写终端界面是什么体验、REPL 的组件树长什么样、流式消息怎么渲染成你看到的样子。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 启动链</a>
+                <a href="claude-code-src-day04.html" style="color:var(--accent-green);">Day 04 · Ink 终端 UI 入门 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const nodes = Array.from(document.querySelectorAll('#loopDemo .n[data-i]'));
+            let i = 0;
+            setInterval(() => { nodes.forEach(n=>n.classList.remove('lit')); nodes[i].classList.add('lit'); i=(i+1)%nodes.length; }, 700);
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
