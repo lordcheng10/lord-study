@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · Task 任务定义与输出 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#ef4444}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        .chain{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .chain .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-secondary);text-align:center}
+        .chain .n b{display:block;color:#ef4444;font-size:11px} .chain .a{color:#f97316;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ef4444,#f97316);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">Task 任务 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Task 是"工单"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 关键属性表</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 结构化输出</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _execute_core 产出</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · TaskOutput 三形态</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 上下文链（精髓）</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 条件任务 + 安全</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 Agent</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 Crew &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">Task：任务定义与输出</h1>
+            <p class="part-desc">第二个核心概念。Agent 是员工，Task 是工单。今天读 <code>task.py</code>：任务怎么定义、怎么产出结构化结果、以及任务间"上下文链"这个编排精髓。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Task 是"工单"</h1></div>
+            <div class="card">
+                <p><code>Task(BaseModel)</code>（<code>task.py:114</code>）。两个必填字段就是一张工单的核心：</p>
+<pre><code class="language-python"># task.py:146-149
+description: str        # 任务描述：要做什么
+expected_output: str    # 期望输出：做成什么样</code></pre>
+                <div class="baby"><span class="t">为什么 expected_output 是必填的？</span>
+                因为<strong>不说清"要什么样的结果"，AI 就会自由发挥、可能跑偏</strong>。<code>expected_output</code>="一份 5 条要点的清单"这种明确要求，等于给 AI 一个验收标准，它会朝这个方向产出。这是提示词工程的关键——<strong>明确的期望产出 = 更可控的结果</strong>。CrewAI 把它设为必填，逼你想清楚"我到底要什么"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>关键属性表</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>属性</th><th>作用</th><th>行号</th></tr>
+                    <tr><td><code>agent</code></td><td>负责执行的 agent（可空，交 Crew 分派）</td><td>task.py:157</td></tr>
+                    <tr><td><code>context</code></td><td>其他 Task 列表，其输出作为本任务上下文（精髓，L06）</td><td>task.py:161</td></tr>
+                    <tr><td><code>tools</code></td><td>本任务限定的工具</td><td>task.py:210</td></tr>
+                    <tr><td><code>output_json</code>/<code>output_pydantic</code></td><td>结构化输出（L03）</td><td>task.py:169/179</td></tr>
+                    <tr><td><code>async_execution</code></td><td>是否异步执行</td><td>task.py:165</td></tr>
+                    <tr><td><code>callback</code></td><td>任务完成后的回调</td><td>task.py:154</td></tr>
+                    <tr><td><code>guardrail</code></td><td>输出护栏校验（Day 10）</td><td>task.py:246</td></tr>
+                    <tr><td><code>human_input</code></td><td>是否要人工审核最终答案</td><td>task.py:227</td></tr>
+                    <tr><td><code>output_file</code></td><td>把结果写到文件</td><td>task.py:199</td></tr>
+                </table>
+                <div class="glossary"><b>安全细节</b>：<code>output_file_validation</code>（<code>task.py:487</code>）会拒绝路径穿越 <code>..</code>、shell 展开符 <code>~/$</code>、管道符——防止任务写文件时被注入攻击。<strong>让 AI 写文件是危险操作，框架在校验层就把恶意路径挡掉。</strong>这和 OpenHands 的安全思路一致：危险操作要有防护。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>结构化输出</h1></div>
+            <div class="card">
+                <p>默认任务输出是文本。但你常想要<strong>结构化数据</strong>（好让程序后续处理）。用 <code>output_pydantic</code> 或 <code>output_json</code>：</p>
+<pre><code class="language-python">from pydantic import BaseModel
+class Report(BaseModel):
+    title: str
+    key_points: list[str]
+
+task = Task(
+    description="研究并总结 {topic}",
+    expected_output="标题 + 要点列表",
+    output_pydantic=Report,     # ★ 输出会被约束成 Report 对象
+)</code></pre>
+                <div class="anno">读法：<b>指定 <code>output_pydantic=Report</code>，任务产出就会被解析成一个 Report 对象——你能 <code>result.pydantic.key_points</code> 直接取字段，而不是从一坨文本里正则抠。</b>校验器 <code>check_output</code>（<code>task.py:548</code>）保证 output_json 和 output_pydantic 不能同时设。</div>
+                <div class="baby"><span class="t">为什么结构化输出很重要？</span>
+                如果 AI 只吐文本，你想用其中的"要点列表"就得写脆弱的文本解析。让 AI 直接吐一个符合 <code>Report</code> 模型的结构化对象，<strong>下游程序能可靠地按字段取值</strong>——这是把 AI 接进真实软件系统的关键。<code>response_model</code>（<code>task.py:189</code>）则走 LLM 原生结构化输出（更可靠）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>_execute_core：任务如何产出</h1></div>
+            <div class="card">
+                <p>同步入口 <code>execute_sync</code>（<code>task.py:572</code>）→ 核心 <code>_execute_core</code>（<code>task.py:762</code>）：</p>
+<pre><code class="language-python"># task.py:772-794（精简）
+agent = agent or self.agent
+if not agent: raise Exception("...no agent assigned...")   # 没 agent 不能跑
+crewai_event_bus.emit(self, TaskStartedEvent(...))          # 发"任务开始"事件
+result = agent.execute_task(task=self, context=context, tools=tools)  # ★ 交给 agent 干</code></pre>
+                <div class="anno">读法：<b>Task 自己不干活——它把活儿交给 <code>agent.execute_task</code>（Day 02 学的），自己负责"发事件、组装 TaskOutput、跑护栏、写文件、回调"这些编排。</b>注意 Task 必须有 agent 才能执行（自己没有就用 Crew 分派的）。整个方法用 try/except/finally 包裹，失败发 <code>TaskFailedEvent</code>。</div>
+                <div class="glossary"><b>职责分清</b>：Agent = "怎么想怎么做"（ReAct 循环），Task = "这件活的定义 + 产出的封装"。Task 把 agent 的原始结果加工成规范的 TaskOutput（L05），并处理输出格式、护栏、文件、回调、事件。<strong>Agent 管执行，Task 管定义与产出规范化——各司其职。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>TaskOutput：三形态统一输出</h1></div>
+            <div class="card">
+                <p>任务结果封装成 <code>TaskOutput</code>（<code>tasks/task_output.py:14</code>），同时容纳三种形态：</p>
+<pre><code class="language-python">raw: str                    # 原始文本（永远有）
+pydantic: BaseModel | None  # Pydantic 对象（若设了 output_pydantic）
+json_dict: dict | None      # JSON 字典（若设了 output_json）
+output_format: OutputFormat # 标记当前是 RAW / JSON / PYDANTIC</code></pre>
+                <div class="anno">读法：<b>无论任务是文本还是结构化输出，都统一封进 TaskOutput，三个字段按需填。</b><code>__str__</code>（<code>task_output.py:99</code>）优先返回 pydantic、其次 json、最后 raw——所以你 <code>print(output)</code> 总能拿到最有用的形态。</div>
+                <div class="baby"><span class="t">为什么要"三形态统一"？</span>
+                因为不同任务输出类型不同，但下游希望用<strong>统一的方式</strong>拿结果。TaskOutput 就是这个统一容器：想要文本读 <code>.raw</code>、想要对象读 <code>.pydantic</code>、想要字典读 <code>.json_dict</code>。<strong>统一的输出抽象，让编排代码不用为每种输出类型写分支。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>上下文链：一个任务的输出喂给下一个（编排精髓）</h1></div>
+            <div class="card">
+                <p>这是 CrewAI 流水线的核心。串联在 Crew 层 <code>_get_context</code>（<code>crew.py:1827</code>），根据 <code>task.context</code> 的三种状态：</p>
+                <div class="chain">
+                    <span class="n"><b>Task A</b>研究</span><span class="a">输出→context→</span>
+                    <span class="n"><b>Task B</b>分析</span><span class="a">输出→context→</span>
+                    <span class="n"><b>Task C</b>成文</span>
+                </div>
+<pre><code class="language-python"># crew.py:1827 三态语义
+# context = NOT_SPECIFIED（默认）→ 自动拼进"前面所有任务"的输出
+# context = [task_a, task_b]      → 只拼这两个任务的输出（精确依赖）
+# context = []（空列表）          → 不看任何上文（隔离）</code></pre>
+                <div class="anno">读法：<b>三态设计极其优雅——默认串联（前面所有）、指定列表（精确依赖）、空列表（隔离）。</b>拼好的上下文通过 <code>agent.execute_task(task, context=...)</code> 传进去，成为下一个任务的输入。这样"任务 A 的产出"就变成"任务 B 的输入"，形成流水线。</div>
+                <div class="baby"><span class="t">三态为什么这么设计？</span>
+                真实工作流有三种依赖情况：① <strong>默认</strong>——大多数任务需要看到前面所有产出（写手要看研究和分析的全部）；② <strong>精确</strong>——某任务只依赖特定几个前置（润色只需看初稿，不用看原始资料）；③ <strong>隔离</strong>——某任务独立起头，不看任何上文。用一个 <code>context</code> 字段的三种取值优雅表达这三种，比强制你手动传数据方便多了。<strong>好的默认值（自动串联）+ 精确控制的能力（指定列表），是 API 设计的平衡艺术。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>条件任务与安全</h1></div>
+            <div class="card">
+                <p><strong>ConditionalTask</strong>（<code>tasks/conditional_task.py:14</code>）——带一个 <code>condition</code> 函数，根据上一个任务的输出决定要不要跑：</p>
+<pre><code class="language-python"># conditional_task.py:41 should_execute
+def should_execute(self, context: TaskOutput) -> bool:
+    return bool(self.condition(context))   # 用上一任务的输出判断
+# 条件不满足 → get_skipped_task_output 返回空 TaskOutput（raw=""）</code></pre>
+                <div class="anno">读法：<b>条件任务实现了简单的 if/else 分支——比如"如果研究结果里发现了风险，就跑风险评估任务，否则跳过"。</b>约束：条件任务不能是唯一任务、也不能是第一个（因为需要前置任务的输出来判断条件）。</div>
+                <div class="glossary"><b>护栏（guardrail）预告</b>（Day 10 细讲）：Task 还能配 <code>guardrail</code>——任务产出后先"质检"，不合格就带着反馈重跑（最多 <code>guardrail_max_retries</code> 次）。字符串护栏会用一个 LLM 来判断输出合不合规（"用 LLM 校验 LLM"）。这让任务输出质量有保障。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Task 的两个必填字段？expected_output 为什么必填？</li>
+                    <li>结构化输出（output_pydantic）解决什么问题？</li>
+                    <li>_execute_core 里 Task 和 Agent 怎么分工？</li>
+                    <li>TaskOutput 三形态是什么？为什么统一封装？</li>
+                    <li>上下文链的三态语义？（默认串联/精确/隔离）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '146,270p' $P/task.py | head -50           # 属性
+sed -n '762,830p' $P/task.py                       # _execute_core
+sed -n '1827,1840p' $P/crew.py                     # 上下文链三态
+sed -n '14,60p' $P/tasks/conditional_task.py       # 条件任务</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：第三个核心概念——<strong>Crew（团队）</strong>。读 <code>crew.py</code>：Crew 怎么把 agents + tasks 组织起来、<code>kickoff()</code> 入口、Pydantic 声明式校验如何在开工前抓配置错误、CrewOutput 统一输出。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 Agent</a>
+                <a href="crewai-day04.html" style="color:var(--accent-green);">Day 04 · Crew 团队 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
