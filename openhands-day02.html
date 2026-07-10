@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · Action 与 Observation — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
+        table.k code{font-size:11px}
+        .pair{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:14px 4px}
+        .pair .box{border-radius:9px;padding:11px 14px;font-size:12.5px;min-width:170px}
+        .pair .act{background:rgba(245,158,11,.1);border:1px solid #f59e0b} .pair .act b{color:#f59e0b}
+        .pair .obs{background:rgba(6,182,212,.1);border:1px solid var(--accent-cyan)} .pair .obs b{color:var(--accent-cyan)}
+        .pair .a{color:var(--text-muted);font-weight:800;font-size:18px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#f97316);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">Action 与 Observation · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一切都是"动作+观察"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Action 判别式设计</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 动作全家福</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 精读 ExecuteBashAction</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 精读文件编辑动作</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Observation 与之对称</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么这样设计</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day03.html" class="nav-link" style="color:var(--accent-green);">Day 03 事件流 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">Action 与 Observation</h1>
+            <p class="part-desc">OpenHands 最核心的两个概念。Agent 想做的每件事都是一个 <b>Action（动作）</b>，执行后的每个结果都是一个 <b>Observation（观察）</b>。今天对着前端真实的 TypeScript 类型定义，看它们长什么样。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一切都是"动作 + 观察"</h1></div>
+            <div class="card">
+                <p>OpenHands 把 Agent 的一举一动都显式建模成数据结构。整个 Agent 循环就一句话：</p>
+                <div class="pair">
+                    <span class="box act"><b>Action 动作</b><br>Agent 想做什么<br><small>"运行这条命令""改这个文件"</small></span>
+                    <span class="a">→ 执行 →</span>
+                    <span class="box obs"><b>Observation 观察</b><br>执行后得到什么<br><small>"命令输出是…""改成功了"</small></span>
+                </div>
+                <div class="baby"><span class="t">为什么要把"动作"做成数据，而不是直接调函数？</span>
+                你可能想："Agent 要跑命令，直接调一个 <code>run(cmd)</code> 函数不就行了？"OpenHands 偏要先造一个 <code>ExecuteBashAction</code> 数据对象。好处有三：① <strong>整条轨迹能存下来、能回放、能审计</strong>（每个动作都是一条记录）；② <strong>前端只要渲染这串数据就能"实时观看" Agent 干活</strong>；③ <strong>动作在真正执行前能被拦截、要求人工确认</strong>（安全）。<strong>"把行为变成数据"是所有严肃 Agent 框架的共同选择。</strong></div>
+                <div class="glossary">我们今天读的类型定义在前端 <code>frontend/src/types/v1/core/base/</code>。为什么读前端？因为 Agent 核心已拆到外部包（Day 01），而前端为了渲染，把这套事件类型<strong>完整地镜像</strong>了一份 TypeScript 定义——这是本仓库里最完整、最好读的"概念字典"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Action 的判别式设计</h1></div>
+            <div class="card">
+                <p>所有动作都继承一个基类，靠一个 <code>kind</code> 字段区分是哪种动作（<code>base/base.ts:40</code>）：</p>
+<pre><code class="language-typescript">export interface ActionBase&lt;T extends ActionEventType = ActionEventType&gt; {
+  kind: T;      // 判别式：告诉你这是哪种动作
+}</code></pre>
+                <div class="anno">读法：<b><code>kind</code> 是"判别式字段"（discriminator）——像快递单上的"物品类型"栏。</b>程序拿到一个动作，先看 <code>kind</code> 是 <code>"ExecuteBashAction"</code> 还是 <code>"FileEditorAction"</code>，就知道该怎么处理、该读哪些字段。TypeScript 的联合类型 + kind 判别，是类型安全地处理"多种动作"的经典写法。</div>
+                <div class="baby"><span class="t">判别式是什么？打个比方</span>
+                想象一个"表单信封"，信封外面写着类型（kind），里面装着对应的内容。看到 kind="跑命令"，就知道里面装的是命令字符串；看到 kind="改文件"，就知道里面装的是文件路径和新内容。程序按 kind 拆信，绝不会拿错字段。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>动作全家福（<code>base/action.ts</code>）</h1></div>
+            <div class="card">
+                <p>OpenHands 的 Agent 能发出这些动作（节选自 <code>frontend/src/types/v1/core/base/action.ts</code>）：</p>
+                <table class="k">
+                    <tr><th>动作 kind</th><th>干什么</th><th>关键字段</th></tr>
+                    <tr><td><code>ExecuteBashAction</code></td><td>执行 bash 命令</td><td>command, is_input, timeout</td></tr>
+                    <tr><td><code>FileEditorAction</code></td><td>看/建/改文件</td><td>command, path, old_str, new_str</td></tr>
+                    <tr><td><code>ThinkAction</code></td><td>记录一段思考（不改环境）</td><td>thought</td></tr>
+                    <tr><td><code>FinishAction</code></td><td>任务结束、回复用户</td><td>message</td></tr>
+                    <tr><td><code>TaskTrackerAction</code></td><td>维护 todo 任务清单</td><td>command, task_list</td></tr>
+                    <tr><td><code>BrowserNavigate…</code>(10个)</td><td>浏览器操作</td><td>url 等</td></tr>
+                    <tr><td><code>GlobAction</code>/<code>GrepAction</code></td><td>按文件名/内容搜索</td><td>pattern, path</td></tr>
+                    <tr><td><code>TaskAction</code></td><td>委派给子 Agent</td><td>prompt, subagent_type</td></tr>
+                    <tr><td><code>MCPToolAction</code></td><td>调用 MCP 外部工具</td><td>data</td></tr>
+                </table>
+                <div class="glossary"><b>这张表就是 Agent 的"能力清单"</b>——它能做的一切都在这。注意分成几类：<strong>操作环境</strong>（bash/文件/浏览器/搜索）、<strong>思考与收尾</strong>（think/finish）、<strong>任务管理</strong>（tracker/委派子 agent）、<strong>扩展</strong>（MCP 工具）。哪些动作可用，由配置里的开关决定（<code>config.template.toml</code> 的 <code>[agent]</code> 段：<code>enable_browsing</code>/<code>enable_editor</code>/<code>enable_cmd</code>… Day 04 讲）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>精读 ExecuteBashAction</h1></div>
+            <div class="card">
+                <p>最常用的动作——跑命令（<code>action.ts:25-42</code>）：</p>
+<pre><code class="language-typescript">export interface ExecuteBashAction extends ActionBase&lt;"ExecuteBashAction"&gt; {
+  command: string;        // 要执行的 bash 命令（Ctrl-C 可中断）
+  is_input: boolean;      // true=向"正在运行的进程"输入；false=执行一条新命令
+  timeout: number | null; // 超时秒数
+  reset: boolean;         // true=重建终端会话（终端卡死时用）
+}</code></pre>
+                <div class="anno">读法：<b>大部分时候 <code>command</code>="要跑的命令"、其余是 false/null。</b>但 <code>is_input</code> 这个设计很妙——有些命令会进入交互（比如问你 y/n，或 python 交互解释器），这时 Agent 需要"向正在运行的进程输入内容"，而不是"开一条新命令"。<code>is_input=true</code> 就表达了这个区别。<code>reset</code> 则是"终端卡死了，给我换个干净的"的逃生阀。</div>
+                <div class="baby"><span class="t">看细节体会设计者的用心</span>
+                真实世界的终端不是"一句命令一个结果"那么简单——有交互式程序、有长时间运行、有卡死。<code>is_input</code>/<code>timeout</code>/<code>reset</code> 这几个字段就是为了让 Agent 能应付这些真实情况。<strong>好的抽象，是把真实世界的复杂性妥帖地装进字段里。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>精读文件编辑动作（str_replace 模式）</h1></div>
+            <div class="card">
+                <p>改文件用一套"子命令"设计（<code>action.ts:63-123</code>），这是业界（Anthropic <code>str_replace_editor</code>）的经典模式：</p>
+<pre><code class="language-typescript">export interface FileEditorAction extends ActionBase&lt;"FileEditorAction"&gt; {
+  command: "view" | "create" | "str_replace" | "insert" | "undo_edit";
+  path: string;              // 文件路径
+  file_text?: string;        // create 时的完整内容
+  old_str?: string;          // str_replace：要被替换的原文
+  new_str?: string;          // str_replace：替换成的新文
+  insert_line?: number;      // insert：插在第几行
+}</code></pre>
+                <div class="anno">读法：<b>一个动作类型，靠 <code>command</code> 子命令表达 5 种文件操作。</b>重点是 <code>str_replace</code>——它不是"重写整个文件"，而是"把文件里的 <code>old_str</code> 这段替换成 <code>new_str</code>"。</div>
+                <div class="baby"><span class="t">为什么改文件要用"查找替换"而不是"重写全文"？</span>
+                想象一个 2000 行的文件，Agent 只想改第 500 行的一个函数。如果每次都让大模型输出整个 2000 行，① 极其浪费 token（贵、慢）；② 大模型很容易在重抄时改错别的地方。<strong>str_replace 只让它给出"要改的那一小段的前后对比"</strong>——精准、省钱、不误伤。<code>view</code> 先看、<code>str_replace</code> 精改、<code>undo_edit</code> 可撤销，这套组合让 AI 改代码既安全又高效。<strong>这是 OpenHands（和 Claude）能可靠改大文件的关键技巧。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Observation 与 Action 一一对称</h1></div>
+            <div class="card">
+                <p>每种动作，基本都有一个对应的观察结果（<code>base/observation.ts</code>）。比如跑命令的结果（<code>observation.ts:57-82</code>）：</p>
+<pre><code class="language-typescript">export interface ExecuteBashObservation extends ObservationBase&lt;"ExecuteBashObservation"&gt; {
+  content: Array&lt;TextContent | ImageContent&gt;;  // 命令的输出
+  command: string | null;
+  exit_code: number | null;   // 退出码；-1 表示软超时、进程还没结束
+  error: boolean;
+  timeout: boolean;
+  metadata: CmdOutputMetadata; // 工作目录、用户名等（从终端提示符 PS1 抓的）
+}</code></pre>
+                <div class="anno">读法：<b>动作 <code>ExecuteBashAction</code> ←→ 观察 <code>ExecuteBashObservation</code>，孪生成对。</b>观察里带 <code>exit_code</code>（命令成功还是失败）、<code>content</code>（输出内容）——Agent 正是靠读这些判断"我上一步干得对不对、下一步该怎么办"。</div>
+                <table class="k">
+                    <tr><th>动作</th><th>→ 对应观察</th><th>观察里的关键信息</th></tr>
+                    <tr><td>ExecuteBashAction</td><td>ExecuteBashObservation</td><td>exit_code, content（输出）</td></tr>
+                    <tr><td>FileEditorAction</td><td>FileEditorObservation</td><td>old_content, new_content（改前改后）</td></tr>
+                    <tr><td>Browser*Action</td><td>BrowserObservation</td><td>output, screenshot_data（网页截图）</td></tr>
+                    <tr><td>Glob/GrepAction</td><td>Glob/GrepObservation</td><td>files/matches（命中列表）</td></tr>
+                </table>
+                <div class="glossary"><b>浏览器观察带截图</b>（<code>screenshot_data</code>，base64）——所以前端能把 Agent"看到的网页"直接展示给你。这种"孪生对称"设计让运行时能用统一的方式处理"执行动作→产生观察"，也让前端渲染有章可循（Day 03/16）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么这样设计（回味）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>可观测</strong>：一切行为都是数据 → 能存、能回放、能审计、能在 UI 实时看。</li>
+                    <li><strong>可安全管控</strong>：动作执行前可拦截、可要求人工确认（每个 ActionEvent 还带 <code>security_risk</code> 风险评估，Day 03）。</li>
+                    <li><strong>可对称处理</strong>：Action/Observation 孪生 → 运行时逻辑统一、前端渲染统一。</li>
+                    <li><strong>省钱高效</strong>：像 str_replace 这种细粒度动作，避免大模型重复输出大段内容。</li>
+                </ul>
+                <div class="glossary"><b>一句话</b>：OpenHands 把"Agent 与环境的每一次交互"都拆成一对结构化的 Action/Observation。这个看似简单的决定，撑起了整个系统的可观测性、安全性和工程可维护性。<strong>明天（Day 03）我们看这些 Action/Observation 怎么被"包装成事件"、串成一条"事件流"，以及动作和观察靠什么配对。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Action 和 Observation 分别是什么？循环怎么转？</li>
+                    <li>为什么把"行为"做成数据结构而不是直接调函数？（三大好处）</li>
+                    <li>kind 判别式是干嘛的？</li>
+                    <li>文件编辑为什么用 str_replace 而不是重写全文？</li>
+                    <li>Action 和 Observation 的"孪生对称"体现在哪？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：读真实类型定义</h3>
+<pre><code class="language-bash"># 1. 动作全家福
+sed -n '1,60p' frontend/src/types/v1/core/base/action.ts
+
+# 2. 精读 bash 动作 + 文件编辑动作
+sed -n '25,123p' frontend/src/types/v1/core/base/action.ts
+
+# 3. 对称的观察
+sed -n '57,140p' frontend/src/types/v1/core/base/observation.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>事件流 Event Stream</strong>——裸的 Action/Observation 还要被包成带元数据的"事件"（ActionEvent/ObservationEvent），靠 <code>action_id</code> 配对，按时间排成一条流。一次会话 = 一条事件流。我们还会看流式 token、历史压缩等辅助事件。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="openhands-day03.html" style="color:var(--accent-green);">Day 03 · 事件流 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

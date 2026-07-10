@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 事件流 Event Stream — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .stream{display:flex;flex-direction:column;gap:6px;margin:14px 0}
+        .stream .ev{display:flex;gap:10px;align-items:center;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .stream .ev .src{font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;flex-shrink:0}
+        .stream .ev .src.u{background:rgba(139,92,246,.15);color:#8b5cf6} .stream .ev .src.a{background:rgba(245,158,11,.15);color:#f59e0b} .stream .ev .src.e{background:rgba(6,182,212,.15);color:#06b6d4}
+        .srcgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+        .srcgrid .s{border:1px solid var(--border-color);border-radius:8px;padding:9px;text-align:center;font-size:11.5px;background:var(--bg-secondary)}
+        .srcgrid .s b{display:block;margin-bottom:3px} @media(max-width:768px){.srcgrid{grid-template-columns:1fr 1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#f97316);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">事件流 Event Stream · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 会话 = 一条事件流</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseEvent 三字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 事件的四种来源</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ActionEvent 包装</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ObservationEvent 与配对</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 事件全家族</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 流式增量与历史压缩</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 Action</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 运行 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">事件流 Event Stream</h1>
+            <p class="part-desc">裸的 Action/Observation 还要被包成带元数据的"事件"。一次会话 = 一条按时间排列的事件流。今天看事件怎么包装、动作和观察靠什么配对、还有哪些辅助事件。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>会话 = 一条事件流</h1></div>
+            <div class="card">
+                <p>OpenHands 里，<strong>一次对话（conversation）就是一条按时间排列的事件（Event）序列</strong>。你发的消息、Agent 的动作、环境返回的结果，全都是流里的一个个事件：</p>
+                <div class="stream">
+                    <div class="ev"><span class="src u">USER</span> MessageEvent：「帮我修登录 bug」</div>
+                    <div class="ev"><span class="src a">AGENT</span> ActionEvent：想跑 <code>cat app.py</code>（附带 thought）</div>
+                    <div class="ev"><span class="src e">ENV</span> ObservationEvent：文件内容返回</div>
+                    <div class="ev"><span class="src a">AGENT</span> ActionEvent：str_replace 修改第 42 行</div>
+                    <div class="ev"><span class="src e">ENV</span> ObservationEvent：编辑成功</div>
+                    <div class="ev"><span class="src a">AGENT</span> ActionEvent：FinishAction「修好了」</div>
+                </div>
+                <div class="baby"><span class="t">为什么"一切皆事件流"这么关键？</span>
+                因为它带来三个超能力：① <strong>能存能回放</strong>——整个任务过程是一串数据，存下来随时能重现、审计"AI 到底干了啥"；② <strong>前端只要订阅这条流就能实时展示</strong>——来一个事件画一个卡片；③ <strong>能压缩</strong>——对话太长时把老事件折叠成摘要（L07）。<strong>事件流是 OpenHands 一切能力的载体。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseEvent：所有事件的共同三字段</h1></div>
+            <div class="card">
+                <p>每个事件都继承 <code>BaseEvent</code>（<code>frontend/src/types/v1/core/base/event.ts:10</code>）：</p>
+<pre><code class="language-typescript">export interface BaseEvent {
+  id: EventID;        // 唯一 id（用于配对、去重）
+  timestamp: string;  // ISO 时间字符串（用于排序）
+  source: SourceType; // 事件来源：agent / user / environment / hook
+}</code></pre>
+                <div class="anno">读法：<b>三个共同字段：唯一 id、时间戳、来源。</b><code>id</code> 让事件能互相引用（观察靠它找到对应动作，L05）；<code>timestamp</code> 让事件能排成时间流；<code>source</code> 告诉你"这事件是谁产生的"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>事件的四种来源（source）</h1></div>
+            <div class="card">
+                <p><code>base/common.ts:56</code> 定义了 4 种来源：</p>
+                <div class="srcgrid">
+                    <div class="s"><b style="color:#8b5cf6">user</b>你产生的<br>发消息、暂停</div>
+                    <div class="s"><b style="color:#f59e0b">agent</b>大模型产生的<br>动作、思考、系统提示</div>
+                    <div class="s"><b style="color:#06b6d4">environment</b>运行时产生的<br>观察结果、状态、报错</div>
+                    <div class="s"><b style="color:#22c55e">hook</b>钩子脚本产生的<br>PreToolUse 等</div>
+                </div>
+                <div class="glossary">这四种来源覆盖了系统里所有"会说话的角色"。前端渲染时靠 <code>source</code> 快速分流：<code>user</code> 画成你的气泡、<code>agent</code> 画成 AI 的卡片、<code>environment</code> 画成执行结果面板。<strong>观察类事件的 source 永远是 <code>environment</code></strong>（因为它来自沙箱运行时），这个约定后面判断事件类型时会用到。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ActionEvent：给动作套上"信封"</h1></div>
+            <div class="card">
+                <p>Day 02 的 Action 只是"要做的事"本身。真正在流里流动的是 <code>ActionEvent</code>——把 Action 连同一堆元数据包起来（<code>events/action-event.ts:11</code>）：</p>
+<pre><code class="language-typescript">export interface ActionEvent&lt;T extends Action = Action&gt; extends BaseEvent {
+  thought: TextContent[];      // Agent 采取此动作前的"思考"
+  action: T;                   // ★ 真正的动作（Day 02 那些）
+  tool_name: string;           // 被调用的工具名
+  tool_call_id: ToolCallID;    // 大模型返回的 tool call id
+  llm_response_id: EventID;    // 同一次 LLM 响应里的并行动作归组
+  security_risk: SecurityRisk; // ★ 大模型对这个动作的风险评估
+}</code></pre>
+                <div class="anno">读法：<b>一个 ActionEvent 就是"大模型的一次工具调用"。</b>它比裸 Action 多了：<code>thought</code>（把 AI 的心理活动和动作绑在一起，前端能显示"AI 在想什么才决定这么做"）、<code>tool_call_id</code>（对应大模型的函数调用）、以及关键的 <code>security_risk</code>。</div>
+                <div class="baby"><span class="t">security_risk 是安全的第一道闸</span>
+                大模型在产出动作时，会同时给这个动作打一个"风险等级"。比如"读个文件"是低危，"<code>rm -rf</code>"或"往数据库写"是高危。系统可以配置成：<strong>高危动作执行前先暂停、弹出来问你"确定吗？"</strong>（confirmation mode，Day 17 细讲）。这个字段就是这套机制的数据基础。<strong>让 AI 自己评估风险 + 人工确认高危动作 = 敢把执行权交给 AI 的底气。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ObservationEvent 与 action_id 配对</h1></div>
+            <div class="card">
+                <p>观察事件（<code>events/observation-event.ts:6</code>）同样包装，且带一个关键字段 <code>action_id</code>：</p>
+<pre><code class="language-typescript">export interface ObservationEvent&lt;T extends Observation = Observation&gt; extends ObservationBaseEvent {
+  source: "environment";  // 观察永远来自环境
+  observation: T;         // 真正的观察结果（Day 02）
+  action_id: EventID;     // ★ 这个观察，回应的是哪个 ActionEvent
+}</code></pre>
+                <div class="anno">读法：<b><code>action_id</code> 指向"我是哪个动作的结果"——这是动作与观察配对的钥匙。</b>Agent 发出 id=abc 的 ActionEvent（跑命令），命令执行完，环境产出一个 ObservationEvent，它的 <code>action_id=abc</code>，表示"这是 abc 那个命令的输出"。</div>
+                <div class="baby"><span class="t">配对有什么用？看前端的妙用</span>
+                前端渲染时（<code>utils/handle-event-for-ui.ts</code>）有条核心规则：<strong>观察到达时，用 <code>action_id</code> 找到之前那张"动作卡片"，原地替换它</strong>。所以你在界面上看到的是：先出现一张卡片"⏳ 要运行命令 <code>pytest</code>"，命令跑完，同一张卡片变成"✅ 命令 pytest 的输出：..."。不是两张卡片，是一张卡片的"状态更新"。<strong>action_id 就是让"意图"和"结果"能在 UI 上合体的黏合剂。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>事件全家族（<code>openhands-event.ts</code>）</h1></div>
+            <div class="card">
+                <p>所有事件汇成一个联合类型 <code>OpenHandsEvent</code>（<code>openhands-event.ts:25</code>）。三个"主角" + 一堆"配角"：</p>
+                <ul>
+                    <li><strong>主角</strong>：<code>ActionEvent</code>（动作）、<code>ObservationEvent</code>（观察）、<code>MessageEvent</code>（纯聊天消息，user 提问 / assistant 回复）。</li>
+                    <li><strong>系统</strong>：<code>SystemPromptEvent</code>（会话开头发一次，携带系统提示 + 所有可用工具的定义）。</li>
+                    <li><strong>控制/状态</strong>：<code>ConversationStateUpdateEvent</code>（执行状态：idle/running/paused/finished…）、<code>PauseEvent</code>（用户暂停）。</li>
+                    <li><strong>错误</strong>：<code>AgentErrorEvent</code>、<code>ConversationErrorEvent</code>、<code>ServerErrorEvent</code>。</li>
+                    <li><strong>进阶</strong>：<code>StreamingDeltaEvent</code>（流式 token）、<code>Condensation*Event</code>（历史压缩）、<code>HookExecutionEvent</code>（钩子）、<code>ACPToolCallEvent</code>（第三方 agent）。</li>
+                </ul>
+                <div class="glossary"><code>SystemPromptEvent</code> 里的 <code>tools</code> 字段（OpenAI 格式的工具定义）就是"Agent 能用哪些工具"的正式声明——它对应 Day 02 的动作全家福，也对应配置里的 <code>enable_*</code> 开关。会话一开始发这一条，等于告诉大模型"你有这些能力"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>两个重要的进阶事件</h1></div>
+            <div class="card">
+                <p><strong>① StreamingDeltaEvent（流式增量）</strong>（<code>streaming-delta-event.ts</code>）：大模型是一个字一个字生成的。为了让你看到"打字机效果"，每生成一小段就推一个 delta 事件。<strong>关键：它不持久化</strong>——只用于实时渲染。中途重连的客户端拿不到这些碎片，只会拿到最终完整的 <code>MessageEvent</code>。</p>
+                <p><strong>② CondensationEvent（历史压缩）</strong>（<code>condensation-event.ts</code>）：对话越来越长，迟早超出大模型的上下文窗口。压缩事件负责"把一批老事件折叠成一段摘要"——<code>forgotten_event_ids</code> 记录哪些事件被移出上下文、<code>summary</code> 是它们的替代摘要。</p>
+                <div class="baby"><span class="t">历史压缩为什么必须有？</span>
+                大模型能"记住"的内容有上限（上下文窗口，比如 20 万 token）。一个复杂任务可能产生几百个事件，早就超了。如果不处理，要么报错，要么把最早的直接砍掉（丢失重要信息）。<strong>压缩 = 把"跑了 50 步的详细过程"浓缩成"前面我做了 A、B、C，结论是 D"的摘要</strong>，既省 token 又保留关键信息。配置里 <code>[condenser]</code> 段能选压缩策略（Day 04/14 提）。这是长任务 Agent 的必备能力。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>"一次会话是一条事件流"意味着什么？带来哪三个超能力？</li>
+                    <li>BaseEvent 的三个共同字段？事件的四种 source？</li>
+                    <li>ActionEvent 比裸 Action 多了什么？security_risk 干嘛？</li>
+                    <li>action_id 怎么把观察和动作配对？前端如何用它？</li>
+                    <li>StreamingDelta 为什么不持久化？历史压缩解决什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：读事件类型</h3>
+<pre><code class="language-bash"># 1. 所有事件的联合类型
+sed -n '25,47p' frontend/src/types/v1/core/openhands-event.ts
+
+# 2. BaseEvent + source
+sed -n '10,25p' frontend/src/types/v1/core/base/event.ts
+
+# 3. ActionEvent / ObservationEvent 包装
+sed -n '11,72p' frontend/src/types/v1/core/events/action-event.ts
+sed -n '6,49p' frontend/src/types/v1/core/events/observation-event.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：概念够了，该跑起来了！<strong>运行一个 OpenHands</strong>——Docker/CLI 三种启动方式、<code>config.template.toml</code> 的关键配置（runtime/agent 工具开关/sandbox 镜像/安全），以及配置如何决定 Agent 的能力。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 Action</a>
+                <a href="openhands-day04.html" style="color:var(--accent-green);">Day 04 · 运行一个 OpenHands &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
