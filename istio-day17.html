@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · EnvoyFilter — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#66bb6a,#4a7fd6);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">EnvoyFilter · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 逃生舱</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · CRD 结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CRD→wrapper</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · patch 应用</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · crash 保护</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 生成流水线插入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Higress 的 WasmPhase</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 遥测</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day18.html" class="nav-link" style="color:#66bb6a;">Day 18 istioctl &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 遥测/扩展/安装</span>
+            <h1 class="part-title">EnvoyFilter（Higress 重用）</h1>
+            <p class="part-desc">这是理解 Higress 怎么在 Istio 上做增强的关键一课。EnvoyFilter 是"逃生舱"——直接给 istiod 生成的 Envoy 配置打补丁。<strong>Higress 大量用它来实现 Wasm 插件、自定义 filter</strong>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>逃生舱</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">EnvoyFilter = "配置的最后一道手动改写"</span>
+                istiod 从 VirtualService/DestinationRule 等高层 CRD 生成 Envoy 配置（Day 07-08）。<strong>但高层 CRD 覆盖不了 Envoy 的所有能力——有些 Envoy 高级功能（特定 filter、特殊参数）Istio 没暴露高层 API。EnvoyFilter 就是"逃生舱"：让你<strong>直接对 istiod 生成的 Envoy 配置打补丁</strong>（加一个 filter、改一个字段、删一个东西）。</strong>好比"生成的配置我不满意，我手动改几处"。<strong>它强大但危险（直接操作 Envoy 底层配置，写错会崩），是"最后手段"。而 Higress 恰恰重度依赖它——因为 Higress 的很多增强能力（Wasm 插件、AI 网关 filter）就是通过 EnvoyFilter 注入的。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>CRD 结构</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/envoyfilter.go:36 EnvoyFilterWrapper
+//   Patches map[ApplyTo][]*EnvoyFilterConfigPatchWrapper  // 按 ApplyTo 分组
+//   Priority
+// :81 EnvoyFilterConfigPatchWrapper：
+//   Value proto.Message（编译好的 patch 值）、Match、ApplyTo、Operation
+//   WasmPhase / WasmPriority（:86-87，Higress 定制！）</code></pre>
+                <div class="anno">读法：<b>EnvoyFilter 由一组 patch 组成。每个 patch：<code>ApplyTo</code>（改哪类对象：LISTENER/HTTP_FILTER/CLUSTER…）、<code>Match</code>（匹配哪些具体对象）、<code>Operation</code>（怎么改：ADD/MERGE/REMOVE/INSERT_BEFORE…）、<code>Value</code>（改成什么）。<strong>Higress 加了 <code>WasmPhase</code>/<code>WasmPriority</code></strong>——用于 Wasm 插件的执行阶段和优先级排序（L07）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CRD → wrapper</h1></div>
+            <div class="card">
+<pre><code class="language-go">// envoyfilter.go:115 convertToEnvoyFilterWrapper
+//   逐条 ConfigPatches 转换
+//   cpw.WasmPhase/WasmPriority = ...（:166 Higress）
+//   xds.BuildXDSObjectFromStruct（:172）非严格模式编译 patch value 成 proto
+//   wellKnownVersions（:102）把常见版本正则优化成前缀匹配</code></pre>
+                <div class="anno">读法：<b>EnvoyFilter CRD 被编译成内部 wrapper（把 patch value 从 YAML/struct 编译成 proto 对象）。<strong>非严格模式</strong>编译——为了兼容不同 Envoy API 版本（patch 可能引用较新/较旧的字段）。版本匹配正则优化（<code>wellKnownVersions</code>）避免每次跑正则的开销。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>patch 应用</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/networking/core/envoyfilter/ 三个应用入口：
+//   listener_patch.go:40 ApplyListenerPatches
+//   cluster_patch.go:34 ApplyClusterMerge
+//   rc_patch.go:34 ApplyRouteConfigurationPatches
+// Operation 语义：MERGE（合并字段）、REMOVE（删除）、ADD（新增）、INSERT_BEFORE/AFTER（过滤器链插入）</code></pre>
+                <div class="anno">读法：<b>生成 Listener/Cluster/Route 后（Day 08），在这里应用 EnvoyFilter 补丁。<code>MERGE</code> 合并字段（改现有对象）、<code>ADD</code> 新增、<code>INSERT_BEFORE/AFTER</code> 在过滤器链的特定位置插入过滤器。</b>这就是 Day 08 提到的 <code>patchListeners()</code>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>crash 保护</h1></div>
+            <div class="card">
+<pre><code class="language-go">// listener_patch.go:40 ApplyListenerPatches
+//   用 runtime.HandleCrash（:46）包裹 —— patch 出错 panic 不会拖垮整个推送
+//   回退到 patch 前的 listener（:51）</code></pre>
+                <div class="baby"><span class="t">为什么 patch 要"崩溃保护"？</span>
+                EnvoyFilter 是用户手写的底层补丁——很容易写错（引用不存在的字段、类型不匹配）。<strong>如果一个坏 patch 导致 panic，可能拖垮整个 istiod 的配置推送（影响所有 Envoy）。所以应用 patch 时用 <code>runtime.HandleCrash</code> 包裹：某个 patch 崩了，捕获它、回退到打补丁前的配置、继续处理其他的——<strong>一个坏 patch 不会连累全局</strong>。</strong>这是"隔离故障"的防御性设计——对"用户可能写错的强大功能"必须加保护网。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>生成流水线插入</h1></div>
+            <div class="card">
+                <p>EnvoyFilter 在 core 生成流程的固定点被应用：<code>cluster.go</code> 取 <code>Push.EnvoyFilters(proxy)</code> 后 <code>ApplyClusterMerge</code>；<code>gateway.go</code>/<code>httproute.go</code> 调 <code>ApplyRouteConfigurationPatches</code>；listener 在 <code>patchListeners()</code>（Day 08）。</p>
+                <div class="anno">读法：<b>EnvoyFilter 是生成流水线的"最后一道工序"——istiod 先按高层 CRD 生成基础配置，然后过一遍 EnvoyFilter 补丁做微调/增强。所以它能改动几乎任何生成结果。</b>这就是它作为"逃生舱"的位置——在标准生成之后、下发之前。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Higress 的 WasmPhase</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Higress 怎么用 EnvoyFilter 做插件生态</b>：<br>
+                Higress 的 Wasm 插件（用 wasm-go 写，本系列最后一站）<strong>就是通过 EnvoyFilter 注入到 Envoy 的</strong>——把 Wasm filter 用 <code>INSERT_BEFORE/AFTER</code> 插进过滤器链。<br>
+                Higress 给 EnvoyFilter 加了 <code>WasmPhase</code>（执行阶段：认证/统计/…）和 <code>WasmPriority</code>（同阶段内的优先级）——<strong>让多个 Wasm 插件能按"阶段 + 优先级"有序编排</strong>（比如认证插件在限流插件之前）。<br>
+                <strong>所以 EnvoyFilter 是 Istio（Day 17）、Envoy Wasm（Envoy 课 Day 17）、wasm-go（本系列末站）三者的连接枢纽：wasm-go 写插件 → 编译成 wasm → Higress 用 EnvoyFilter 把它插进 Envoy 过滤器链 → Envoy 的 Wasm runtime 执行。</strong>理解了这条链，就理解了整个 Higress 插件生态的技术底座。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>EnvoyFilter 为什么叫"逃生舱"？它在什么时候用？</li>
+                    <li>patch 的 ApplyTo/Operation/Match/Value 各是什么？</li>
+                    <li>为什么 patch 应用要 crash 保护？</li>
+                    <li>EnvoyFilter 在生成流水线的什么位置？</li>
+                    <li>Higress 的 WasmPhase/WasmPriority 干什么？它怎么连接 Istio/Envoy/wasm-go？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'EnvoyFilterWrapper\|WasmPhase\|convertToEnvoyFilterWrapper' pilot/pkg/model/envoyfilter.go
+grep -n 'func ApplyListenerPatches\|runtime.HandleCrash' pilot/pkg/networking/core/envoyfilter/listener_patch.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>istioctl CLI</strong>——运维网格的命令行工具：install（安装）、analyze（静态体检）、proxy-config（看 Envoy 实际配置）、proxy-status（对比期望 vs 实况）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 遥测</a>
+                <a href="istio-day18.html" style="color:#66bb6a;">Day 18 · istioctl CLI &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
