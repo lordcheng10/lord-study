@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 数据流与拓扑执行 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fanin{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 4px;font-size:12px;flex-wrap:wrap}
+        .fanin .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary)}
+        .fanin .a{color:#06b6d4;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">数据流与拓扑执行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 核心问题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 单节点执行</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 输出喂给下游</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 攒齐输入才入队</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · fan-in 汇聚</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 静态连线回填</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 原子锁防重复</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 执行引擎</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 Scheduler &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 执行引擎</span>
+            <h1 class="part-title">数据流与拓扑执行</h1>
+            <p class="part-desc">拓扑执行的最后一块拼图。一个节点跑完，输出怎么精确地"喂"给下游？多个上游的节点怎么"攒齐"再跑？今天读 <code>_enqueue_next_nodes</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>核心问题</h1></div>
+            <div class="card">
+                <p>Day 12 的调度循环说"节点产出的输出决定下游哪些节点入队"。今天回答具体<strong>怎么做到</strong>：① 一个节点的输出怎么找到该连给谁；② 一个下游节点有多个输入口（来自多个上游），怎么等它们都到齐才跑。</p>
+                <div class="baby"><span class="t">难点在"多入"（fan-in）</span>
+                如果图是一条直线（A→B→C），很简单：A 完了给 B，B 完了给 C。但真实图有<strong>汇聚</strong>——比如"生成报告"节点需要"研究结果"和"数据分析"<strong>两个</strong>上游都完成才能开始。这时不能研究一完就跑报告（数据分析还没好）。<strong>必须"攒齐所有输入才入队"——这是拓扑执行最核心也最微妙的地方。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>单节点执行 execute_node</h1></div>
+            <div class="card">
+                <p><code>execute_node</code>（<code>manager.py:142</code>）跑一个节点：校验输入 → 注入凭证（Day 08）→ 调 <code>block.execute()</code>（异步生成器）逐个产出：</p>
+<pre><code class="language-python"># manager.py:341（概念）
+async for output_name, output_data in block.execute(input_data, **extra_exec_kwargs):
+    yield output_name, output_data   # Block 可流式产出多个 (口名, 值)</code></pre>
+                <div class="anno">读法：<b>Block 的 run 是异步生成器（Day 02），所以一个节点执行可以陆续产出多个 (输出口名, 值)。</b>每产出一个，就交给下一步（L03）去看"这个输出该喂给哪些下游"。finally 里释放凭证锁、累加统计。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>输出喂给下游 _enqueue_next_nodes</h1></div>
+            <div class="card">
+                <p><code>_enqueue_next_nodes</code>（<code>manager.py:389</code>）——数据流的引擎。对当前节点的每条 <code>output_link</code>：</p>
+<pre><code class="language-python"># 概念流程
+# 1. parse_execution_output 判断输出值是否匹配这条连线的 source_name
+# 2. 匹配 → upsert_execution_input 把值写给下游节点执行（攒输入）
+# 3. validate_exec 检查下游输入齐了吗：
+#      不齐 → 只落库，不入队
+#      齐了 → 标 QUEUED，加进执行队列</code></pre>
+                <div class="anno">读法：<b>一个输出口的值，顺着连它的每条 Link，写进对应下游节点的输入口。</b>关键在第 3 步——写完后<strong>检查这个下游节点的所有必需输入是否都齐了</strong>，齐了才入队执行。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>攒齐输入才入队（核心规则）</h1></div>
+            <div class="card">
+                <p>关键机制 <code>upsert_execution_input</code>（<code>data/execution.py:862</code>）：把上游的值"攒"到下游节点执行上。</p>
+<pre><code class="language-python"># 找一个"还没有这个输入口、且 INCOMPLETE"的下游节点执行，把值插进去
+# 找不到就新建一个 INCOMPLETE 执行
+# —— 陆续到来的多个输入被"攒"到同一次执行上</code></pre>
+                <div class="baby"><span class="t">"攒输入"是怎么回事？</span>
+                一个下游节点有 3 个输入口，分别来自 3 个上游。这 3 个上游不会同时完成——A 先完成给了口1（此时口2、口3还空）、然后 C 完成给了口3、最后 B 完成给了口2。<strong><code>upsert_execution_input</code> 把陆续到来的值攒到<strong>同一个</strong>下游节点执行上（一个 INCOMPLETE 状态的执行记录），像往一个篮子里陆续放东西。每次放完就检查"篮子满了吗（所有必需输入都有了吗）"——满了才标 QUEUED 入队。</strong>这就实现了"等所有输入到齐才跑"。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>fan-in 汇聚 + fan-out 分叉</h1></div>
+            <div class="card">
+                <div class="fanin">
+                    <div style="display:flex;flex-direction:column;gap:4px"><span class="n">研究 Block</span><span class="n">分析 Block</span></div>
+                    <span class="a">都完成才 →</span>
+                    <span class="n" style="border-color:#22c55e">报告 Block<br><small>等两个输入齐</small></span>
+                </div>
+                <div class="anno">读法：<b>"攒齐输入才入队"优雅地处理了 fan-in（多入汇聚）——报告节点耐心等研究和分析都完成。</b>同理 fan-out（一出多入）也自然支持：一个节点的一个输出口可以连多条 Link，每条都触发一个下游（一个输出喂给多个下游）。</div>
+                <div class="baby"><span class="t">为什么这套机制能处理任意复杂的图？</span>
+                无论图多复杂（分支、汇聚、并行、菱形），本质都是"节点等输入齐了就跑、跑完把输出喂给下游"。<strong>只要每个节点都遵守"输入齐了才跑"，整张图的执行顺序就自动正确——不需要预先算好一个全局执行顺序。</strong>这是数据流驱动的美妙之处：局部规则（等输入齐）保证全局正确（拓扑顺序）。和 eino 的 channel"多上游合并"、Pregel 引擎异曲同工。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>静态连线回填</h1></div>
+            <div class="card">
+                <p>Day 03/11 讲的静态连线（<code>is_static</code>）在这里有特殊处理（<code>manager.py:458</code>）：补齐下游缺失的静态输入用"最近一次执行的输入值"回填；若连线是静态的，还会把之前"卡着等这个静态值"的 INCOMPLETE 执行重新补齐、重新入队（<code>:501</code>）。</p>
+                <div class="baby"><span class="t">静态连线为什么要特殊处理？</span>
+                普通输入"用一次就消费掉"，但静态输入（如配置值、循环里的常量）要<strong>能被反复用</strong>。想象一个循环：每轮都要用同一个"配置"值。如果配置值用一次就没了，第二轮就卡住。<strong>静态连线回填 = "这个值一直可用，谁等它就随时给"——支持循环、支持一值多用。</strong>这让 AutoGPT 的图能表达迭代循环（不只是一次性 DAG）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>原子锁防重复</h1></div>
+            <div class="card">
+                <p><code>_enqueue_next_nodes</code> 用分布式锁 <code>synchronized(f"upsert_input-{next_node_id}-{graph_exec_id}")</code>（<code>manager.py:446</code>）保证"同一下游节点的输入攒集是<strong>原子</strong>的"。</p>
+                <div class="baby"><span class="t">为什么攒输入要加锁？</span>
+                想象两个上游节点<strong>几乎同时</strong>完成，都要给下游节点写输入。如果不加锁，可能两个都读到"篮子里还差 1 个"、都以为"我写完还差、不该入队"——结果<strong>输入其实齐了却没人入队</strong>（下游卡死）；或者都判断"齐了"、<strong>重复入队两次</strong>（下游跑两遍）。<strong>加锁让"写输入 + 检查是否齐 + 入队"这一串操作原子化——同一时刻只有一个上游在处理，不会错判。</strong>并发编程里，"检查后操作"（check-then-act）必须加锁，否则有竞态。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>拓扑执行的核心难点是什么？（fan-in 多入汇聚）</li>
+                    <li>输出怎么找到该喂给谁？（顺着 output_link 匹配 source_name）</li>
+                    <li>"攒齐输入才入队"怎么实现？（upsert_execution_input 攒 + validate 检查齐没齐）</li>
+                    <li>局部规则怎么保证全局拓扑正确？</li>
+                    <li>静态连线回填支持什么？攒输入为什么要加锁？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '389,470p' $P/executor/manager.py | head -50    # _enqueue_next_nodes
+sed -n '862,936p' $P/data/execution.py | head -40       # upsert_execution_input
+grep -n 'synchronized\|is_static' $P/executor/manager.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>Scheduler 定时执行</strong>——让 Agent 定时/周期性自动跑（"每天早上 8 点")。基于 APScheduler、持久化 JobStore、cron 兼容处理、孤儿任务自愈。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 执行引擎</a>
+                <a href="autogpt-day14.html" style="color:var(--accent-green);">Day 14 · Scheduler &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

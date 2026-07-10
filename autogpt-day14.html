@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · Scheduler 定时执行 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">Scheduler 定时执行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要定时</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · APScheduler 基础</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 持久化 JobStore</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 同步/异步桥接</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 触发即回主链路</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · cron 兼容坑</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 孤儿任务自愈</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 数据流</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 WebSocket &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 执行引擎</span>
+            <h1 class="part-title">Scheduler 定时执行</h1>
+            <p class="part-desc">让 Agent 定时/周期性自动运行（"每天早上 8 点跑"）。今天读 <code>executor/scheduler.py</code>：基于 APScheduler、持久化、cron 兼容、孤儿任务自愈。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要定时</h1></div>
+            <div class="card">
+                <p>回忆 Day 01 的例子："每天早上把新闻头条总结后发到我邮箱"。这个"每天早上"就靠 Scheduler——让 Agent <strong>无需人工触发、按时间表自动跑</strong>。这正是"持续运行的 AI Agent"（AutoGPT 的定位）的关键。</p>
+                <div class="baby"><span class="t">定时 = "持续 Agent"的核心</span>
+                手动触发的 Agent 是"工具"（你用它时才跑）。<strong>定时/周期触发的 Agent 是"员工"（它自己按时干活，你不用管）。</strong>比如"每小时检查一次竞品价格""每周一生成周报""每天备份数据"——这些自动化才是平台"continuous AI agents"承诺的价值。Scheduler 让 Agent 从"被动工具"变成"主动员工"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>APScheduler 基础</h1></div>
+            <div class="card">
+                <p>Scheduler 基于 <strong>APScheduler</strong>（Python 成熟的定时任务库）的 <code>BackgroundScheduler</code>，是一个独立的 RPC 服务（<code>AppService</code>）。它支持几种触发器：</p>
+                <ul>
+                    <li><strong>cron 触发</strong>：按 cron 表达式（"0 8 * * *" = 每天 8 点）。</li>
+                    <li><strong>interval 触发</strong>：按固定间隔（每 30 分钟）。</li>
+                    <li><strong>date 触发</strong>：在某个具体时刻跑一次。</li>
+                </ul>
+                <div class="glossary"><b>为什么用 APScheduler 而不自己写？</b> 定时任务的坑很多：错过了怎么补、重启后任务丢不丢、时区、并发实例控制……APScheduler 是久经考验的成熟库，把这些都处理好了。<strong>成熟的基础设施直接用，别重造轮子——AutoGPT 用 litellm 接模型、用 APScheduler 做定时、用 RabbitMQ 做队列，都是这个原则。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>持久化 JobStore</h1></div>
+            <div class="card">
+                <p>定时任务用 <code>SQLAlchemyJobStore</code> 存进 Postgres（<code>scheduler.py:1302</code>，表 <code>apscheduler_jobs</code>）——<strong>进程重启不丢</strong>。<code>job_defaults</code>（<code>:1308</code>）有几个关键设置：</p>
+<pre><code class="language-python">coalesce=True            # 错过的重复任务只补跑最新一次（别补一堆）
+max_instances=1000
+misfire_grace_time=None  # 永不因错过而丢弃</code></pre>
+                <div class="baby"><span class="t">这几个设置解决什么真实问题？</span>
+                <strong>持久化</strong>：定时任务存 DB，服务重启/宕机后任务还在（不会"重启后所有定时都没了"）。<strong>coalesce=True</strong>：假设服务停了 3 小时、期间某个"每小时任务"本该跑 3 次——恢复后不补跑 3 次（那会瞬间挤爆），只补跑最新 1 次。<strong>misfire_grace_time=None</strong>：即使错过了执行时刻，也不丢弃、照样跑。<strong>这些设置保证"定时任务在各种异常（重启、卡顿）下仍可靠"——生产级定时的必备考量。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>同步/异步桥接</h1></div>
+            <div class="card">
+                <p>APScheduler 跑在线程池（同步），但平台业务逻辑是 async 的。<code>run_async</code>（<code>scheduler.py:148</code>）用 <code>run_coroutine_threadsafe</code> 把协程丢到一个常驻 event loop 线程执行——搭起"同步调度器 ↔ 异步业务"的桥。</p>
+                <div class="baby"><span class="t">为什么需要"桥接"？</span>
+                APScheduler 到点了会在它的线程池里调你的函数（同步世界）。但你的业务函数（发起图执行）是 <code>async</code> 的（异步世界）。<strong>两个世界不能直接互调——同步线程不能直接 <code>await</code> 协程。</strong><code>run_coroutine_threadsafe</code> 就是那座桥：把异步协程"提交"到一个专门的异步事件循环去跑，同步这边等它结果。<strong>混合同步库（APScheduler）和异步业务是常见场景，这个桥接模式很实用。</strong>（CrewAI 的调度器也是同样处理。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>触发即回主链路</h1></div>
+            <div class="card">
+                <p>定时时刻到了，APScheduler 调 <code>execute_graph</code>（<code>scheduler.py:159</code>）→ <code>_execute_graph</code> → 调 <code>add_graph_execution</code>——<strong>又回到 Day 05 那条"发 MQ → 引擎执行"的主链路</strong>！</p>
+                <div class="anno">读法：<b>定时触发和用户手动点"运行"<strong>殊途同归</strong>——最终都调 <code>add_graph_execution</code> 发 MQ、由执行引擎消费执行。</b>Scheduler 只是"按时间自动调用"那个入口，执行逻辑完全复用。</div>
+                <div class="baby"><span class="t">复用主链路的好处</span>
+                无论触发来源是"用户点击""API 调用"还是"定时器"，它们都汇聚到<strong>同一个执行入口</strong>（<code>add_graph_execution</code>）。这意味着：定时执行和手动执行走完全一样的流程（扣费、拓扑执行、实时推送、计费对账）——<strong>不用为定时执行单独写一套逻辑。</strong>"多种触发源 → 同一执行入口"是清晰架构的标志。定时任务参数用 <code>kind</code> 字段区分（graph 执行 vs copilot 任务），是"多态判别器"设计。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>cron 兼容坑</h1></div>
+            <div class="card">
+                <p>一个真实的坑（<code>scheduler.py:1143</code> 的 <code>_normalize_cron_day_of_week</code>）：<strong>APScheduler 的星期编号（0=周一）和 Unix cron（0=周日）不一致</strong>，需要转换，还要处理范围回绕（如 <code>6-2</code> 跨周末）。</p>
+                <div class="baby"><span class="t">这种"兼容坑"为什么值得讲？</span>
+                因为它是<strong>真实工程里最容易出错、最难查的那类 bug</strong>——两个系统对"同一个概念"（星期几）有不同约定。如果不转换，用户设"每周日跑"，实际却在周一跑（差一天），而且很难发现（要等一周才知道）。<strong>集成第三方库/系统时，务必核对"约定是否一致"（编号从 0 还是 1、时区、大小端…）。</strong>这类"边界约定不一致"的坑，是老手才会警惕的。AutoGPT 专门写了转换函数处理它。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>孤儿任务自愈</h1></div>
+            <div class="card">
+                <p>定时任务运行时，如果它要跑的图<strong>已经被删了</strong>（或移出库、校验失败），怎么办？Scheduler 会捕获异常并<strong>自动删除这个孤儿定时任务</strong>（<code>scheduler.py:189</code>、<code>_cleanup_orphaned_schedules_for_graph</code>，<code>:372</code>）。</p>
+                <div class="baby"><span class="t">"自愈"为什么重要？</span>
+                想象你设了个"每天跑 Agent X"的定时，后来删了 Agent X。如果不处理，这个定时任务每天都会触发、每天都失败报错——<strong>产生无穷无尽的错误日志、浪费资源。</strong>自愈 = "发现要跑的图没了，就自动把这个定时任务也删掉"——系统自己清理掉不再有效的任务。<strong>另外添加定时任务时会先 <code>validate_and_construct_node_execution_input</code> 校验图能跑（<code>:1556</code>）——防止"定时任务运行时才炸"，把错误提前到设置时。</strong>这些自愈/前置校验让定时系统健壮、不留垃圾。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>定时为什么是"持续 Agent"的核心？</li>
+                    <li>持久化 JobStore + coalesce + misfire_grace 各解决什么异常？</li>
+                    <li>同步/异步桥接为什么需要？</li>
+                    <li>定时触发和手动触发为什么殊途同归？</li>
+                    <li>cron 星期编号坑是什么？孤儿任务怎么自愈？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+grep -n 'SQLAlchemyJobStore\|coalesce\|misfire_grace\|run_async' $P/executor/scheduler.py | head
+grep -n 'def _execute_graph\|def add_graph_execution_schedule\|_normalize_cron_day_of_week\|_cleanup_orphaned' $P/executor/scheduler.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>WebSocket 实时更新</strong>——执行过程如何实时推送到前端画布。鉴权、消息路由、Redis Pub/Sub → WebSocket 转发。你在画布上看节点实时亮起的原理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 数据流</a>
+                <a href="autogpt-day15.html" style="color:var(--accent-green);">Day 15 · WebSocket &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
