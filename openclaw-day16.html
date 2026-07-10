@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · 沙箱与运行时 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f97316}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#f97316);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">沙箱与运行时 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要沙箱</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三份镜像</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 默认收紧配置</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 要不要沙箱化</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 容器生命周期</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 防配置注入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · exec 进沙箱</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 归一化</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day17.html" class="nav-link" style="color:#f97316;">Day 17 安全 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 运行时/安全/部署</span>
+            <h1 class="part-title">沙箱与运行时</h1>
+            <p class="part-desc">助理会执行工具、跑命令、读写文件——怎么保证它（或被注入的恶意指令）不搞坏你的机器？答案是 Docker 沙箱。代码在 <code>src/agents/sandbox/</code>（~40 文件），底层调 <code>docker</code> CLI。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要沙箱</h1></div>
+            <div class="card">
+                <p>助理的工具能跑 shell 命令、改文件。如果模型被提示注入攻击、或自己犯错跑了 <code>rm -rf</code>，直接在你的真实系统上执行就是灾难。<strong>沙箱把工具执行关进一个隔离的 Docker 容器</strong>：容器里怎么折腾都伤不到宿主。</p>
+                <div class="baby"><span class="t">沙箱 = "隔离的实验室"</span>
+                做危险化学实验要在通风橱里做，不在客厅。<strong>沙箱就是给助理的"实验室"：它想执行的命令、读写的文件，都发生在一个和你真实系统隔离的容器里。</strong>容器可以断网、只读根文件系统、限制内存 CPU、丢弃所有特权。即使里面跑了恶意命令，也出不了这个"实验室"。<strong>对一个会自主执行代码的 AI 助理，沙箱不是可选项而是必需——这是"假设模型可能被攻破"的防御姿态（Day 17 详讲信任模型）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三份镜像</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>Dockerfile</th><th>基于</th><th>内容/用途</th></tr>
+                    <tr><td><code>Dockerfile.sandbox</code></td><td>debian:bookworm-slim</td><td>基础：bash/curl/git/jq/python3/ripgrep，非登录用户 sandbox，<code>CMD sleep infinity</code></td></tr>
+                    <tr><td><code>Dockerfile.sandbox-common</code></td><td>基础镜像 +</td><td>语言工具链：nodejs/python3/golang/rustc/cargo，可选 pnpm/bun/brew</td></tr>
+                    <tr><td><code>Dockerfile.sandbox-browser</code></td><td>基础镜像 +</td><td>chromium/xvfb/x11vnc/novnc，EXPOSE 9222(CDP)/5900(VNC)/6080(noVNC)</td></tr>
+                </table>
+                <div class="anno">读法：<b><code>CMD sleep infinity</code> 很关键——容器不是"跑一个命令就退出"，而是<strong>常驻空转</strong>，命令通过 <code>docker exec</code> 注入进去执行（L07）。</b>这样一个容器可复用多次执行，不用每条命令都起新容器（快）。浏览器沙箱额外提供 CDP/VNC，让助理能操控一个隔离的浏览器。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>默认极度收紧</h1></div>
+            <div class="card">
+                <p><code>resolveSandboxDockerConfig</code>（<code>config.ts:76-120</code>）的安全默认：</p>
+<pre><code class="language-typescript">readOnlyRoot: true          // 根文件系统只读
+tmpfs: ["/tmp","/var/tmp","/run"]   // 只有这几个临时目录可写（内存盘）
+network: "none"             // 默认断网！
+capDrop: ["ALL"]            // 丢弃所有 Linux capability
+env: { LANG: "C.UTF-8" }    // 环境变量默认几乎为空
+// mode 默认 "off"（config.ts:191）；workspaceAccess 默认 "none"</code></pre>
+                <div class="baby"><span class="t">"默认拒绝一切，按需放开"</span>
+                注意这些默认值有多严：<strong>根目录只读、断网、无任何特权、环境变量清空。</strong>这是安全领域的黄金原则——<strong>默认最小权限（deny by default），需要什么再显式打开</strong>。要让沙箱能联网？显式配 network。要能写工作区？显式配 workspaceAccess。<strong>这样即使配置疏忽，默认也是最安全的状态，而不是"默认全开、忘了关就出事"。</strong>还有三个 <code>dangerouslyAllow*</code> break-glass 开关（config.ts:27-31）——名字带 dangerously，逼你意识到风险才敢开。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>要不要沙箱化</h1></div>
+            <div class="card">
+                <p><code>shouldSandboxSession</code>（<code>runtime-status.ts:10-18</code>）按 <code>mode</code> 决定：</p>
+<pre><code class="language-typescript">// mode = "off"      → 不沙箱（默认，直接在宿主执行）
+// mode = "all"      → 全部沙箱
+// mode = "non-main" → 只要不是"主 session"就沙箱化</code></pre>
+                <div class="anno">读法：<b><code>non-main</code> 模式很实用：你自己直接对话的主会话可能需要完整能力（不沙箱），但助理派生的子任务/来自外部的会话就沙箱化——按"信任级别"区别对待。</b>被工具策略拦截时会给人类可读的诊断（提示改哪个配置、跑 <code>openclaw sandbox explain</code>）。默认 off 是因为个人自部署场景信任度高（Day 17 信任模型）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>容器生命周期</h1></div>
+            <div class="card">
+                <p>核心 <code>src/agents/sandbox/docker.ts</code>（567 行）：</p>
+                <ul>
+                    <li><code>execDockerRaw</code>（<code>:67</code>）：<code>spawn("docker", args)</code> 封装，找不到 docker 抛友好错误。</li>
+                    <li><code>buildSandboxCreateArgs</code>（<code>:317</code>）：拼 <code>docker create</code> 参数——先 <code>validateSandboxSecurity</code>（L06），再加 <code>--read-only</code>/<code>--tmpfs</code>/<code>--network</code>/<code>--cap-drop</code>/<strong>强制 <code>--security-opt no-new-privileges</code></strong>/资源限制（pids/memory/cpus）。</li>
+                    <li><code>ensureSandboxContainer</code>（<code>:492</code>）：幂等保证容器存在，用 <code>computeSandboxConfigHash</code> 检测配置变化 → 不匹配则重建。</li>
+                </ul>
+                <div class="anno">读法：<b><code>no-new-privileges</code> 强制加上：禁止容器内进程提权（比如通过 setuid 程序变 root）。配置哈希让"改了沙箱配置自动重建容器"，避免旧配置残留。</b>容器记入 registry <code>~/.openclaw/sandbox/containers.json</code>，定期 <code>prune</code> 清理过期的。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>防配置注入</h1></div>
+            <div class="card">
+                <p>创建容器前 <code>validateSandboxSecurity</code>（<code>validate-sandbox-security.ts</code>，344 行）做校验，防"配置注入"：</p>
+                <ul>
+                    <li><code>BLOCKED_HOST_PATHS</code>（<code>:18-33</code>）：禁止把 <code>/etc /proc /sys /dev /root</code> 及各种 <code>docker.sock</code> 挂进容器。</li>
+                    <li><code>validateBindMounts</code>（<code>:234</code>）：拒绝非绝对路径、覆盖 <code>/</code>、目标是保留路径；含<strong>软链接逃逸加固</strong>（解析真实路径再查）。</li>
+                    <li><code>validateNetworkMode</code>：禁 <code>network=host</code>/<code>container:*</code>。</li>
+                    <li>禁 seccomp/apparmor <code>unconfined</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么挂载 docker.sock 是大忌？</span>
+                <code>/var/run/docker.sock</code> 是 Docker 守护进程的控制接口。<strong>如果把它挂进沙箱容器，容器里就能命令 Docker 起一个新的特权容器、挂载宿主根目录——等于直接逃出沙箱、拿下整台宿主机。</strong>这是容器逃逸的经典手法。所以 OpenClaw 明确把它列入禁止挂载清单。<strong>软链接逃逸加固也是同理：防止用 <code>/safe/link → /etc</code> 这种软链接绕过路径检查。</strong>这些校验体现了"沙箱设计者要主动想清楚所有逃逸路径并堵死"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>exec 进沙箱执行</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/agents/bash-tools.shared.ts:49 buildDockerExecArgs
+// docker exec -i [-t] -w &lt;workdir&gt; -e K=V … &lt;container&gt; /bin/sh -lc "&lt;cmd&gt;"
+//   特意跳过宿主 PATH（防 Windows PATH 污染），用 OPENCLAW_PREPEND_PATH 前置
+// 环境变量先经 sanitizeEnvVars 过滤（下条 Day 17 讲）
+
+// exec host 路由 src/infra/exec-approvals.ts:10
+type ExecHost = "sandbox" | "gateway" | "node";
+// 默认偏好 sandbox；但若该 session 未激活沙箱，回落到 gateway 宿主执行（host-first）</code></pre>
+                <div class="anno">读法：<b>命令通过 <code>docker exec</code> 注入到常驻容器里跑（L02）。文件操作走 fs-bridge（<code>fs-bridge.ts</code>）同样用 docker exec。</b>三种 exec host（sandbox/gateway/node）：优先沙箱，没沙箱就宿主（gateway），或推给连接的节点设备（node，Day 18）。宿主执行前还有 <code>sanitizeHostBaseEnv</code>/<code>validateHostEnv</code> 拦危险变量。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么会自主执行代码的助理必须有沙箱？</li>
+                    <li>三份镜像各是什么？CMD sleep infinity 为什么这么设？</li>
+                    <li>默认收紧配置有哪些？"deny by default" 好在哪？</li>
+                    <li>三种沙箱 mode 的区别？</li>
+                    <li>为什么禁止挂载 docker.sock？exec 怎么进沙箱执行？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+cat Dockerfile.sandbox
+sed -n '76,120p' src/agents/sandbox/config.ts        # 默认收紧
+sed -n '18,33p' src/agents/sandbox/validate-sandbox-security.ts  # 禁挂路径</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>安全纵深防御</strong>——SECURITY.md 的信任模型（为什么默认 off）、exec 审批系统、提示词注入防御（包裹+警告）、宿主环境变量策略、密钥处理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 归一化</a>
+                <a href="openclaw-day17.html" style="color:#f97316;">Day 17 · 安全纵深防御 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
