@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 入口与启动流程 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#e11d48);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">入口与启动流程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · bin 入口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · openclaw.mjs</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · entry.ts → runCli</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 快速路径</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Commander 命令</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · gateway 命令</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · onboard 向导</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day03.html" class="nav-link" style="color:#f97316;">Day 03 Gateway &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 入门与全景</span>
+            <h1 class="part-title">入口与启动流程</h1>
+            <p class="part-desc">你敲 <code>openclaw gateway</code> 回车，到底发生了什么？今天追一遍启动链：<code>openclaw.mjs</code>（bin）→ <code>dist/entry.js</code> → <code>runCli</code>（Commander）→ 对应命令。以及 <code>openclaw onboard</code> 配置向导。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>bin 入口</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// package.json:16
+"bin": { "openclaw": "openclaw.mjs" }
+"main": "dist/index.js"</code></pre>
+                <div class="baby"><span class="t">"bin" 是什么？</span>
+                <code>package.json</code> 的 <code>bin</code> 字段声明"这个包提供哪些命令行工具"。<strong>你 <code>npm install -g openclaw</code> 后，系统里就有了 <code>openclaw</code> 命令，它指向 <code>openclaw.mjs</code> 这个文件。</strong>所以你敲 <code>openclaw gateway</code>，实际就是 <code>node openclaw.mjs gateway</code>。<code>.mjs</code> 是 ES Module 格式的 JS 文件。这是所有 Node CLI 工具的标准入口机制。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>openclaw.mjs（薄壳引导）</h1></div>
+            <div class="card">
+                <p><code>openclaw.mjs</code> 是个"薄壳"，只做三件事：</p>
+<pre><code class="language-typescript">// 1. 检查 Node 版本（要求 >= 22.12）
+const MIN_NODE_MAJOR = 22, MIN_NODE_MINOR = 12;
+ensureSupportedNodeVersion();   // 不满足 → 打印 nvm 升级指引并退出
+
+// 2. 开启 Node 编译缓存（加速后续启动）
+if (module.enableCompileCache && !process.env.NODE_DISABLE_COMPILE_CACHE) { ... }
+
+// 3. 加载真正的入口 dist/entry.js（构建产物）
+if (await tryImport("./dist/entry.js")) { /* OK */ }
+else if (await tryImport("./dist/entry.mjs")) { /* OK */ }
+else throw new Error("openclaw: missing dist/entry.(m)js (build output).");</code></pre>
+                <div class="anno">读法：<b>为什么要这层薄壳？因为它必须能在<strong>任何</strong> Node 版本下先跑起来、检查版本——如果直接用新语法写在主代码里，老 Node 会直接语法报错、连"请升级"都提示不了。</b>薄壳用最保守的语法，先验版本、开缓存，再加载真正的（编译过的）主程序 <code>dist/entry.js</code>。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>entry.ts → runCli</h1></div>
+            <div class="card">
+                <p><code>dist/entry.js</code> 由 <code>src/entry.ts</code> 编译而来。它做启动准备后调 <code>runCli</code>（<code>src/cli/run-main.ts:74</code>）：</p>
+<pre><code class="language-typescript">// src/entry.ts（简化）
+process.argv = normalizeWindowsArgv(process.argv);   // Windows argv 归一
+// 处理只读 auth store、--no-color 等早期开关
+// 若非 version/help 快速路径 →
+import("./cli/run-main.js").then(({ runCli }) => runCli(process.argv));</code></pre>
+                <div class="anno">读法：<b>entry.ts 是"启动准备层"：处理平台差异（Windows argv）、进程级开关、决定是否 respawn（重启进程以加实验性 flag），最后把控制权交给 <code>runCli</code>。</b>把"进程级准备"和"命令分发"分开，各司其职。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>快速路径（fast path）</h1></div>
+            <div class="card">
+                <p><code>entry.ts</code> 里有 <code>tryHandleRootVersionFastPath</code> / <code>tryHandleRootHelpFastPath</code>（<code>:128/:148</code>）：如果只是 <code>openclaw --version</code> 或 <code>--help</code>，直接处理、不加载全套 CLI。</p>
+                <div class="baby"><span class="t">为什么要"快速路径"？</span>
+                加载完整的 CLI（几十个命令、一堆依赖）要花时间。<strong>但 <code>openclaw --version</code> 只想打印个版本号，没必要把整个程序加载起来。</strong>快速路径就是"抄近道"：一眼看出你只要版本/帮助，就立刻返回，跳过重加载。<strong>这是启动性能优化——高频轻量操作走捷径，别为它付全量启动的代价。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Commander 命令分发</h1></div>
+            <div class="card">
+                <p><code>runCli</code> 用 <strong>Commander</strong>（Node 流行的 CLI 框架）构建命令树，各命令在 <code>src/cli/</code> 注册（如 <code>gateway-cli/register.ts</code>、<code>exec-approvals-cli.ts</code>、<code>logs-cli.ts</code>、<code>update-cli.ts</code>）。</p>
+                <div class="anno">读法：<b>Commander 把 <code>openclaw &lt;命令&gt; &lt;子命令&gt; --选项</code> 解析成对应的处理函数。每个功能域一个 register 文件（gateway/onboard/doctor/skills…），保持 CLI 模块化。</b>你敲的 <code>gateway</code> 就匹配到 gateway 命令的处理器。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>gateway 命令（最常用）</h1></div>
+            <div class="card">
+                <p><code>src/cli/gateway-cli/register.ts</code> 注册 <code>gateway</code> 命令。它启动 Gateway 服务器（Day 03）：</p>
+<pre><code class="language-bash">openclaw gateway --bind lan --port 18789   # 启动网关，监听 LAN
+openclaw gateway --allow-unconfigured      # Docker 默认（未配置也先起来）</code></pre>
+                <div class="anno">读法：<b>这是生产运行的主命令——Docker/compose/fly 的 <code>CMD</code> 都是它（Day 20）。启动后网关拉起各渠道连接、开始收发消息。</b><code>--bind</code> 控制监听范围（loopback/lan，Day 03/20 的安全点），<code>--port</code> 默认 18789。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>onboard 向导</h1></div>
+            <div class="card">
+                <p>首次使用推荐跑 <code>openclaw onboard</code>（README 首推）。相关代码在 <code>src/commands/onboard-*.ts</code>（onboard-config / onboard-auth / onboard-skills / onboard-remote / onboard-custom…）。</p>
+                <div class="baby"><span class="t">向导（wizard）解决什么？</span>
+                OpenClaw 配置项很多（选哪个模型、连哪些渠道、怎么鉴权、装哪些技能）。<strong>让新手直接写配置文件太劝退。onboard 向导用一问一答的交互，一步步领你：配网关 → 选模型 + 登录（OAuth/API key）→ 接渠道 → 选技能。</strong>每一步对应一个 <code>onboard-*.ts</code> 文件。<strong>这是"降低上手门槛"的产品化投入——又一个"框架"和"产品"的区别：产品必须管好第一次使用体验。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li><code>openclaw</code> 命令指向哪个文件？（bin）</li>
+                    <li>openclaw.mjs 这层薄壳为什么必要？做哪三件事？</li>
+                    <li>entry.ts → runCli 的职责分工？</li>
+                    <li>快速路径优化什么？</li>
+                    <li>gateway 命令干什么？onboard 向导解决什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+head -60 openclaw.mjs
+grep -n 'runCli\|version.*FastPath\|help.*FastPath' src/entry.ts
+ls src/cli/ | grep -iE 'register|gateway|run-main'
+ls src/commands/onboard-*.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>Gateway 控制平面</strong>——网关服务器怎么起、<code>gateway.bind</code> 的安全含义、WebSocket JSON-RPC、server-methods，以及它怎么协调渠道 ↔ Agent。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="openclaw-day03.html" style="color:#f97316;">Day 03 · Gateway 控制平面 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
