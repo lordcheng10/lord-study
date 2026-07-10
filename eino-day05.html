@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次调用的完整旅程 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .journey { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+        .jstep { display:flex; align-items:center; gap:12px; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:9px; padding:11px 14px; transition:all .3s; }
+        .jstep.lit { border-color:#00ADD8; box-shadow:0 0 14px rgba(0,173,216,.3); }
+        .jstep .n { flex-shrink:0; width:28px;height:28px;border-radius:50%; background:var(--layer); color:#fff; display:flex;align-items:center;justify-content:center; font-size:12px;font-weight:700; }
+        .jstep .txt { flex:1; } .jstep .txt b { font-size:13px; } .jstep .txt small { display:block; font-size:11px; color:var(--text-muted); font-family:'SF Mono',monospace; }
+        .jstep .tag { font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; color:#fff; background:var(--layer); }
+        .lyS{--layer:#00ADD8} .lyC{--layer:#22c55e} .lyO{--layer:#8b5cf6} .lyA{--layer:#f59e0b}
+        .recap4{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+        .rc{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:11px 13px;font-size:12.5px;color:var(--text-secondary)} .rc b{color:#00ADD8}
+        @media(max-width:768px){ .recap4{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00ADD8,#8b5cf6);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">一次调用的完整旅程 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一个真实场景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 端到端旅程动画</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 数据在各层怎么变</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 流式贯穿全程</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 为什么需要"编排"</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 第 1 周收官</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 components</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 Runnable &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次调用的完整旅程</h1>
+            <p class="part-desc">把 Day 03（数据）+ Day 04（组件）串起来，看一次带 RAG + 工具的对话，数据怎么在各层流转，为第 2 周的"编排引擎"铺路。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一个真实场景</h1></div>
+            <div class="card">
+                <p>设想一个"带知识库的客服 Agent"，用户问：<em>"你们的退货政策是什么？"</em> 它需要：① 从知识库检索退货政策文档；② 把文档 + 问题拼成提示词；③ 调模型生成回答。这正好用上 Day 04 的多个组件。</p>
+                <div class="glossary">今天不深入代码，重点是<strong>看清数据（Day 03 的 Message/Document/Stream）怎么在组件（Day 04）之间流动</strong>，从而理解"为什么需要一个编排引擎把它们连起来"——那就是第 2 周 compose 的主题。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>端到端旅程动画</h1></div>
+            <div class="card">
+                <p>下面每步依次高亮，颜色表示它属于哪层（🔵schema 数据 / 🟢component 组件 / 🟣compose 编排 / 🟠agent）：</p>
+                <div class="journey" id="journey">
+                    <div class="jstep lyS" data-i="0"><div class="n">1</div><div class="txt"><b>用户问题 → User Message</b><small>schema.Message{Role: User, Content: "退货政策?"}</small></div><span class="tag">数据</span></div>
+                    <div class="jstep lyC" data-i="1"><div class="n">2</div><div class="txt"><b>Retriever 检索知识库</b><small>Retrieve(query) → []*schema.Document（退货政策文档）</small></div><span class="tag">组件</span></div>
+                    <div class="jstep lyC" data-i="2"><div class="n">3</div><div class="txt"><b>ChatTemplate 拼提示词</b><small>Format({docs, question}) → []*Message（含 System+检索资料+User）</small></div><span class="tag">组件</span></div>
+                    <div class="jstep lyC" data-i="3"><div class="n">4</div><div class="txt"><b>ChatModel 生成</b><small>Stream(messages) → StreamReader[*Message]（边生成边吐）</small></div><span class="tag">组件</span></div>
+                    <div class="jstep lyS" data-i="4"><div class="n">5</div><div class="txt"><b>流式输出 → 拼成完整答案</b><small>StreamReader 逐 chunk → ConcatMessages → 完整 Message</small></div><span class="tag">数据</span></div>
+                    <div class="jstep lyO" data-i="5"><div class="n">6</div><div class="txt"><b>这三步"连起来"就是 compose 的活</b><small>Chain: Retriever → ChatTemplate → ChatModel，compile 成一个 Runnable</small></div><span class="tag">编排</span></div>
+                </div>
+                <div class="glossary">看出来了吗——<strong>每一步的输出正好是下一步的输入</strong>：问题(Message) → 检索(Document) → 提示词(Message) → 模型(Stream)。手写的话你得自己把这些组件一个个调、把输出接到下一个的输入。<strong>compose 就是帮你"自动接线"的引擎</strong>（L05）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>数据在各层怎么变</h1></div>
+            <div class="card">
+                <p>用 Day 03 学的数据类型，跟踪"退货政策?"这句话的变形：</p>
+<pre><code class="language-go">"退货政策?"                                  // 你的原始输入（字符串）
+  → schema.Message{Role: User, Content: "退货政策?"}    // 包成 User 消息
+  → Retriever.Retrieve → []*schema.Document{ {Content:"退货政策：7天无理由...", Score:0.9} }  // 检索到的文档
+  → ChatTemplate.Format → []*schema.Message{           // 拼成给模型的消息列表
+        {Role: System, Content: "你是客服，依据资料回答：\n退货政策：7天无理由..."},
+        {Role: User, Content: "退货政策?"},
+    }
+  → ChatModel.Stream → StreamReader[*Message]           // 模型流式返回
+  → ConcatMessages → schema.Message{Role: Assistant, Content: "我们支持 7 天无理由退货..."}  // 拼成完整答案</code></pre>
+                <div class="glossary"><b>Message 和 Document 是"通用货币"</b>（Day 03 讲的）：正因为大家都用这几个类型，组件之间才能像积木一样拼接——Retriever 吐 Document、ChatTemplate 吃 Document 吐 Message、ChatModel 吃 Message 吐 Stream。<strong>统一的数据契约 = 可组合性的前提。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>流式贯穿全程</h1></div>
+            <div class="card">
+                <p>注意第 4 步 ChatModel 用的是 <code>Stream</code>——它<strong>边生成边吐</strong>。如果整条链路每个节点都支持流式，那"退货政策的回答"能一个字一个字地实时显示给用户（打字机效果），而不是憋完整段再出。</p>
+                <div class="glossary"><b>但如果某个节点只支持非流呢？</b> 比如你在模型后加了个"敏感词过滤"节点，它只实现了 <code>Invoke</code>（要完整输入）。这时 Eino 会自动把模型的流<strong>用 <code>ConcatMessages</code> 拼成完整消息</strong>再喂给过滤节点——流到这里就"凝固"了。<strong>这套"流↔非流自动转换"就是 Day 01 提的 Runnable 4 范式，明天 Day 06 精讲。</strong>今天你只要感受到：流式是 Eino 一等公民，且能和非流节点自动衔接。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>为什么需要"编排"</h1></div>
+            <div class="card">
+                <p>你可能会想：这三个组件我自己手写代码一个个调不就行了？确实能，但会很痛苦：</p>
+                <table>
+                    <thead><tr><th>手写调用的麻烦</th><th>compose 编排帮你解决</th></tr></thead>
+                    <tbody>
+                        <tr><td>手动把每个组件的输出接到下一个的输入</td><td>自动连线（Chain 自动连边）</td></tr>
+                        <tr><td>手动处理流式/非流的转换</td><td>Runnable 4 范式自动转换</td></tr>
+                        <tr><td>要循环/分支时代码乱成一团</td><td>Graph 的边和 Branch（支持循环并行）</td></tr>
+                        <tr><td>类型接错了运行时才崩</td><td>编译期/建图期类型检查</td></tr>
+                        <tr><td>加日志/追踪要改每个组件</td><td>callbacks 切面统一注入</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary"><b>编排引擎（compose）就是 Eino 的心脏</b>：它把"一堆组件 + 它们的连接关系"变成一个可执行、类型安全、原生流式、可观测的整体。第 2 周（Day 06-10）我们就钻进它——先学 Runnable（统一执行抽象），再学 Chain（自动连线的直线）、Graph（可循环的图）、Workflow（字段级映射）。<strong>学透了 compose，第 3 周的 Agent 就是水到渠成——因为 Agent 本质就是一张 compose 图（Day 01 讲过）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>第 1 周收官</h1></div>
+            <div class="card">
+                <div class="recap4">
+                    <div class="rc"><b>Day 01</b> 项目全景：四大支柱、schema→components→compose→adk 四层</div>
+                    <div class="rc"><b>Day 02</b> 环境 & 第一个 Agent：五步搭 ChatModelAgent、react 直觉</div>
+                    <div class="rc"><b>Day 03</b> schema：Message（一体化）、StreamReader（流式精髓）、Concat（拼接）</div>
+                    <div class="rc"><b>Day 04</b> components：ChatModel/Tool/ChatTemplate/RAG 三件套接口</div>
+                </div>
+                <p style="margin-top:12px;">你现在有了 Eino 的<strong>地基</strong>：知道数据长什么样、有哪些组件积木、它们怎么串成一次调用。接下来三周往上盖：</p>
+                <ul>
+                    <li><strong>第 2 周（compose 编排引擎）</strong>：把积木连起来跑——Runnable / Chain / Graph / Workflow。框架心脏。</li>
+                    <li><strong>第 3 周（ADK）</strong>：搭会自己干活的 Agent——ChatModelAgent / 多智能体 / 中断恢复 / ReAct 精读。</li>
+                    <li><strong>第 4 周（进阶）</strong>：callbacks / 流式内部 / 类型安全 / 生态收官。</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周自测</h3>
+                <ul>
+                    <li>一次带 RAG + 工具的对话，数据怎么在组件间流转？（Message→Document→Message→Stream）</li>
+                    <li>为什么 Message/Document 叫"通用货币"？</li>
+                    <li>流式怎么贯穿全程？遇到非流节点怎么办？（ConcatMessages 凝固）</li>
+                    <li>为什么需要 compose 编排？它替你解决了哪 5 类麻烦？</li>
+                    <li>为什么说"学透 compose，Agent 就水到渠成"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 回顾第 1 周的核心文件，为第 2 周做准备
+head -40 schema/message.go          # 数据
+sed -n '36,50p' components/model/interface.go   # 组件
+grep -n "func NewChain\|func NewGraph\|func NewWorkflow" compose/*.go | head   # 明天的主角
+
+# 明天开始读 compose/runnable.go —— 先瞄一眼那 4 个方法
+sed -n '32,40p' compose/runnable.go</code></pre>
+                <div class="tip"><strong>第 2 周预告 · Day 06</strong>：进入框架心脏。Day 06 讲 <strong>Runnable 与 4 种流式范式</strong>（Invoke/Stream/Collect/Transform）——理解"组件只实现一个、框架自动补齐四个"这个 Eino 最精妙的设计，是读懂后面一切的钥匙。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 components</a>
+                <a href="eino-day06.html" style="color:var(--accent-green);">Day 06 · Runnable 与 4 种流式范式 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const steps = Array.from(document.querySelectorAll('#journey .jstep'));
+            let i = 0;
+            setInterval(() => { steps.forEach(s=>s.classList.remove('lit')); steps[i].classList.add('lit'); i=(i+1)%steps.length; }, 700);
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
