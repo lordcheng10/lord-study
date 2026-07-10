@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 一次操作的流转 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .step{display:flex;gap:12px;align-items:flex-start;margin:10px 0}
+        .step .n{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#f59e0b,#3b82f6);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
+        .step .c{flex:1;font-size:13px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">操作流转 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 追一条路由的诞生</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① Controller 守门</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② Service 编排</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ Converter 转换</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · destination 注解</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ④ 写 K8s</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · update/delete 对称</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day11.html" class="nav-link" style="color:#3b82f6;">Day 11 AI 供应商 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 SDK 与配置存储</span>
+            <h1 class="part-title">一次操作的端到端流转</h1>
+            <p class="part-desc">第 2 周收官。今天把前面所有零件串成一条链：点"新建路由"后，请求怎么穿过 Controller→Service→Converter→K8s，最终变成一个带 <code>higress.io/destination</code> 注解的 Ingress。这是全课的"任督二脉"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>追一条路由的诞生</h1></div>
+            <div class="card">
+                <div class="step"><div class="n">1</div><div class="c"><b>Controller</b>：<code>POST /v1/routes</code> → <code>RoutesController.add</code> 校验入参</div></div>
+                <div class="step"><div class="n">2</div><div class="c"><b>Bean 注入</b>：<code>routeService</code> 来自 <code>SdkConfig.routeService()</code>（Day 02）</div></div>
+                <div class="step"><div class="n">3</div><div class="c"><b>Service</b>：<code>RouteServiceImpl.add</code> 转换 + 编排</div></div>
+                <div class="step"><div class="n">4</div><div class="c"><b>Converter</b>：<code>route2Ingress</code> 把 Route 变成 V1Ingress + 注解</div></div>
+                <div class="step"><div class="n">5</div><div class="c"><b>K8s</b>：<code>createIngress</code> → <code>NetworkingV1Api.createNamespacedIngress</code></div></div>
+                <div class="tip">下面 L02-L06 逐段拆这条链的每一步。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① Controller 守门</h1></div>
+            <div class="card">
+                <p><code>RoutesController.java:77-86</code>（Day 04 见过）：校验名字非空、拒绝 <code>.internal</code> 后缀、<code>route.validate()</code>，再 <code>routeService.add(route)</code>。</p>
+                <div class="anno">读法：<b>控制器不碰业务，只"守门 + 转交"。它拿到的 <code>routeService</code> 是 Day 02 <code>SdkConfig</code> 把 SDK 造的对象注册成的 Bean。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② Service 编排</h1></div>
+            <div class="card">
+                <p><code>RouteServiceImpl.java:121-136</code>：</p>
+<pre><code class="language-java">public Route add(Route route) {
+    V1Ingress ingress = kubernetesModelConverter.route2Ingress(route);  // :123 转换
+    V1Ingress newIngress;
+    try {
+        newIngress = kubernetesClientService.createIngress(ingress);    // :126 写 K8s
+    } catch (ApiException e) {
+        if (e.getCode() == 409) throw new ResourceConflictException();  // 撞名 → 409
+        throw new BusinessException(...);
+    }
+    writeAuthConfigResources(route, ...);   // :134 顺带写鉴权（allow list）
+    return kubernetesModelConverter.ingress2Route(newIngress);          // 回读返回
+}</code></pre>
+                <div class="baby"><span class="t">为什么创建路由还要"顺带写鉴权"？</span>
+                如果这条路由配了鉴权（只允许某些消费者访问），<strong>鉴权信息不是存在 Ingress 里，而是存在一个"ROUTE 作用域的 key-auth 插件实例"的 allow list 里</strong>（第 3 周 Day 13 详讲）。所以 <code>add</code> 除了建 Ingress，还要 <code>writeAuthConfigResources</code> 同步鉴权资源——这就是 Service 层"一个操作牵连多个资源"的编排价值。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ Converter 转换</h1></div>
+            <div class="card">
+                <p><code>KubernetesModelConverter.route2Ingress</code>（<code>:231-241</code>）依次填充：</p>
+<pre><code class="language-java">fillIngressMetadata(...)     // 名字、标签（域名→higress.io/domain_xxx 标签）
+fillIngressSpec(...)         // path 规则、backend
+fillIngressCors(...)         // CORS 注解
+fillIngressAnnotations(...)  // 其余高级能力注解 + nginx 注解兼容
+fillIngressLabels(...)</code></pre>
+                <div class="anno">读法：<b>Higress 的路由高级能力（CORS、重写、限流、header 控制…）<strong>全部编码成 Ingress 的 annotation</strong>。原生 Ingress 只能表达"路径→服务"，Higress 用注解把它扩展成一个功能完整的路由。这个转换器就是那套注解约定的实现（2102 行，Higress 教程里的注解体系在这落地）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>destination 注解（最关键的一个）</h1></div>
+            <div class="card">
+                <p><code>fillIngressDestination</code>（<code>:1647-1680</code>）把 <code>route.services</code> 拼成 <code>higress.io/destination</code> 注解：单服务写 <code>name:port</code>，多服务每行写 <code>&lt;weight&gt;% name:port version</code>。而 Ingress 的 backend 固定指向 McpBridge 引用（<code>DEFAULT_MCP_BRIDGE_BACKEND</code>）。</p>
+<pre><code class="language-yaml">metadata:
+  annotations:
+    higress.io/destination: |
+      80% svc-a.default.svc.cluster.local:8080
+      20% svc-b.default.svc.cluster.local:8080
+  labels:
+    higress.io/domain_example.com: "true"
+    higress.io/resource-definer: higress</code></pre>
+                <div class="baby"><span class="t">为什么真正的后端写在注解里，而不是 Ingress 的 backend？</span>
+                原生 Ingress 的 backend 只能指一个 K8s Service。<strong>但 Higress 要支持多后端加权、指向注册中心的服务、指向 LLM 上游……这些原生 backend 表达不了。于是 Higress 把 backend 固定指向一个"占位"引用，真正的目的地写进 <code>higress.io/destination</code> 注解。</strong>这正是 Higress 相对原生 Ingress 的核心设计——你在上一站 Higress 教程见过控制器怎么读这个注解。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>④ 写 K8s</h1></div>
+            <div class="card">
+                <p><code>createIngress</code>（<code>:386-391</code>）：<code>renderDefaultMetadata</code>（打 resource-definer 标签）→ <code>fillDefaultIngressClass</code> → <code>new NetworkingV1Api(client).createNamespacedIngress(...)</code>。</p>
+                <div class="glossary"><b>到这一步，Console 的工作就结束了</b>——一个带注解的 Ingress 已经写进 K8s。<b>接下来是上一站 Higress 控制器的活</b>：它 watch 到这个 Ingress → 翻译成 Istio 的 VirtualService/Gateway → 经 MCP-over-xDS 喂给 istiod → istiod 生成 xDS 给 Envoy → 流量生效。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>update / delete 对称</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>update</strong>（<code>:138-154</code>）：走 <code>replaceIngress</code>（<code>replaceNamespacedIngress</code>，靠 resourceVersion 乐观锁）。</li>
+                    <li><strong>delete</strong>（<code>:156-165</code>）：走 <code>deleteIngress</code>，并 <code>wasmPluginInstanceService.deleteAll(ROUTE, name)</code> 清理该路由的插件实例。</li>
+                </ul>
+                <div class="anno">读法：<b>delete 的"级联清理"很重要——删路由时把它挂的插件实例一起删掉，否则会留下孤儿配置。<strong>create/update/delete 三者对称，都遵循"改 Ingress + 同步关联资源"的模式。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 2 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周你应该能回答</h3>
+                <ul>
+                    <li>"创建路由"的四层链路（Controller→Service→Converter→K8s）？</li>
+                    <li>为什么 add 要顺带 <code>writeAuthConfigResources</code>？</li>
+                    <li>路由的高级能力为什么全编码成注解？</li>
+                    <li><code>higress.io/destination</code> 注解为什么存后端而不用 Ingress backend？</li>
+                    <li>delete 为什么要级联清理插件实例？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk
+sed -n '121,165p' service/RouteServiceImpl.java
+sed -n '231,241p' service/kubernetes/KubernetesModelConverter.java
+sed -n '1647,1680p' service/kubernetes/KubernetesModelConverter.java</code></pre>
+                <div class="tip"><strong>下周预告 · 第 3 周</strong>：<strong>AI / 插件 / 消费者</strong>——这是 Console 最精彩的部分：一条 AI 路由如何"一对多"展开成 Ingress + 多个插件 + EnvoyFilter，LLM Provider 如何变成 ai-proxy 配置，消费者鉴权、Wasm 插件、服务来源、MCP 怎么管理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day09.html" style="color:var(--accent-cyan);">&larr; Day 09</a>
+                <a href="higress-console-day11.html" style="color:#3b82f6;">Day 11 · AI 供应商 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

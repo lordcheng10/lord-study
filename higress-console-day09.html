@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 领域模型 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#f59e0b}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">领域模型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 领域模型总览</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · VersionedDto 乐观锁</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Route 全字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 匹配条件与上游</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ServiceSource 类型体系</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · WasmPluginInstance 作用域</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 分页与校验</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day10.html" class="nav-link" style="color:#f59e0b;">Day 10 操作流转 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 SDK 与配置存储</span>
+            <h1 class="part-title">领域模型：数据长什么样</h1>
+            <p class="part-desc">今天看 SDK 的 <code>model/</code> 包——这些 Java 类定义了"路由/服务/插件/消费者"在代码里的形状。它们是控制器接收、SDK 转换的中间语言，读懂字段就读懂了整个数据流转的载体。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>领域模型总览</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>实体</th><th>文件</th><th>落地为</th></tr>
+                    <tr><td>Route</td><td>model/Route.java</td><td>Ingress + 注解</td></tr>
+                    <tr><td>Service</td><td>model/Service.java</td><td>K8s Service 只读投影</td></tr>
+                    <tr><td>ServiceSource</td><td>model/ServiceSource.java</td><td>McpBridge registry 项</td></tr>
+                    <tr><td>Domain</td><td>model/Domain.java</td><td>ConfigMap（前缀 domain-）</td></tr>
+                    <tr><td>TlsCertificate</td><td>model/TlsCertificate.java</td><td>Secret（kubernetes.io/tls）</td></tr>
+                    <tr><td>WasmPluginInstance</td><td>model/WasmPluginInstance.java</td><td>WasmPlugin CR 的 matchRules</td></tr>
+                    <tr><td>Consumer</td><td>model/consumer/Consumer.java</td><td>key-auth 插件实例</td></tr>
+                    <tr><td>AiRoute / LlmProvider</td><td>model/ai/*.java</td><td>ConfigMap + 插件</td></tr>
+                </table>
+                <div class="anno">读法：<b>这些实体大多用 Lombok 的 <code>@Data @Builder</code> 生成 getter/setter/builder，字段清晰。每个都带一个 <code>validate()</code> 做自校验（Day 04 控制器里调过）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>VersionedDto 乐观锁</h1></div>
+            <div class="card">
+                <p><code>model/VersionedDto.java</code> 是带 <code>version</code> 字段的父接口，对应 K8s 的 <code>resourceVersion</code>。</p>
+                <div class="baby"><span class="t">version 字段怎么用？</span>
+                你查一个路由时，返回的 Route 带着 <code>version</code>（就是它在 K8s 里的当前版本号）。<strong>你改完提交时把这个 version 一起带回来，SDK 写 K8s 时用它做乐观锁——期间若别人改过，版本号变了，你的写入被拒绝，前端提示"配置已被他人修改，请刷新"。</strong>这就是昨天说的乐观锁在模型层的落点。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Route 全字段</h1></div>
+            <div class="card">
+                <p><code>model/Route.java</code>（字段 <code>:46-108</code>，<code>validate() :110-130</code>）：</p>
+<pre><code class="language-java">name / version / domains / path / methods / headers / urlParams
+services         // 上游服务（可多个，带权重）
+rewrite / cors / headerControl / proxyNextUpstream  // 高级能力
+authConfig       // 鉴权（allow list）
+customConfigs / customLabels
+readonly         // 是否只读（非 console 创建 或 有不支持的特性）</code></pre>
+                <div class="anno">读法：<b>注意 <code>mock/redirect/rateLimit/timeout</code> 等字段标注了"未支持"——说明是预留位。<code>readonly</code> 很关键：如果这个 Ingress 不是 Console 建的、或含 Console 看不懂的注解，就标只读，前端只展示不允许编辑（避免破坏别人的配置）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>匹配条件与上游</h1></div>
+            <div class="card">
+                <p>route 子包里的辅助类型：</p>
+                <ul>
+                    <li><code>RoutePredicate</code> / <code>RoutePredicateTypeEnum</code>：EQUAL("exact") / PRE("prefix") / REGULAR("regex")，每种带 <code>annotationPrefix</code>（生成注解用）。</li>
+                    <li><code>KeyedRoutePredicate</code>：带 key 的匹配（header/query 名 + 匹配方式）。</li>
+                    <li><code>UpstreamService</code>：name / port / version / <strong>weight（0-100）</strong>。</li>
+                    <li><code>CorsConfig</code> / <code>RewriteConfig</code> / <code>HeaderControlConfig</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">weight 权重是干嘛的？</span>
+                一条路由可以指向多个后端服务，<strong>weight 决定流量按什么比例分配</strong>（比如 A 服务 80%、B 服务 20%，常用于灰度发布）。<strong>规则是"所有上游权重之和必须 = 100"</strong>——这个校验前后端都会做（Day 10、Day 18 会再见到）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ServiceSource 类型体系</h1></div>
+            <div class="card">
+                <p><code>model/ServiceSource.java</code>：<code>ALLOWABLE_TYPES</code>（<code>:52-55</code>）= nacos / nacos2 / nacos3 / zookeeper / consul / eureka / static / dns；<code>validate()</code>（<code>:121-196</code>）按类型分派专用校验器（Nacos/Consul/Static/Dns）。</p>
+                <div class="baby"><span class="t">"服务来源"是什么？</span>
+                微服务架构里，服务实例的地址是动态变化的，靠"注册中心"管理（服务启动时向注册中心报到）。<strong>ServiceSource 就是告诉 Higress"去哪个注册中心发现服务"——支持 Nacos、Consul、Eureka、ZooKeeper 这些主流注册中心，也支持直接写死 IP（static）或域名（dns）。</strong>这是 Higress 对比原生 K8s Ingress 的一大优势：能对接非 K8s 的服务。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>WasmPluginInstance 与四作用域</h1></div>
+            <div class="card">
+                <p><code>model/WasmPluginInstance.java</code>（实现 <code>VersionedDto</code>）核心字段 <code>targets: Map&lt;Scope,String&gt;</code>（<code>:49</code>）、<code>configurations/rawConfigurations</code>（<code>:63-67</code>）。作用域枚举 <code>WasmPluginInstanceScope.java</code>：</p>
+<pre><code class="language-java">GLOBAL(0) / DOMAIN(10) / ROUTE(100) / SERVICE(1000)  // 数字是优先级</code></pre>
+                <div class="baby"><span class="t">为什么插件要分作用域？</span>
+                同一个插件（比如限流）可以配在不同层级：<strong>全局（所有流量）、某个域名、某条路由、某个服务</strong>。作用域越"窄"（SERVICE > ROUTE > DOMAIN > GLOBAL），优先级数字越大，越后生效、能覆盖更宽范围的配置。<strong>GLOBAL 不能和其他作用域共存（<code>validate() :118-139</code>），因为"全局"和"具体某处"是互斥的表达。</strong>这个作用域模型是第 3 周插件管理的基础。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>分页与校验</h1></div>
+            <div class="card">
+                <p>分页相关：<code>model/PaginatedResult.java</code>、<code>model/CommonPageQuery.java</code>、<code>model/RoutePageQuery.java</code>。校验统一放在各实体的 <code>validate()</code> 方法里，控制器在写操作前调用（见 Day 04）。</p>
+                <div class="anno">读法：<b>把校验放在领域模型自己身上（而不是散在控制器里），是"充血模型"的做法——<strong>"一个 Route 怎样才算合法"由 Route 自己定义，谁用它谁调 <code>validate()</code>，规则只写一处。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>主要领域实体各落地为哪种 K8s 对象？</li>
+                    <li><code>VersionedDto</code> 的 version 怎么配合乐观锁？</li>
+                    <li>上游 weight 的规则？<code>readonly</code> 什么时候为 true？</li>
+                    <li>插件的四个作用域和优先级？为什么 GLOBAL 不能与其他共存？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk/model
+sed -n '46,130p' Route.java
+sed -n '52,60p' ServiceSource.java
+cat WasmPluginInstanceScope.java
+sed -n '40,139p' WasmPluginInstance.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第 2 周收官）</strong>：<strong>一次操作的端到端流转</strong>——从 <code>POST /v1/routes</code> 一路追到 K8s 里生成的那个带注解的 Ingress，把 Controller→Service→SDK→K8s 四层串成一条完整链路。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day08.html" style="color:var(--accent-cyan);">&larr; Day 08</a>
+                <a href="higress-console-day10.html" style="color:#f59e0b;">Day 10 · 操作流转 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

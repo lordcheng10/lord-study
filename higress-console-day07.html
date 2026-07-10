@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 配置存储 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#f59e0b}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">配置存储 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 存储 = 薄封装</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 资源 → K8s 对象映射</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Ingress CRUD</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ConfigMap/Secret</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · CRD 的 CRUD</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 只列自己的资源</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 乐观锁与冲突</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day08.html" class="nav-link" style="color:#f59e0b;">Day 08 K8s 客户端 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 SDK 与配置存储</span>
+            <h1 class="part-title">配置存储：一切都落在 K8s</h1>
+            <p class="part-desc">今天回答一个核心问题：Console 把用户配的东西存到哪、怎么存？答案是"全部落成 K8s 原生对象"。今天建立"哪类配置 → 哪种 K8s 资源"的映射表，明天再深入客户端本身。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>存储层 = 薄封装</h1></div>
+            <div class="card">
+                <p><code>KubernetesClientService.java</code>（813 行）把每类资源的 CRUD 都封成方法——<strong>没有接口、没有多实现</strong>，这个类本身就是"存储抽象"。</p>
+                <div class="baby"><span class="t">为什么不搞个"仓储接口 + 多实现"？</span>
+                很多项目喜欢定义 <code>Repository</code> 接口，再写 MySQL 实现、Redis 实现……但 Higress Console <strong>只有一种存储后端——Kubernetes API Server</strong>，永远不会换成 MySQL。既然只有一种实现，再抽个接口就是过度设计。<strong>于是它直接用一个具体类当存储层，方法就是各资源的 CRUD。简单、直接、够用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>资源 → K8s 对象映射（本课核心表）</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>控制台里的东西</th><th>落地为哪种 K8s 对象</th></tr>
+                    <tr><td>路由 Route</td><td>Ingress + <code>higress.io/*</code> 注解</td></tr>
+                    <tr><td>AI 路由 AiRoute</td><td>ConfigMap（高层抽象）+ Ingress + 多个 WasmPlugin 实例 + EnvoyFilter</td></tr>
+                    <tr><td>服务来源 ServiceSource</td><td>名为 <code>default</code> 的单个 McpBridge CR</td></tr>
+                    <tr><td>Wasm 插件实例</td><td>WasmPlugin CR</td></tr>
+                    <tr><td>域名 Domain / 全局配置</td><td>ConfigMap</td></tr>
+                    <tr><td>TLS 证书</td><td>Secret（type <code>kubernetes.io/tls</code>）</td></tr>
+                    <tr><td>LLM Provider</td><td>ai-proxy 插件的全局 WasmPlugin 实例</td></tr>
+                    <tr><td>消费者/鉴权</td><td>key-auth 插件实例；密钥 → Secret</td></tr>
+                </table>
+                <div class="anno">读法：<b>把这张表记牢——它是理解整个 Console 的钥匙。<strong>Console 干的所有事，本质就是把用户操作翻译成这张表右列的 K8s 对象。</strong>第 3 周会逐个展开右列。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Ingress CRUD（用官方 NetworkingV1Api）</h1></div>
+            <div class="card">
+                <p><code>KubernetesClientService.java</code> 里 Ingress 相关方法：</p>
+<pre><code class="language-java">listIngress()      :328-338   // 只列带 higress 标签的
+readIngress        :374-384   // 404 转 null
+createIngress      :386-391
+replaceIngress     :393-403
+deleteIngress      :405-418</code></pre>
+                <div class="anno">读法：<b>底层用 Kubernetes 官方 Java 客户端 <code>io.kubernetes:client-java</code>（不是 fabric8）。<code>readIngress</code> 把 K8s 的 404 转成 Java 的 <code>null</code>——一个贴心的适配，调用方判空即可，不用 catch 异常。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ConfigMap / Secret CRUD</h1></div>
+            <div class="card">
+                <p>同一个 client，用 <code>CoreV1Api</code> 操作 ConfigMap 和 Secret：</p>
+<pre><code class="language-java">// ConfigMap :420-475（域名、AI 路由、全局配置都存这）
+listConfigMap / readConfigMap / createConfigMap / replaceConfigMap / deleteConfigMap
+// Secret :477-530（TLS 证书、认证密钥）
+listSecret / readSecret / createSecret / replaceSecret / deleteSecret</code></pre>
+                <div class="baby"><span class="t">ConfigMap 和 Secret 有什么区别？</span>
+                两者都是 K8s 里的键值存储。<strong>ConfigMap 存普通配置（明文），Secret 存敏感数据（base64 编码，K8s 可加密静态存储）。</strong>所以证书私钥、API 密钥这类敏感信息用 Secret，域名/路由这类普通配置用 ConfigMap。语义清晰，也符合 K8s 最佳实践。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>CRD 的 CRUD（用 CustomObjectsApi）</h1></div>
+            <div class="card">
+                <p>自定义资源（CRD）用 <code>CustomObjectsApi</code> 泛型操作：</p>
+                <ul>
+                    <li>McpBridge（服务来源）：<code>:532-582</code>，group <code>networking.higress.io</code>、plural <code>mcpbridges</code></li>
+                    <li>WasmPlugin（插件）：<code>:586-666</code>，group <code>extensions.higress.io</code>、plural <code>wasmplugins</code></li>
+                    <li>EnvoyFilter（istio CRD）：<code>:668-712</code></li>
+                </ul>
+                <div class="anno">读法：<b>CRD 没有专用的 Java API 类，所以用泛型的 <code>CustomObjectsApi</code>——传入 group/version/plural 三元组定位资源类型，用 <code>io.kubernetes.client.openapi.JSON</code> 在 <code>Object</code> 和自定义 POJO 之间转换（POJO 在 <code>crd/</code> 目录）。<strong>这三类 CRD 正是上一站 Higress 会 watch 的资源。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>只列"自己创建的"资源</h1></div>
+            <div class="card">
+                <p>所有 list 默认带标签选择器（<code>:101-102</code> <code>DEFAULT_LABEL_SELECTORS = higress.io/resource-definer=higress</code>）：</p>
+<pre><code class="language-java">// renderDefaultMetadata :741-746
+// 写入任何资源前，统一打上 resource-definer=higress 标签
+// 内部资源额外打 higress.io/internal=true</code></pre>
+                <div class="baby"><span class="t">为什么要打这个标签？</span>
+                一个 K8s 集群里可能有很多 Ingress，有的是别的工具建的。<strong>Console 只想管"自己创建的"那些——所以写入时统一打上 <code>resource-definer=higress</code> 标签，列出来时也只筛这个标签的。</strong>好比在自己的东西上贴名字条，找的时候只找贴了自己名字的，绝不误删别人的。<code>isDefinedByConsole</code>（<code>:214-217</code>）就靠这个标签判断"是不是我建的"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>乐观锁与冲突</h1></div>
+            <div class="card">
+                <p>更新走 <code>replaceIngress</code>（<code>replaceNamespacedIngress</code>），靠 K8s 的 <code>resourceVersion</code> 做乐观锁；创建撞名字时 K8s 返 409，SDK 转成 <code>ResourceConflictException</code>。</p>
+                <div class="anno">读法：<b>领域模型的 <code>version</code> 字段（<code>VersionedDto</code>）对应 K8s 的 <code>resourceVersion</code>。<strong>更新时带上你读到的版本号，若期间别人改过，版本对不上，K8s 拒绝写入——避免"后写覆盖先写"。</strong>这是分布式配置管理的标准做法。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么"存储层"是薄封装而不是仓储接口？</li>
+                    <li>路由/AI 路由/服务来源/证书分别落成哪种 K8s 对象？</li>
+                    <li>Ingress/ConfigMap/Secret/CRD 各用哪个 K8s API 类？</li>
+                    <li><code>resource-definer=higress</code> 标签的作用？乐观锁怎么防覆盖？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk/service/kubernetes
+grep -n "public.*Ingress\|public.*ConfigMap\|public.*Secret\|public.*McpBridge\|public.*WasmPlugin" KubernetesClientService.java | head -40
+sed -n '741,760p' KubernetesClientService.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>K8s 客户端</strong>——客户端怎么初始化（in-cluster vs kubeConfig）、怎么鉴权（JWT policy + token 文件）、以及少数走 HTTP 直连 Higress 控制器的只读运维接口。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day06.html" style="color:var(--accent-cyan);">&larr; Day 06</a>
+                <a href="higress-console-day08.html" style="color:#f59e0b;">Day 08 · K8s 客户端 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

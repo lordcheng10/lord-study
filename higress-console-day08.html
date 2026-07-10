@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · K8s 客户端 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">K8s 客户端 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三大 API 入口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 客户端初始化</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · in-cluster 判定</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 能力探测</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 鉴权 token</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 直连控制器 debug</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 命名空间/ingressClass 过滤</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day09.html" class="nav-link" style="color:#f59e0b;">Day 09 领域模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 SDK 与配置存储</span>
+            <h1 class="part-title">K8s 客户端：怎么连、怎么认证</h1>
+            <p class="part-desc">昨天看了"存了哪些资源"，今天看"客户端本身怎么建、怎么鉴权"。重点是两种连接模式（集群内/外）和 token 的来源——这决定了 Console 部署在哪、以什么身份读写 K8s。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三大 API 入口</h1></div>
+            <div class="card">
+                <p><code>KubernetesClientService.java</code> 用官方客户端 <code>io.kubernetes.client.openapi.*</code>，三个 API 对象各管一类资源：</p>
+                <ul>
+                    <li><code>CoreV1Api</code>：ConfigMap / Secret / Service / Endpoints（<code>:298, :425, :478</code>）</li>
+                    <li><code>NetworkingV1Api</code>：Ingress（<code>:279, :329, :375</code>）</li>
+                    <li><code>CustomObjectsApi</code>：所有 CRD（McpBridge/WasmPlugin/EnvoyFilter，<code>:533, :612, :669</code>）</li>
+                </ul>
+                <div class="anno">读法：<b>记住这个对应关系，读到任何 K8s 操作就知道它用哪个 API 类。<code>CustomObjectsApi</code> 是"万能"的，因为 CRD 千变万化，K8s 用一套泛型接口统一处理。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>客户端初始化</h1></div>
+            <div class="card">
+                <p>构造函数 <code>KubernetesClientService(HigressServiceConfig)</code>（<code>:140-179</code>）：</p>
+<pre><code class="language-java">validateConfig(config);                     // :791-812 校验
+// 赋值 controller 相关字段（:143-158）
+inClusterMode = isInCluster();              // :153-154 判定
+// :160-176 三种建客户端方式：
+//   ClientBuilder.cluster()                        （集群内）
+//   ClientBuilder.kubeconfig(loadKubeConfig(file)) （从 kubeconfig 文件）
+//   ClientBuilder.kubeconfig(loadKubeConfig(str))  （从 kubeconfig 内容字符串）
+initializeK8sCapabilities();                // :178 能力探测</code></pre>
+                <div class="baby"><span class="t">"连 K8s"到底是连什么？</span>
+                K8s 集群有一个 API Server（就是那个管一切的中枢）。<strong>"连 K8s"= 建一个能向 API Server 发 HTTP 请求的客户端，并带上身份凭证。</strong>凭证要么是集群内的 ServiceAccount token（Pod 里自带），要么是 kubeconfig 文件（你本机 <code>~/.kube/config</code> 那个）。三种建法对应三种拿凭证的场景。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>in-cluster 判定</h1></div>
+            <div class="card">
+                <p><code>isInCluster()</code>（<code>:273-275</code>）：检查 <code>/var/run/secrets/kubernetes.io/serviceaccount/token</code> 文件是否存在。</p>
+                <div class="baby"><span class="t">这个文件是怎么来的？</span>
+                当 Console 作为 Pod 跑在 K8s 集群里时，<strong>K8s 会自动把该 Pod 的 ServiceAccount token 挂载到这个固定路径</strong>。所以"这个文件存在"就等于"我正跑在集群里"，可以直接用它做身份。<strong>如果文件不存在（比如你在本机开发跑 jar），就说明在集群外，得改用 kubeconfig。</strong>一个文件的有无就区分了两种部署形态，很巧妙。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>能力探测</h1></div>
+            <div class="card">
+                <p><code>initializeK8sCapabilities()</code>（<code>:181-204</code>）：探测集群是否支持 Ingress v1 API，重试 5 次（<code>CAPABILITY_CHECK_ATTEMPTS</code>），探测不到就假定支持（K8s ≥ 1.19 都有）。</p>
+                <div class="anno">读法：<b>不同版本 K8s 的 Ingress API 版本不同（老版本是 <code>v1beta1</code>）。<strong>启动时先探一探集群支持哪个版本，后续就用对的 API，避免"新代码打老集群"报错。</strong>重试 5 次是防启动瞬间 API Server 还没就绪。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>鉴权 token（JWT policy）</h1></div>
+            <div class="card">
+                <p>访问 Higress 控制器 debug 接口时的 token 来源，见 <code>readTokenFromFile()</code>（<code>:733-739</code>）：</p>
+<pre><code class="language-java">// 按 controllerJwtPolicy 选 token 文件：
+// FIRST_PARTY_JWT  → /var/run/secrets/kubernetes.io/serviceaccount/token
+// THIRD_PARTY_JWT  → /var/run/secrets/access-token/token</code></pre>
+                <div class="baby"><span class="t">为什么有两种 JWT policy？</span>
+                token（一段代表身份的加密字符串，JWT）有两种签发方式：<strong>first-party 用 K8s 默认给 Pod 的 ServiceAccount token；third-party 用一个专门挂载的、有受众/过期控制的 token</strong>（更安全，符合较新的 K8s 安全实践）。<code>controllerJwtPolicy</code> 让部署方按集群策略选，代码读对应路径的文件即可。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>直连控制器 debug 接口</h1></div>
+            <div class="card">
+                <p>绝大多数操作走 K8s API，<strong>但少数只读运维数据直接 HTTP 调 Higress 控制器</strong>（用 okHttp）：</p>
+<pre><code class="language-java">gatewayServiceList()     :235-252  // GET /debug/registryz    已发现的服务列表
+gatewayServiceEndpoint() :254-272  // GET /debug/endpointShardz endpoint 分片
+buildControllerRequest(path) :719-731
+//   host：集群内用 controllerServiceName.controllerNamespace，否则 controllerServiceHost
+//   带 Bearer token（controllerAccessToken 或 readTokenFromFile）</code></pre>
+                <div class="anno">读法：<b>"服务发现列表""endpoint 分片"这类实时运维数据不存在 K8s 里，而是 Higress 控制器内存中算出来的，所以只能直接问控制器。<strong>写配置走 K8s（解耦），读运行时状态走 HTTP（直连）——各取所需。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>命名空间 / ingressClass 过滤</h1></div>
+            <div class="card">
+                <p>写入前 <code>fillDefaultIngressClass</code>（<code>:755-760</code>）补上 <code>ingressClassName</code>；列出时 <code>retainWatchedIngress</code>（<code>:749-753</code>）+ <code>buildIsIngressWatchedPredicate</code>（<code>:762-774</code>）按 ingressClass 过滤，兼容 nginx class 为空的场景。</p>
+                <div class="baby"><span class="t">ingressClassName 是干嘛的？</span>
+                一个集群里可能同时装了多个 Ingress 控制器（nginx、Higress……）。<strong><code>ingressClassName</code> 就是 Ingress 的"归属标签"——写着 <code>higress</code> 的才归 Higress 管。</strong>Console 写入时自动打上这个 class，列出时也只看归 Higress 管的那些，避免和 nginx 的 Ingress 混在一起。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>三大 K8s API 入口各管什么？</li>
+                    <li>in-cluster 怎么判定？两种连接模式分别拿哪种凭证？</li>
+                    <li>两种 JWT policy 的 token 来自哪个文件？</li>
+                    <li>哪些数据走 K8s、哪些走 HTTP 直连控制器？为什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/sdk/src/main/java/com/alibaba/higress/sdk/service/kubernetes
+sed -n '140,204p' KubernetesClientService.java
+sed -n '235,275p' KubernetesClientService.java
+sed -n '719,760p' KubernetesClientService.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>领域模型</strong>——<code>Route/ServiceSource/WasmPluginInstance/Consumer</code> 等实体的字段与校验，以及 <code>VersionedDto</code> 的乐观锁、<code>WasmPluginInstanceScope</code> 的四作用域。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day07.html" style="color:var(--accent-cyan);">&larr; Day 07</a>
+                <a href="higress-console-day09.html" style="color:#f59e0b;">Day 09 · 领域模型 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
