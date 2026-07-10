@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · Service 业务层 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">Service 业务层 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 请求生命周期枢纽</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · traceId 与上下文</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 鉴权切面</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 统一异常处理</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · AllowAnonymous</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · SessionService 登录</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ConfigService 存 ConfigMap</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day06.html" class="nav-link" style="color:#14b8a6;">Day 06 SDK 抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周 后端架构</span>
+            <h1 class="part-title">横切与 Service 业务层</h1>
+            <p class="part-desc">第 1 周收官。今天看两样东西：一是"每个请求都会经过"的 AOP 切面（鉴权/日志/异常统一在这里），二是 console 自身业务 service（登录、系统配置）。理解切面 = 理解后端的"请求生命周期"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>请求生命周期的枢纽</h1></div>
+            <div class="card">
+                <p><code>console/aop/ApiStandardizationAspect.java</code>（<code>@Aspect @Component</code>）用一个切点拦截所有控制器方法：</p>
+<pre><code class="language-java">// :69-70
+@Around("execution(* com.alibaba.higress.console.controller..*Controller.*(..))")
+public Object around(ProceedingJoinPoint pjp) { ... }</code></pre>
+                <div class="baby"><span class="t">什么是 AOP 切面？</span>
+                有些逻辑（打日志、鉴权、异常兜底）几乎每个接口都要做，如果每个方法里都写一遍就太啰嗦。<strong>AOP（面向切面编程）让你把这些"横切逻辑"抽出来，声明"拦截所有 Controller 方法"，Spring 就自动在每次调用前后插入执行。</strong>好比机场安检——不管你去哪个登机口，都先过同一个安检口。这个切面就是 Console 后端的"安检口"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>traceId 与上下文</h1></div>
+            <div class="card">
+                <p>切面进来第一件事（<code>:72-77</code>）：生成 <code>traceId</code> 放进 MDC，并初始化 <code>HttpContext</code>（用 ThreadLocal 保存 request/response）。</p>
+                <div class="anno">读法：<b><code>traceId</code> 是每个请求的唯一编号，写进日志（对应 <code>application.properties</code> 日志 pattern 里的 <code>%mdc</code>）。<strong>这样一条请求从进来到报错的所有日志都带同一个 traceId，排查问题时一搜就串起来了。</strong><code>HttpContext</code> 用 ThreadLocal 让后续代码能随时拿到当前请求对象，不用一路当参数传。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>鉴权：登录校验</h1></div>
+            <div class="card">
+                <p><code>:80-89</code>：若当前接口不是匿名接口，就调 <code>sessionService.validateSession</code> 校验登录，失败抛 <code>AuthException</code>，成功把 user 放进 <code>SessionUserHelper</code>。</p>
+<pre><code class="language-java">if (isLoginRequired(method)) {
+    User user = sessionService.validateSession();  // 校验会话
+    SessionUserHelper.setCurrentUser(user);
+}</code></pre>
+                <div class="anno">读法：<b>"要不要登录"由 <code>isLoginRequired</code>（<code>:134-162</code>）读取类/方法上的 <code>@AllowAnonymous</code> 注解决定，结果缓存进 <code>ConcurrentHashMap</code> 避免每次反射。<strong>集中鉴权的好处：新增一个接口默认就受保护，不用记得手动加校验。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>统一异常处理</h1></div>
+            <div class="card">
+                <p><code>:96-109</code> catch 所有 <code>Throwable</code>，按类型分级打日志，转成 <code>Response.failure</code> + 对应 HTTP 状态。状态映射在 <code>getHttpStatus</code>（<code>:164-178</code>）：</p>
+<pre><code class="language-java">ValidationException      → 400
+AuthException            → 401
+NotFoundException        → 502
+ResourceConflictException→ 409
+其余                      → 500</code></pre>
+                <div class="baby"><span class="t">为什么 NotFound 是 502 而不是 404？</span>
+                这里的 <code>NotFoundException</code> 通常指"<strong>去 K8s / Higress 控制器找东西没找到</strong>"，也就是"上游依赖异常"，所以用 502（Bad Gateway，网关自身作为客户端访问后端失败）。而"用户查的资源不存在"是在 <code>ControllerUtil</code> 里返回 404（Day 04）。<strong>两种"没找到"语义不同，用不同的码区分。</strong>K8s 的 <code>ApiException</code> 还会把 Code/Body 一起打进日志（<code>:117-131</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>@AllowAnonymous</h1></div>
+            <div class="card">
+                <p>登录、就绪探针、落地页这类接口不能要求先登录，用 <code>@AllowAnonymous</code> 标注跳过鉴权。切面读到它就放行。</p>
+                <div class="anno">读法：<b>这是"默认安全"设计——<strong>不加注解 = 需要登录</strong>，只有明确标 <code>@AllowAnonymous</code> 的才放行。<code>LandingController</code>、<code>HealthzController</code>、<code>SessionController.login</code> 都是匿名的。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>SessionService：登录</h1></div>
+            <div class="card">
+                <p><code>SessionController</code>（<code>/session</code>）提供 login/logout，背后 <code>SessionService</code> 校验用户名密码（来自 Helm 注入的 <code>admin.username/password</code>，<code>helm/values.yaml:113-116</code>）并签发会话。</p>
+                <div class="anno">读法：<b>Console 的登录很轻——单管理员账号，凭据从部署配置来。这也呼应"无数据库"：连用户信息都不建表，直接用配置。<code>UserController</code>（<code>/user</code>）提供 info/changePassword。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ConfigService：系统配置存 ConfigMap</h1></div>
+            <div class="card">
+                <p>console 自身的持久化配置走 <code>console/service/ConfigServiceImpl.java</code>（<code>@Service</code>）：</p>
+<pre><code class="language-java">// :42-43 ConfigMap 名默认 higress-console
+// :53-64 getString 从 ConfigMap 的 data 读值
+// :151-175 setConfigs：读/初始化 ConfigMap → 改 data → replaceConfigMap</code></pre>
+                <div class="baby"><span class="t">读-改-写模式</span>
+                改配置时它先 <code>readConfigMap</code> 拿到当前 ConfigMap，改动 data，再 <code>replaceConfigMap</code> 写回。<strong>K8s 的 replace 带 <code>resourceVersion</code> 乐观锁——如果中途有人也改了，版本号对不上，写入会失败，避免覆盖别人的改动。</strong>这就是用 K8s 当数据库时的并发控制方式。注意这个 <code>ConfigService</code> 只管控制台自己的键值，跟"网关业务配置"是两码事。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 1 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周你应该能回答</h3>
+                <ul>
+                    <li>切面拦截了什么？请求生命周期的五步（traceId→上下文→鉴权→执行→统一异常）？</li>
+                    <li>异常类型到 HTTP 状态的映射？为什么 NotFound 是 502？</li>
+                    <li><code>@AllowAnonymous</code> 的"默认安全"设计？</li>
+                    <li>console 系统配置怎么存进 ConfigMap？乐观锁怎么防并发覆盖？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/console/src/main/java/com/alibaba/higress/console
+sed -n '69,178p' aop/ApiStandardizationAspect.java
+sed -n '42,175p' service/ConfigServiceImpl.java
+ls aop/ service/</code></pre>
+                <div class="tip"><strong>下周预告 · 第 2 周</strong>：钻进 <strong>SDK 与配置存储</strong>——<code>HigressServiceProvider</code> 手写依赖注入、<code>KubernetesClientService</code> 怎么连 K8s、<code>KubernetesModelConverter</code> 怎么把路由翻译成 Ingress+注解，以及"创建路由"的端到端追踪。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day04.html" style="color:var(--accent-cyan);">&larr; Day 04</a>
+                <a href="higress-console-day06.html" style="color:#14b8a6;">Day 06 · SDK 抽象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 后端分层 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .layer{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .layer .row{border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;background:var(--bg-secondary)}
+        .layer .row b{color:#14b8a6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">后端分层 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三层总览</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Controller 层</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Service 层</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SDK 存储层</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 两类 Service</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 包结构地图</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 无数据库！</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day04.html" class="nav-link" style="color:#14b8a6;">Day 04 REST API &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 后端架构</span>
+            <h1 class="part-title">后端分层：三层怎么分工</h1>
+            <p class="part-desc">今天建立后端的"分层地图"：Controller（薄）→ Service（业务）→ SDK/K8s（存储）。理解了这三层的边界，后面每读一个功能就知道"该去哪一层找"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三层总览</h1></div>
+            <div class="card">
+                <div class="layer">
+                    <div class="row"><b>L1 Controller</b>（<code>console/controller/</code>）：<code>@RestController</code>，只做"接收 HTTP + 校验入参 + 委派"，不含业务逻辑。</div>
+                    <div class="row"><b>L2 Service</b>：分两类——console 自身业务（登录/仪表盘/系统配置）+ SDK 资源 Service（路由/服务/插件/AI，真正操作 K8s）。</div>
+                    <div class="row"><b>L3 SDK/K8s</b>（<code>sdk/service/kubernetes/</code>）：<code>KubernetesClientService</code> 直接读写 K8s；<code>KubernetesModelConverter</code> 做"领域模型 ↔ K8s 对象"转换。</div>
+                </div>
+                <div class="baby"><span class="t">为什么要分这么多层？</span>
+                <strong>每层只关心自己那点事，改起来互不影响。</strong>控制器改 API 形状不用碰 K8s 逻辑；SDK 改 K8s 写法不用碰 HTTP。而且 SDK 是纯 Java 库（不依赖 Spring），别的程序也能拿去复用。分层 = 关注点分离 = 可维护 + 可复用。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Controller 层：薄</h1></div>
+            <div class="card">
+                <p>统一风格：<code>@RestController</code> + <code>@RequestMapping("/v1/...")</code> + <code>@Validated</code>，字段用 <code>@Resource</code> 注入 SDK service，返回 <code>ResponseEntity&lt;Response&lt;T&gt;&gt;</code>。以 <code>RoutesController.java:45-52</code> 为例：</p>
+<pre><code class="language-java">@RestController
+@RequestMapping("/v1/routes")
+@Validated
+public class RoutesController {
+    @Resource private RouteService routeService;   // 昨天 SdkConfig 注册的 Bean
+    // ...
+}</code></pre>
+                <div class="anno">读法：<b>控制器<strong>只做校验 + 委派</strong>：检查名字非空、名字合法，然后 <code>routeService.add(route)</code> 一句话交给下一层。真正的业务在 Service 里。</b>Day 04 会把全部控制器和端点列一遍。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Service 层：业务</h1></div>
+            <div class="card">
+                <p>Service 是"编排中枢"。比如"创建路由"不是简单写一个 Ingress——<code>RouteServiceImpl.add</code>（<code>RouteServiceImpl.java:121-136</code>）会：① 把 Route 转成 Ingress；② 调 K8s 创建；③ 还要 <code>writeAuthConfigResources</code> 写鉴权相关资源。<strong>这种"一个操作牵连多个 K8s 资源"的编排，正是 Service 层的价值。</strong></p>
+                <div class="glossary"><b>典型编排例子</b>：一条 <b>AI 路由</b>（Day 11）会同时展开成 Ingress + model-router 插件 + model-mapper 插件 + ai-statistics 插件 +（可选）fallback 路由 + EnvoyFilter——全在 <code>AiRouteServiceImpl</code> 一个方法里编排完成。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SDK/K8s 存储层</h1></div>
+            <div class="card">
+                <p>最底层是 <code>sdk/service/kubernetes/KubernetesClientService.java</code>（813 行）——它把每类 K8s 资源的增删改查封成方法：Ingress、ConfigMap、Secret、以及 CRD（McpBridge/WasmPlugin/EnvoyFilter）。旁边的 <code>KubernetesModelConverter.java</code>（2102 行）负责把领域对象翻译成 K8s 对象。</p>
+                <div class="baby"><span class="t">"存储层"就是这两个类</span>
+                别的项目里"存储层"通常是数据库 DAO。<strong>Higress Console 没有数据库——它的"存储"就是 Kubernetes API Server</strong>，所有数据都以 K8s 资源的形式存在集群里。<code>KubernetesClientService</code> 就是它的"DAO"，<code>KubernetesModelConverter</code> 就是它的"ORM 映射"。第 2 周整周都在拆这两个类。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>两类 Service（重要区分）</h1></div>
+            <div class="card">
+                <ol>
+                    <li><strong>console 自身业务 service</strong>（<code>console/service/</code>，是 Spring <code>@Service</code>）：<code>SessionService</code>（登录）、<code>DashboardService</code>（仪表盘）、<code>ConfigServiceImpl</code>（系统配置）。</li>
+                    <li><strong>SDK 资源 service</strong>（<code>sdk/service/</code>，<strong>不是</strong> Spring 组件）：<code>RouteServiceImpl</code>、<code>ServiceServiceImpl</code>、<code>WasmPluginServiceImpl</code>、<code>AiRouteServiceImpl</code>…由 <code>HigressServiceProvider</code> 手动装配，再在 <code>SdkConfig</code> 注册为 Bean。</li>
+                </ol>
+                <div class="anno">读法：<b>第一类是"给人用的控制台功能"（登录、看仪表盘）；第二类是"操作网关配置"。<strong>区分它们的关键：前者带 <code>@Service</code> 注解被 Spring 自动扫描，后者是 SDK 里手写 <code>new</code> 出来的。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>包结构地图</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># console 模块
+HigressConsoleApplication.java  启动类
+WebMvcInitializer.java          静态资源 + SPA 回退
+config/    SdkConfig, SwaggerConfig
+controller/ 17+ 控制器 + ai/ + mcp/ + dto/ + util/ + exception/
+service/   ConfigService, DashboardService, SessionService, SystemService
+aop/       ApiStandardizationAspect（切面）, AllowAnonymous
+client/grafana/  Grafana 客户端
+
+# sdk 模块
+config/    HigressServiceConfig
+service/   HigressServiceProvider(Impl), RouteServiceImpl, ...
+service/kubernetes/  KubernetesClientService, KubernetesModelConverter, crd/
+service/ai/          AiRouteServiceImpl, LlmProviderServiceImpl, 各厂商 Handler
+service/consumer/    ConsumerServiceImpl, KeyAuthCredentialHandler
+service/mcp/         McpServerService...
+model/               Route, Service, Domain, ai/*, consumer/*, mcp/*</code></pre>
+                <div class="tip">把这张地图收藏——后面 17 天几乎都在这几个目录里游走。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>无数据库！（本项目最反直觉的一点）</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">连控制台自己的配置都存在 K8s 里</span>
+                你可能以为管理后台总得有个 MySQL 存点东西吧？<strong>没有。</strong>连 console 自己的设置都存在一个 K8s ConfigMap（默认名 <code>higress-console</code>，见 <code>ConfigServiceImpl.java:42-43</code>）里。<strong>为什么？因为 K8s 本身就是个带持久化、带 watch、带一致性的"数据库"</strong>——Console 复用它，就不用自己维护数据库、备份、迁移。这也让 Console 天然"无状态"，重启不丢数据、可以随便扩副本。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>后端三层分别是什么？各自的边界？</li>
+                    <li>两类 Service 怎么区分？谁被 Spring 扫描、谁是手写 new？</li>
+                    <li>"存储层"在这个项目里指哪两个类？</li>
+                    <li>为什么说 Console 没有数据库？它的数据存哪？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend
+ls console/src/main/java/com/alibaba/higress/console/controller/
+ls sdk/src/main/java/com/alibaba/higress/sdk/service/
+ls sdk/src/main/java/com/alibaba/higress/sdk/service/kubernetes/
+sed -n '45,52p' console/src/main/java/com/alibaba/higress/console/controller/RoutesController.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>REST API 层</strong>——把全部控制器和端点列一张总表，然后精读最典型的 <code>RoutesController</code> 的 CRUD，看校验、状态码策略、统一响应怎么做。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day02.html" style="color:var(--accent-cyan);">&larr; Day 02</a>
+                <a href="higress-console-day04.html" style="color:#14b8a6;">Day 04 · REST API &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Console 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三大部分</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 前端打进后端 jar</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Maven 多模块</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 和 Higress 的关系</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一句话数据流</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 构建与启动脚本</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day02.html" class="nav-link" style="color:#14b8a6;">Day 02 后端启动 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 后端架构</span>
+            <h1 class="part-title">项目全景：网关控制台</h1>
+            <p class="part-desc">欢迎来到 Higress Console——higress-group 系列第 4 站。前三站（Envoy/Istio/Higress）都是"引擎"，这一站是"给人用的方向盘"：一个全栈应用，让你在网页上点点点，就能管理 Higress 的路由、服务、插件、AI 供应商。第一天先建立整体印象。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Console 是什么</h1></div>
+            <div class="card">
+                <p><strong>Higress Console</strong> 是 Higress（云原生 AI 网关）的 <strong>Web 管理控制台</strong>（<code>README.md:1-7</code>）——用来管理配置规则（服务/路由/域名）、可观测、插件、AI Provider、登录等能力，首个可用版本基于 Kubernetes 部署。</p>
+                <div class="baby"><span class="t">"网关的操作台"</span>
+                上一站 Higress 是网关本体，它读 K8s 里的 Ingress + 注解 + CRD 就能工作——但让运维手写这些 YAML 太痛苦。<strong>Console 就是那个"帮你把界面点击翻译成 YAML"的管理后台。</strong>你在网页上填一个"路由名 + 域名 + 后端服务"，点保存，Console 就替你生成一个带 <code>higress.io/*</code> 注解的 Ingress 写进 K8s，Higress 控制器随即读到并生效。<strong>好比路由器的 Web 管理页——你不用记命令行，点几下就配好了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三大部分</h1></div>
+            <div class="card">
+                <p><code>README.md:11-13</code> 说明本仓库由三部分组成，前端构建后会随后端一起部署：</p>
+                <ul>
+                    <li><strong>frontend/</strong>：React 前端，基于阿里 ice.js（<code>frontend/ice.config.mts</code>、<code>frontend/package.json</code>），产物在 <code>frontend/build</code>。</li>
+                    <li><strong>backend/</strong>：Java Spring Boot，最终把前端产物一起打进一个 jar。</li>
+                    <li><strong>helm/</strong>：K8s 部署编排（<code>helm/Chart.yaml</code>、<code>helm/values.yaml</code>、<code>helm/templates/</code>）。</li>
+                </ul>
+                <div class="anno">读法：<b>关键结论——前后端最终是<strong>单一 jar、单一进程</strong>部署</b>。这在企业级 Java 项目里很常见：Maven 构建时先编译前端，再把静态文件塞进后端 classpath，用户只需跑一个 jar。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>前端怎么被打进后端 jar</h1></div>
+            <div class="card">
+                <p>这是本项目最有意思的工程点。<code>backend/console/pom.xml</code> 用 <code>frontend-maven-plugin</code> 在 Maven 构建阶段直接编译前端：</p>
+<pre><code class="language-xml"><!-- backend/console/pom.xml:101-103 --><plugin>
+  <groupId>com.github.eirslett</groupId>
+  <artifactId>frontend-maven-plugin</artifactId>
+  <configuration><workingDirectory>../../frontend/</workingDirectory></configuration>
+</plugin></code></pre>
+                <ul>
+                    <li><code>pom.xml:107-139</code>：依次执行 <code>install-node-and-npm</code> → <code>npm install</code> → <code>npx</code> → <code>npm run build</code>。</li>
+                    <li><code>pom.xml:149-158</code>（<code>copy-resources-static</code>）：把 <code>../../frontend/build</code> 拷进 <code>src/main/resources/static</code>。</li>
+                    <li><code>pom.xml:190</code>：<code>git-commit-id</code> 插件注入版本信息。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要这样折腾？</span>
+                前端产物（HTML/JS/CSS）本质是一堆静态文件。Spring Boot 会自动把 <code>classpath:/static/</code> 里的东西当静态资源对外提供。<strong>于是把前端 build 结果拷进这个目录，后端 jar 一跑，访问根路径就是前端页面，访问 <code>/v1/*</code> 就是后端 API——同一个端口、同一个进程，部署超简单。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Maven 多模块</h1></div>
+            <div class="card">
+                <p>后端是 Maven 多模块项目。父 POM <code>backend/pom.xml</code>：</p>
+                <ul>
+                    <li><code>pom.xml:7-11</code>：继承 <code>spring-boot-starter-parent:2.7.18</code>。</li>
+                    <li><code>pom.xml:22-25</code>：两个子模块 <strong>sdk</strong> 和 <strong>console</strong>。</li>
+                    <li><code>pom.xml:54-75</code>：关键依赖 <code>retrofit 2.9.0</code>、<code>guava 31.1</code>、<code>fastjson 1.2.83</code>、<strong><code>io.kubernetes:client-java 17.0.0</code></strong>、<code>springdoc 1.8.0</code>（Swagger）。</li>
+                </ul>
+                <div class="glossary"><b>两个模块的分工</b>：<br>
+                <b>backend/console</b>（<code>higress-console</code>）= Spring Boot 主应用：REST 控制器 + 控制台自身业务（登录/仪表盘/系统配置）+ Web 静态资源。<br>
+                <b>backend/sdk</b>（<code>higress-admin-sdk</code>）= 核心 SDK：K8s 客户端、模型转换、各资源 Service（Route/Service/Domain/WasmPlugin/AI…）。</div>
+                <div class="anno">读法：<b><code>console/pom.xml:24-28</code> 显示 console 依赖 sdk。sdk 刻意<strong>不依赖 Spring</strong>，可作为独立库使用——这是很讲究的分层设计，我们第 2 周会专门拆 sdk。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>和 Higress 的关系（承上）</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Console ≠ Higress 本体</span>
+                千万别混淆：<strong>上一站的 Higress 控制器/数据面是"配置引擎 + 流量执行者"；Console 只是"给人用的管理界面"——它<strong>生成</strong>那些 Higress 要读的配置。</strong>你在 Console 建一条路由，Console 把它写成 <code>higress.io/*</code> 注解的 K8s Ingress；然后上一站学的 Higress 控制器 watch 到这个 Ingress，翻译成 Istio 配置喂给 istiod，最终生成 xDS 给 Envoy。<strong>Console 和 Higress 通过"K8s 资源"解耦——Console 只管写 K8s，从不直接碰 Envoy。</strong></div>
+                <div class="tip">建议先学完 Higress（上一站）再学本课——你会更清楚 Console 生成的那些 Ingress/注解/CRD 到底被谁、怎么消费。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一句话数据流</h1></div>
+            <div class="card">
+<pre><code class="language-bash">浏览器界面点击（建路由/配插件/加 AI provider）
+  → React 前端调后端 REST（/v1/routes …）
+    → Controller 校验 → Service 处理 → SDK 转换
+      → K8s 客户端写 Ingress + 注解 / CRD / ConfigMap / Secret
+        → （上一站）Higress 控制器 watch 到 → 转 Istio 配置 → xDS → Envoy 生效</code></pre>
+                <div class="anno">读法：<b>这条链把第 4 站和前三站接起来了。本课聚焦前四段（浏览器→K8s），第五段是上一站的内容。<strong>记住一个总纲：Console 的全部工作，本质是"把界面操作翻译成 K8s 原生对象"。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>构建与启动脚本</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>backend/build.sh</code>：<code>./mvnw clean package -Dmaven.test.skip=true</code>（会触发前端构建）→ <code>docker build -t higress-console:0.0.1 -f Dockerfile .</code>。</li>
+                    <li><code>backend/start.sh</code>：带 <code>--local</code> 跑 <code>./console/target/higress-console.jar</code>，否则跑 <code>/app/higress-console.jar</code>；<code>start.sh:5-7</code> 为 arm64 macOS 加了 JVM 兼容参数。</li>
+                </ul>
+                <div class="anno">读法：<b>先记住"一条命令 <code>mvn package</code> 就能同时编好前后端并打成一个 jar"。第 4 周（Day 19）会详细拆 Dockerfile 和 Helm。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Higress Console 是什么？和 Higress 本体什么关系？</li>
+                    <li>本仓库三大部分？前端怎么被打进后端 jar？</li>
+                    <li>后端两个 Maven 模块（console/sdk）各自负责什么？</li>
+                    <li>"界面点击 → K8s 资源"这条数据流的每一段？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console
+head -20 README.md
+ls backend/ frontend/ helm/
+sed -n '22,25p' backend/pom.xml          # 两个子模块
+sed -n '101,158p' backend/console/pom.xml # 前端一体化打包</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>后端启动流程</strong>——从 <code>HigressConsoleApplication</code> 主类看 Spring Boot 怎么 boot，组件扫描怎么覆盖两个模块，以及最关键的 <code>SdkConfig</code> 怎么在 <code>@PostConstruct</code> 里真正连上 K8s。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="higress-console-day02.html" style="color:#14b8a6;">Day 02 · 后端启动 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

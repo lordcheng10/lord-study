@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · REST API 层 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#14b8a6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">REST API 层 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 统一 REST 风格</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 控制器全表</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 精读 Routes CRUD</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 最小示例 Services</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Response DTO</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ControllerUtil 状态码</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 分页查询</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day05.html" class="nav-link" style="color:#14b8a6;">Day 05 Service 层 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 后端架构</span>
+            <h1 class="part-title">REST API 层：后端对外的门面</h1>
+            <p class="part-desc">今天看后端"对外暴露了哪些接口"：一张控制器总表，再精读最典型的路由 CRUD，最后看统一响应和状态码策略——这套模式所有控制器都一样，学一个就会全部。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>统一 REST 风格</h1></div>
+            <div class="card">
+                <p>所有控制器长得几乎一样：<code>@RestController</code> + <code>@RequestMapping("/v1/...")</code> + <code>@Validated</code> + <code>@Tag</code>（Swagger 分组），返回 <code>ResponseEntity&lt;Response&lt;T&gt;&gt;</code> 或 <code>ResponseEntity&lt;PaginatedResponse&lt;T&gt;&gt;</code>，通过 <code>ControllerUtil.buildResponseEntity(...)</code> 包装。</p>
+                <div class="baby"><span class="t">什么是 RESTful？</span>
+                简单说就是"<strong>用 HTTP 动词表达操作，用 URL 表达资源</strong>"：<code>GET /v1/routes</code> 列表、<code>GET /v1/routes/{name}</code> 查一个、<code>POST /v1/routes</code> 新建、<code>PUT /v1/routes/{name}</code> 改、<code>DELETE /v1/routes/{name}</code> 删。<strong>看到 URL 和方法就知道在干嘛，这就是 REST 的好处。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>控制器全表</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>控制器</th><th>基路径</th><th>主要端点</th></tr>
+                    <tr><td>RoutesController</td><td>/v1/routes</td><td>list/get/post/put/delete</td></tr>
+                    <tr><td>ServicesController</td><td>/v1/services</td><td>list（只读）</td></tr>
+                    <tr><td>ServiceSourceController</td><td>/v1/service-sources</td><td>CRUD</td></tr>
+                    <tr><td>DomainsController</td><td>/v1/domains</td><td>CRUD</td></tr>
+                    <tr><td>ConsumersController</td><td>/v1/consumers</td><td>CRUD</td></tr>
+                    <tr><td>TlsCertificatesController</td><td>/v1/tls-certificates</td><td>CRUD</td></tr>
+                    <tr><td>WasmPluginsController</td><td>/v1/wasm-plugins</td><td>CRUD + /config + /readme</td></tr>
+                    <tr><td>WasmPluginInstancesController</td><td>/v1（四作用域）</td><td>global/domain/route/service</td></tr>
+                    <tr><td>ai/AiRoutesController</td><td>/v1/ai/routes</td><td>CRUD</td></tr>
+                    <tr><td>ai/LlmProvidersController</td><td>/v1/ai/providers</td><td>CRUD</td></tr>
+                    <tr><td>mcp/McpServerController</td><td>/v1/mcpServer</td><td>CRUD + consumers</td></tr>
+                    <tr><td>DashboardController</td><td>/dashboard</td><td>init/info/configData</td></tr>
+                    <tr><td>SystemController</td><td>/system</td><td>init/info/config</td></tr>
+                    <tr><td>SessionController</td><td>/session</td><td>login/logout</td></tr>
+                    <tr><td>UserController</td><td>/user</td><td>info/changePassword</td></tr>
+                    <tr><td>HealthzController</td><td>/healthz</td><td>ready（就绪探针）</td></tr>
+                </table>
+                <div class="anno">读法：<b>大部分是标准 CRUD；<code>ServicesController</code> 只读（服务从注册中心发现，不能增删）；<code>WasmPluginInstancesController</code> 特殊——它按四个作用域（全局/域名/路由/服务）分别提供接口。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>精读 Routes CRUD</h1></div>
+            <div class="card">
+                <p><code>RoutesController.java</code> 是最典型的 CRUD，逐段看 <code>add</code>（<code>:71-86</code>）：</p>
+<pre><code class="language-java">@PostMapping
+public ResponseEntity<Response<Route>> add(@RequestBody Route route) {
+    if (StringUtils.isEmpty(route.getName()))                       // :78 名字非空
+        throw new ValidationException("name can't be empty.");
+    if (route.getName().endsWith(HigressConstants.INTERNAL_RESOURCE_NAME_SUFFIX)) // :81 禁内部后缀
+        throw new ValidationException(...);
+    route.validate();                                                // :84 领域模型自校验
+    return ControllerUtil.buildResponseEntity(routeService.add(route));
+}</code></pre>
+                <div class="anno">读法：<b>三步校验（名字非空 → 禁止 <code>.internal</code> 后缀 → <code>route.validate()</code> 领域自校验）后交给 <code>routeService.add</code>。<code>update</code>（<code>:88-107</code>）还会校验"URL 里的名字"和"body 里的名字"一致。<code>delete</code>（<code>:109-120</code>）成功返回 204。</b>控制器只做"守门"，不做业务。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>最小示例：ServicesController</h1></div>
+            <div class="card">
+                <p><code>ServicesController.java:35-51</code> 只有一个 <code>list</code>，是最干净的入门样本：</p>
+<pre><code class="language-java">@GetMapping
+public ResponseEntity<PaginatedResponse<Service>> list(@ParameterObject ServicePageQuery query) {
+    return ControllerUtil.buildResponseEntity(serviceService.list(query));
+}</code></pre>
+                <div class="baby"><span class="t">为什么服务只能看不能改？</span>
+                服务（Service）不是你"创建"的，而是 Higress 从注册中心（K8s / Nacos / Consul…）<strong>发现</strong>的。控制台只是把发现到的服务列出来给你选，不提供增删改——这符合"服务发现"的语义。真正管理"从哪发现服务"的是<strong>服务来源（Service Source）</strong>，Day 14 讲。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>统一响应 Response DTO</h1></div>
+            <div class="card">
+                <p><code>console/controller/dto/Response.java:32-57</code> 是三段式包装：</p>
+<pre><code class="language-java">class Response<T> { boolean success; String message; T data; }
+// success(data) / failure(msg|Throwable) 静态工厂
+// getErrorMessage :63-75 会把 K8s ApiException 的 responseBody 也拼进错误信息</code></pre>
+                <div class="anno">读法：<b>前端拿到的永远是 <code>{success, message, data}</code> 这个统一形状，好处理。<strong>特别贴心的是 <code>getErrorMessage</code> 把 K8s 报错的原始 body 也带上——排查"为什么写 K8s 失败"时能直接看到根因。</strong></b>分页版是 <code>PaginatedResponse</code>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>ControllerUtil：按方法定状态码</h1></div>
+            <div class="card">
+                <p><code>console/controller/util/ControllerUtil.java:46-78</code> 根据 HTTP 方法自动决定状态码：</p>
+                <ul>
+                    <li>GET 且结果为 <code>null</code> → <strong>404</strong></li>
+                    <li>GET 且是分页 → <code>PaginatedResponse.success</code></li>
+                    <li>POST → <strong>201 CREATED</strong></li>
+                    <li>DELETE → 有内容 200，否则 <strong>204</strong></li>
+                </ul>
+                <div class="baby"><span class="t">为什么要费劲区分状态码？</span>
+                HTTP 状态码是"机器可读的结果信号"。<strong>201 表示"创建成功"、204 表示"删了，没内容返回"、404 表示"没找到"。</strong>前端和监控系统靠这些码就能判断结果，不用去解析 body。把这套逻辑收进一个工具类，所有控制器统一遵守，省得每个接口自己写。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>分页查询</h1></div>
+            <div class="card">
+                <p>列表接口普遍接收一个查询对象（如 <code>RoutePageQuery</code>），用 <code>@ParameterObject</code>（Springdoc）把 URL 上的 <code>?pageNum=&amp;pageSize=&amp;name=</code> 自动绑定成对象字段，返回 <code>PaginatedResult</code>。</p>
+                <div class="anno">读法：<b><code>@ParameterObject</code> 让 Swagger 把查询对象的每个字段都展开成独立的查询参数文档，前端调用方一目了然。分页在 SDK 层实现（第 2 周会看到 <code>CommonPageQuery</code>/<code>PaginatedResult</code>）。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>控制器的统一风格是什么？RESTful 的动词/URL 约定？</li>
+                    <li><code>RoutesController.add</code> 的三步校验？</li>
+                    <li>为什么服务（Services）只读？</li>
+                    <li><code>Response</code> 的三段式？<code>ControllerUtil</code> 怎么定状态码？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend/console/src/main/java/com/alibaba/higress/console
+sed -n '71,120p' controller/RoutesController.java
+sed -n '32,75p' controller/dto/Response.java
+sed -n '46,78p' controller/util/ControllerUtil.java
+ls controller/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：<strong>横切与 Service 业务层</strong>——请求生命周期的枢纽 <code>ApiStandardizationAspect</code>（traceId/鉴权/统一异常），以及 console 自身业务 service（登录、系统配置存 ConfigMap）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day03.html" style="color:var(--accent-cyan);">&larr; Day 03</a>
+                <a href="higress-console-day05.html" style="color:#14b8a6;">Day 05 · Service 层 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 后端启动 — Higress Console 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/properties.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">后端启动 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 主类与组件扫描</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · application.properties</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · WebMvc 与 SPA 回退</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SdkConfig 连 K8s</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · @Bean 桥接</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 配置键 SystemConfigKey</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 启动时序图</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-console-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-console-day03.html" class="nav-link" style="color:#14b8a6;">Day 03 后端分层 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 后端架构</span>
+            <h1 class="part-title">后端启动：Spring Boot 怎么 boot</h1>
+            <p class="part-desc">昨天看了全景，今天钻进后端的"开机流程"：从 main 方法一路到"连上 K8s、把 SDK 各服务注册成 Bean"。最关键的一步是 <code>SdkConfig</code> 的 <code>@PostConstruct</code>——这是 console 和 sdk 的桥接点。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>主类与组件扫描</h1></div>
+            <div class="card">
+                <p>入口 <code>console/HigressConsoleApplication.java:18-23</code>：</p>
+<pre><code class="language-java">@SpringBootApplication(scanBasePackages = {"com.alibaba.higress"})
+public class HigressConsoleApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(HigressConsoleApplication.class, args);
+    }
+}</code></pre>
+                <div class="baby"><span class="t">为什么 scanBasePackages 要写到 com.alibaba.higress？</span>
+                Spring Boot 默认只扫描主类所在包及其子包。但本项目 sdk 模块里也有一些 Spring 组件（比如 <code>ConfigServiceImpl</code> 上带 <code>@Service</code>），它们的包是 <code>com.alibaba.higress.console.service</code> 之外的。<strong>把扫描根设为 <code>com.alibaba.higress</code>，就能同时覆盖 console 和 sdk 两个模块的包</strong>，让两边的 Bean 都被发现。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>application.properties</h1></div>
+            <div class="card">
+                <p><code>console/src/main/resources/application.properties</code>（注意：只有 <code>.properties</code>，没有 <code>.yaml</code>）：</p>
+<pre><code class="language-properties">springdoc.api-docs.enabled=false            # 默认关闭 API 文档
+springdoc.pathsToMatch=/v1/**,/session/**,/dashboard/**,/system/**,/user/**
+higress-console.build.version=@app.build.version@   # Maven 资源过滤注入版本
+server.compression.enabled=true              # 开启响应压缩</code></pre>
+                <div class="anno">读法：<b><code>pathsToMatch</code> 这一行等于把后端全部 API 前缀列了个总览：<code>/v1</code>（业务资源）、<code>/session</code>（登录）、<code>/dashboard</code>、<code>/system</code>、<code>/user</code>。<code>@app.build.version@</code> 会被 Maven 替换成 <code>console/pom.xml:20</code> 的 <code>2.1.0</code>。</b>大量运行期参数不写死在这里，而走 <code>@Value</code> + 环境变量（Helm 注入），见 L06。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>WebMvc 与 SPA 回退</h1></div>
+            <div class="card">
+                <p><code>console/WebMvcInitializer.java:31-59</code>（<code>@Configuration @EnableWebMvc</code>）做两件事：把 <code>/*</code> 映射到 <code>classpath:/static/</code>（打包进来的前端），并实现 <strong>SPA 回退</strong>：</p>
+<pre><code class="language-java">// resolveResourceInternal :48-56（简化）
+// 找不到的资源：只要不是 /v1/ API 前缀（:35），
+// 也不是 /assets/ /css/ /js/ 等静态目录（:39-40），
+// 一律回退到 /index.html</code></pre>
+                <div class="baby"><span class="t">什么叫 SPA 回退？</span>
+                前端是单页应用（SPA），路由（比如 <code>/route</code>、<code>/plugin</code>）都在浏览器里由 JS 处理，服务器上并没有这些文件。<strong>如果用户直接刷新 <code>/plugin</code>，服务器找不到这个文件会 404。SPA 回退就是"找不到就统统返回 index.html"，让前端 JS 接管路由。</strong>但要排除真正的 API（<code>/v1/</code>）和静态资源目录，否则 API 也被吞成 HTML 就乱套了。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SdkConfig：真正连上 K8s 的地方</h1></div>
+            <div class="card">
+                <p>整个启动流程最关键的 Bean 是 <code>console/config/SdkConfig.java</code>（<code>@Configuration</code>）：</p>
+<pre><code class="language-java">// :47-79 一组 @Value 读入 K8s/controller 连接参数
+@Value("${higress-console.kube-config:}") private String kubeConfig;
+@Value("${higress-console.controller.service.host:...}") private String controllerServiceHost;
+// ... jwtPolicy、accessToken、clusterDomainSuffix 等，默认值来自 HigressConstants
+
+// :83-93 @PostConstruct initialize()
+@PostConstruct
+public void initialize() {
+    HigressServiceConfig config = HigressServiceConfig.builder()
+        .withKubeConfigPath(...)....build();
+    serviceProvider = HigressServiceProvider.create(config);  // ← 这一步真正连 K8s
+}</code></pre>
+                <div class="anno">读法：<b><code>@PostConstruct</code> 表示"这个 Bean 构造完成后立刻执行 <code>initialize()</code>"。它用 <code>@Value</code> 注入的参数搭出一个 <code>HigressServiceConfig</code>，然后 <code>HigressServiceProvider.create(config)</code>——从这一刻起，后端就握着一个能读写 K8s 的客户端了。</b>（Provider 内部怎么装配，第 2 周 Day 06 详讲。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>@Bean 桥接：console ← sdk</h1></div>
+            <div class="card">
+                <p><code>SdkConfig.java:95-168</code> 把 <code>serviceProvider</code> 产出的各 SDK 服务注册成 Spring <code>@Bean</code>：</p>
+<pre><code class="language-java">@Bean public RouteService routeService() { return serviceProvider.routeService(); }
+@Bean public KubernetesClientService kubernetesClientService() { ... }
+@Bean public WasmPluginService wasmPluginService() { ... }
+@Bean public AiRouteService aiRouteService() { ... }
+// ServiceService / DomainService / LlmProviderService / McpServerService ...</code></pre>
+                <div class="baby"><span class="t">这就是 console 和 sdk 的"接线板"</span>
+                sdk 模块自己不用 Spring（它是纯 Java 库），所以它产出的对象不会自动变成 Bean。<strong><code>SdkConfig</code> 就充当"接线板"——把 sdk 造出来的每个 service 挂到 Spring 容器里。</strong>之后 console 的控制器只要 <code>@Resource RouteService routeService</code> 就能拿到，任何 K8s 操作都从这里走，控制器自己从不 <code>new</code>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>配置键 SystemConfigKey</h1></div>
+            <div class="card">
+                <p>所有可注入的配置键定义在 <code>console/constant/SystemConfigKey.java</code>：</p>
+                <ul>
+                    <li><code>:25</code> <code>ns</code>（命名空间）、<code>:29</code> <code>controller.access-token</code>、<code>:31</code> <code>controller.jwt-policy</code></li>
+                    <li><code>:33 / :35</code> <code>controller.service.port / host</code>、<code>:51</code> <code>config-map.name</code>、<code>:74+</code> <code>dashboard.*</code></li>
+                </ul>
+                <div class="anno">读法：<b>部署时 Helm 把这些键映射成环境变量（<code>HIGRESS_CONSOLE_*</code>）注入容器，Spring 再通过 <code>@Value</code> 读进来。<strong>所以"改配置"= 改 Helm values → 环境变量 → @Value，无需改代码。</strong></b>Day 19 会把这条注入链走完。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>启动时序（串起来）</h1></div>
+            <div class="card">
+<pre><code class="language-bash">main() → SpringApplication.run
+  → 组件扫描 com.alibaba.higress（console + sdk 的 @Component/@Service）
+    → 加载 application.properties + 环境变量（@Value）
+      → SdkConfig 构造 → @PostConstruct：建 HigressServiceConfig → create(provider) → 连 K8s
+        → 注册各 SDK service 为 @Bean
+          → WebMvcInitializer 装好静态资源 + SPA 回退
+            → 内嵌 Tomcat 监听 8080，就绪</code></pre>
+                <div class="tip">把这张时序图记牢，后面每一天都在这条链上的某个节点展开。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 <code>scanBasePackages</code> 要设成 <code>com.alibaba.higress</code>？</li>
+                    <li>SPA 回退解决什么问题？为什么要排除 <code>/v1/</code>？</li>
+                    <li><code>SdkConfig</code> 的 <code>@PostConstruct</code> 干了什么？它为什么是"桥接点"？</li>
+                    <li>配置怎么从 Helm 一路走到 <code>@Value</code>？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress-console/backend
+sed -n '18,23p' console/src/main/java/com/alibaba/higress/console/HigressConsoleApplication.java
+sed -n '31,59p' console/src/main/java/com/alibaba/higress/console/WebMvcInitializer.java
+sed -n '47,168p' console/src/main/java/com/alibaba/higress/console/config/SdkConfig.java</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>后端分层</strong>——Controller / Service / SDK 三层各自的职责边界，以及请求进来后在这三层之间怎么流动。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-console-day01.html" style="color:var(--accent-cyan);">&larr; Day 01</a>
+                <a href="higress-console-day03.html" style="color:#14b8a6;">Day 03 · 后端分层 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
