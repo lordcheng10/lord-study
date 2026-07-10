@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · Dispatcher 事件循环 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e91e63,#7c4dff);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">Dispatcher 事件循环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 事件驱动</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Dispatcher 接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · libevent 底座</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 单轮循环步骤</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 非阻塞 IO 挂接</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · post 跨线程</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 延迟删除</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 线程模型</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day05.html" class="nav-link" style="color:#e91e63;">Day 05 请求入口 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 架构与线程</span>
+            <h1 class="part-title">Dispatcher 事件循环</h1>
+            <p class="part-desc">每个线程"阻塞在事件循环"里到底在干什么？今天拆开 <code>Dispatcher</code>——基于 libevent 的事件驱动引擎，非阻塞 IO 的核心。这是"单线程扛海量连接"的秘密。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>事件驱动</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">阻塞 vs 事件驱动</span>
+                传统写法：一个线程处理一个连接，读数据时"阻塞"等着（<code>read()</code> 卡住直到有数据）。<strong>1 万个连接就要 1 万个线程——内存爆炸、切换开销巨大。</strong>事件驱动完全不同：<strong>一个线程管上万个连接，用"非阻塞 IO + 事件循环"——不傻等，而是问操作系统"哪些连接有数据可读了？"，只处理就绪的那些。</strong>好比餐厅一个服务员看着几十桌：不站在一桌前等他们点完，而是哪桌举手（就绪）就去哪桌。<strong>这就是 Envoy 单个 worker 能扛海量连接的原因——事件循环（Dispatcher）就是那个"看着所有桌子的服务员"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Dispatcher 接口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/event/dispatcher.h:112
+class Dispatcher : public DispatcherBase, public ScopeTracker {
+  FileEventPtr createFileEvent(...);        // :129 监听 fd 的可读/可写事件
+  TimerPtr createTimer(TimerCb cb);         // :136 定时器
+  ServerConnectionPtr createServerConnection(...);  // :203 服务端连接
+  void deferredDelete(DeferredDeletablePtr&amp;&amp;);       // :234 延迟删除
+  void run(RunType type);                   // :272 跑事件循环
+  void post(PostCb);                        // :73（DispatcherBase）线程安全投递任务
+};
+enum class RunType { Block, NonBlock, RunUntilExit };  // :264</code></pre>
+                <div class="anno">读法：<b>Dispatcher 提供三类能力：注册 IO 事件（fd 就绪）、定时器、跨线程投递任务（post）。<code>run(Block)</code> 启动循环。</b><code>post</code> 是<strong>线程安全</strong>的（Day 03 跨线程更新就靠它），其余方法只能在本线程调（大量 <code>ASSERT(isThreadSafe())</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>libevent 底座</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/event/libevent_scheduler.cc
+// :18 构造 event_base_new() 建立 libevent 事件基
+// :47 run() 本质就是 event_base_loop(libevent_.get(), flag)
+//   Block 用默认阻塞、NonBlock 非阻塞、RunUntilExit 用 EVLOOP_NO_EXIT_ON_EMPTY
+// :64 loopExit = event_base_loopexit</code></pre>
+                <div class="baby"><span class="t">libevent 是什么？</span>
+                <strong>libevent 是一个成熟的 C 事件通知库</strong>——它封装了操作系统的 epoll（Linux）/kqueue（Mac）等高效 IO 多路复用机制，提供跨平台的"告诉我哪些 fd 就绪了"能力。<strong>Envoy 不重造轮子，而是站在 libevent 上：Dispatcher 是对 libevent 的面向对象封装。</strong><code>event_base_loop</code> 就是那个"不停问 OS 谁就绪、处理就绪事件"的循环。你只需理解 Dispatcher 这层抽象，libevent 是它的引擎。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>单轮循环步骤</h1></div>
+            <div class="card">
+                <p><code>libevent_scheduler.h:19-56</code> 的注释写得极清楚，一轮循环：</p>
+<pre><code class="language-bash">1. 算 poll 超时（下一个定时器多久到期）
+2. prepare 回调
+3. poll fd 事件（阻塞等待，直到有 fd 就绪或超时）
+4. check 回调
+5. 处理到期的定时器
+6. 执行 work list（post 的任务、延迟删除、activate）
+7. 未退出则回到 1</code></pre>
+                <div class="anno">读法：<b>这就是事件循环的"一次心跳"：等 IO 就绪（第 3 步是唯一"阻塞"点）→ 处理就绪的 IO → 处理到期定时器 → 执行投递的任务 → 循环。<code>post</code>/<code>deferredDelete</code> 都是第 6 步的 work list 项。</b>这段注释是理解事件循环的黄金教材。<code>poll_delay_us</code>/<code>loop_duration_us</code> 直方图统计每轮耗时（可观测）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>非阻塞 IO 挂接</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/event/file_event_impl.cc:55 assignEvents
+// event_assign(..., EV_PERSIST | EV_ET/EV_READ/EV_WRITE/EV_CLOSED, callback, this)
+// 把 socket 的 可读/可写/关闭 事件注册进 libevent
+// 回调把 libevent 的 what 翻译成 Envoy 的 FileReadyType</code></pre>
+                <div class="anno">读法：<b>这是"socket 就绪 → 触发回调 → 进入过滤器链"的最底层入口。<code>EV_READ</code>=可读了就调回调、<code>EV_ET</code>=边缘触发（高效）。</b>Day 05 会看到：连接可读时，这个回调最终驱动网络过滤器链处理数据。定时器同理用 <code>evtimer_assign</code>（<code>timer_impl.cc:12</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>post 跨线程</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/event/dispatcher_impl.cc:263 post
+// 加 post_lock_ 把回调塞进 post_callbacks_
+// 仅当队列由空变非空时 scheduleCallbackCurrentIteration() 唤醒事件循环
+// —— 这是唯一带锁的地方，锁只护"队列"这一瞬间，回调执行时不持锁
+// :355 runPostCallbacks：std::move 整个队列出来后释放锁再逐个执行</code></pre>
+                <div class="baby"><span class="t">post 是线程模型的"胶水"</span>
+                Day 03 说主线程用 <code>post</code> 把配置更新投递到各 worker——就是这个 <code>post</code>。<strong>它是唯一允许"跨线程"调用的方法：别的线程把一个任务塞进目标线程的队列，目标线程在自己的事件循环第 6 步执行它。</strong>注意它加锁的范围极小——只在"塞进队列"那一瞬间锁，执行任务时不持锁（先 <code>std::move</code> 整个队列出来再逐个跑）。<strong>这种"锁只护队列操作、不护业务执行"的设计把锁竞争降到最低。</strong>这就是 Envoy 并发模型的核心胶水。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>延迟删除</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/event/dispatcher_impl.cc:244 deferredDelete
+// 把待删对象放入 current_to_delete_（双缓冲 to_delete_1_/2_）
+// 下一轮循环统一删 —— 避免在栈上正被使用的对象被立刻销毁</code></pre>
+                <div class="baby"><span class="t">为什么要"延迟删除"？</span>
+                想象一个过滤器在处理请求时，触发了"关闭这个连接"——如果立刻销毁连接对象，但调用栈上层还在用它，就会 use-after-free 崩溃。<strong>延迟删除的招数：不立即删，而是把对象放进"待删列表"，等这一轮事件处理完、栈完全退出后，下一轮循环开头统一删。</strong>用双缓冲（两个列表交替）防止"删的过程中又有新的待删"导致的问题。<strong>这是事件驱动 C++ 里管理对象生命周期的经典技巧——异步世界里"什么时候能安全删对象"是个真问题。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>事件驱动为什么能"单线程扛海量连接"？</li>
+                    <li>Dispatcher 提供哪三类能力？</li>
+                    <li>libevent 是什么？run() 底层是什么调用？</li>
+                    <li>单轮事件循环的步骤？唯一的阻塞点在哪一步？</li>
+                    <li>post 为什么锁范围极小？延迟删除防什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '19,56p' source/common/event/libevent_scheduler.h   # 单轮循环黄金注释
+sed -n '263,300p' source/common/event/dispatcher_impl.cc   # post
+sed -n '55,80p' source/common/event/file_event_impl.cc     # event_assign</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：<strong>请求入口全景</strong>——把前 4 天串起来：一个连接从 accept 到进入过滤器链的完整链路——监听 socket 就绪 → ActiveTcpListener → 监听器过滤器 → 选过滤器链 → 网络过滤器 → HCM。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 线程模型</a>
+                <a href="envoy-day05.html" style="color:#e91e63;">Day 05 · 请求入口全景 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

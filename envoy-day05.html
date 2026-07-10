@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 请求入口全景 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:9px 12px 9px 40px;border:1px solid var(--border-color);border-radius:8px;margin:7px 0;font-size:12.5px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:9px;top:9px;width:21px;height:21px;border-radius:50%;background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px}
+        .flow .step b{color:#e91e63}.flow .step code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e91e63,#7c4dff);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">请求入口全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 完整链路</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · accept 连接</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 连接均衡</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三种过滤器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 选过滤器链</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · HCM 桥接</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 路由在哪算</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 事件循环</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day06.html" class="nav-link" style="color:#ff7043;">Day 06 L4 过滤器 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">请求入口全景</h1>
+            <p class="part-desc">把前 4 天串起来：一个连接从被 accept 到进入过滤器链，完整走一遍。这是第 2 周深入过滤器前的"地图预览"。收官第 1 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>完整链路（都在 worker 线程）</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step">监听 socket 就绪 → <code>ActiveTcpListener::onAccept</code>（active_tcp_listener.cc:80）</div>
+                    <div class="step">连接均衡，可能改派给别的 worker（<code>onAcceptWorker</code> :108, post :166）</div>
+                    <div class="step">跑<b>监听器过滤器</b>（<code>ActiveTcpSocket::continueFilterChain</code> active_tcp_socket.cc:112）</div>
+                    <div class="step"><code>newConnection</code> → <b>选过滤器链</b>（<code>findFilterChain</code> filter_chain_manager_impl.cc:556）</div>
+                    <div class="step">装<b>网络过滤器</b>（<code>createNetworkFilterChain</code>）</div>
+                    <div class="step">连接可读 → 跑<b>网络读过滤器</b>（<code>FilterManagerImpl::onContinueReading</code> :62）</div>
+                    <div class="step"><b>HCM::onData</b>（会说 HTTP 的网络过滤器，conn_manager_impl.cc:539）→ 解析 HTTP → L7 过滤器链</div>
+                    <div class="step"><b>Router</b>::decodeHeaders（选路由+集群，转发上游，router.cc:440）</div>
+                </div>
+                <div class="anno">读法：<b>这条链把 Day 01-04 的知识串起来了：worker 线程（Day 03）的事件循环（Day 04）监听到连接就绪，一路经三种过滤器处理，直到 Router 转发。后面每周深入其中一段。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>accept 连接</h1></div>
+            <div class="card">
+                <p>每个 worker 有一个 <code>ConnectionHandlerImpl</code>（<code>connection_handler_impl.cc:40</code>），管理它的 listener。监听 socket 就绪（Day 04 的 IO 事件）触发 <code>ActiveTcpListener::onAccept</code>（<code>active_tcp_listener.cc:80</code>）——每来一条连接触发一次。</p>
+                <div class="anno">读法：<b>借助 SO_REUSEPORT，每个 worker 有自己的监听 socket 分片（<code>getListenSocket(worker_index)</code>），内核帮忙把新连接分到各 worker——天然负载均衡、无锁。</b>这是 Day 03 "每 worker 独立"在接入层的体现。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>连接均衡</h1></div>
+            <div class="card">
+                <p><code>onAcceptWorker</code>（<code>:108</code>）做连接均衡：<code>:117-124</code> 若目标 worker 不是自己则 <code>target_handler.post(std::move(socket))</code> 把连接改派给别的 worker。</p>
+                <div class="baby"><span class="t">为什么还要"再均衡"？</span>
+                虽然内核（SO_REUSEPORT）已经分连接了，但可能不够均匀（比如某 worker 攒了一堆长连接）。<strong>Envoy 可选地做一次"连接均衡"：如果发现某 worker 负载明显偏高，就把新连接 <code>post</code> 给更闲的 worker 处理。</strong>注意用的还是 <code>post</code>（Day 04）——把连接的所有权转移到目标 worker 的线程里，之后这条连接就归它了。这体现了"连接一旦定了 worker 就不跨线程"的原则（Day 03）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三种过滤器</h1></div>
+            <div class="card">
+                <p>Envoy 有三个层次的过滤器，请求入口会依次遇到：</p>
+                <ul>
+                    <li><strong>监听器过滤器（Listener Filter）</strong>：连接建立前、在裸 socket 上运行，可 peek 字节探测 SNI/ALPN/协议（如 <code>tls_inspector</code>、<code>http_inspector</code>）。接口 <code>envoy/network/filter.h:423</code>。</li>
+                    <li><strong>网络过滤器（L4，Network Filter）</strong>：作用于连接字节流（读/写）。接口 <code>filter.h:241/123</code>。（Day 06 详讲）</li>
+                    <li><strong>HTTP 过滤器（L7）</strong>：在 HCM 内部、对已解析的 HTTP 运行。接口 <code>envoy/http/filter.h</code>。（Day 08 详讲）</li>
+                </ul>
+                <div class="baby"><span class="t">三层过滤器 = 三个处理时机</span>
+                <strong>监听器过滤器</strong>最早——连接刚建立、还没解析任何协议，用来"偷看"头几个字节判断这是什么流量（是 TLS 吗？是 HTTP 吗？）。<strong>网络过滤器（L4）</strong>处理原始字节流（TCP 层面，比如 TCP 代理、限速）。<strong>HTTP 过滤器（L7）</strong>处理解析后的 HTTP（认证、限流、改 header）。<strong>三层由浅入深：字节 → 连接 → HTTP。越往后信息越结构化，能做的处理越精细。</strong>这三层是第 2 周的主角。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>选过滤器链</h1></div>
+            <div class="card">
+                <p><code>findFilterChain</code>（<code>filter_chain_manager_impl.cc:556</code>）按"最具体匹配"选一条过滤器链：</p>
+<pre><code class="language-bash">① 目的端口 destination_ports_map_（:568，回退端口 0）
+② 目的 IP findFilterChainForDestinationIP（:605，用 LC-Trie 高效匹配）
+③ SNI findFilterChainForServerName（:622，读 socket.requestedServerName()，先精确再通配）</code></pre>
+                <div class="anno">读法：<b>一个 Listener 可以有多条过滤器链，按"目的端口/IP/SNI"选一条。比如同一个 443 端口，按 SNI（客户端要访问的域名）选不同的 TLS 证书和后续处理。</b>选中后建传输 socket、建 ServerConnection、装网络过滤器链（含 HCM）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>HCM 桥接 L4→L7</h1></div>
+            <div class="card">
+                <p><strong>HTTP 连接管理器（HCM）本身是一个网络（L4）读过滤器</strong>——这是 L4 到 L7 的桥。连接可读 → 网络过滤器链跑 → 最后一个是 HCM → <code>HCM::onData</code>（<code>conn_manager_impl.cc:539</code>）→ <code>codec_-&gt;dispatch(data)</code> 解析 HTTP → 触发 L7 过滤器链。</p>
+                <div class="baby"><span class="t">HCM：一个"会说 HTTP 的网络过滤器"</span>
+                这是 Envoy 一个精妙的设计：<strong>L4（字节流）和 L7（HTTP）不是两套独立系统，而是通过"HCM 是一个特殊的 L4 网络过滤器"连接起来。</strong>网络过滤器链处理原始字节，走到 HCM 这个过滤器时，它把字节喂给 HTTP 解析器（codec），解析出 HTTP 请求后，再启动 L7 HTTP 过滤器链。<strong>所以从 L4 到 L7 是无缝衔接的——HCM 是那个"翻译官 + 分发器"。</strong>Day 07 整天讲 HCM。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>路由在哪算（易错点）</h1></div>
+            <div class="card">
+                <div class="glossary"><b>一个常见误解</b>：很多人以为路由是在 Router 过滤器里算的。<strong>其实不是！HTTP 路由匹配发生在 HCM 的 <code>refreshCachedRoute()</code>（<code>conn_manager_impl.cc:1822</code>），在请求头解码时就算好并缓存。Router 过滤器（<code>router.cc:440</code>）只是<strong>读取</strong>已缓存的 <code>route()</code> 结果去转发。</strong><br>为什么这样设计？因为路由结果可能被多个 L7 过滤器用到（不只是 Router），提前算好缓存，大家共享。记住这个易错点，读源码不会找错地方。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 1 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周（架构与线程）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 01</strong> Envoy 全景、代理概念、目录、六大术语、在 higress 的角色</li>
+                    <li><strong>Day 02</strong> 启动路径 main → MainCommon → InstanceImpl → 主线程事件循环</li>
+                    <li><strong>Day 03</strong> 线程模型：1 主 + N worker + ThreadLocal 无锁（招牌设计）</li>
+                    <li><strong>Day 04</strong> Dispatcher 事件循环：libevent、非阻塞 IO、post、延迟删除</li>
+                    <li><strong>Day 05</strong> 请求入口：accept → 连接均衡 → 三种过滤器 → 选链 → HCM 桥接</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Envoy 的"骨架和引擎"：怎么启动、为何快（无锁线程模型 + 事件驱动）、请求怎么进来。第 2 周深入"血肉"——过滤器链怎么逐层处理请求。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '80,170p' source/common/listener_manager/active_tcp_listener.cc | head -40
+sed -n '556,630p' source/common/listener_manager/filter_chain_manager_impl.cc | head -40
+grep -n 'refreshCachedRoute' source/common/http/conn_manager_impl.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 06（第2周开始）</strong>：<strong>L4 网络过滤器链</strong>——<code>FilterStatus</code>（Continue/StopIteration）、ReadFilter/WriteFilter 接口、FilterManager 的读写链表（FIFO/LIFO）、<code>onContinueReading</code> 迭代。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 事件循环</a>
+                <a href="envoy-day06.html" style="color:#ff7043;">Day 06 · L4 网络过滤器链 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
