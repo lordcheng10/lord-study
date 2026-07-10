@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code CLI 源码学习 · 20 天总目录（claude-code-best 逆向实现）</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .content { max-width: 1180px; }
+        /* Agent Loop 环形动画 */
+        .loop-wrap { display:flex; justify-content:center; padding:14px 0 4px; }
+        .aloop { position:relative; width:320px; height:320px; }
+        .aloop .center {
+            position:absolute; inset:0; margin:auto; width:120px; height:120px;
+            display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+            background:radial-gradient(circle,rgba(245,158,11,.14),transparent 70%); border-radius:50%;
+        }
+        .aloop .center b { font-size:15px; color:var(--accent-orange); } .aloop .center small { font-size:10px; color:var(--text-muted); }
+        .aloop .ring { position:absolute; inset:0; border:1px dashed rgba(139,92,246,.3); border-radius:50%; }
+        .aloop .node {
+            position:absolute; width:96px; margin-left:-48px; left:50%; top:50%; margin-top:-26px;
+            background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px;
+            padding:8px 6px; font-size:11px; text-align:center; transition:all .4s; color:var(--text-secondary);
+        }
+        .aloop .node b { display:block; font-size:11.5px; color:var(--text-primary); }
+        .aloop .node.lit { border-color:var(--accent-orange); color:var(--accent-orange); box-shadow:0 0 16px rgba(245,158,11,.4); transform:scale(1.08); }
+        .aloop .node.lit b { color:var(--accent-orange); }
+        .aloop .orbit { position:absolute; width:20px;height:20px; left:50%; top:50%; margin:-10px; border-radius:50%;
+            background:#fff; box-shadow:0 0 12px 3px rgba(245,158,11,.8); }
+        .term-hero { border-radius:10px; overflow:hidden; border:1px solid var(--border-color); margin:6px 0; font-family:'SF Mono',monospace; }
+        .term-hero .bar { background:#2d2d3a; padding:7px 12px; display:flex; gap:6px; align-items:center; }
+        .term-hero .bar i{width:10px;height:10px;border-radius:50%;display:block} .term-hero .bar .r{background:#ff5f57}.term-hero .bar .y{background:#ffbd2e}.term-hero .bar .g{background:#28c840}
+        .term-hero .bar span{flex:1;text-align:center;font-size:11px;color:var(--text-muted)}
+        .term-hero .body{background:#0a0a12;padding:14px 16px;font-size:12.5px;line-height:1.7}
+        .term-hero .p{color:var(--accent-orange);font-weight:700} .term-hero .u{color:var(--accent-cyan)} .term-hero .o{color:var(--text-secondary)} .term-hero .k{color:var(--accent-green)}
+        .week-bar { display:flex; align-items:center; gap:12px; margin:36px 0 14px; padding-left:2px; }
+        .week-bar .wk { width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+        .week-bar h2 { font-size:17px; font-weight:700; margin:0; } .week-bar span { font-size:12px; color:var(--text-muted); }
+        .day-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+        .day-card { display:flex; flex-direction:column; gap:8px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:18px; text-decoration:none; transition:transform .2s,border-color .2s,box-shadow .2s; }
+        .day-card:hover { transform:translateY(-4px); border-color:rgba(245,158,11,.45); box-shadow:0 12px 34px rgba(245,158,11,.10); }
+        .day-card .top { display:flex; align-items:center; gap:10px; }
+        .day-card .num { width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;font-family:'SF Mono',monospace; }
+        .day-card h3 { font-size:15px; font-weight:700; color:var(--text-primary); margin:0; line-height:1.35; }
+        .day-card p { font-size:12.5px; color:var(--text-secondary); margin:0; line-height:1.6; flex:1; }
+        .day-card .foot { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+        .day-card .mins { font-size:11px; color:var(--text-muted); }
+        .day-card .go { font-size:12px; font-weight:600; color:var(--accent-orange); }
+        .day-card.soon { opacity:.55; cursor:default; }
+        .day-card.soon:hover { transform:none; border-color:var(--border-color); box-shadow:none; }
+        .day-card.soon .go { color:var(--text-muted); }
+        .badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; background:rgba(34,197,94,.12); color:var(--accent-green); }
+        @media(max-width:600px){ .aloop{transform:scale(.85)} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">CC</div>
+            <h2>Claude Code CLI</h2>
+            <p class="version">源码逆向精读 · 20 天 · claude-code-best</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">总目录</li>
+            <li><a href="#intro" class="nav-link active">开篇 · 这是个什么项目</a></li>
+            <li><a href="#loop" class="nav-link">Agent 循环总图</a></li>
+            <li><a href="#how" class="nav-link">怎么用这份教程</a></li>
+            <li class="nav-group-title">第 1 周 · 建立心智</li>
+            <li><a href="#week1" class="nav-link">Day 01 - 05</a></li>
+            <li class="nav-group-title">第 2 周 · 核心引擎</li>
+            <li><a href="#week2" class="nav-link">Day 06 - 10</a></li>
+            <li class="nav-group-title">第 3 周 · 扩展能力</li>
+            <li><a href="#week3" class="nav-link">Day 11 - 15</a></li>
+            <li class="nav-group-title">第 4 周 · 平台化进阶</li>
+            <li><a href="#week4" class="nav-link">Day 16 - 20</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">源码深度学习 · 零基础友好</span>
+            <h1 class="part-title">Claude Code CLI 源码学习</h1>
+            <p class="part-desc">20 天 · 每天 30 分钟 · 逐层读懂一个真实的终端 AI 编码助手（claude-code-best · TypeScript + Bun + Ink）是怎么造出来的</p>
+        </div>
+
+        <section id="intro" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>开篇 · 这是个什么项目</h1></div>
+            <div class="card">
+                <p>我们要读的这个仓库 <code>claude-code-best</code>，是一个<strong>逆向实现（reverse-engineered）的 Anthropic Claude Code CLI</strong>——也就是"在终端里跟你结对编程的 AI 助手"的一个开源复刻版，而且加了不少官方没有的功能（远程控制、workflow 编排、语音等）。</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：它是一个<strong>跑在终端里的 AI Agent</strong>——你用自然语言下命令，它自己调用工具（读写文件、跑命令、搜索代码…）把编程任务干完。本教程带你逐层读懂"这样一个 Agent 从按下回车到干完活，内部到底发生了什么"。</p>
+                </div>
+                <p>它用 <strong>TypeScript</strong> 写、跑在 <strong>Bun</strong> 上、界面用 <strong>React + Ink</strong> 渲染到终端。规模不小：2500+ 个 <code>.ts</code> + 700+ 个 <code>.tsx</code>，还是个 monorepo。别被吓到——我们会顺着"一次对话的旅程"这条主线，把复杂度拆成 20 天可消化的小块。</p>
+                <div class="info-box"><strong>为什么值得读？</strong> 因为它是当下最热的一类软件——"Agentic CLI"——的完整、真实实现。读懂它，你就理解了 agent 循环、工具调用、权限、MCP、终端 UI 这些 AI 应用的核心工程，能力可迁移到任何 AI 产品开发。</div>
+            </div>
+        </section>
+
+        <section id="loop" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>Agent 循环总图（动起来看）</h1></div>
+            <div class="card">
+                <p>整个 CLI 的灵魂就是一个<strong>循环</strong>。下面这颗发光的小球会绕着圈跑——它就是一次任务在 Agent 内部转的圈：<strong>你说话 → 模型思考 → 要用工具 → 执行工具 → 结果喂回模型 → 再思考……直到任务完成</strong>。今天不用懂细节，先把这个"圈"刻进脑子。</p>
+                <div class="loop-wrap">
+                    <div class="aloop" id="aloop">
+                        <div class="ring"></div>
+                        <div class="center"><b>Agent<br>Loop</b><small>周而复始<br>直到完成</small></div>
+                        <div class="node" data-a="0"><b>① 用户输入</b>你的需求</div>
+                        <div class="node" data-a="1"><b>② 请求模型</b>拼上下文+工具</div>
+                        <div class="node" data-a="2"><b>③ 流式回复</b>文字/工具调用</div>
+                        <div class="node" data-a="3"><b>④ 执行工具</b>读写/跑命令</div>
+                        <div class="node" data-a="4"><b>⑤ 回填结果</b>喂回下一轮</div>
+                        <div class="orbit" id="orbit"></div>
+                    </div>
+                </div>
+                <p>落到这个项目里，这个圈由 <code>src/QueryEngine.ts</code> / <code>src/query.ts</code> 驱动，工具在 <code>packages/builtin-tools</code>，界面在 <code>src/components</code>（Ink）。这三块 + "什么时候停"的判断，就是核心中的核心（Day 03、06–10 细讲）。</p>
+                <div class="term-hero">
+                    <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>ccb — 终端里的样子</span></div>
+                    <div class="body">
+                        <div><span class="p">›</span> <span class="u">帮我把 utils.ts 里的 fetchData 改成带重试的</span></div>
+                        <div class="o">● 我先看一下这个文件…</div>
+                        <div class="k">  ⎿ Read(utils.ts)  ⎿ Edit(utils.ts)  ✓ 已加上 3 次重试</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="how" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>怎么用这份教程</h1></div>
+            <div class="feature-grid">
+                <div class="feature-item"><div class="feature-icon">⏱️</div><h4>每天 30 分钟</h4><p>一天一个独立页面，跟着"今日小结 + 动手"收尾再关。</p></div>
+                <div class="feature-item"><div class="feature-icon">👶</div><h4>零基础友好</h4><p>不假设你懂 React/Ink/Bun/Agent，每个术语首次出现都有大白话解释。</p></div>
+                <div class="feature-item"><div class="feature-icon">📍</div><h4>精确到行号</h4><p>关键代码标 <code>文件:行号</code>，可在真源码里跳转对照。</p></div>
+            </div>
+            <div class="tip"><strong>一条主线</strong>：整份教程围绕"<strong>跟着一次对话走完全程</strong>"展开——从你敲下需求，到 Agent 调工具改完代码返回。每一天都是这条主线上的一站。</div>
+        </section>
+
+        <!-- W1 -->
+        <div class="week-bar" id="week1"><div class="wk" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">W1</div><h2>第 1 周 · 建立心智</h2><span>它是什么、怎么跑起来、Agent 循环、终端 UI</span></div>
+        <div class="day-grid">
+            <a class="day-card" href="claude-code-src-day01.html">
+                <div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">01</div><h3>项目全景与模块地图</h3></div>
+                <p>它是什么、技术栈（Bun/TS/Ink）、monorepo 结构、核心子系统一览。</p>
+                <div class="foot"><span class="mins">≈30 min · 已就绪 <span class="badge">NEW</span></span><span class="go">开始学 &rarr;</span></div>
+            </a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">02</div><h3>环境搭建与启动链</h3></div><p>装 Bun、build、ccb 命令，从 cli.tsx 到 REPL 渲染的完整启动流程。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">03</div><h3>Agent 循环总览</h3></div><p>turn 循环：请求模型→检测工具调用→执行→回填→再循环，直到停。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">04</div><h3>Ink 终端 UI 入门</h3></div><p>React 怎么渲染到终端、REPL 组件树、消息列表与输入框。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">05</div><h3>一次对话的完整旅程</h3></div><p>把前 4 天串起来：从你敲回车到 Agent 改完代码返回的全链路。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W2 -->
+        <div class="week-bar" id="week2"><div class="wk" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">W2</div><h2>第 2 周 · 核心引擎</h2><span>QueryEngine、工具系统、内置工具、权限、上下文管理</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">06</div><h3>QueryEngine 深入</h3></div><p>驱动一轮对话的生成器、流式增量、如何检测并分派工具调用。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">07</div><h3>工具系统 Tool 接口</h3></div><p>一个工具要实现什么、怎么注册、怎么暴露给模型当 tool 定义。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">08</div><h3>内置工具精读</h3></div><p>Read/Write/Edit/Bash/Grep/Glob… 逐个看真实实现与执行管线。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">09</div><h3>权限系统</h3></div><p>permission 模式、工具调用的门禁、用户审批流、allow/deny 配置。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">10</div><h3>上下文与 Token 管理</h3></div><p>上下文压缩(compaction)、stop hooks、token 预算、什么时候结束一轮。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W3 -->
+        <div class="week-bar" id="week3"><div class="wk" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">W3</div><h2>第 3 周 · 扩展能力</h2><span>Slash 命令、MCP、Skills、事件 Hooks、子代理</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">11</div><h3>Slash 命令系统</h3></div><p>命令怎么定义/注册、"/x args" 怎么解析分派，精读若干内置命令。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">12</div><h3>MCP 客户端</h3></div><p>连接外部 MCP server（stdio/SSE/HTTP）、发现其工具、并入工具集。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">13</div><h3>Skills 技能系统</h3></div><p>SKILL.md 格式、发现与加载、如何被 Agent 触发调用。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">14</div><h3>事件 Hooks 系统</h3></div><p>PreToolUse/PostToolUse/Stop… settings.json 驱动的拦截钩子。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#22c55e);">15</div><h3>子代理 / Task / coordinator</h3></div><p>子 agent 怎么派生、并行、把结果汇回主循环。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W4 -->
+        <div class="week-bar" id="week4"><div class="wk" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">W4</div><h2>第 4 周 · 平台化进阶</h2><span>会话记忆、配置模型成本、TUI 深入、远程控制、构建收官</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">16</div><h3>会话 / 历史 / 记忆</h3></div><p>对话怎么存与恢复(--continue/--resume)、CLAUDE.md 记忆、memdir。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">17</div><h3>配置分层与模型/成本</h3></div><p>user/project/global 设置合并、模型选择、成本追踪。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">18</div><h3>TUI 深入</h3></div><p>输入框多行/粘贴/自动补全、键位系统、vim 模式、对话框浮层。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">19</div><h3>远程控制 / daemon / workflow</h3></div><p>手机/web 远程控制 Claude Code、bridge/daemon、workflow 多 agent 编排。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#f59e0b);">20</div><h3>构建/测试/native + 收官</h3></div><p>build.ts、bun test、*-napi 原生包，全项目串讲与学习路线。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <div class="card highlight-card" style="margin-top:40px; text-align:center;">
+            <p style="margin:0;">📅 <strong>Day 01 已就绪，其余每天陆续上线</strong>。建议按顺序学。准备好了就从 <a href="claude-code-src-day01.html">Day 01 · 项目全景</a> 开始。</p>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // 环形排布 5 个节点 + 小球绕圈
+            const loop = document.getElementById('aloop');
+            const nodes = Array.from(loop.querySelectorAll('.node'));
+            const orbit = document.getElementById('orbit');
+            const R = 118, n = nodes.length;
+            nodes.forEach((el, i) => {
+                const ang = (-90 + i * 360 / n) * Math.PI / 180;
+                el.style.left = (50 + Math.cos(ang) * R / 3.2) + '%';
+                el.style.top = (50 + Math.sin(ang) * R / 3.2) + '%';
+            });
+            let t = 0, cur = 0;
+            setInterval(() => {
+                t = (t + 0.02) % 1;
+                const ang = (-90 + t * 360) * Math.PI / 180;
+                orbit.style.left = (50 + Math.cos(ang) * R / 3.2) + '%';
+                orbit.style.top = (50 + Math.sin(ang) * R / 3.2) + '%';
+                const idx = Math.floor(t * n) % n;
+                if (idx !== cur) { cur = idx; nodes.forEach((e,i)=>e.classList.toggle('lit', i===cur)); }
+            }, 40);
+
+            const links = document.querySelectorAll('.nav-link[href^="#"]');
+            const sections = document.querySelectorAll('section[id], div[id^="week"]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-30% 0px -60% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
