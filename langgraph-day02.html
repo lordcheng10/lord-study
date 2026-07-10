@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · StateGraph 节点+边+状态 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#6366f1);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">StateGraph · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三件套</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 节点 = 函数</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · START/END</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · add_node</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · add_edge</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Builder 模式</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · compile</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day03.html" class="nav-link" style="color:var(--accent-green);">Day 03 State &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">StateGraph：节点 + 边 + 状态</h1>
+            <p class="part-desc">第一个核心概念。读 <code>graph/state.py</code>：StateGraph 的三件套（State/Node/Edge）、add_node/add_edge、Builder 模式、compile 产出什么。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三件套（源码 docstring 说得最清楚）</h1></div>
+            <div class="card">
+                <p><code>StateGraph</code>（<code>state.py:130</code>）的 docstring 一句话定义：<em>"A graph whose nodes communicate by reading and writing to a shared state. The signature of each node is <code>State -> Partial&lt;State&gt;</code>."</em></p>
+                <ul>
+                    <li><strong>State（共享状态）</strong>：一个带类型的字典（TypedDict），整张图的"共享白板"，所有节点读它、往它写。</li>
+                    <li><strong>Node（节点）= 一个函数</strong>：签名 <code>State → Partial&lt;State&gt;</code>——读状态、返回"要更新哪些字段"的<strong>局部字典</strong>。</li>
+                    <li><strong>Edge（边）= 控制流</strong>：只决定"下一个轮到谁"，本身不搬运数据（数据都在共享 State 里）。</li>
+                </ul>
+                <div class="baby"><span class="t">状态与控制流分离（核心设计）</span>
+                传统写 Agent 是一堆 if/else + 手工传参，难中断、难重放、难可视化。<strong>LangGraph 把"状态"和"控制流"分开——状态集中在一个可序列化的 dict，控制流是显式的图。</strong>于是天然支持 checkpoint（存档）、断点续跑、并发、可视化。<strong>这个"数据在共享状态、边只管顺序"的分离是理解 LangGraph 的钥匙。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>节点 = 函数（返回局部更新）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># state.py:426 官方示例
+def my_node(state: State, config: RunnableConfig) -> State:
+    return {"x": state["x"] + 1}      # 只返回要改的键，不是完整状态</code></pre>
+                <div class="anno">读法：<b>节点读 <code>state</code>、返回 <code>{"x": ...}</code>——<strong>只更新 x 这一个键</strong>（partial state update），框架负责合并进完整状态（Day 03 的 reducer）。</b>节点除了 state，还能按需接收 config/writer/store/runtime 等参数（<code>_node.py:16</code> 用 Protocol 穷举定义可选签名）。</div>
+                <div class="baby"><span class="t">"只返回局部更新"为什么好？</span>
+                节点只关心"我要改什么"，不用管整个状态怎么组装。比如聊天节点只返回 <code>{"messages": [新回复]}</code>，不用重建整段对话历史。<strong>框架用 reducer 把局部更新合并进全局状态（Day 03）。</strong>这让节点函数简单、聚焦、可复用——只做自己的事，合并交给框架。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>START / END 特殊节点</h1></div>
+            <div class="card">
+<pre><code class="language-python"># constants.py:28
+END = sys.intern("__end__")
+START = sys.intern("__start__")</code></pre>
+                <div class="anno">读法：<b>START/END 不是真节点，是两个保留字符串常量。<code>START</code>="图的入口，用户输入从这灌进来"，<code>END</code>="到此停机"。</b>不能把它们当普通节点名（<code>state.py:794</code> 会报 "Node is reserved"）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>add_node</h1></div>
+            <div class="card">
+                <p><code>add_node</code>（<code>state.py:662</code>）加一个节点。智能之处：</p>
+                <ul>
+                    <li><strong>节点名推断</strong>（<code>:768</code>）：直接传函数则取 <code>__name__</code>；也可 <code>add_node("name", fn)</code> 显式命名。</li>
+                    <li><strong>输入 schema 推断</strong>（<code>:803</code>）：读函数第一个参数的类型注解作为该节点输入 schema。</li>
+                    <li><strong>从返回类型推断出边</strong>（<code>:826</code>）：若返回类型标注 <code>Command[Literal["a","b"]]</code>，自动把 a/b 记为可能的目标（用于可视化/路由）。</li>
+                </ul>
+                <div class="glossary">节点最终被包装成 <code>StateNodeSpec</code>（<code>_node.py:84</code>）存进 <code>self.nodes</code> 字典。<strong>"约定优于配置"——节点名从函数名推断、出边从返回注解推断，少写样板。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>add_edge</h1></div>
+            <div class="card">
+                <p><code>add_edge</code>（<code>state.py:915</code>）加普通边，两种形态：</p>
+<pre><code class="language-python">builder.add_edge("a", "b")           # 直连：a 跑完就跑 b
+builder.add_edge(["a", "b"], "c")    # 汇合：a 和 b 都跑完才跑 c（fan-in）
+# 语法糖：
+builder.set_entry_point("a")  # = add_edge(START, "a")
+builder.set_finish_point("z") # = add_edge("z", END)</code></pre>
+                <div class="anno">读法：<b>单起点 = 直连边；多起点 <code>add_edge(["a","b"], "c")</code> = "等 a、b 都跑完才执行 c"（汇合/fan-in，存进 <code>waiting_edges</code>）。</b>边只表达"顺序/依赖"，不传数据（数据在 State）。</div>
+                <div class="baby"><span class="t">边只管顺序、不传数据（再强调）</span>
+                注意 <code>add_edge("a", "b")</code> <strong>没有</strong>指定"a 的什么输出给 b"——因为数据不通过边传，而是都在共享 State 里。a 更新了 State 的某些键，b 直接从 State 读。<strong>边只是"a 跑完轮到 b"的控制信号。</strong>这和 eino/AutoGPT 的"边传数据"不同——LangGraph 是"共享状态 + 边只管顺序"。理解这点很关键。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Builder 模式</h1></div>
+            <div class="card">
+                <p><code>StateGraph</code> 只是"图纸"——不能直接跑（<code>state.py:139</code> docstring 警告：必须先 <code>.compile()</code>）。所有 <code>add_*</code> 方法都 <code>return self</code>（<code>:913</code>），支持链式调用。</p>
+                <div class="baby"><span class="t">"图纸"vs"可执行"</span>
+                <code>StateGraph</code> 是可变的图纸——你往上加节点、加边。<code>compile()</code> 产出<strong>不可变的 <code>CompiledStateGraph</code></strong>（真正能跑的）。<strong>分离"定义期"（可随意改图纸）和"运行期"（图定型、优化好、可反复高速执行）。</strong>这和 eino 的 Compile、AutoGPT 的图编译一个思想——建图时灵活、编译后高效不可变。<code>return self</code> 让你能 <code>builder.add_node(...).add_edge(...).add_edge(...)</code> 链式写。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>compile：图纸变可执行</h1></div>
+            <div class="card">
+                <p><code>compile()</code>（<code>state.py:1164</code>）做几件事：</p>
+                <ol>
+                    <li><code>validate()</code>（<code>:1116</code>）：检查边指向的节点都存在、必须有从 START 出发的入口。</li>
+                    <li>把每个 State 字段变成一个 <strong>channel（通道）</strong>（Day 07）。</li>
+                    <li>构造 <code>CompiledStateGraph</code>，把节点/边"焊接"成 Pregel 计算图。</li>
+                </ol>
+<pre><code class="language-python"># state.py:1391 —— 关键类型关系
+class CompiledStateGraph(Pregel[...], ...):   # ★ 编译产物就是一个 Pregel！</code></pre>
+                <div class="anno">读法：<b><code>CompiledStateGraph</code> <strong>继承自 Pregel</strong>——LangGraph 的执行引擎（Day 06）。</b>Pregel 实现了 LangChain 的 <code>Runnable</code> 接口，所以编译后的图能 <code>.invoke()</code>/<code>.stream()</code>/<code>.ainvoke()</code>。<strong>你写的高层 StateGraph，编译后变成通用的底层 Pregel——一套引擎支撑多种上层 API。</strong>Day 09 会详看这个编译过程。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>StateGraph 三件套？"状态与控制流分离"什么意思？</li>
+                    <li>节点为什么"只返回局部更新"？</li>
+                    <li>START/END 是什么？</li>
+                    <li>add_edge 的单起点 vs 多起点（汇合）？边为什么不传数据？</li>
+                    <li>Builder 模式（图纸 vs 可执行）？compile 产出什么（Pregel）？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/graph
+sed -n '130,145p' $P/state.py            # StateGraph docstring
+sed -n '426,430p' $P/state.py            # 节点示例
+sed -n '915,967p' $P/state.py | head -30 # add_edge
+grep -n 'class CompiledStateGraph' $P/state.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：全书最重要的概念——<strong>State 与 reducers</strong>：节点返回局部更新，reducer 决定怎么合并进状态（覆盖 vs 追加）。精读 add_messages。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="langgraph-day03.html" style="color:var(--accent-green);">Day 03 · State 与 reducers &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · State 与 reducers — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#6366f1);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">State 与 reducers · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么需要 reducer</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 字段 → 通道</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 无 reducer = 覆盖</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 有 reducer = 合并</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · add_messages 精读</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · MessagesState</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 并发写为什么必须 reducer</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 StateGraph</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 条件边 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">State 与 reducers</h1>
+            <p class="part-desc">全书最重要的概念。节点返回"局部更新"，reducer 决定这些更新<b>怎么合并进状态</b>（覆盖 vs 追加）。精读 add_messages。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么需要 reducer</h1></div>
+            <div class="card">
+                <p>节点返回的是"局部更新"（Day 02）。问题：<strong>更新怎么合并进旧状态？</strong>两种典型情况：</p>
+                <ul>
+                    <li>同一步里<strong>多个节点并发</strong>给同一个键写值，怎么办？</li>
+                    <li>一个"消息列表"，新消息应该<strong>追加</strong>还是<strong>覆盖</strong>整个列表？</li>
+                </ul>
+                <div class="baby"><span class="t">reducer = "合并策略"</span>
+                答案就是 <strong>reducer</strong>：每个 State 字段背后是一个 <strong>channel（通道）</strong>，channel 的 <code>update()</code> 方法决定合并策略。<strong>reducer 签名 <code>(旧值, 新值) → 合并后的值</code>。</strong>比如聊天历史用"追加"reducer（新消息接到末尾），计数器用"覆盖"（新值替换旧值）。<strong>节点无需关心合并——只管返回局部更新，reducer 负责合并。这是 LangGraph 状态管理的精髓。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>字段 → 通道</h1></div>
+            <div class="card">
+                <p>compile 时，<code>_get_channel</code>（<code>state.py:1836</code>）为每个 State 字段挑一个 channel：</p>
+<pre><code class="language-python">def _get_channel(name, annotation, ...):
+    if channel := _is_field_channel(annotation): ...    # Annotated[..., 某 Channel]
+    elif channel := _is_field_binop(annotation): ...     # Annotated[..., reducer 函数]
+    fallback: LastValue = LastValue(annotation)          # 没标注 → 默认 LastValue（覆盖）
+    return fallback</code></pre>
+                <div class="anno">读法：<b>每个 State 字段变成一个 channel。看字段的类型注解决定用哪种：没 reducer 注解 → <code>LastValue</code>（覆盖）；有 reducer 函数 → <code>BinaryOperatorAggregate</code>（合并）。</b>reducer 不是挂在图上的额外概念，而是<strong>内建在 channel 的 <code>update()</code> 里</strong>（Day 07 深入）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>无 reducer = 覆盖（LastValue）</h1></div>
+            <div class="card">
+                <p>字段没标 reducer（如 <code>count: int</code>）→ <code>LastValue</code> channel（<code>last_value.py:56</code>）：</p>
+<pre><code class="language-python">def update(self, values):
+    if len(values) == 0: return False
+    if len(values) != 1:
+        raise InvalidUpdateError("Can receive only one value per step. Use an Annotated key ...")
+    self.value = values[-1]   # 直接覆盖</code></pre>
+                <div class="anno">读法：<b><code>LastValue</code> = "存最后一个值、每步最多接收一个"。</b>关键：<strong>没有 reducer 的字段，同一步被两个节点同时写就报错</strong>（"Can receive only one value per step"）——这就是新手常见的报错来源。所以并发写必须用 reducer（L07）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>有 reducer = 合并（BinaryOperatorAggregate）</h1></div>
+            <div class="card">
+                <p><code>Annotated[类型, 二元函数]</code> → <code>BinaryOperatorAggregate</code>（<code>binop.py:123</code>）：</p>
+<pre><code class="language-python">class State(TypedDict):
+    items: Annotated[list, operator.add]   # reducer = operator.add（列表拼接）
+
+# update() 逐个折叠：
+for value in values:
+    self.value = self.operator(self.value, value)   # 用 operator 合并</code></pre>
+                <div class="anno">读法：<b><code>Annotated[list, operator.add]</code> 让多次写入<strong>逐个用 + 累加</strong>（列表拼接），而非覆盖。</b>于是多个节点并行往 <code>items</code> 写，全部被 <code>operator.add</code> 累加，不冲突。reducer 就是那个二元合并函数。</div>
+                <div class="baby"><span class="t">reducer 是什么（数学直觉）</span>
+                reducer 来自函数式编程的"归约"——把一串值用一个二元操作"折叠"成一个。<code>[1,2,3]</code> 用 <code>+</code> 归约 = <code>((0+1)+2)+3 = 6</code>。<strong>LangGraph 用它合并状态更新：旧状态 + 新更新 → 新状态。</strong>覆盖（LastValue）其实是"取最后一个"的特殊 reducer。<strong>把"如何合并状态"抽象成 reducer——灵活（你能自定义任意合并逻辑）、统一（所有字段都走这套机制）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>add_messages 精读（最常用的 reducer）</h1></div>
+            <div class="card">
+                <p><code>add_messages</code>（<code>message.py:60</code>）是 chat/agent 最常用的 reducer——<strong>默认追加，ID 相同则替换</strong>（<code>:216</code>）：</p>
+<pre><code class="language-python">merged = left.copy()
+merged_by_id = {m.id: i for i, m in enumerate(merged)}
+for m in right:
+    if (existing_idx := merged_by_id.get(m.id)) is not None:
+        merged[existing_idx] = m       # 同 ID → 替换
+    else:
+        merged.append(m)                # 新 ID → 追加
+# RemoveMessage(id=REMOVE_ALL_MESSAGES) 可清空所有</code></pre>
+                <div class="anno">读法：<b>新消息 ID 已存在 → 替换那条（改写）；新 ID → 追加到末尾。</b>还给缺 ID 的消息补 UUID、支持 <code>RemoveMessage</code> 删消息。</div>
+                <div class="baby"><span class="t">为什么聊天用 add_messages？</span>
+                聊天机器人每轮，节点只需 <code>return {"messages": [ai_回复]}</code>，<strong>add_messages 自动把新回复<strong>追加</strong>到历史里，而不是覆盖整段对话。</strong>如果用默认的 LastValue（覆盖），每轮就把历史丢了、只剩最新一条——聊天就"失忆"了。<strong>"同 ID 替换"则支持流式更新（同一条消息边生成边更新）。</strong>这个 reducer 是 LangGraph 聊天记忆的基础。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>MessagesState（开箱即用）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># message.py:372
+class MessagesState(TypedDict):
+    messages: Annotated[list[AnyMessage], add_messages]</code></pre>
+                <div class="anno">读法：<b>LangGraph 预置了 <code>MessagesState</code>——一个带 messages 键 + add_messages reducer 的 State。</b>绝大多数教程/agent 直接继承它，不用自己写。<strong>约定优于配置——最常见的 State（聊天消息）现成给你。</strong></div>
+                <div class="glossary"><b>v1.0 变化提示</b>：老的 <code>MessageGraph</code> 已废弃（<code>message.py:312</code>），官方建议用带 <code>messages</code> 键的 <code>StateGraph</code>（即 MessagesState 风格）。写新代码用新 API。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>并发写为什么必须 reducer</h1></div>
+            <div class="card">
+                <p>回到 L03 的报错："Can receive only one value per step"。这是因为 LangGraph 支持<strong>同一超步多个节点并行执行</strong>（Day 06）——它们可能都往同一个键写。</p>
+                <div class="baby"><span class="t">并发 + 无 reducer = 冲突</span>
+                想象两个节点并行都往 <code>results</code> 写。用 <code>LastValue</code>（覆盖）：一步收到两个值，它不知道该留哪个——<strong>报错</strong>（避免静默丢数据）。用 reducer（如 <code>operator.add</code>）：两个值被合并（拼接）——<strong>各自的贡献都保留</strong>。<strong>所以"会被多个节点并发写的字段"必须配 reducer。</strong>这是 LangGraph 并行安全的机制：reducer 定义了"多个并发写怎么合并"。<strong>没 reducer 的字段只能单节点写——框架用报错强制你为并发字段想清楚合并策略。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要 reducer？它的签名是什么？</li>
+                    <li>字段怎么变 channel？没 reducer 默认是什么（覆盖）？</li>
+                    <li>LastValue 为什么"多写报错"？BinaryOperatorAggregate 怎么合并？</li>
+                    <li>add_messages 的规则（追加/ID 替换）？为什么聊天要用它？</li>
+                    <li>为什么并发写的字段必须配 reducer？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph
+sed -n '1836,1860p' $P/graph/state.py         # _get_channel
+sed -n '56,77p' $P/channels/last_value.py     # LastValue 覆盖
+sed -n '123,144p' $P/channels/binop.py        # BinaryOperatorAggregate
+sed -n '187,244p' $P/graph/message.py         # add_messages</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>条件边与路由</strong>——add_conditional_edges 让图学会 if/router：一个路由函数看状态、返回下一个节点名。这是 ReAct Agent"要不要继续"的核心。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 StateGraph</a>
+                <a href="langgraph-day04.html" style="color:var(--accent-green);">Day 04 · 条件边 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
