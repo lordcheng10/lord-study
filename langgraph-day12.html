@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · CheckpointSaver 与 threads — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">CheckpointSaver 与 threads · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Saver 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 抽象接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · thread_id 隔离</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · InMemorySaver</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Sqlite/Postgres</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · get_state / list</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 多会话实战</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 Checkpoint</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 时间旅行 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 持久化与人在环</span>
+            <h1 class="part-title">CheckpointSaver 与 threads</h1>
+            <p class="part-desc">检查点存哪里、怎么存？读 <code>BaseCheckpointSaver</code> 抽象接口和它的三种实现，理解 <code>thread_id</code> 怎么把多个独立会话隔离开。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Saver 是什么</h1></div>
+            <div class="card">
+                <p>Day 11 讲了检查点<em>是什么</em>，今天讲它<em>存哪儿</em>。<code>CheckpointSaver</code>（检查点存储器）负责把检查点写入/读出某种后端（内存、SQLite、Postgres……）。编译时传入：</p>
+<pre><code class="language-python">from langgraph.checkpoint.memory import InMemorySaver
+graph = builder.compile(checkpointer=InMemorySaver())   # 插上"存档器"
+graph.invoke(input, {"configurable": {"thread_id": "user-42"}})  # 指定存档槽位</code></pre>
+                <div class="anno">读法：<b>compile 时插上 checkpointer，图就获得了"存档能力"；invoke 时用 <code>thread_id</code> 指定"存到哪个会话"。</b>不传 checkpointer → 图无记忆，每次从头（Day 01-10 的默认）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>抽象接口</h1></div>
+            <div class="card">
+                <p><code>BaseCheckpointSaver</code>（<code>checkpoint/base/__init__.py</code>）定义了统一接口，所有后端实现它：</p>
+                <table class="k">
+                    <tr><th>方法</th><th>作用</th></tr>
+                    <tr><td><code>put</code></td><td>存一个检查点（Day 08 after_tick 调）</td></tr>
+                    <tr><td><code>put_writes</code></td><td>存 pending writes（Day 11 半完成保护）</td></tr>
+                    <tr><td><code>get_tuple</code></td><td>读某检查点（恢复用）</td></tr>
+                    <tr><td><code>list</code></td><td>列出某 thread 的所有检查点（时间旅行用，Day 13）</td></tr>
+                </table>
+                <div class="baby"><span class="t">又是"接口/实现分离"（老朋友了）</span>
+                和 eino 的 ChatModel、AutoGPT 的 Block、crewAI 的 LLM 一样：<strong>Pregel 引擎只依赖 <code>BaseCheckpointSaver</code> 这个抽象接口（put/get/list），完全不关心底层是内存还是数据库。</strong>换存储后端 = 换一个实现类，引擎代码一行不改。<strong>开发时用 InMemory、生产用 Postgres，图逻辑完全一样——这就是抽象接口的价值。</strong>贯穿所有框架的同一设计哲学。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>thread_id 隔离</h1></div>
+            <div class="card">
+                <p>检查点按 <code>thread_id</code> 分组存储。每个 thread_id 是一条<strong>独立的检查点时间线</strong>——互不干扰。</p>
+                <div class="baby"><span class="t">thread = 一个独立的对话/会话</span>
+                想象一个客服机器人同时服务 1000 个用户。<strong>每个用户一个 <code>thread_id</code>——他们的对话历史（检查点）各存各的，绝不串台。</strong>用户 A 发消息用 <code>thread_id="A"</code>，图自动加载 A 的历史、接着聊；用户 B 用 <code>"B"</code>，是全新的另一条线。<strong>这就是 LangGraph 做"多用户记忆"的方式：不用你手动管理会话字典，thread_id + checkpointer 自动搞定持久化和隔离。</strong>换个 thread_id 就是换个记忆空间。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>InMemorySaver</h1></div>
+            <div class="card">
+                <p><code>InMemorySaver</code>（<code>checkpoint/memory/</code>）把检查点存进内存字典（按 thread_id → checkpoint_id 嵌套）。进程结束即丢——适合开发、测试、单元测试。</p>
+                <div class="anno">读法：<b>最简单的实现，零依赖、零配置，验证逻辑用。</b>它证明了接口的完整性：连纯内存字典都能撑起完整的持久化/时间旅行 API。生产别用（重启就没了）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Sqlite / Postgres</h1></div>
+            <div class="card">
+                <p>生产级实现在独立包：</p>
+                <table class="k">
+                    <tr><th>包</th><th>后端</th><th>适用</th></tr>
+                    <tr><td><code>langgraph-checkpoint-sqlite</code></td><td>SQLite 文件</td><td>单机、本地持久化</td></tr>
+                    <tr><td><code>langgraph-checkpoint-postgres</code></td><td>Postgres</td><td>生产、多实例共享</td></tr>
+                </table>
+                <p>它们把 Day 11 的 Checkpoint 结构序列化（Day 15 讲 serde）后存进表；<code>list</code>/<code>get_tuple</code> 用 SQL 查询实现。API 与 InMemory 完全一致。</p>
+                <div class="anno">读法：<b>同一套接口的持久化后端。生产用 Postgres——多个服务实例连同一个库，Agent 状态天然共享、可水平扩展。</b>切换只需换 checkpointer 那一行。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>get_state / get_state_history</h1></div>
+            <div class="card">
+                <p>Pregel 在 Saver 之上包了用户友好的 API（<code>main.py</code>）：</p>
+<pre><code class="language-python">cfg = {"configurable": {"thread_id": "user-42"}}
+snap = graph.get_state(cfg)              # 当前状态快照（StateSnapshot）
+for s in graph.get_state_history(cfg):   # 历史所有检查点（新→旧）
+    print(s.config, s.values, s.next)    # next = 接下来该跑的节点</code></pre>
+                <div class="anno">读法：<b><code>get_state</code>=读当前存档；<code>get_state_history</code>=列出这个 thread 的所有历史存档（底层调 saver.list）。</b><code>StateSnapshot</code> 带 <code>next</code>（下一步跑谁）和 <code>config</code>（含 checkpoint_id）——Day 13 时间旅行就用这个 config 精确定位到某一步。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>多会话实战</h1></div>
+            <div class="card">
+<pre><code class="language-python">graph = builder.compile(checkpointer=InMemorySaver())
+
+# 会话 A：连续两轮，自动记住上一轮
+graph.invoke({"messages":[HumanMessage("我叫小明")]}, {"configurable":{"thread_id":"A"}})
+graph.invoke({"messages":[HumanMessage("我叫啥?")]}, {"configurable":{"thread_id":"A"}})
+# → 第二轮能答"小明"，因为 add_messages 累加了 A 的历史（Day 03 + Day 11）
+
+# 会话 B：全新记忆，不知道小明
+graph.invoke({"messages":[HumanMessage("我叫啥?")]}, {"configurable":{"thread_id":"B"}})
+# → 答不上来，B 是独立时间线</code></pre>
+                <div class="anno">读法：<b>这就是"聊天机器人记住上下文"的完整机制：checkpointer 存历史 + add_messages 累加 + thread_id 隔离。三者合起来，你几乎不用写记忆管理代码。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Saver 干什么？怎么给图插上它？</li>
+                    <li>BaseCheckpointSaver 的 put/get_tuple/list 各干嘛？</li>
+                    <li>thread_id 起什么作用？（会话隔离/多用户记忆）</li>
+                    <li>InMemory vs Sqlite vs Postgres 怎么选？</li>
+                    <li>get_state / get_state_history 返回什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">C=libs/checkpoint/langgraph/checkpoint
+grep -n 'class BaseCheckpointSaver' $C/base/__init__.py
+grep -n 'def put\b\|def get_tuple\|def list\b' $C/base/__init__.py
+ls $C/memory/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>时间旅行与断点</strong>——既然每步都存了检查点、还能 list 出历史，那就能"读档到任意一步重新出发"。看 checkpoint_id 定位 + interrupt_before/after 断点。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 Checkpoint</a>
+                <a href="langgraph-day13.html" style="color:var(--accent-green);">Day 13 · 时间旅行与断点 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

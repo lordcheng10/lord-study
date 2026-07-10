@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · Checkpoint 检查点 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">Checkpoint 检查点 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 检查点是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Checkpoint 结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · channel_values</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · versions_seen</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · pending_writes</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · CheckpointMetadata</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 恢复过程</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 节点并行</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 Saver &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 持久化与人在环</span>
+            <h1 class="part-title">Checkpoint 检查点</h1>
+            <p class="part-desc">Day 08 那行"每个超步存检查点"存的到底是什么？今天拆开 <code>libs/checkpoint/</code> 的 Checkpoint 数据结构——它是持久执行、时间旅行、人在环的共同根基。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>检查点是什么</h1></div>
+            <div class="card">
+                <p>检查点（checkpoint）= <strong>某个超步结束时，整个图状态的一份完整快照</strong>。有了它，程序重启后能"回到那一刻继续"。</p>
+                <div class="baby"><span class="t">像游戏存档</span>
+                打游戏时每过一关自动存档。<strong>LangGraph 每跑完一个超步就"存档"一次——把此刻所有通道的值、进度信息打包保存。</strong>下次即使进程崩了、机器重启了，加载存档就能从那一步继续，不用从头打。<strong>更妙的是：因为每步都存，你还能"读档到任意一关"（时间旅行，Day 13），或"在某关暂停等玩家操作"（人在环，Day 14）。</strong>这一整周的能力，全靠"每步存档"这一个机制。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Checkpoint 结构</h1></div>
+            <div class="card">
+                <p><code>Checkpoint</code>（<code>libs/checkpoint/langgraph/checkpoint/base/__init__.py</code>）是个 TypedDict：</p>
+<pre><code class="language-python">class Checkpoint(TypedDict):
+    v: int                              # 版本号（格式版本）
+    id: str                             # 检查点 ID（单调递增，可排序）
+    ts: str                             # 时间戳
+    channel_values: dict[str, Any]      # ★ 所有通道当前值（状态本体）
+    channel_versions: dict[str, str]    # 每个通道的版本号
+    versions_seen: dict[str, dict]      # 每个节点"见过"的通道版本（触发去重）
+    updated_channels: list[str] | None  # 本步更新了哪些通道</code></pre>
+                <div class="anno">读法：<b>一个检查点 = 状态本体（channel_values）+ 进度元信息（各种 versions）。<code>id</code> 单调递增，所以检查点天然可排序 → 能构成一条历史时间线（Day 13 时间旅行的基础）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>channel_values（状态本体）</h1></div>
+            <div class="card">
+                <p><code>channel_values</code> 是<strong>所有通道当前值的字典</strong>——就是你的 State 此刻的完整内容（Day 07 通道值的集合）。恢复时把它灌回各通道，状态就"活"过来了。</p>
+                <div class="anno">读法：<b>这是存档的"主体数据"。你的 messages 历史、count、任何 State 字段，都在这里。</b>其余字段都是"怎么正确恢复和继续"的元信息。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>versions_seen（触发去重）</h1></div>
+            <div class="card">
+                <p><code>versions_seen[node]</code> 记录"节点 node 上次执行时，见过的各触发通道版本号"。Day 06/08 讲的触发判断就靠它：<strong>通道当前版本 > 节点见过的版本 → 触发；相等 → 不重复触发</strong>。</p>
+                <div class="baby"><span class="t">为什么恢复也要存它？</span>
+                如果只存 channel_values（数据）不存 versions_seen（进度），恢复后引擎不知道"哪些节点已经处理过当前数据了"，会<strong>重复执行</strong>。<strong>versions_seen 就是"每个节点的已读回执"——存下它，恢复后引擎才能准确判断"接下来该触发谁、谁已经跑过了"，做到精确续跑而非从头重跑。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>pending_writes（半完成保护）</h1></div>
+            <div class="card">
+                <p>检查点还伴随存储 <strong>pending writes</strong>（<code>put_writes</code>，Day 08）——本超步中<strong>已完成</strong>节点的写入。若单步执行到一半崩溃，恢复时这些已完成的写入不用重算。</p>
+                <div class="anno">读法：<b>粒度比"整步"更细的保护：一个超步里 A 跑完、B 还没跑就崩了——A 的结果（pending write）已落盘，恢复后只需重跑 B。</b>避免"因为 B 挂了，把已成功的 A 也重跑一遍"（A 可能有副作用，如已扣款）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>CheckpointMetadata</h1></div>
+            <div class="card">
+                <p>每个检查点还带一份元数据 <code>CheckpointMetadata</code>：</p>
+                <table class="k">
+                    <tr><th>字段</th><th>含义</th></tr>
+                    <tr><td><code>source</code></td><td>来源：input（首次输入）/ loop（超步间，Day 08）/ update（手动改状态）</td></tr>
+                    <tr><td><code>step</code></td><td>第几步（-1=输入前，0,1,2...）</td></tr>
+                    <tr><td><code>parents</code></td><td>父检查点（构成历史链）</td></tr>
+                </table>
+                <div class="anno">读法：<b>元数据回答"这个存档是怎么产生的、在时间线的第几步"。<code>step</code> + <code>parents</code> 让检查点串成一条可回溯的链——Day 13 时间旅行遍历的就是这条链。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>恢复过程</h1></div>
+            <div class="card">
+                <p>带 checkpointer 的图再次 invoke 时（同一 thread_id），<code>_loop.py</code> 启动阶段：</p>
+<pre><code class="language-python"># 1. 从 saver 读最新检查点（Day 12）
+# 2. channel_values → 灌回各通道（状态复活）
+# 3. versions_seen → 恢复触发进度
+# 4. pending_writes → 应用未提交的已完成写入
+# 5. 从下一超步继续 tick 循环（Day 08）</code></pre>
+                <div class="baby"><span class="t">"继续"而不是"重来"</span>
+                这就是"持久执行"（durable execution）的完整闭环：<strong>存档时保存了数据+进度+半完成保护，恢复时逐一还原，然后从断点的下一步继续跑。</strong>用户视角：一个跑了半小时、中途崩溃的长流程，重启后几乎无缝续上。<strong>这是 LangGraph 区别于"一个大 while 循环"式 Agent 的核心工程能力，也是它能支撑生产级长运行 Agent 的原因。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>检查点是什么？（某超步末的完整状态快照）</li>
+                    <li>Checkpoint 的三大内容：channel_values / versions_seen / pending_writes 各管什么？</li>
+                    <li>为什么恢复不能只存 channel_values？</li>
+                    <li>CheckpointMetadata 的 source/step/parents 干嘛？</li>
+                    <li>恢复过程的 5 步？为什么是"继续"不是"重来"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">C=libs/checkpoint/langgraph/checkpoint/base/__init__.py
+grep -n 'class Checkpoint\b\|class CheckpointMetadata' $C
+sed -n '/class Checkpoint(TypedDict)/,/^$/p' $C | head -40</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>CheckpointSaver 与 threads</strong>——检查点存哪、怎么存？读 BaseCheckpointSaver 接口 + InMemory/Sqlite/Postgres 实现，理解 thread_id 怎么隔离多个会话。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 节点并行</a>
+                <a href="langgraph-day12.html" style="color:var(--accent-green);">Day 12 · CheckpointSaver &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
