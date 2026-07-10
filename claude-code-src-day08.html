@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · 内置工具精读 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .toolcard{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:16px;margin:10px 0;border-left:3px solid var(--tc,var(--accent-orange))}
+        .toolcard h3{font-size:15px;margin:0 0 4px;color:var(--tc,var(--accent-orange))} .toolcard .f{font-size:11px;font-family:monospace;color:var(--text-muted);margin-bottom:8px}
+        .flags{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0} .flag{font-size:10.5px;padding:2px 9px;border-radius:12px;background:var(--bg-primary);border:1px solid var(--border-color);color:var(--text-secondary)}
+        .flag.ro{border-color:rgba(34,197,94,.4);color:var(--accent-green)} .flag.wr{border-color:rgba(245,158,11,.4);color:var(--accent-orange)} .flag.cc{border-color:rgba(6,182,212,.4);color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">内置工具精读 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工具全家福</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Read（只读范例）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Read 的去重巧思</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Edit（写范例）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Bash（最复杂权限）</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Agent（子代理）</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 结果落盘与 maxResultSize</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 Tool 接口</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 权限系统 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 核心引擎</span>
+            <h1 class="part-title">内置工具精读</h1>
+            <p class="part-desc">打开 <code>packages/builtin-tools</code>，看几个真实工具怎么填 Day 07 那套接口：Read（只读）、Edit（写）、Bash（最复杂权限）、Agent（子代理）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工具全家福</h1></div>
+            <div class="card">
+                <p>工具都在 <code>packages/builtin-tools/src/tools/&lt;名字&gt;/</code>，注册入口 <code>getAllBaseTools()</code>（<code>src/tools.ts:218</code>）。约 60 个，核心的：</p>
+                <table>
+                    <thead><tr><th>模型可见名</th><th>用途</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>Read</code></td><td>读文件/图片/PDF/notebook</td></tr>
+                        <tr><td><code>Write / Edit</code></td><td>创建覆盖 / 就地修改文件</td></tr>
+                        <tr><td><code>Bash</code></td><td>执行 shell 命令</td></tr>
+                        <tr><td><code>Glob / Grep</code></td><td>按文件名找 / 按内容正则搜（ripgrep）</td></tr>
+                        <tr><td><code>Agent</code>（别名 Task）</td><td>委派工作给子代理</td></tr>
+                        <tr><td><code>WebFetch / WebSearch</code></td><td>抓 URL / 联网搜索</td></tr>
+                        <tr><td><code>TodoWrite / Task*</code></td><td>任务清单管理</td></tr>
+                        <tr><td><code>Skill</code></td><td>调用 slash-command 技能（Day 13）</td></tr>
+                        <tr><td><code>EnterPlanMode / ExitPlanMode</code></td><td>进入/退出规划模式</td></tr>
+                        <tr><td><code>MCPTool / ListMcpResources</code></td><td>MCP 相关（Day 12）</td></tr>
+                        <tr><td><code>LSP</code></td><td>代码智能（定义/引用/符号）</td></tr>
+                    </tbody>
+                </table>
+                <div class="glossary"><b>注意名字对不上目录名</b>：工具的真实 <code>name</code>（模型看到的）常和目录名不同——比如目录 <code>FileReadTool/</code> 但工具名是 <code>Read</code>，目录 <code>AgentTool/</code> 但主名是 <code>Agent</code>（<code>Task</code> 只是向后兼容别名）。名字取自各工具的 <code>constants.ts</code>。读代码时以 <code>name</code> 字段为准。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Read — 只读工具的范例</h1></div>
+            <div class="toolcard" style="--tc:#22c55e">
+                <h3>FileReadTool（name: Read）</h3>
+                <div class="f">packages/builtin-tools/src/tools/FileReadTool/FileReadTool.ts</div>
+                <div class="flags"><span class="flag ro">isReadOnly → true</span><span class="flag cc">isConcurrencySafe → true</span><span class="flag">maxResultSizeChars: 100000</span><span class="flag">strict: true</span></div>
+            </div>
+            <div class="card">
+                <p><strong>输入 schema</strong>（<code>:226</code>）：<code>z.strictObject({ file_path, offset?, limit?, pages? })</code>，<code>file_path</code> 描述明确要求"绝对路径"。</p>
+                <p><strong>标志</strong>：<code>isReadOnly → true</code> 且 <code>isConcurrencySafe → true</code>（<code>:373</code>）——所以 Day 07 讲的并发分区里，多个 Read 会<strong>并发</strong>执行（模型一次读 5 个文件，同时读）。</p>
+                <p><strong>权限</strong>（<code>:398</code>）委托给共享函数 <code>checkReadPermissionForTool</code>（<code>filesystem.ts:1030</code>），判定顺序简化版：UNC/可疑路径 → ask；deny 规则 → deny；<strong>在工作目录内 → allow</strong>（最常见放行路径）；否则 → ask。Day 09 细讲。</p>
+                <p><strong>输出</strong>是个"判别联合"（<code>:256</code>）：text / image / notebook / pdf / file_unchanged 各一种形态——Read 不只读文本，还能读图片、PDF、Jupyter notebook。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Read 的去重巧思：省 token</h1></div>
+            <div class="card">
+                <p>Read 执行时（<code>:494</code>）有个聪明的优化：如果模型<strong>重复读同一个文件的同一范围、且文件没改过</strong>（mtime 未变），就返回一个 <code>file_unchanged</code> 存根，而不是把整个文件内容再塞一遍。</p>
+                <div class="glossary"><b>为什么这么做？</b> Agent 干活时经常反复读同一个文件（读一次、改一点、再读确认……）。每次都把全文塞进对话，既浪费 token（花钱）又撑大上下文（更容易触发压缩）。检测到"你读的这个文件跟上次一模一样"，就回一句"没变化"（<code>file_unchanged</code>），模型知道用之前读到的内容即可。<strong>QueryEngine 里那个 <code>readFileState</code> 字段（Day 06）就是记"读过哪些文件、什么版本"，供这个去重用的。</strong>这是"省 token = 省钱 + 省上下文"的典型工程优化。</div>
+                <p>另一个细节 <code>backfillObservableInput</code>（<code>:388</code>，Day 07 提过）：把 <code>file_path</code> 展开成绝对路径，让 hook 白名单无法用 <code>~</code>/相对路径绕过——安全考量。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Edit — 写工具的范例</h1></div>
+            <div class="toolcard" style="--tc:#f59e0b">
+                <h3>FileEditTool（name: Edit）</h3>
+                <div class="f">packages/builtin-tools/src/tools/FileEditTool/FileEditTool.ts</div>
+                <div class="flags"><span class="flag wr">会写文件</span><span class="flag">默认非并发</span></div>
+            </div>
+            <div class="card">
+                <p><strong>schema</strong>（<code>types.ts:5</code>）：<code>z.strictObject({ file_path, old_string, new_string, replace_all? })</code>——Edit 的机制是"把文件里的 <code>old_string</code> 替换成 <code>new_string</code>"（精确字符串替换，不是行号）。</p>
+                <p><strong>校验</strong>（<code>validateInput</code>）在权限之前就挡掉明显非法调用：<code>old_string === new_string</code>（没意义）、超大文件、写团队记忆文件里塞密钥等。</p>
+                <p><strong>权限</strong>（<code>:121</code>）委托 <code>checkWritePermissionForTool</code>（<code>filesystem.ts:1205</code>），关键几条：</p>
+                <ul>
+                    <li><strong>安全检查</strong> <code>checkPathSafetyForAutoEdit</code>：命中危险文件/目录（<code>.git</code>/<code>.vscode</code>/<code>.claude</code>/<code>.bashrc</code>/<code>.mcp.json</code> 等，清单在 <code>filesystem.ts:57</code>）→ 强制 <code>ask</code>，<strong>即使在 bypassPermissions 模式也照样问</strong>！</li>
+                    <li><code>acceptEdits</code> 模式 + 在工作目录内 → allow（<code>:1371</code>，这是"自动接受编辑"的关键路径）。</li>
+                </ul>
+                <div class="glossary"><b>为什么有些文件即使 bypass 也要问？</b> 因为改 <code>.git</code>、<code>.bashrc</code>、<code>.mcp.json</code> 这类文件可能造成严重后果（破坏仓库、改你的 shell 启动脚本、注入恶意 MCP）。这些"safetyCheck"级别的确认<strong>凌驾于所有放行模式之上</strong>——哪怕你开了"绕过所有权限"，动这些文件仍会停下来问。这是"最危险的操作永远留一道人工闸"的安全底线。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Bash — 全仓最复杂的权限</h1></div>
+            <div class="toolcard" style="--tc:#ef4444">
+                <h3>BashTool（name: Bash）</h3>
+                <div class="f">packages/builtin-tools/src/tools/BashTool/BashTool.tsx</div>
+                <div class="flags"><span class="flag">maxResultSizeChars: 30000</span><span class="flag cc">只读命令才可并发</span></div>
+            </div>
+            <div class="card">
+                <p><strong>schema</strong>：<code>{ command, timeout?, description?, run_in_background?, ... }</code>。</p>
+                <p><strong>并发</strong>：<code>isConcurrencySafe(input) = isReadOnly(input)</code>——只有<strong>只读命令</strong>（<code>find/grep/cat/ls</code> 等白名单，<code>BashTool.tsx:95</code>）才可并发；会改东西的命令串行。</p>
+                <p><strong>权限</strong>（<code>bashPermissions.ts:1663</code>）是全仓最复杂的逻辑，因为一条命令可能是复合的（<code>a && b | c</code>）：</p>
+                <ul>
+                    <li>用 <strong>tree-sitter 做 AST 解析</strong>（<code>:1688</code>），把复合命令拆成一个个子命令。</li>
+                    <li>每个子命令<strong>分别</strong>匹配 deny/ask/allow 规则（比如 <code>ls && git push</code>，<code>ls</code> 放行但 <code>git push</code> 命中 <code>Bash(git *)</code> 规则要问）。</li>
+                    <li>解析不出（<code>too-complex</code>）→ fail-safe 返回 <code>ask</code>（<code>:1741</code>）。</li>
+                </ul>
+                <div class="glossary"><b>为什么要 AST 拆命令？</b> 如果只做字符串匹配，<code>echo hi; rm -rf /</code> 这种"前面无害、后面危险"的复合命令就能骗过规则。用 tree-sitter 把命令解析成语法树、逐个子命令判权限，才能准确拦住藏在复合命令里的危险操作。解析不了就宁可问（fail-safe）。<b>tree-sitter</b> 是一个增量语法解析库，能把代码/命令解析成语法树。这是"用真正的解析而非正则来做安全判断"的范例——正则在安全场景往往有绕过漏洞。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Agent — 委派子代理</h1></div>
+            <div class="toolcard" style="--tc:#8b5cf6">
+                <h3>AgentTool（name: Agent，别名 Task）</h3>
+                <div class="f">packages/builtin-tools/src/tools/AgentTool/AgentTool.tsx</div>
+                <div class="flags"><span class="flag ro">isReadOnly → true</span><span class="flag cc">isConcurrencySafe → true</span></div>
+            </div>
+            <div class="card">
+                <p>这是最特别的工具——它的"执行"是<strong>递归跑一个完整的子 agent</strong>（Day 15 细讲）。schema（<code>:137</code>）：<code>{ description, prompt, subagent_type?, model?, run_in_background? }</code>。</p>
+                <p><strong>反直觉的标志</strong>：<code>isReadOnly → true</code>（<code>:1458</code>）。可 Agent 明明能让子代理改文件？关键在<strong>权限下放</strong>——</p>
+<pre><code class="language-typescript">// AgentTool.tsx:1475 —— Agent 本身几乎总是放行
+async checkPermissions(input, context) {
+  // 只有 ant 构建 + auto 模式才 passthrough，否则直接 allow
+  return { behavior: 'allow', updatedInput: input }
+}</code></pre>
+                <div class="glossary"><b>"权限下放"是什么意思？</b> 父代理调 <code>Agent</code> 工具本身<strong>不弹权限</strong>（所以标 isReadOnly）；真正的权限门控发生在<strong>子代理内部</strong>——当子代理去调 Read/Edit/Bash 时，那些工具各自的权限检查照常生效。所以"派一个子代理"不危险（它还没干活），"子代理干的活"才逐个受权限管。子代理跑完，取它最后一条 assistant 文本作为 Agent 工具的结果回给父代理（<code>agentToolUtils.ts:277</code>）——就像你雇了个助手，让他去办事、只把结论汇报给你。</div>
+                <p>子代理可用的工具会被裁剪（禁用清单 <code>ALL_AGENT_DISALLOWED_TOOLS</code>，<code>constants/tools.ts:44</code>，如 ExitPlanMode、AskUserQuestion——这些只有主代理该用）。</p>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>结果落盘：maxResultSizeChars</h1></div>
+            <div class="card">
+                <p>注意各工具的 <code>maxResultSizeChars</code> 不同：Read 是 100000、Bash 是 30000。这个字段控制"结果多大就落盘"（<code>toolExecution.ts:1478</code>）：</p>
+                <ul>
+                    <li>结果 ≤ 上限：完整塞进对话给模型。</li>
+                    <li>结果 &gt; 上限：<strong>存到磁盘</strong>，只给模型一个"预览 + 文件路径"，模型想看全部再去 Read 那个路径。</li>
+                </ul>
+                <div class="glossary"><b>为什么要落盘？</b> 一个 Bash 命令可能吐出几十万字（比如 <code>npm install</code> 的日志）。全塞进对话会瞬间撑爆上下文、花一大笔 token。落盘 + 只给预览，让模型看到"大概是什么 + 完整在哪"，需要细看再按需读。<strong>Bash 的上限（30000）比 Read（100000）小</strong>，因为命令输出更容易失控膨胀。这是"防止单个工具结果撑爆上下文"的又一道闸。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么多个 Read 能并发、多个 Edit 要串行？（isReadOnly/isConcurrencySafe）</li>
+                    <li>Read 的 file_unchanged 去重解决什么？</li>
+                    <li>为什么改 .git/.bashrc 即使 bypass 也要问？（safetyCheck 凌驾放行模式）</li>
+                    <li>Bash 为什么用 tree-sitter AST 拆命令判权限？</li>
+                    <li>Agent 为什么标 isReadOnly？权限在哪里真正生效？（下放到子代理内部）</li>
+                    <li>maxResultSizeChars 干什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 看工具全家福
+ls packages/builtin-tools/src/tools/
+
+# 2. 读 Read（只读范例 + 去重）
+sed -n '226,260p' packages/builtin-tools/src/tools/FileReadTool/FileReadTool.ts
+sed -n '373,410p' packages/builtin-tools/src/tools/FileReadTool/FileReadTool.ts
+
+# 3. 读 Edit 的 schema 与安全检查
+sed -n '5,20p' packages/builtin-tools/src/tools/FileEditTool/types.ts
+sed -n '57,80p' src/utils/permissions/filesystem.ts    # 危险文件清单
+
+# 4. 读 Bash 的 AST 权限（复杂，挑着看）
+grep -n "tree-sitter\|too-complex\|isReadOnly" packages/builtin-tools/src/tools/BashTool/*.tsx | head
+
+# 5. 读 Agent 的 checkPermissions（权限下放）
+sed -n '1458,1489p' packages/builtin-tools/src/tools/AgentTool/AgentTool.tsx</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：工具执行前那道"权限"关卡，是保证 Agent 安全的核心。Day 09 专讲<strong>权限系统</strong>——5 种权限模式、判定顺序（哪些能被 bypass、哪些不能）、审批弹窗怎么变成一个"await 的 Promise"。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 Tool 接口</a>
+                <a href="claude-code-src-day09.html" style="color:var(--accent-green);">Day 09 · 权限系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
