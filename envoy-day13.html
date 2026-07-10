@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · Cluster Manager 集群管理 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#26a69a);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">Cluster Manager · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Cluster 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ClusterManagerImpl</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 初始化状态机</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 线程本地集群</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · getThreadLocalCluster</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 跨线程传播</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · CDS 驱动</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 配置订阅</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day14.html" class="nav-link" style="color:#e91e63;">Day 14 负载均衡 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 xDS 与上游</span>
+            <h1 class="part-title">Cluster Manager 集群管理</h1>
+            <p class="part-desc">Cluster（上游服务集群）是"流量要转发去的目的地"。今天看 <code>ClusterManagerImpl</code> 怎么管理集群，尤其是它的<strong>线程本地集群状态</strong>——Envoy 高性能的又一关键设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Cluster 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Cluster = "一组等价的后端服务器"</span>
+                你的服务通常不止一台机器——比如 <code>user-service</code> 部署了 5 个实例。<strong>Cluster（集群）就是"这一组等价后端"的抽象：它有名字（user-service）、一堆端点（5 个 IP:Port）、一个负载均衡策略（怎么在 5 个里选一个）、健康检查规则。</strong>Envoy 把请求路由到某个 Cluster，再由 Cluster 的负载均衡器选一个具体后端转发。<strong>Cluster 是"逻辑目的地"，端点是"物理机器"。</strong>CDS 定义集群属性、EDS 提供端点（Day 11 的层级链）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ClusterManagerImpl</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/upstream/cluster_manager_impl.h:230
+class ClusterManagerImpl : public ClusterManager {
+  Status initialize(const Bootstrap&amp; bootstrap) override;                      // :234
+  StatusOr&lt;bool&gt; addOrUpdateCluster(const Cluster&amp; cluster, const std::string&amp; version) override; // :241 CDS 增删改落点
+  ThreadLocalCluster* getThreadLocalCluster(absl::string_view cluster) override; // :304
+  bool removeCluster(const std::string&amp; cluster, ...) override;                 // :306
+};</code></pre>
+                <div class="anno">读法：<b>ClusterManager 是"所有集群的总管"：增删改集群（<code>addOrUpdateCluster</code>，CDS 动态更新的落点）、按名取集群（<code>getThreadLocalCluster</code>）。</b>它是数据面和上游服务之间的桥梁。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>初始化状态机</h1></div>
+            <div class="card">
+                <p><code>ClusterManagerInitHelper</code> 管理启动顺序（<code>cluster_manager_impl.cc</code>）：</p>
+<pre><code class="language-bash">Primary（主）集群先初始化 → onStaticLoadComplete()（cc:260）
+  → Secondary（次，如需 DNS 解析的）集群 startInitializingSecondaryClusters()（cc:268）
+    → 最后才启动 CDS 动态订阅 setCds()（cc:274）</code></pre>
+                <div class="baby"><span class="t">为什么初始化要讲顺序？</span>
+                有个"先有鸡还是先有蛋"问题：<strong>Envoy 要通过 xDS 从控制面拉动态集群，但"连控制面"本身就需要一个集群（指向控制面的那个 gRPC 集群）先就绪！</strong>所以顺序必须是：先把配置里写死的静态主集群（含控制面集群）启动 → 再启动需要 DNS 解析的次集群 → 最后才用已就绪的控制面集群去拉 CDS 动态集群。<strong>这个初始化状态机保证了"承载 xDS 的集群先活，才能拉别的集群"——启动依赖顺序的经典处理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>线程本地集群状态</h1></div>
+            <div class="card">
+                <p>Envoy 是多 Worker 线程（Day 03 会讲）。集群更新在主线程，但每个 Worker 要<strong>无锁读取</strong>集群/连接池。方案：<strong>Thread Local Storage（TLS，线程本地存储）</strong>。</p>
+<pre><code class="language-cpp">// cluster_manager_impl.h:774 struct ClusterData —— 主线程侧集群数据
+// 内部类 ThreadLocalClusterManagerImpl —— 每个 Worker 线程一份副本
+// tls_.set(...)（cc:447）在每个 Worker 上创建</code></pre>
+                <div class="baby"><span class="t">线程本地存储：Envoy 无锁高性能的秘密（重要！）</span>
+                多线程共享数据通常要加锁（防止一个线程读时另一个在改），但锁会拖慢热路径。<strong>Envoy 的招数：主线程负责"计算配置"，然后给<strong>每个 Worker 线程一份只读副本</strong>（thread-local）。Worker 处理请求时读自己的副本，<strong>完全不用加锁</strong>（因为没人会改它的副本）。</strong>配置变了？主线程算好新副本，通过"消息投递"更新到各 Worker（下一课）。<strong>"每线程一份副本 + 消息投递更新"替代了"共享 + 加锁"——这是 Envoy 能在多核上线性扩展、扛百万连接的核心设计。你在 Day 03 还会看到这个模式贯穿整个 Envoy。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>getThreadLocalCluster</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// cluster_manager_impl.cc:986
+ThreadLocalCluster* ClusterManagerImpl::getThreadLocalCluster(absl::string_view cluster) {
+  ThreadLocalClusterManagerImpl&amp; cluster_manager = *tls_;   // 当前线程的副本
+  auto entry = cluster_manager.thread_local_clusters_.find(cluster);
+  if (entry != cluster_manager.thread_local_clusters_.end())
+    return entry-&gt;second.get();                              // 无锁哈希查找！
+  return cluster_manager.initializeClusterInlineIfExists(cluster);  // 惰性初始化
+}</code></pre>
+                <div class="anno">读法：<b>请求处理时调这个函数拿集群——直接从<strong>当前线程</strong>的哈希表查，<strong>零锁</strong>。</b>这就是 L04 设计的兑现：Worker 读自己的 <code>thread_local_clusters_</code>，飞快。Router（Day 09）就是调它拿到目标集群。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>跨线程传播</h1></div>
+            <div class="card">
+                <p>集群更新怎么从主线程传到各 Worker？<code>postThreadLocalClusterUpdate()</code>（<code>cc:1167</code>）通过 <code>tls_.runOnAllThreads(...)</code>（<code>cc:1201</code>）把新主机集合投递到每个 Worker，各 Worker 的 <code>ClusterEntry</code>（持有 LB + 连接池）据此重建。</p>
+                <div class="anno">读法：<b><code>runOnAllThreads</code> = "把这个更新任务发到每个 Worker 的事件队列，让它们各自在自己的线程里执行更新"。</b>不是主线程去改 Worker 的数据（那要锁），而是<strong>让 Worker 自己改自己的副本</strong>（在它自己线程里，无竞争）。这就是"消息投递代替共享内存加锁"的并发模型（和 OpenClaw 的会话串行、LangGraph 的检查点异曲同工——都在解决并发安全，各有各的招）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>CDS 驱动集群管理</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/upstream/cds_api_impl.h:35
+class CdsApiImpl : public CdsApi, SubscriptionBase&lt;Cluster&gt; {
+  // onConfigUpdate（cc:50/:102）收到集群列表 → 委托 helper_.onConfigUpdate
+  //   → 对每个资源调 ClusterManager 的 addOrUpdateCluster / removeCluster
+  //   → 完成后 runInitializeCallbackIfAny() 通知初始化完成
+};</code></pre>
+                <div class="anno">读法：<b>把 Day 12 的订阅和今天的集群管理串起来：CDS 是一个 <code>SubscriptionBase&lt;Cluster&gt;</code> 订阅者，收到下发的集群列表，就调 ClusterManager 增删改集群。</b>这就是"控制面改集群配置 → CDS 下发 → Envoy 热更新集群"的完整链路。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Cluster 是什么？和端点什么关系？</li>
+                    <li>ClusterManager 的核心职责？</li>
+                    <li>初始化状态机为什么要讲顺序？</li>
+                    <li>线程本地集群状态怎么做到无锁读？（Envoy 高性能关键）</li>
+                    <li>跨线程更新为什么用 runOnAllThreads 而非加锁？CDS 怎么驱动？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '230,310p' source/common/upstream/cluster_manager_impl.h | head -50
+sed -n '986,1000p' source/common/upstream/cluster_manager_impl.cc
+grep -n 'runOnAllThreads\|postThreadLocalClusterUpdate' source/common/upstream/cluster_manager_impl.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>负载均衡</strong>——集群里多个后端，怎么选一个？<code>LoadBalancer::chooseHost</code>、轮询（取模）、最少请求（P2C 二选一）、EDF 加权公平调度。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 配置订阅</a>
+                <a href="envoy-day14.html" style="color:#e91e63;">Day 14 · 负载均衡 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

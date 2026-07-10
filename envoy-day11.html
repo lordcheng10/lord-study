@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 11 · xDS 动态配置总览 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#7c4dff}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#26a69a);">11</div>
+            <h2>Day 11</h2>
+            <p class="version">xDS 动态配置总览 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · xDS 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 五大发现服务</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 管理服务器模型</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 层级引用链</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · DiscoveryRequest/Response</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ACK/NACK 握手</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 源码分布</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day12.html" class="nav-link" style="color:#e91e63;">Day 12 配置订阅 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 xDS 与上游</span>
+            <h1 class="part-title">xDS 动态配置总览</h1>
+            <p class="part-desc">Envoy 最强大的能力：<strong>配置从远程"管理服务器"动态下发、热更新、不重启</strong>。这就是 Istio/Higress 控制面控制 Envoy 数据面的方式。今天讲清 xDS 是什么、五大发现服务、握手协议。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>xDS 是什么</h1></div>
+            <div class="card">
+                <p><strong>xDS = "x" Discovery Service</strong>，"x" 是占位符，代表一类"发现服务"的统称。Envoy 启动时<strong>不需要知道全部配置</strong>，而是运行时通过网络从一个<strong>管理服务器（Management Server / 控制面）</strong>动态拉取配置。</p>
+                <div class="baby"><span class="t">xDS = "配置的外卖服务"</span>
+                传统程序改配置要改文件、重启。<strong>Envoy 不这样——它像点外卖：启动时几乎"空着肚子"，然后连上一个"配置外卖平台"（管理服务器），说"给我监听器配置、集群配置…"，平台就把配置"送"过来；配置变了，平台主动推送新的，Envoy 热更新、<strong>全程不重启</strong>。</strong>Istio 的 istiod、Higress 的控制面就是这个"外卖平台"。这让海量 Envoy 实例能被一个控制面统一、实时地管理——这是服务网格的根基。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>五大发现服务</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>缩写</th><th>全称</th><th>下发什么</th></tr>
+                    <tr><td><strong>LDS</strong></td><td>Listener Discovery</td><td>监听器（端口 + 过滤器链）</td></tr>
+                    <tr><td><strong>CDS</strong></td><td>Cluster Discovery</td><td>集群（上游服务定义）</td></tr>
+                    <tr><td><strong>RDS</strong></td><td>Route Discovery</td><td>路由表（HTTP 路由规则）</td></tr>
+                    <tr><td><strong>EDS</strong></td><td>Endpoint Discovery</td><td>端点（集群下的具体 IP:Port）</td></tr>
+                    <tr><td><strong>SDS</strong></td><td>Secret Discovery</td><td>密钥/证书（TLS 材料）</td></tr>
+                </table>
+                <div class="anno">读法：<b>每一类可动态下发的配置，都被抽象成一种 Discovery Service。proto 资源类型定义在 <code>api/envoy/config/</code>（如 <code>Listener</code>/<code>Cluster</code>/<code>RouteConfiguration</code>/<code>ClusterLoadAssignment</code>）。</b>记住这五个缩写，xDS 世界就有了地图。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>管理服务器模型</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">控制面 vs 数据面</span>
+                <strong>数据面（data plane）= Envoy 本身，真正转发流量。控制面（control plane）= 管理服务器，决定"流量该怎么转"并下发配置。</strong>两者分离是现代网络基础设施的核心思想：成百上千个 Envoy（数据面）各自扛流量，一个控制面（istiod/Higress）统一给它们下发规则。<strong>你改一条路由规则，控制面通过 xDS 推给所有相关 Envoy，秒级生效、零重启。</strong>本课学 Envoy 是学"数据面怎么接收和应用配置"；Day 后面的 Istio 子项目会讲"控制面怎么生成配置"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>层级引用链</h1></div>
+            <div class="card">
+                <p>五大服务不是孤立的，它们串成一条解析链：</p>
+<pre><code class="language-bash">LDS（监听器）→ RDS（路由表）→ CDS（集群）→ EDS（端点）
+# 一个请求进来：
+#   LDS 决定命中哪个 Listener
+#   RDS 决定路由到哪个 Cluster
+#   CDS 定义该 Cluster 的属性（LB 策略/健康检查/发现类型）
+#   EDS 提供该 Cluster 当前有哪些健康端点</code></pre>
+                <div class="anno">读法：<b>这条链是整个动态配置体系的主线（Day 15 会用它收尾串讲）。从"入口监听"一路解析到"后端具体端点"。</b>理解这条链，就理解了 Envoy 配置的全貌。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>DiscoveryRequest / Response</h1></div>
+            <div class="card">
+                <p>xDS 的通信消息定义在 <code>api/envoy/service/discovery/v3/discovery.proto</code>：</p>
+<pre><code class="language-protobuf">message DiscoveryRequest {        // discovery.proto:58
+  string version_info = 1;        // 我当前应用的配置版本
+  core.v3.Node node = 2;          // 我是谁（Envoy 实例标识）
+  repeated string resource_names = 3;  // 我想要哪些资源
+  string type_url = 4;            // 想要哪类资源（LDS/CDS/…）
+  string response_nonce = 5;      // 对应哪次响应
+}
+message DiscoveryResponse {       // discovery.proto:117
+  string version_info = 1;
+  repeated google.protobuf.Any resources = 2;  // 下发的配置
+  string type_url = 4;
+}</code></pre>
+                <div class="anno">读法：<b>Envoy 发 Request 说"我要 type_url 这类资源里的这些 resource_names"；Server 回 Response 带 <code>resources</code> + <code>version_info</code> + <code>nonce</code>。<code>type_url</code> 区分是哪类 xDS。</b>聚合发现服务 ADS 的 gRPC 接口在 <code>ads.proto:29</code>（<code>StreamAggregatedResources</code> 双向流）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>ACK / NACK 握手</h1></div>
+            <div class="card">
+                <p>xDS 是最终一致性协议，靠 ACK/NACK 确认：</p>
+<pre><code class="language-bash">1. Envoy 发 Request（type_url + resource_names）
+2. Server 回 Response（resources + version_info + nonce）
+3. Envoy 应用配置：
+   - 成功 → 回一个带相同 version_info + nonce 的 Request（ACK 确认）
+   - 失败 → 回带 error_detail 的 Request（NACK 拒绝，保留旧配置）</code></pre>
+                <div class="baby"><span class="t">为什么要 ACK/NACK？</span>
+                下发的新配置可能有错（比如引用了不存在的集群）。<strong>如果 Envoy 无脑应用坏配置，可能整个挂掉。ACK/NACK 让 Envoy 能"应用成功才确认、应用失败就拒绝并保留旧配置继续跑"。</strong>控制面看到 NACK 就知道"这份配置这个 Envoy 没接受"，可以告警。<strong>nonce（一次性随机数）用来对上"这个确认是针对哪次下发的"，避免新旧响应错乱。</strong>这套协议保证了动态配置既灵活又安全——坏配置不会搞垮数据面。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>源码分布</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>层</th><th>位置</th></tr>
+                    <tr><td>接口层（纯虚）</td><td><code>envoy/config/</code>：subscription.h、grpc_mux.h、subscription_factory.h</td></tr>
+                    <tr><td>通用逻辑</td><td><code>source/common/config/</code>：订阅工厂、type_url 映射（<code>type_to_endpoint.cc:21</code>）</td></tr>
+                    <tr><td>具体订阅实现</td><td><code>source/extensions/config_subscription/</code>：filesystem / grpc / rest 三种传输</td></tr>
+                </table>
+                <div class="anno">读法：<b>又是"接口 + 多实现"：抽象订阅接口在 <code>envoy/config/</code>，三种传输方式（文件监听 / gRPC 流 / REST 轮询）作为扩展在 <code>config_subscription/</code>。</b>生产主力是 gRPC（Day 12 详讲）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>xDS 是什么？解决"改配置要重启"的什么痛点？</li>
+                    <li>五大发现服务 LDS/CDS/RDS/EDS/SDS 各下发什么？</li>
+                    <li>控制面 vs 数据面的分工？</li>
+                    <li>LDS→RDS→CDS→EDS 层级引用链？</li>
+                    <li>ACK/NACK 握手保证了什么？nonce 干嘛？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '58,130p' api/envoy/service/discovery/v3/discovery.proto
+sed -n '29,40p' api/envoy/service/discovery/v3/ads.proto
+ls source/extensions/config_subscription/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>配置订阅机制</strong>——gRPC 订阅怎么实现？<code>Subscription</code>/<code>SubscriptionCallbacks</code> 接口、<code>GrpcMux</code> 多路复用（ADS 复用一条流）、<code>sendDiscoveryRequest</code>/<code>onDiscoveryResponse</code> 的热更新闭环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="envoy-day12.html" style="color:#e91e63;">Day 12 · 配置订阅机制 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

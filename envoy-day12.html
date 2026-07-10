@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · 配置订阅机制 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#7c4dff,#26a69a);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">配置订阅机制 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两个核心接口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SubscriptionBase</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 订阅工厂分发</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · GrpcSubscription</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · GrpcMux 多路复用</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ADS 一条流</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 热更新闭环</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 xDS 总览</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day13.html" class="nav-link" style="color:#e91e63;">Day 13 Cluster Mgr &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 xDS 与上游</span>
+            <h1 class="part-title">配置订阅机制</h1>
+            <p class="part-desc">Day 11 讲了 xDS 协议，今天看它<em>怎么实现</em>：<code>Subscription</code>/<code>SubscriptionCallbacks</code> 接口、<code>GrpcMux</code> 多路复用（ADS 复用一条 gRPC 流）、以及"订阅→下发→应用→ACK"的热更新闭环。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两个核心接口</h1></div>
+            <div class="card">
+                <p><code>envoy/config/subscription.h</code> 定义订阅的两面：</p>
+<pre><code class="language-cpp">// 订阅者视角（subscription.h:212）—— 每个 xDS（如 CDS）持一个
+class Subscription {
+  virtual void start(const absl::flat_hash_set&lt;std::string&gt;&amp; resource_names) PURE;  // :221
+  virtual void updateResourceInterest(...) PURE;    // 改变关注的资源
+};
+// 回调视角（subscription.h:97）—— 配置到达时被回调
+class SubscriptionCallbacks {
+  virtual absl::Status onConfigUpdate(const std::vector&lt;DecodedResourceRef&gt;&amp; resources,
+                                      const std::string&amp; version_info) PURE;         // :110 全量
+  virtual absl::Status onConfigUpdate(added, removed, version) PURE;                 // :122 增量
+  virtual void onConfigUpdateFailed(reason, exception) PURE;                         // :133
+};</code></pre>
+                <div class="anno">读法：<b><code>Subscription</code> = "我要订阅什么"（start/更新关注）；<code>SubscriptionCallbacks</code> = "配置来了怎么处理"（onConfigUpdate）。每种 xDS（CDS/LDS/EDS…）都实现这两个接口。</b>全量（SotW）和增量（Delta）两种 onConfigUpdate。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SubscriptionBase 模板</h1></div>
+            <div class="card">
+                <p>为复用，<code>source/common/config/subscription_base.h:11</code> 提供模板 <code>SubscriptionBase&lt;Current&gt;</code>，自动绑定资源类型（如 CDS 绑 <code>Cluster</code>）。</p>
+                <div class="baby"><span class="t">泛型模板省了什么？</span>
+                CDS、LDS、EDS 的订阅逻辑 90% 一样，只是"处理哪种资源类型"不同（Cluster vs Listener vs Endpoint）。<strong>C++ 模板 <code>SubscriptionBase&lt;Cluster&gt;</code> 让 CDS 一行继承就自动获得"解码成 Cluster 类型"的通用逻辑，不用每个 xDS 重写一遍解码。</strong>这是泛型编程消除重复的典型——和你在 langgraph/eino 见过的"接口/实现分离"是同一目标（少写重复、易维护），只是这里用 C++ 模板实现。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>订阅工厂分发</h1></div>
+            <div class="card">
+                <p><code>SubscriptionFactoryImpl::subscriptionFromConfigSource()</code>（<code>subscription_factory_impl.cc:27</code>）按配置类型创建不同 Subscription：</p>
+<pre><code class="language-cpp">// :64 kApiConfigSource 分支再按 ApiConfigSource 枚举细分：
+//   :78 AGGREGATED_GRPC / :80 AGGREGATED_DELTA_GRPC → 走 ADS（共享一条 gRPC 流）
+//   :87 REST                                        → REST 轮询
+//   :90 GRPC / :93 DELTA_GRPC                       → 独立 gRPC 流</code></pre>
+                <div class="anno">读法：<b>工厂根据你配的"配置来源类型"（文件/REST/gRPC/ADS）选对应实现。生产几乎都用 ADS（AGGREGATED_GRPC）——所有 xDS 复用一条流（L06）。</b>这是"工厂模式"：调用方只说"我要订阅"，工厂决定用哪种传输。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>GrpcSubscriptionImpl</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/config_subscription/grpc/grpc_subscription_impl.h:20
+class GrpcSubscriptionImpl : public Subscription, protected UntypedConfigUpdateCallbacks {
+  GrpcSubscriptionImpl(GrpcMuxSharedPtr grpc_mux, SubscriptionCallbacks&amp; callbacks, ...);  // :24
+  void start(const absl::flat_hash_set&lt;std::string&gt;&amp; resource_names) override;              // :31
+};</code></pre>
+                <div class="anno">读法：<b>关键：它<strong>不直接管 gRPC 流</strong>，而是持有一个 <code>GrpcMux</code>（多路复用器）。<code>start()</code> 实际是向 GrpcMux <code>addWatch</code>（注册"我关注 type_url 的这些资源"）。</b>多个 xDS 订阅共享同一个 GrpcMux——这就是 ADS 的基础（L06）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>GrpcMux 多路复用</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// 接口 envoy/config/grpc_mux.h:58
+class GrpcMux {
+  virtual void start() PURE;                                          // :65
+  virtual GrpcMuxWatchPtr addWatch(const std::string&amp; type_url,
+      const absl::flat_hash_set&lt;std::string&gt;&amp; resources,
+      SubscriptionCallbacks&amp; callbacks, ...) PURE;                    // :104
+};
+// 实现 source/extensions/config_subscription/grpc/grpc_mux_impl.cc
+// :160 start()：建立 gRPC 双向流 establishNewStream()
+// :169 sendDiscoveryRequest(type_url)：填 resource_names，首帧带 node，sendMessage
+// :357 onDiscoveryResponse()：收下发→分发给 watch 回调→成功后发 ACK
+// :564 onStreamEstablished()：（重）连成功后重新发起所有 type_url 的 Request（断线重连恢复）</code></pre>
+                <div class="baby"><span class="t">"多路复用器"是什么？</span>
+                想象一根网线要同时传电话、电视、上网——<strong>多路复用（mux）就是"多种数据流共用一条物理通道"。GrpcMux 让 LDS/CDS/RDS/EDS 多种配置类型<strong>复用同一条 gRPC 连接</strong>：每种类型是一个 "watch"，GrpcMux 统一管理这条流上的收发，按 type_url 把下发的配置分发给对应的订阅者。</strong>断线了，<code>onStreamEstablished</code> 自动重连并重新订阅所有类型——这是生产可靠性的关键。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>ADS：一条流的意义</h1></div>
+            <div class="card">
+                <p><strong>ADS（Aggregated Discovery Service，聚合发现服务）</strong> = 所有 xDS 类型复用一条 gRPC 流。</p>
+                <div class="baby"><span class="t">为什么要"聚合成一条流"？</span>
+                如果 LDS、CDS、RDS、EDS 各开一条独立连接，会有<strong>顺序问题</strong>：比如新集群（CDS）和它的端点（EDS）分别从两条流来，可能端点先到、集群还没到 → 短暂不一致甚至报错。<strong>ADS 把它们放一条流，管理服务器能<strong>控制下发顺序</strong>（先 CDS 后 EDS、先 LDS 后 RDS），保证配置更新时序一致、无中间态错误。</strong>这就是为什么生产环境几乎都用 ADS。<code>pausable_ack_queue.cc</code> 的可暂停 ACK 队列就是为保证这种依赖顺序服务的。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>热更新闭环</h1></div>
+            <div class="card">
+<pre><code class="language-bash">establishNewStream（建流）
+  → sendDiscoveryRequest（订阅：我要这些资源）
+  → Server 推 onDiscoveryResponse（下发配置）
+  → 解码为 DecodedResource
+  → 调各 xDS 的 onConfigUpdate（应用到运行时对象，如新增 Cluster）
+  → 回 ACK（version_info + nonce）
+# 全程无需重启进程！</code></pre>
+                <div class="anno">读法：<b>这就是"配置不重启热更新"的完整闭环（Day 11 的协议在这里落地为代码流程）。应用成功回 ACK、失败回 NACK 保留旧配置。</b>后面几天看 <code>onConfigUpdate</code> 具体怎么"应用"——CDS 增删集群（Day 13）、端点变化（Day 15）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Subscription 和 SubscriptionCallbacks 各是什么视角？</li>
+                    <li>SubscriptionBase 模板省了什么？</li>
+                    <li>订阅工厂按什么分发？生产为什么用 ADS？</li>
+                    <li>GrpcMux 为什么是"多路复用器"？断线怎么恢复？</li>
+                    <li>热更新闭环的完整步骤？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '97,135p' envoy/config/subscription.h
+sed -n '58,110p' envoy/config/grpc_mux.h
+grep -n 'sendDiscoveryRequest\|onDiscoveryResponse\|establishNewStream' source/extensions/config_subscription/grpc/grpc_mux_impl.cc | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>Cluster Manager</strong>——集群怎么被管理？<code>ClusterManagerImpl</code>、初始化状态机、<strong>线程本地集群状态</strong>（主线程算配置、Worker 无锁读副本，Envoy 高性能关键）、CDS 如何驱动增删改。</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 xDS 总览</a>
+                <a href="envoy-day13.html" style="color:#e91e63;">Day 13 · Cluster Manager &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
