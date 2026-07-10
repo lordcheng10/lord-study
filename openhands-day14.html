@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · LLM 抽象与提示词 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .note{border:1px dashed #8b5cf6;background:rgba(139,92,246,.06);border-radius:8px;padding:11px 14px;margin:12px 0;font-size:12.5px} .note b{color:#8b5cf6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">LLM 抽象与提示词 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · litellm 统一层</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · _configure_llm 真实代码</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 为什么强制流式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 系统提示的组成</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 用量与成本统计</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 多模型与切换</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Profile 与密钥</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 Runtime</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 CodeAct &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 Agent 大脑</span>
+            <h1 class="part-title">LLM 抽象与提示词</h1>
+            <p class="part-desc">大模型是 Agent 的"智力"。今天讲 OpenHands 怎么用 litellm 统一对接上百种模型、系统提示怎么组织、流式为什么强制开、成本怎么算。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>litellm：统一上百种模型</h1></div>
+            <div class="card">
+                <p>OpenHands 不自己写"怎么调 OpenAI/怎么调 Claude"——它用 <code>litellm</code>（<code>pyproject.toml:55</code>，固定 1.84.1）作为统一层。你换模型只改配置，代码不动。</p>
+                <div class="baby"><span class="t">litellm 是什么？</span>
+                每家大模型的 API 长得不一样（OpenAI 一套、Anthropic 一套、Google 一套……请求格式、参数名、返回结构都不同）。<strong>litellm 是一个"万能翻译适配器"</strong>——你用统一的方式调用，它负责翻译成各家的私有格式。想从 GPT-4 换成 Claude？改个模型名字符串即可。<strong>这就是 Day 04 说的"bring your own model（自带模型）"能成立的原因——litellm 把上百种模型的差异抹平了。</strong>和 eino 用适配器统一各家模型是同一招。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>_configure_llm 真实代码</h1></div>
+            <div class="card">
+                <p>本仓构建 LLM 配置的地方（<code>live_status_app_conversation_service.py:1215</code>）：</p>
+<pre><code class="language-python">def _configure_llm(self, ...):
+    llm = ...  # 按用户选的 model / api_key 构建
+    llm.stream = True          # ★ 强制流式（L03）
+    llm.usage_id = 'agent'     # ★ 用量归属标记（L05）
+    return llm</code></pre>
+                <div class="anno">读法：<b>两个强制设置很关键：<code>stream=True</code>（流式输出，见 L03）和 <code>usage_id='agent'</code>（把这次调用的 token 用量归到 "agent" 名下，便于分类统计成本）。</b>模型和 key 来自用户设置（Settings UI 或配置）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>为什么强制流式（stream=True）</h1></div>
+            <div class="card">
+                <p>回忆 Day 03 的 <code>StreamingDeltaEvent</code>——大模型一个字一个字生成，流式推给前端做"打字机效果"。<code>_configure_llm</code> 强制 <code>stream=True</code> 就是为了这个。</p>
+                <div class="baby"><span class="t">流式为什么对 Agent 体验至关重要？</span>
+                Agent 一步可能要生成很长的内容（一段思考 + 一个动作）。如果非流式，你得<strong>干等十几秒</strong>直到整段生成完才看到任何东西——像卡死。流式让你<strong>边生成边看</strong>：AI 的思考一个字一个字冒出来、命令逐渐成形。① 体验上"活了"；② 你能<strong>提前发现它跑偏</strong>（看到它开始想歪就赶紧暂停，省时间省钱）。<strong>对自主 Agent 这种"一步耗时长"的场景，流式不是锦上添花，是必需品。</strong></div>
+                <div class="glossary">流式还配合 confirmation mode（Day 17）——你能实时看到 Agent 要干什么，在高危动作真正执行前就有机会介入。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>系统提示的组成</h1></div>
+            <div class="card">
+                <p>系统提示（system prompt）是"给 Agent 的岗位说明书"，通过 Day 03 的 <code>SystemPromptEvent</code> 在会话开头发出。它大致由几块拼成：</p>
+                <ul>
+                    <li><strong>角色与总则</strong>：你是一个软件工程 Agent，如何行事（来自 SDK 的默认提示 + <code>Instruction</code> 配置）。</li>
+                    <li><strong>工具清单</strong>：所有可用工具的定义（Day 12）——告诉 LLM "你有这些手"。</li>
+                    <li><strong>后缀 system_message_suffix</strong>：本仓在 <code>AgentContext</code> 里追加的定制内容（Day 11 见过），比如 planning 场景的额外指示（<code>_apply_server_agent_overrides</code>，<code>:1382</code>）。</li>
+                    <li><strong>环境信息</strong>：工作目录、仓库信息等。</li>
+                </ul>
+                <div class="glossary"><b>系统提示 = Agent 行为的"宪法"</b>。它决定 Agent 的风格（谨慎还是激进）、流程（要不要先看代码再改）、边界（哪些不能做）。OpenHands 的系统提示是长期打磨的成果——好的系统提示能显著提升任务成功率。这也是为什么 microagents（Day 18）能通过"往上下文注入知识片段"来定制 Agent 行为。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>用量与成本统计</h1></div>
+            <div class="card">
+                <p>Day 03 提过 <code>ConversationStateUpdateEvent</code> 里带 <code>TokenUsage</code>/<code>LLMMetrics</code>。每次 LLM 调用的 token 数、花费都被记录、累加，通过事件推给前端显示，也用于 <code>max_budget_per_task</code>（Day 04）的熔断判断。</p>
+                <div class="baby"><span class="t">为什么成本统计是刚需？</span>
+                自主 Agent 会自己反复调大模型——一个复杂任务几百步，每步都烧 token。如果不统计、不设上限，<strong>可能一觉醒来账单爆炸</strong>（尤其它陷入无效循环时）。所以：① 每步记录用量（<code>usage_id='agent'</code> 便于归类）；② 实时累加、显示给你看；③ 超 <code>max_budget_per_task</code> 强制停。<strong>"让 AI 自主花钱"必须配"实时计费 + 硬性上限"——这是我们在 eino 教程反复强调的成本经济学，在这里再次出现。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>多模型与运行时切换</h1></div>
+            <div class="card">
+                <p>OpenHands 支持配多个模型 profile，Agent 甚至能<strong>运行中自己切换模型</strong>。本仓在构建 Agent 时会按需附加 <code>SwitchLLMTool</code>（<code>:1800</code>，≥2 个 profile 才有意义）：</p>
+<pre><code class="language-python"># 有多个模型 profile 时，给 Agent 加一个"切换模型"工具
+# Agent 可以自己决定："这步简单，用便宜的小模型；这步难，切到强模型"</code></pre>
+                <div class="baby"><span class="t">为什么让 Agent 自己切模型？</span>
+                成本与能力的权衡。强模型（如 GPT-4/Claude Opus）聪明但贵，弱模型（如 mini/haiku）便宜但笨。<strong>让 Agent 按任务难度自己选</strong>：简单的文件浏览用便宜模型，难的架构决策切到强模型。这样既省钱又不牺牲关键步骤的质量。切换本身也是一个动作（会产生 <code>SwitchLLMObservation</code>，Day 08 的 webhook 会处理它更新会话记录）。<strong>模型路由（<code>[model_routing]</code> 配置段）是省钱的高级玩法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Profile 与密钥的下发</h1></div>
+            <div class="card">
+                <p>用户的 LLM profiles（模型配置 + API key）在 SaaS 场景下不在沙箱容器里，需要在启动时<strong>同步进沙箱</strong>——这就是 Day 07 提到的 <code>_seed_sandbox_profiles</code>（<code>:958</code>）。API key 这类机密走 Day 09 的"按需下发"或环境变量转发（<code>get_agent_server_env</code> 转发 <code>LLM_*</code> 前缀变量）。</p>
+                <div class="glossary"><b>串起来看</b>：你在 Settings 配了模型和 key → app_server 启动会话时把 profile 同步进沙箱（<code>_seed_sandbox_profiles</code>）+ 转发 LLM_* 环境变量（<code>get_agent_server_env</code>）→ 沙箱里的 Agent 用 litellm + 这些配置调模型。<strong>机密始终小心处理（Day 09 的最小暴露原则），模型配置则按需同步。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>litellm 解决什么问题？和 eino 的模型适配哪里像？</li>
+                    <li>_configure_llm 强制的两个设置是什么？各为什么？</li>
+                    <li>流式为什么对 Agent 体验是必需品？</li>
+                    <li>系统提示由哪几块组成？为什么是 Agent 的"宪法"？</li>
+                    <li>为什么让 Agent 自己切换模型？成本怎么统计和熔断？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep 'litellm' pyproject.toml
+grep -n 'def _configure_llm\|stream\|usage_id\|SwitchLLMTool\|_seed_sandbox_profiles' \
+  openhands/app_server/app_conversation/live_status_app_conversation_service.py | head
+sed -n '/\[model_routing\]/,/^\[/p' config.template.toml</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>CodeAct 范式精读</strong>——OpenHands 的招牌思想：把"写并执行代码"作为 Agent 的统一动作空间。为什么"用代码当动作"比"一堆固定工具"更强大？这是理解 OpenHands 灵魂的一天。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 Runtime</a>
+                <a href="openhands-day15.html" style="color:var(--accent-green);">Day 15 · CodeAct 精读 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

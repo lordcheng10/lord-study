@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · CodeAct 范式精读 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
+        .vs .c.bad{border-color:#f59e0b;background:rgba(245,158,11,.05)} .vs .c.good{border-color:#22c55e;background:rgba(34,197,94,.05)}
+        .vs .c h4{margin:0 0 6px;font-size:13px} .vs .c.bad h4{color:#f59e0b} .vs .c.good h4{color:#22c55e} .vs .c li{font-size:12px;color:var(--text-secondary);margin:4px 0}
+        @media(max-width:768px){.vs{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">CodeAct 范式精读 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · CodeAct 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 固定工具 vs 代码动作</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 代码作为动作的威力</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · OpenHands 的取舍</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 一次 CodeAct 循环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 为什么在 SWE-bench 领先</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 全周知识串联</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 LLM</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day16.html" class="nav-link" style="color:var(--accent-green);">Day 16 前端展示 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">CodeAct 范式精读</h1>
+            <p class="part-desc">OpenHands 的招牌思想。默认 Agent 叫 CodeActAgent——它把"写并执行代码"作为核心动作空间。今天讲清 CodeAct 为什么比"一堆固定工具"更强大，收官 Agent 大脑。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>CodeAct 是什么</h1></div>
+            <div class="card">
+                <p><strong>CodeAct</strong> = Code as Action（以代码为动作）。核心主张：<strong>与其给 Agent 一堆各式各样的固定工具，不如让它"写代码并执行"——因为代码本身就是最通用、最强大的动作。</strong>OpenHands 默认 Agent（<code>default_agent = "CodeActAgent"</code>，Day 04）正是这个范式的实现。</p>
+                <div class="baby"><span class="t">先建直觉</span>
+                想让 Agent 完成"统计这个目录下所有 .py 文件的总行数"。<strong>固定工具派</strong>：得预先造一个 <code>count_lines</code> 工具、还要一个 <code>list_files</code> 工具、可能还要 <code>filter_by_extension</code>……每种需求造一个工具，造不完。<strong>CodeAct 派</strong>：直接让 Agent 写一行 <code>find . -name '*.py' | xargs wc -l</code> 并执行——一条命令搞定，不需要任何专门工具。<strong>代码/命令是"图灵完备"的——理论上能表达任何操作。给 Agent 一个终端，胜过给它一百个专用按钮。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>固定工具 vs 代码动作</h1></div>
+            <div class="card">
+                <div class="vs">
+                    <div class="c bad"><h4>❌ 纯固定工具派</h4>
+                        <ul><li>每种能力造一个专用工具</li><li>工具越堆越多，LLM 在几十个工具里容易选晕</li><li>组合能力弱：想"先筛选再统计"得有组合工具</li><li>遇到没预置工具的需求就卡住</li></ul>
+                    </div>
+                    <div class="c good"><h4>✅ CodeAct（代码为动作）</h4>
+                        <ul><li>核心就几个：跑 bash/写代码、编辑文件</li><li>任意逻辑用代码表达——图灵完备</li><li>组合天然：管道、循环、条件全都行</li><li>遇到新需求，现写代码即可</li></ul>
+                    </div>
+                </div>
+                <div class="anno">读法：<b>固定工具像"给你一堆专用厨具（切蒜器、开瓶器…）"，CodeAct 像"给你一把好菜刀 + 会用刀的手"。</b>专用厨具用起来顺手但有限，好菜刀 + 手能应付任何食材。OpenHands 选了后者为主。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>代码作为动作的威力</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>表达力无上限</strong>：任何计算、文件操作、数据处理，一段代码就能表达，不受预置工具限制。</li>
+                    <li><strong>组合天然</strong>：管道 <code>|</code>、循环、条件判断——编程语言天生擅长组合，Agent 一步就能表达复杂逻辑。</li>
+                    <li><strong>复用生态</strong>：能 <code>pip install</code> 任何库、调用任何命令行工具——整个开源生态都是 Agent 的工具箱。</li>
+                    <li><strong>LLM 本来就擅长写代码</strong>：大模型在海量代码上训练过，"写代码"是它最强的能力之一。让它用最擅长的方式行动。</li>
+                </ul>
+                <div class="baby"><span class="t">最后一点尤其妙</span>
+                LLM 见过无数 Python/bash 代码，"写代码"这件事它极其在行。而"从 50 个自定义工具里精确选一个、填对参数"反而容易出错。<strong>CodeAct 让 Agent 用它最训练有素的方式（写代码）来行动，命中率自然高。</strong>这是 CodeAct 论文的核心洞察：动作空间对齐 LLM 的强项。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>OpenHands 的实际取舍（不是纯粹主义）</h1></div>
+            <div class="card">
+                <p>OpenHands 没有极端到"只有一个 bash 工具"。它以 CodeAct 为核心，但也保留了几个精心设计的专用工具（Day 02/12 的动作全家福）：</p>
+                <ul>
+                    <li><strong>bash 执行</strong>：CodeAct 的核心——万能。</li>
+                    <li><strong>文件编辑（str_replace）</strong>：为什么不直接用 bash 的 sed？因为 str_replace 更可靠、能生成 diff、可撤销（Day 02/12）。</li>
+                    <li><strong>浏览器、搜索（glob/grep）</strong>：高频操作做成专用工具，比每次写代码更省 token、更稳。</li>
+                </ul>
+                <div class="glossary"><b>务实的平衡</b>：核心用 CodeAct（通用），高频/需要可靠性的操作用专用工具（好用）。<strong>"能用代码解决的绝不造工具，但高频关键操作值得打磨专用工具"</strong>——这个平衡是 OpenHands 工程成熟度的体现。纯理论派会说"只要 bash 就够"，但实践中 str_replace 的 diff、glob 的结构化结果，确实比裸 bash 更适合 Agent。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>一次 CodeAct 循环（把全周串起来）</h1></div>
+            <div class="card">
+                <p>任务："找出项目里最大的 3 个文件"。CodeActAgent 的实际运转：</p>
+<pre><code class="language-bash"># step 1: LLM 决定写命令（CodeAct）→ ExecuteBashAction
+$ find . -type f -printf '%s %p\n' | sort -rn | head -3
+# → ExecuteBashObservation: "1048576 ./data.bin\n524288 ./model.pkl\n..."
+
+# step 2: LLM 看到结果，判断任务完成 → FinishAction
+# "最大的三个文件是 data.bin(1MB)、model.pkl(512KB)、..."</code></pre>
+                <div class="anno">读法：<b>一条命令 + 一次判断，任务就完成了——不需要任何"找大文件"的专用工具。</b>这一步用到了：LLM 智力（Day 14）决定写什么命令 → 工具体系（Day 12）的 bash 工具 → Runtime（Day 13）在沙箱执行 → 产生 Action/Observation（Day 02）→ 进事件流（Day 03）→ app_server 记录（Day 08）→ 前端实时显示。<strong>全周知识在这一条命令里全用上了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>为什么 OpenHands 在 SWE-bench 领先</h1></div>
+            <div class="card">
+                <p>SWE-bench 是衡量"AI 解决真实 GitHub issue 能力"的权威榜单。OpenHands 长期是开源方案的领先者，CodeAct 是重要原因：</p>
+                <ul>
+                    <li>真实 bug 修复千变万化，固定工具覆盖不全，CodeAct 的通用性正好对症。</li>
+                    <li>能跑测试验证（<code>pytest</code>）→ 看结果 → 自我纠错，闭环完整。</li>
+                    <li>持久终端 + 完整开发环境（Day 12）让它像真人程序员一样操作。</li>
+                </ul>
+                <div class="glossary"><b>本质</b>：修 bug 这件事，人类程序员就是"看代码、改、跑测试、再改"——CodeAct + 沙箱 + 事件循环，把这个人类工作流忠实地搬给了 AI。<strong>动作空间越接近人类程序员的真实操作，Agent 越强。</strong>CodeAct 的胜利，是"让 AI 用人类最自然的方式（写代码、敲命令）干活"的胜利。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>全周知识串联（一图流）</h1></div>
+            <div class="card">
+                <p>一个 CodeActAgent 完成任务，用到你第 3 周学的所有东西：</p>
+                <ul>
+                    <li><b>Day 11 Agent SDK</b>：step 循环、感知历史、产出 Action</li>
+                    <li><b>Day 12 工具</b>：bash 为核心动作（CodeAct）+ 专用工具（str_replace/glob）</li>
+                    <li><b>Day 13 Runtime</b>：在沙箱里真正执行代码、返回 Observation</li>
+                    <li><b>Day 14 LLM</b>：litellm 接模型、流式、系统提示、成本控制</li>
+                    <li><b>Day 15 CodeAct</b>：以代码为动作，把一切黏合成强大的自主循环</li>
+                </ul>
+                <div class="glossary">再往前，这一切又建立在第 1 周的 Action/Observation 事件模型、第 2 周的 app_server 编排之上。<strong>从"一条 find 命令"能追溯到整个系统每一层——你已经读懂了一个 SOTA 级自主 AI 软件工程师的骨架。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 3 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 3 周（Day 11-15）你已读懂 Agent 大脑</h3>
+                <ul>
+                    <li><b>Day 11</b> Agent SDK：step 循环、三要素、停止条件</li>
+                    <li><b>Day 12</b> 工具体系：三件套、function calling、MCP</li>
+                    <li><b>Day 13</b> Runtime：执行引擎、三种实现、vs Sandbox</li>
+                    <li><b>Day 14</b> LLM：litellm、流式、系统提示、成本</li>
+                    <li><b>Day 15</b> CodeAct：以代码为动作的招牌范式</li>
+                </ul>
+                <p style="margin-top:8px">下周（Day 16-20）进入 <strong>前端 / 安全 / 生态</strong>：事件如何渲染成 UI、安全权限机制、微代理定制、企业版、收官。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 默认 Agent 是 CodeActAgent
+grep -n 'default_agent' config.template.toml
+# 回看 bash 动作（CodeAct 核心）与专用工具
+sed -n '25,42p' frontend/src/types/v1/core/base/action.ts
+# 思考题：如果只保留 bash 一个工具，OpenHands 还能工作吗？为什么仍保留 str_replace？</code></pre>
+                <div class="tip"><strong>下周预告 · Day 16</strong>：回到前端——<strong>事件流如何渲染成界面</strong>：type-guards 类型守卫、<code>handleEventForUI</code> 的"观察替换动作"规则、WebSocket 连接管理。看第 1 周的事件模型如何变成你看到的聊天界面。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 LLM</a>
+                <a href="openhands-day16.html" style="color:var(--accent-green);">Day 16 · 前端实时展示 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
