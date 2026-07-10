@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · LLM 抽象 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">LLM 抽象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · LLM 是"智力"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 双轨：原生 + litellm</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · __new__ 工厂路由</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · litellm 懒加载</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · call 调用入口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · function calling</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 流式与降级</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 工具</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day16.html" class="nav-link" style="color:var(--accent-green);">Day 16 Memory &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
+            <h1 class="part-title">LLM 抽象</h1>
+            <p class="part-desc">大模型是 Agent 的"智力"。今天读 <code>llm.py</code>：litellm 如何统一上百种模型、"原生 SDK + litellm 兜底"的双轨设计、function calling 和流式。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>LLM 是 Agent 的"智力"</h1></div>
+            <div class="card">
+                <p>Day 02 说 Agent 由 LLM 驱动。这个 LLM 就是 <code>LLM(BaseLLM)</code>（<code>llm.py:368</code>），它统一封装了对各家大模型的调用，让 Agent/Task/Crew 不用关心"到底调的是 GPT 还是 Claude"。</p>
+                <div class="baby"><span class="t">为什么需要 LLM 抽象层？</span>
+                每家模型的 API 不一样（OpenAI/Anthropic/Google 各一套）。如果 Agent 代码直接写 OpenAI 的调用，换模型就得改一堆代码。<strong>LLM 抽象层把"怎么调各家模型"的差异封装起来，对上提供统一接口。</strong>你改个模型名字符串就能换模型，Agent 逻辑纹丝不动——这就是"自带模型"（bring your own model）的基础。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>双轨设计：原生 SDK + litellm 兜底</h1></div>
+            <div class="card">
+                <p>CrewAI 用 <strong>litellm</strong> 统一对接上百个模型供应商，但对主流供应商<strong>优先走原生 SDK</strong>：</p>
+                <ul>
+                    <li><strong>主流供应商</strong>（OpenAI/Anthropic/Azure/Bedrock/Gemini）：走原生 SDK 实现（更精准、支持更多特性）。</li>
+                    <li><strong>其他所有</strong>：回退到 litellm（万能适配，覆盖上百种）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么"双轨"而不只用 litellm？</span>
+                litellm 覆盖广但是"最大公约数"——为了统一，可能不支持某家模型的独特高级特性。<strong>对最常用的几家（OpenAI/Claude），直接用它们的官方 SDK，能用上全部特性、更稳定；对长尾的上百家，用 litellm 兜底，保证"什么都能接"。</strong>常用的走精品路线、长尾的走通用路线——两全其美。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>__new__ 工厂路由</h1></div>
+            <div class="card">
+                <p>路由发生在 <code>__new__</code>（<code>llm.py:393</code>）——根据 model 字符串决定返回哪种实现：</p>
+<pre><code class="language-python"># 概念：LLM("gpt-5") 或 LLM("anthropic/claude-...")
+# 若前缀是原生供应商（openai/anthropic/... provider_mapping :432）
+#   且模型在常量表里 → 返回原生实现类（llm.py:478）
+# 否则 → 回退到 litellm 实现</code></pre>
+                <div class="anno">读法：<b><code>__new__</code> 是 Python 的"对象创建工厂"——在这里根据你传的 model 字符串，<strong>决定实例化哪个实现类</strong>。</b>你写 <code>LLM("gpt-4o")</code>，框架帮你选了 OpenAI 原生实现；写一个冷门模型，就选 litellm 实现。对你完全透明。</div>
+                <div class="glossary"><b>这是"工厂模式"</b>：用一个统一入口 <code>LLM(...)</code>，根据参数返回不同的具体实现。调用方（Agent）只知道拿到一个"能调模型的东西"，不关心底层是原生还是 litellm。<strong>和 Day 02 的 <code>create_llm</code>（字符串→LLM 对象）配合，构成"配置即代码"的完整链条。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>litellm 懒加载</h1></div>
+            <div class="card">
+                <p>litellm 是<strong>懒加载</strong>的（<code>_ensure_litellm</code>，<code>llm.py:113</code>）——只在真正需要时才 import。</p>
+                <div class="baby"><span class="t">为什么懒加载 litellm？</span>
+                litellm 这个库 import 时会做一些副作用（比如自动 <code>load_dotenv()</code> 加载环境变量），而且它比较重。如果你用的是原生 SDK 路径（比如就用 OpenAI），根本不需要 litellm——<strong>那就别 import 它，省启动时间、避免不必要的副作用</strong>。只有当真的走到 litellm 路径时才 import。<strong>"用到才加载"——和 Day 12 的 Flow 懒加载接线、Day 15 的双轨一样，都是"按需付出成本"的优化。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>call：高层调用入口</h1></div>
+            <div class="card">
+                <p><code>call()</code>（<code>llm.py:1820</code>）是统一的调用入口，流程：</p>
+<pre><code class="language-python"># call 流程
+# 1. 发 LLMCallStartedEvent（事件总线）
+# 2. 校验参数、把 str 消息转成 [{"role":"user",...}]
+# 3. 跑 before-hook
+# 4. _prepare_completion_params（:748）
+# 5. 按是否流式分流：
+if self._effective_stream():
+    result = self._handle_streaming_response(...)     # 流式
+else:
+    result = self._handle_non_streaming_response(...)  # 非流式</code></pre>
+                <div class="anno">读法：<b><code>call</code> 统一了"发事件 → 规范化消息 → 准备参数 → 流式/非流式分流"这套流程。</b>无论底层是原生还是 litellm，调用方都用同一个 <code>call</code>。发 <code>LLMCallStartedEvent</code> 让 LLM 调用可被监控（Day 18 事件系统）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>function calling 支持</h1></div>
+            <div class="card">
+                <p>Day 07/14 讲的"原生函数调用"就靠这里：</p>
+                <ul>
+                    <li><code>supports_function_calling</code>（<code>llm.py:2402</code>）：判断当前模型支不支持原生函数调用（litellm 路径用 <code>litellm.utils.supports_function_calling</code>）。</li>
+                    <li>非流式响应 <code>_handle_non_streaming_response</code>（<code>:1220</code>）里，若返回了 <code>tool_calls</code> 且提供了 <code>available_functions</code>，就调 <code>_handle_tool_call</code>（<code>:1356</code>）执行工具。</li>
+                </ul>
+                <div class="glossary"><code>available_functions</code> 就是 Day 14 讲的"函数名→tool.run 映射"。<strong>整条链串起来</strong>：工具转 OpenAI schema（Day 14）→ 发给 LLM → LLM 返回 tool_call → LLM 层从 available_functions 找到函数执行（Day 14/15）→ 发 <code>ToolUsageStartedEvent</code>（Day 18）。<strong>Day 07/14/15/18 讲的是同一条工具调用链的不同环节。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>流式与降级</h1></div>
+            <div class="card">
+                <p><code>_handle_streaming_response</code>（<code>llm.py:800</code>）遍历流式 chunk，累积内容与增量 tool_calls。有个健壮性设计：</p>
+                <div class="baby"><span class="t">流式的自动降级</span>
+                <code>:934</code>——如果流式模式下<strong>一个 chunk 都没收到</strong>（某些模型/配置下流式可能异常），会<strong>自动降级回非流式</strong>再调一次。这样即使流式出问题，用户也能拿到结果，不会空手而归。<strong>"优雅降级"——首选方案失败时自动退到备选，保证功能可用。</strong>这和 Day 07 的"原生模式不支持就降级到文本 ReAct"、Day 15 的"非主流模型降级到 litellm"是同一种健壮性思维。<strong>好框架处处有兜底。</strong></div>
+                <div class="glossary">流式为什么重要？让用户看到"打字机效果"、能提前发现跑偏——和 OpenHands Day 14 讲的一致。整个流式过程通过 <code>_handle_emit_call_events</code>（<code>:2150</code>）发事件，接入可观测性。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要 LLM 抽象层？</li>
+                    <li>"原生 SDK + litellm"双轨设计的好处？</li>
+                    <li>__new__ 工厂路由怎么选实现？</li>
+                    <li>litellm 为什么懒加载？</li>
+                    <li>function calling 链条怎么串（Day 14+15）？流式降级防什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '368,500p' $P/llm.py | head -50       # 类 + __new__ 路由
+grep -n '_ensure_litellm\|supports_function_calling\|_handle_streaming' $P/llm.py | head
+sed -n '1820,1870p' $P/llm.py                 # call 入口</code></pre>
+                <div class="tip"><strong>下周预告 · Day 16</strong>：进入增强能力——<strong>Memory 记忆系统</strong>。注意：CrewAI 已把经典"四类记忆"重构为<strong>统一记忆（unified memory）</strong>，用 scope + categories + importance 组织。我们会讲清这个变迁 + embedding/RAG 检索机制。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 工具</a>
+                <a href="crewai-day16.html" style="color:var(--accent-green);">Day 16 · Memory &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

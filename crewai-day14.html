@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 工具体系 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">工具体系 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · BaseTool 抽象</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · args_schema 自动生成</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · @tool 装饰器</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · run 与用量上限</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 描述重写喂给 LLM</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两条调用路径</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 用量记录与缓存</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 状态</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 LLM &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
+            <h1 class="part-title">工具体系</h1>
+            <p class="part-desc">工具是 Agent 的"双手"。今天读 <code>tools/base_tool.py</code>：工具怎么定义、参数 schema 如何从函数签名自动生成、@tool 装饰器、以及工具被 Agent 调用的两条路径。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>BaseTool 抽象基类</h1></div>
+            <div class="card">
+                <p><code>BaseTool(BaseModel, ABC)</code>（<code>tools/base_tool.py:103</code>）是所有工具的父类，核心字段（<code>:139-191</code>）：</p>
+<pre><code class="language-python">name: str              # 工具名
+description: str        # 告诉 LLM 何时/为何用它
+args_schema            # 参数的 Pydantic schema
+result_as_answer: bool  # 结果是否直接作为最终答案
+max_usage_count: int    # 用量上限
+# 子类必须实现抽象方法 _run（base_tool.py:375）</code></pre>
+                <div class="anno">读法：<b>一个工具 = 名字 + 描述 + 参数 schema + 执行逻辑（<code>_run</code>）。</b>这和 OpenHands Day 12 讲的"工具三件套"一模一样——name/description 给 LLM 看，args_schema 定参数，_run 真正干活。天下工具一个样。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>args_schema 自动从函数签名生成</h1></div>
+            <div class="card">
+                <p>你没提供 args_schema 时，<code>_default_args_schema</code>（<code>base_tool.py:200</code>）用 <code>inspect.signature(cls._run)</code> 读取 <code>_run</code> 的参数类型注解，自动 <code>create_model</code> 生成 Pydantic schema。</p>
+                <div class="baby"><span class="t">"从函数签名自动生成 schema"是什么魔法？</span>
+                你写 <code>def _run(self, city: str, days: int) -> str:</code>，框架用 Python 的<strong>反射（inspect）</strong>读出"有两个参数：city 是字符串、days 是整数"，自动生成对应的参数 schema。<strong>你不用手写一份重复的参数定义——函数签名就是唯一的真相来源。</strong>（呼应 eino 的 InferTool、OpenHands 工具从类型推断——同一招。）这个 schema 最终会告诉 LLM"调这个工具要填哪些参数"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>@tool 装饰器：快速造工具</h1></div>
+            <div class="card">
+                <p><code>@tool</code>（<code>base_tool.py:676</code>）让你把普通函数一键变工具：</p>
+<pre><code class="language-python">@tool
+def greet(name: str) -> str:
+    '''Greet someone.'''      # ← docstring 成为工具 description
+    return f"Hello, {name}!"
+# 参数 name: str → 自动生成 args_schema</code></pre>
+                <div class="anno">读法：<b><code>_make_tool</code>（<code>base_tool.py:708</code>）强制要求函数有 docstring（当描述）和类型注解，再从签名生成 args_schema。</b>支持 <code>@tool</code>、<code>@tool("名字")</code>、<code>@tool(result_as_answer=True)</code> 三种写法。</div>
+                <div class="baby"><span class="t">为什么强制要 docstring 和类型注解？</span>
+                因为 docstring 会变成"给 LLM 的工具说明"、类型注解会变成"参数 schema"。<strong>没有它们，LLM 就不知道这工具干嘛、参数怎么填。</strong>框架强制你写，其实是逼你把工具描述清楚——这直接影响 LLM 用好这个工具的能力（Day 12 OpenHands 讲过 description 写好坏很关键）。<strong>好的约束引导你写出 LLM 友好的工具。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>run 与用量上限</h1></div>
+            <div class="card">
+                <p>对外统一入口是 <code>run</code>（<code>base_tool.py:314</code>），它先校验参数、检查用量、再调 <code>_run</code>：</p>
+<pre><code class="language-python">def run(self, *args, **kwargs):
+    if not args:
+        kwargs = self._validate_kwargs(kwargs)   # 用 args_schema 校验参数
+    limit_error = self._claim_usage()            # 原子计数，超 max_usage_count 返回错误
+    if limit_error: return limit_error
+    result = self._run(*args, **kwargs)          # 真正执行
+    return result</code></pre>
+                <div class="anno">读法：<b><code>run</code> 是"带护栏的执行"——先校验参数合法、再检查没超用量上限、才真正 <code>_run</code>。</b><code>max_usage_count</code> 防止 Agent 反复滥用同一个工具（比如无限调搜索）。参数校验则保证 LLM 传的参数符合 schema。</div>
+                <div class="glossary"><b>为什么要 max_usage_count？</b> Agent 可能陷入"反复调同一工具却不推进"的循环。用量上限是针对单个工具的"刹车"——补充了 Day 07 的 max_iter（整体循环上限）。<strong>多层限制，防失控。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>描述重写：把 schema 喂给 LLM</h1></div>
+            <div class="card">
+                <p><code>_generate_description</code>（<code>base_tool.py:482</code>）把工具描述重写成带 JSON schema 的格式：</p>
+<pre><code class="language-python">self.description = (
+    f"Tool Name: {sanitize_tool_name(self.name)}\n"
+    f"Tool Arguments: {args_json}\n"         # ← 参数结构
+    f"Tool Description: {self.description}")</code></pre>
+                <div class="anno">读法：<b>工具最终给 LLM 看的描述里，<strong>包含了参数的 JSON schema</strong>——这样 LLM 就知道"这工具叫什么、参数有哪些、什么类型"，才能正确地调用它。</b>这份描述会进 Agent 的系统提示（文本 ReAct 模式）或转成 OpenAI function schema（原生模式，L06）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>两条调用路径（呼应 Day 07）</h1></div>
+            <div class="card">
+                <p>Day 07 讲过 Agent 执行有两种模式，工具调用也对应两条路径：</p>
+                <ul>
+                    <li><strong>路径 A（原生 function-calling）</strong>：<code>convert_tools_to_openai_schema</code>（<code>utilities/agent_utils.py:154</code>）把工具转成 OpenAI schema、建立"函数名→tool.run"映射（<code>available_functions</code>）。LLM 返回 tool_call 后，<code>LLM._handle_tool_call</code>（<code>llm.py:1734</code>）从映射取函数、<code>json.loads</code> 参数、调用。</li>
+                    <li><strong>路径 B（文本解析 ReAct）</strong>：<code>ToolUsage</code> 类（<code>tools/tool_usage.py:76</code>）负责——<code>parse_tool_calling</code> 解析文本、<code>_use</code>（<code>:469</code>）执行（先查缓存、可重试解析）。</li>
+                </ul>
+                <div class="glossary"><b>统一转换 <code>CrewStructuredTool</code></b>：<code>BaseTool.to_structured_tool()</code>（<code>:393</code>）把工具转成内部统一执行的 <code>CrewStructuredTool</code>（替代 langchain 的 StructuredTool）。无论哪条路径，最终都执行到工具的 <code>run</code>。<strong>两条路径同一个工具定义——现代模型走 A（可靠），老模型走 B（兜底），和 Day 07 一致。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>用量记录与缓存</h1></div>
+            <div class="card">
+                <p><code>ToolsHandler</code>（<code>agents/tools_handler.py:15</code>）是工具使用的回调处理器。<code>on_tool_use</code>（<code>:26</code>）记录 <code>last_used_tool</code>，并按 <code>cache_function</code> 决定是否缓存 (工具名, 输入)→输出：</p>
+<pre><code class="language-python">if self.cache and should_cache and calling.tool_name != CacheTools().name:
+    self.cache.add(tool=calling.tool_name, input=input_str, output=output)</code></pre>
+                <div class="baby"><span class="t">工具缓存为什么有用？</span>
+                Agent 可能在推理中<strong>用相同参数重复调同一个工具</strong>（比如反复查同一个网址）。缓存后，第二次直接返回上次的结果——<strong>省时间、省钱（尤其工具调用花钱时，如付费 API）、结果也一致</strong>。<code>cache_function</code> 让你自定义"什么情况该缓存"（有些实时数据不该缓存）。这是 Crew 的 <code>cache=True</code>（Day 04）在工具层的落地。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>BaseTool 的核心组成？和 OpenHands 的工具三件套像吗？</li>
+                    <li>args_schema 怎么从函数签名自动生成？</li>
+                    <li>@tool 为什么强制要 docstring 和类型注解？</li>
+                    <li>run 里的用量上限、参数校验各防什么？</li>
+                    <li>工具调用的两条路径？为什么要缓存？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '103,220p' $P/tools/base_tool.py | head -50    # BaseTool + args_schema
+sed -n '676,720p' $P/tools/base_tool.py               # @tool
+sed -n '154,220p' $P/utilities/agent_utils.py         # 转 OpenAI schema
+sed -n '15,60p' $P/agents/tools_handler.py            # 用量+缓存</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15</strong>：<strong>LLM 抽象</strong>——读 <code>llm.py</code>：litellm 如何统一上百种模型、原生 SDK + litellm 双轨设计、function calling 支持、流式处理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 状态</a>
+                <a href="crewai-day15.html" style="color:var(--accent-green);">Day 15 · LLM 抽象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
