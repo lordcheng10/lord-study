@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · hgctl CLI — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#06b6d4);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">hgctl CLI · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 命令树</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · install 三 Profile</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · K8s vs Docker</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · plugin build</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · gateway-config</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · dashboard</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · agent/mcp</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 AI 增强</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day19.html" class="nav-link" style="color:#06b6d4;">Day 19 部署 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 AI 网关/部署</span>
+            <h1 class="part-title">hgctl CLI</h1>
+            <p class="part-desc">hgctl 是 Higress 的命令行工具。今天看它的核心命令：install（K8s/Docker 两条路径）、plugin build（容器编译 Wasm）、gateway-config（看 Envoy 配置）、以及 2025 新增的 agent/mcp（AI Agent 部署）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>命令树</h1></div>
+            <div class="card">
+<pre><code class="language-go">// hgctl/cmd/hgctl/main.go:24 → hgctl/pkg/root.go:27 GetRootCommand
+// 子命令（root.go:35）：version / gateway-config(gc) / install / uninstall / upgrade
+//   / profile / dashboard / manifest / plugin / completion / code-debug / mcp / agent</code></pre>
+                <div class="anno">读法：<b>又是 cobra 命令树（和 istioctl/higress serve 一样）。核心命令：install（装 Higress）、plugin（管 Wasm 插件）、gateway-config（调试 Envoy）、agent/mcp（AI 特性）。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>install 三 Profile</h1></div>
+            <div class="card">
+<pre><code class="language-go">// hgctl/pkg/install.go:38 三种 Profile：k8s / local-k8s / local-docker
+// install()（:122）：交互选 profile → helm.GenerateConfig → Validate
+//   → installer.NewInstaller → Install()</code></pre>
+                <div class="baby"><span class="t">三种安装场景</span>
+                <strong><code>k8s</code>——装到现有 K8s 集群（生产）；<code>local-k8s</code>——本地 K8s（kind/minikube，开发）；<code>local-docker</code>——纯 Docker 单机（最轻量，试用）。</strong>你交互选一种，hgctl 生成对应的 Profile（配置模板）、校验、安装。<strong>三种覆盖了"生产/开发/试用"——降低不同场景的上手门槛。</strong>这是产品化 CLI 的贴心设计（对比 istioctl 只装 K8s）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>K8s vs Docker</h1></div>
+            <div class="card">
+<pre><code class="language-go">// hgctl/pkg/installer/installer.go:54 NewInstaller 按 profile 分派
+// K8s（installer_k8s.go:40）：helm 渲染三组件（Higress/Istio base/GatewayAPI）→ kubectl apply
+//   Profile 存 higress-profile ConfigMap
+// Docker（standalone.go:44）：下载 get-higress.sh → 跑 docker-compose
+//   Profile 存本地文件 ~/.hgctl/profiles/
+//   （实际编排脚本在独立仓库 higress-standalone）</code></pre>
+                <div class="anno">读法：<b>K8s 安装 = helm 渲染 + kubectl apply（Higress core + Istio base + Gateway API 三个 chart）。Docker 安装 = 下载脚本跑 docker-compose（all-in-one 容器）。<strong>Profile 存储位置也不同：K8s 存 ConfigMap（集群内共享）、Docker 存本地文件。</strong></b>安装前用 <code>IsHigressInstalled</code> 检查避免和 helm 冲突。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>plugin build</h1></div>
+            <div class="card">
+<pre><code class="language-go">// hgctl/pkg/plugin/plugin.go:29 子命令 build/install/uninstall/ls/test/config/init
+// build（build/build.go:181）：用官方 TinyGo builder 镜像（wasm-go-builder）在容器里编译 Wasm
+//   产物可为 files 或 oras push 成 OCI 镜像（:433）
+// test（test/start.go:97）：docker compose Up 起本地 envoy+插件环境
+// install（install/install.go）：从 Go 源码一键构建并下发 WasmPlugin CR</code></pre>
+                <div class="baby"><span class="t">hgctl plugin = "插件开发全流程工具"</span>
+                写 Higress Wasm 插件（Day 12-14）的全流程都靠它：<strong><code>init</code>（生成脚手架）→ 写代码 → <code>build</code>（在容器里用 TinyGo 编译成 .wasm，环境一致免装工具链）→ <code>test</code>（本地起 Envoy+插件测试）→ <code>install</code>（构建 + 推 OCI 镜像 + 下发 WasmPlugin CR 到集群）。</strong><code>oras push</code> 把 .wasm 当 OCI 镜像推到镜像仓库（Envoy 从那拉取，Day 11）。<strong>这套工具让插件开发像写普通程序一样顺畅——降低了 Wasm 插件的门槛。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>gateway-config</h1></div>
+            <div class="card">
+<pre><code class="language-go">// hgctl/pkg/config_cmd.go:37（类 istioctl proxy-config）
+// 子命令 all/bootstrap/cluster/endpoint/listener/route
+// gateway_config.go retrieveConfigDump（:105）：selector app=higress-gateway 找 Pod
+//   → 端口转发到 Envoy admin :15000 → GET /config_dump → configdump.ConfigWriter 打印</code></pre>
+                <div class="anno">读法：<b>和 istioctl proxy-config（Istio 课 Day 18）一模一样——直连 Higress Gateway（Envoy）的 admin 口 15000，dump 出实际生效的配置。<strong>排查"配置没生效"的第一利器：直接看 Envoy 现在是什么配置。</strong></b>复用了 istio 的 configdump 打印工具。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>dashboard</h1></div>
+            <div class="card">
+                <p><code>hgctl/pkg/dashboard.go:69</code>：port-forward 到 prometheus(9090)/grafana(3000)/console(8080)/controller(8888)/envoy(15000)，开浏览器。</p>
+                <div class="anno">读法：<b>一键打开各监控/管理界面——省去手动 port-forward。和 istioctl dashboard 同思路。console 就是下一站要讲的 Higress 控制台。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>agent / mcp（2025 新增）</h1></div>
+            <div class="card">
+                <p><code>hgctl/pkg/agent/</code>：把 Claude Code / Qodercli 作为外部 "Agentic Core" 调用。<code>hgctl agent new/deploy/add</code> 创建/部署 AI Agent（支持阿里云函数计算 AgentRun、本地 AgentScope）。<code>hgctl mcp add</code> 把 MCP Server 发布到 Higress Console/Himarket。</p>
+                <div class="baby"><span class="t">hgctl 也在"AI 化"</span>
+                2025 年 Higress 加了 agent/mcp 命令——<strong>把 hgctl 从"网关管理工具"扩展成"AI Agent 部署工具"：能创建、部署 AI Agent（跑在函数计算或本地），能把 MCP Server 发布到市场。</strong>这呼应 Higress"AI 原生"的定位——连它的 CLI 都在往 AI 方向演进。<strong>体现了 Higress 想做的不只是"AI 网关"，而是"AI 应用的基础设施"（网关 + Agent + MCP 工具生态）。</strong>本系列不深入这块（较新、独立），了解方向即可。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>hgctl 的核心命令有哪些？</li>
+                    <li>install 三种 Profile 各适合什么场景？</li>
+                    <li>K8s vs Docker 安装的区别？</li>
+                    <li>plugin build 怎么支撑插件开发全流程？</li>
+                    <li>gateway-config 怎么调试？agent/mcp 体现什么方向？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+grep -n 'func GetRootCommand' hgctl/pkg/root.go
+grep -n 'k8s\|local-docker\|func install' hgctl/pkg/install.go | head
+grep -n 'func.*build\|wasm-go-builder\|oras' hgctl/pkg/plugin/build/build.go | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>部署 + 内嵌 istio/envoy</strong>——Higress 怎么打包 istiod + Envoy？helm 伞形 chart、一 Pod 双容器（higress + discovery）、内嵌 Istio/Envoy 的 fork 与构建胶水。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 AI 增强</a>
+                <a href="higress-ai-day19.html" style="color:#06b6d4;">Day 19 · 部署 + 内嵌 istio/envoy &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 部署 + 内嵌 istio/envoy — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#06b6d4);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">部署 + 内嵌 istio/envoy · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一 Pod 双容器</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两级 xDS</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · helm 伞形 chart</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Gateway 数据面</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 内嵌 istio/envoy</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 构建胶水</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 单机 vs K8s</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 hgctl</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day20.html" class="nav-link" style="color:#06b6d4;">Day 20 收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 AI 网关/部署</span>
+            <h1 class="part-title">部署 + 内嵌 istio/envoy</h1>
+            <p class="part-desc">Higress 怎么把 istiod + Envoy 打包成一个网关部署？今天看部署架构：一 Pod 双容器、两级 xDS、helm 伞形 chart，以及它怎么内嵌 Istio/Envoy 的 fork。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一 Pod 双容器</h1></div>
+            <div class="card">
+<pre><code class="language-yaml"># helm/core/templates/controller-deployment.yaml
+# higress-controller Deployment 一 Pod 两容器：
+#   higress   容器（:38）：镜像 higress/higress，命令 serve（本课的控制器）
+#   discovery 容器（:112）：镜像 higress/pilot，命令 discovery（istiod fork）
+# pilot 通过 HIGRESS_CONTROLLER_SVC=127.0.0.1 + PORT=15051 从同 Pod 控制器拉 MCP 配置</code></pre>
+                <div class="baby"><span class="t">"一 Pod 两容器"的巧妙</span>
+                Higress Controller 是<strong>一个 Pod 里跑两个容器</strong>：<code>higress</code>（Higress Core，Day 02-05 的控制器，起 15051 的 MCP Server）+ <code>discovery</code>（istiod fork，起 15012 的 xDS）。<strong>因为在同一个 Pod，它们能通过 <code>127.0.0.1:15051</code> 通信——discovery 容器（istiod）从 higress 容器（Core）拉 MCP 配置。</strong>这坐实了 Day 01-05 的架构：Higress Core 喂配置给 istiod。<strong>放同 Pod 是为了低延迟通信 + 生命周期绑定（一起启停）。</strong>数据面 Envoy 是另一个 Deployment（L04）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两级 xDS</h1></div>
+            <div class="card">
+<pre><code class="language-bash">Ingress/CRD ──▶ higress 容器(serve) :15051 以 MCP 吐配置
+                    │ (configSource: xds://127.0.0.1:15051)
+                    ▼
+              discovery 容器(istiod) :15012 生成真正的 LDS/CDS/RDS/EDS
+                    ▼
+              higress-gateway(Envoy) 执行流量 + 加载 Wasm/Go 插件</code></pre>
+                <div class="glossary"><b>两级 xDS 是 Higress 架构的精髓</b>：<br>
+                第一级 <strong>MCP-over-xDS（15051）</strong>：higress 容器 → discovery 容器，传 Istio 配置对象（VirtualService 等，Day 05）。<br>
+                第二级 <strong>标准 xDS（15012）</strong>：discovery 容器 → Envoy，传 LDS/CDS/RDS/EDS（Istio 课）。<br>
+                <strong>两级串联：Higress Core 生成配置 → istiod 转 xDS → Envoy 执行。这就是三站（Higress/Istio/Envoy）的物理连接图。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>helm 伞形 chart</h1></div>
+            <div class="card">
+<pre><code class="language-yaml"># helm/higress/Chart.yaml 伞形 chart =
+#   higress-core（本地 file://../core）+ higress-console（远程）
+# helm/core 部署三类工作负载：
+#   higress-controller Deployment（一 Pod 双容器，L01）
+#   higress-gateway Deployment/DaemonSet（Envoy，L04）
+#   higress-console（远程 chart）</code></pre>
+                <div class="anno">读法：<b>用 helm"伞形 chart"（一个 chart 依赖多个子 chart）组织部署——core（控制器+网关）+ console（控制台）。<code>helm install higress helm/higress</code> 一键装全套。</b>配置分发核心是 <code>higress-config</code> ConfigMap（Day 01 的 configSources）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Gateway 数据面</h1></div>
+            <div class="card">
+                <p><code>higress-gateway</code>（<code>helm/core/templates/deployment.yaml</code> 或 daemonset）：Envoy 容器，命令 <code>proxy router</code>，<code>discoveryAddress = higress-controller.&lt;ns&gt;.svc:15012</code>（连 discovery 容器拿 xDS）。</p>
+                <div class="anno">读法：<b>数据面 Envoy 是独立的 Deployment（可扩缩容）。它连 <code>higress-controller:15012</code>（discovery 容器）拿 xDS——就是 Istio 课/Envoy 课讲的那个 xDS 连接。<strong>控制面（controller Pod）和数据面（gateway Pod）分离部署——控制面少而稳、数据面多而弹。</strong></b>可选 Deployment（云 LB）或 DaemonSet（每节点一个）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>内嵌 istio/envoy</h1></div>
+            <div class="card">
+                <p>Higress 仓库根的 <code>istio/</code> 和 <code>envoy/</code> 是 <strong>git submodule</strong>（本地未 checkout），指向 higress-group 的 fork：Istio <code>istio-1.27</code>、Envoy <code>envoy-1.36</code>。即 Higress 基于 <strong>Istio 1.27 + Envoy 1.36 的定制 fork</strong>。</p>
+                <div class="baby"><span class="t">这就是本系列前两站的源码！</span>
+                <strong>你前两站学的 <code>higress-group/istio</code> 和 <code>higress-group/envoy</code>，就是 Higress 内嵌的这两个 submodule！</strong>Higress 用它们的 fork（带 <code>// Added by ingress</code> 定制）编译出 pilot 镜像（istiod）和 gateway 镜像（Envoy）。<strong>所以三站不是孤立的——Envoy 是 Higress 的数据面代码、Istio 是 Higress 的控制面代码，Higress 在它们之上加控制器 + 插件 + AI 能力。学完三站，你就完整掌握了这个 fork 生态的全部层次。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>构建胶水</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># tools/hack/ + Makefile.core.mk
+# build-envoy（:156）→ build-envoy.sh：打补丁 build-envoy.patch 后编译定制 Envoy
+# build-pilot/build-istio（:159/:187）：产 docker.pilot（istiod 镜像）
+# build-gateway（:169）：先 build-golang-filter（.so）再产 docker.proxyv2（Envoy 镜像）
+# 三类镜像：控制器 ← ./cmd/higress；pilot ← external/istio；gateway ← external/proxy+envoy+golang-filter</code></pre>
+                <div class="anno">读法：<b>Higress 用 Makefile + tools/hack 脚本把 istio/envoy 的 fork 编译成镜像：pilot 镜像（istiod）、proxyv2 镜像（Envoy + golang-filter）、控制器镜像（本仓库 cmd/higress）。<code>build-envoy.patch</code> 是 Higress 对 Envoy 的编译期补丁。</b>golang-filter（Day 15）编进 Envoy 镜像。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>单机 vs K8s</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>单机（standalone）</strong>：一个 all-in-one 容器（console+controller+envoy），配置落本地文件。适合试用/边缘（实际编排在独立仓库 higress-standalone）。</li>
+                    <li><strong>K8s</strong>：至少 3 类 Pod（controller/gateway/console），配置经 CRD/ConfigMap+xDS 分发，支持 HPA/LoadBalancer/可观测。</li>
+                </ul>
+                <div class="anno">读法：<b>两种拓扑：单机（简单、一个容器搞定，适合尝鲜）vs K8s（生产级、组件分离、可扩缩容）。<code>docker/Dockerfile.higress</code> 只构建控制器单二进制镜像；all-in-one 在独立仓库。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>一 Pod 双容器是哪两个？为什么放同 Pod？</li>
+                    <li>两级 xDS 分别是什么？（15051 MCP + 15012 标准）</li>
+                    <li>helm 伞形 chart 部署哪三类工作负载？</li>
+                    <li>内嵌的 istio/envoy submodule 是什么？和前两站什么关系？</li>
+                    <li>三类镜像怎么构建？单机 vs K8s 的区别？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress
+sed -n '30,120p' helm/core/templates/controller-deployment.yaml | head -50
+cat .gitmodules
+grep -n 'build-envoy\|build-pilot\|build-gateway' Makefile.core.mk</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>收官串讲</strong>——一次 AI 请求的完整路径、Higress 全景回顾，以及 higress-group 三站（Envoy/Istio/Higress）的完整串讲，承上启下引出剩余两站。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 hgctl</a>
+                <a href="higress-ai-day20.html" style="color:#06b6d4;">Day 20 · 收官串讲 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

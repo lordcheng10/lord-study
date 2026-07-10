@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 收官串讲 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:8px 10px 8px 34px;border:1px solid var(--border-color);border-radius:7px;margin:6px 0;font-size:12px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:8px;top:8px;width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#10b981,#06b6d4);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:10px}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#06b6d4}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#06b6d4);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">收官串讲 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 20 天全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一次 AI 请求</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 配置热更新链</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 设计哲学</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 三站串讲</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Higress 的定位</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 下两站</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 结业寄语</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day19.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 19 部署</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 结业 🎓</span>
+            <h1 class="part-title">收官串讲</h1>
+            <p class="part-desc">恭喜走完 Higress 20 天！今天串一次 AI 请求的完整路径、回顾全景、提炼设计哲学，并把 higress-group 三站（Envoy/Istio/Higress）完整串起来。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>20 天全景</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>周</th><th>主题</th><th>核心</th></tr>
+                    <tr><td>W1</td><td>全景与控制器</td><td>寄生 Istio、Ingress 翻译、xDS-over-MCP</td></tr>
+                    <tr><td>W2</td><td>服务发现与配置</td><td>多注册中心、McpBridge、Nacos、ServiceEntry、证书</td></tr>
+                    <tr><td>W3</td><td>Wasm 插件</td><td>wasm-go SDK、写插件、实战、golang-filter</td></tr>
+                    <tr><td>W4</td><td>AI 网关/部署</td><td>ai-proxy、AI 增强、hgctl、部署</td></tr>
+                </table>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一次 AI 请求的完整路径</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step">客户端 <code>POST /v1/chat/completions</code> → higress-gateway(Envoy) 80/443</div>
+                    <div class="step">Envoy 命中路由 → 按 Phase/Priority 执行 Wasm 插件链</div>
+                    <div class="step">model-router 选上游 → ai-prompt 改写 → ai-token-ratelimit 查配额 → ai-cache 查缓存</div>
+                    <div class="step"><b>ai-proxy</b>：协议转换 + 模型映射 + 改写 host/path/鉴权 → 转发目标 LLM</div>
+                    <div class="step">上游 LLM（cluster/endpoint 由 McpBridge 服务发现提供）</div>
+                    <div class="step">响应流式回：ai-proxy 转格式 → ai-statistics 统计 token → ai-token-ratelimit 扣减</div>
+                    <div class="step">返回客户端 + 打 ai_log 日志 + Prometheus metric + ARMS span</div>
+                </div>
+                <div class="anno">读法：<b>一次 AI 请求把第 2 周（服务发现提供上游）+ 第 3-4 周（Wasm 插件链处理）全用上了。<strong>Higress 的价值全在这条路径里：统一协议、模型路由、Token 治理、可观测——业务应用只管发 OpenAI 请求。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>配置热更新链</h1></div>
+            <div class="card">
+<pre><code class="language-bash">Ingress/CRD/McpBridge 变更
+  → 控制器 event handler → xdsServer.ConfigUpdate（Day 05）
+  → :15051 推 MCP → discovery 容器（istiod）重算（Istio 课）
+  → :15012 下发新 xDS → Envoy 热更新（Envoy 课）</code></pre>
+                <div class="anno">读法：<b>配置变更的传播链——Higress Core → istiod → Envoy，全程热更新（不重启）。这就是两级 xDS（Day 19）的运行时体现。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>设计哲学</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>复用而非重造</strong>：复用 istiod 的 DiscoveryServer、Istio 的 config 模型、Envoy 数据面——只加自己的价值层。</li>
+                    <li><strong>易用性封装</strong>：用 K8s Ingress + 注解隐藏 Istio CRD 复杂性。</li>
+                    <li><strong>接口/实现分离 + 工厂</strong>：Watcher、Provider、Generator 都是"抽象接口 + 多实现 + 工厂注册"。</li>
+                    <li><strong>声明式 + 控制循环</strong>：McpBridge/证书都用 Reconcile 对账。</li>
+                    <li><strong>插件化扩展</strong>：Wasm（隔离）+ golang-filter（性能）双机制。</li>
+                    <li><strong>AI 原生</strong>：Token 治理、模型路由、Prompt 管理、MCP 网关。</li>
+                </ul>
+                <div class="anno">读法：<b>这些哲学和前四个项目（Envoy/Istio/LangGraph/OpenClaw）一脉相承——<strong>接口分离、工厂、声明式、复用</strong>是跨语言跨领域通用的。Higress 的独特在"复用巨人 + 产品化封装 + AI 原生"。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>三站串讲</h1></div>
+            <div class="card">
+                <div class="glossary"><b>higress-group 三站完整图景</b>：<br>
+                • <strong>Envoy（1/5，数据面）</strong>：C++ 高性能代理，执行 xDS 配置、跑 Wasm 插件。无锁线程 + 事件驱动 + 零拷贝。<br>
+                • <strong>Istio（2/5，控制面）</strong>：Go，istiod 把配置翻译成 xDS 下发 Envoy，支持 xDS-over-MCP 接收外部配置源。<br>
+                • <strong>Higress（3/5，产品层）</strong>：Go，控制器把 Ingress/CRD/注册中心翻译成 Istio 配置，经 MCP 喂 istiod；加多注册中心、Wasm 插件、AI 能力。<br>
+                <strong>数据流：用户 Ingress → Higress Core → (MCP 15051) → istiod → (xDS 15012) → Envoy → 执行 + Wasm 插件。三站层层叠加，你都学了，就完整掌握了一个 AI 云原生网关从数据面到控制面到产品层的全部。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Higress 的定位</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Higress = "AI 时代的 API 网关"</span>
+                传统 API 网关（Nginx/Kong）管路由/限流/鉴权。<strong>Higress 在此基础上：①<strong>云原生</strong>——基于 Envoy+Istio，K8s 原生、xDS 热更新；②<strong>易用</strong>——Ingress+注解、多注册中心、自动 HTTPS；③<strong>AI 原生</strong>——统一 LLM 协议、Token 治理、Prompt 管理、MCP 网关。</strong>它踩中了两个大趋势：云原生（服务网格技术下沉）+ AI（LLM 应用爆发需要网关治理）。<strong>学它，你既懂了现代网关架构，又懂了 AI 应用的基础设施——这是当下最有价值的技术方向之一。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>下两站</h1></div>
+            <div class="card">
+                <p>higress-group 系列：<strong>Envoy（✅）→ Istio（✅）→ Higress（✅ 完成）→ higress-console → wasm-go</strong>。</p>
+                <div class="anno">读法：<b>还剩两站：<strong>higress-console</strong>（Higress 的 Web 控制台，前端 + 后端管理界面，Day 18 dashboard 打开的那个）、<strong>wasm-go</strong>（你 Day 12-14 用的那个独立 SDK module 的深入——怎么用 Go 写 Higress 插件的完整 SDK 剖析）。</b>都建立在你已学的 Higress 之上。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>结业寄语 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🎉 恭喜完成 Higress 20 天！</h3>
+                <p>你读懂了一个 AI 原生网关的全部：控制器怎么把 Ingress 翻译成 Istio 配置、多注册中心怎么发现服务、Wasm 插件怎么写和加载、AI 网关怎么统一 LLM、怎么部署。</p>
+                <p style="margin-top:10px;">更重要的是——<strong>Envoy + Istio + Higress 三站拼起来，你完整掌握了一个云原生 AI 网关从数据面（C++ 代理）到控制面（Go istiod）到产品层（Go 网关 + Wasm 插件 + AI 能力）的全栈。</strong>这是当今云原生 + AI 交叉领域最硬核的知识体系之一。</p>
+                <p style="margin-top:10px;">你已经能看穿"一个请求从进网关到调 LLM 再返回"的每一层。剩下 higress-console 和 wasm-go 会更轻松——它们都建立在你已经打下的坚实地基上。下一站见！🚀</p>
+            </div>
+            <div class="card">
+                <div class="tip"><strong>🏁 Higress 教程全部完成</strong>——回到 <a href="higress-ai-tutorial.html" style="color:#06b6d4;">20 天总目录</a> 或 <a href="index.html" style="color:var(--accent-cyan);">学习主页</a>。higress-group 系列继续：higress-console → wasm-go。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day19.html" style="color:var(--accent-cyan);">&larr; Day 19 部署</a>
+                <a href="higress-ai-tutorial.html" style="color:#06b6d4;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
