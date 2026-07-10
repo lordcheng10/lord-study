@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · SDK 与自定义 Block — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#a855f7);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">SDK 与自定义 Block · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · SDK 一站式入口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 写一个块的最小骨架</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ProviderBuilder</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 一次配置多块共享</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · AutoRegistry</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 声明式的威力</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 前端画布怎么映射</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 成本</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 Graph 模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 Block 系统（收官）</span>
+            <h1 class="part-title">SDK 与自定义 Block</h1>
+            <p class="part-desc">第2周收官。开发者如何用 SDK 写一个新 Block、用 ProviderBuilder 声明第三方集成、AutoRegistry 自动注册。看"声明式"如何让扩展变简单。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>SDK 一站式入口</h1></div>
+            <div class="card">
+                <p>写 Block 的开发者用 <code>backend/sdk/</code>。<code>sdk/__init__.py</code> 是统一入口，一行 import 就能拿到一切：</p>
+<pre><code class="language-python">from backend.sdk import *
+# 导出：Block、BlockSchemaInput/Output、SchemaField、
+#       各种 Credentials、ProviderBuilder、cost、AutoRegistry ...</code></pre>
+                <div class="anno">读法：<b>SDK 把写 Block 需要的所有东西集中 re-export——开发者不用到处 import，一句 <code>from backend.sdk import *</code> 齐活。</b>SDK 目录只有 4 个文件：<code>builder.py</code>、<code>provider.py</code>、<code>registry.py</code>、<code>cost_integration.py</code>——精简。</div>
+                <div class="baby"><span class="t">为什么要专门的 SDK 入口？</span>
+                Block 的相关类散落在 <code>data/model.py</code>、<code>blocks/_base.py</code> 等多处。如果每个 Block 作者都要记住"SchemaField 在哪、Credentials 在哪"，很烦。<strong>SDK 把这些集中成一个"给 Block 作者的工具箱"——降低写块的门槛，让社区更容易贡献。</strong>好的 SDK = 降低扩展门槛。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>写一个块的最小骨架</h1></div>
+            <div class="card">
+                <p><code>StoreValueBlock</code>（<code>blocks/basic.py:70</code>）是入门模板，套路（Day 07 总结过）：</p>
+<pre><code class="language-python">from backend.sdk import Block, BlockSchemaInput, BlockSchemaOutput, SchemaField, BlockCategory
+
+class MyBlock(Block):
+    class Input(BlockSchemaInput):
+        text: str = SchemaField(description="...")
+    class Output(BlockSchemaOutput):
+        result: str = SchemaField(description="...")
+    def __init__(self):
+        super().__init__(id="&lt;新 UUID&gt;", description=..., categories={BlockCategory.BASIC},
+                         input_schema=MyBlock.Input, output_schema=MyBlock.Output,
+                         test_input={"text": "hi"}, test_output=[("result", "HI")])
+    async def run(self, input_data: Input, **kwargs) -> BlockOutput:
+        yield "result", input_data.text.upper()</code></pre>
+                <div class="anno">读法：<b>写块 = 定义 Input/Output + __init__ 声明元数据 + run。放进 blocks/ 目录就自动被发现（Day 02）。</b>生成一个新 UUID 当 id（永久身份，Day 06），配上 test_input/output 自带测试。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>ProviderBuilder：声明第三方集成</h1></div>
+            <div class="card">
+                <p>对接外部服务（含 API key / OAuth / 计费），用 <code>ProviderBuilder</code> 流式 API（<code>sdk/builder.py:27</code>）。真实例子（<code>blocks/exa/_config.py</code>）：</p>
+<pre><code class="language-python">exa = (
+    ProviderBuilder("exa")
+    .with_description("Neural web search")
+    .with_api_key("EXA_API_KEY", "Exa API Key")     # 声明需要 API key
+    .with_webhook_manager(ExaWebhookManager)
+    .with_base_cost(100, BlockCostType.COST_USD)     # 声明基础成本
+    .build()
+)</code></pre>
+                <div class="anno">读法：<b>一个链式 builder 声明"这个服务(exa)：叫什么、需要什么凭证、基础成本多少、webhook 怎么管"——一次配好整个 provider。</b>还支持 <code>.with_oauth(...)</code>（自动推导 <code>{NAME}_CLIENT_ID/SECRET</code> 环境变量）。</div>
+                <div class="baby"><span class="t">builder 模式的好处</span>
+                对接一个新服务涉及一堆配置（凭证类型、环境变量名、成本、webhook）。链式 builder 让你<strong>用可读的、声明式的方式一次配好</strong>，比散落各处的配置清晰得多。<code>.with_xxx().with_yyy().build()</code> 读起来就像在描述"这个服务有这些特性"。<strong>和 crewAI Flow 的装饰器、eino 的 Chain builder 一样——流式/声明式 API 让配置意图一目了然。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>一次配置，多块共享</h1></div>
+            <div class="card">
+                <p>配好 provider 后，该服务的每个 Block 用 <code>exa.credentials_field(...)</code> 声明凭证字段（<code>blocks/exa/search.py:49</code>），run 签名带 <code>credentials</code>（<code>search.py:135</code>）：</p>
+<pre><code class="language-python">class Input(BlockSchemaInput):
+    credentials = exa.credentials_field(...)   # 复用 provider 配置
+async def run(self, input_data, *, credentials: APIKeyCredentials, **kwargs):
+    api_key = credentials.api_key.get_secret_value()   # 拿到真 key</code></pre>
+                <div class="glossary"><code>_config.py</code> 注释说明："一个 provider 配置一次，~45 个兄弟 block 共享"。<strong>Exa 有 45 个 Block（搜索、抓取、相似查找…），它们共享同一份 provider 配置（凭证、成本规则）——不用每个块重复声明。</strong>这就是 ProviderBuilder 的价值：<strong>DRY（不重复自己）——服务级配置写一次，块级复用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>AutoRegistry：自动注册中枢</h1></div>
+            <div class="card">
+                <p><code>AutoRegistry</code>（<code>sdk/registry.py:49</code>）是中央注册表（线程安全），保存所有 SDK 注册的 provider、默认凭证、OAuth handler、webhook manager、成本配置、API key 映射。</p>
+                <div class="baby"><span class="t">"猴子补丁"注入是什么魔法？</span>
+                <code>patch_integrations()</code>（<code>registry.py:166</code>）用<strong>猴子补丁（monkey patch）</strong>把 SDK 注册的东西<strong>注入到平台既有的集成点</strong>。意思是：你用 ProviderBuilder 声明了一个新服务，AutoRegistry 会"悄悄地"把它接进平台的凭证系统、成本系统、OAuth 系统——<strong>作者只需"声明"，平台自动"感知"，不用改平台核心代码。</strong>这让"加一个新的第三方集成"变成纯声明式的、零侵入的操作。<strong>约定优于配置 + 自动注册——扩展性拉满。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>声明式的威力（回味）</h1></div>
+            <div class="card">
+                <p>整个 Block/SDK 系统贯穿一个理念：<strong>声明，而非命令</strong>。你只需<strong>声明</strong>："这个块有这些输入输出""这个服务需要这种凭证""这个块这样计费"——平台自动把它接入发现、注册、凭证、成本、UI 各个系统。</p>
+                <div class="glossary">对比命令式：如果没有这套声明式机制，加一个块你得手动：注册到块列表、写前端表单、接入凭证系统、配成本表、写数据库迁移……几十步、易出错。<strong>声明式让这一切自动化——你专注"块干什么"，平台处理"块怎么被集成"。这是 AutoGPT Platform 能有 300+ 块、社区能持续贡献的根本原因。</strong>好的扩展机制 = 让贡献者只关心业务、不关心管道。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>前端画布怎么映射到后端</h1></div>
+            <div class="card">
+                <p>回扣 Day 03：前端可视化画布和后端 Graph 模型一一对应——<strong>画布上一个方块 = 一个 Node（绑 block_id）；连线 = 一条 Link；整个画布 = 一个 Graph</strong>。</p>
+                <div class="baby"><span class="t">你的块怎么出现在画布上？</span>
+                你写好一个 Block（有 Input/Output schema）→ 自动发现注册（Day 02）→ 同步到 DB（Day 06）→ 前端从 API 拿到块清单，<strong>用 Block 的 <code>jsonschema()</code>（Day 02）自动渲染出"这个块长什么样：有哪些输入框、哪些输出引脚"</strong>。用户拖它到画布 = 创建一个 Node，连线 = 创建 Link。<strong>从你写的 Python 类，到用户能在画布上拖拽的可视化积木——这条链完全自动。你只写后端块定义，前端 UI 白送。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 2 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 2 周（Day 06-10）你已吃透 Block 系统</h3>
+                <ul>
+                    <li><b>Day 06</b> Block 基类：ABC+泛型、_execute 生命周期、类型分类</li>
+                    <li><b>Day 07</b> 真实 Block：纯计算/IO/状态/AI 四种范例</li>
+                    <li><b>Day 08</b> 凭证：引用vs实体、discriminator、加锁刷新</li>
+                    <li><b>Day 09</b> 成本：六种类型、静态/动态、cost_filter</li>
+                    <li><b>Day 10</b> SDK：ProviderBuilder、AutoRegistry、声明式扩展</li>
+                </ul>
+                <p style="margin-top:8px">你已理解"积木怎么定义、怎么被集成"。下周（Day 11-15）进入 <strong>执行引擎</strong>——图模型、manager、数据流、定时、WebSocket。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '120,171p' $P/sdk/__init__.py                 # SDK 导出
+sed -n '27,90p' $P/sdk/builder.py | head -40         # ProviderBuilder
+sed -n '49,180p' $P/sdk/registry.py | head -50       # AutoRegistry
+cat $P/blocks/exa/_config.py                          # provider 实战</code></pre>
+                <div class="tip"><strong>下周预告 · Day 11</strong>：进入执行引擎——<strong>Graph 模型（Node/Link）深入</strong>：三层 Graph 模型、计算字段、校验、版本/fork、starting_nodes，为读执行引擎打基础。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 成本</a>
+                <a href="autogpt-day11.html" style="color:var(--accent-green);">Day 11 · Graph 模型 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
