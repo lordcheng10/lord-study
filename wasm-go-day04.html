@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 三级 Context — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .lvl{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .lvl .row{border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;background:var(--bg-secondary);font-size:13px}
+        .lvl .row b{color:#00add8}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00add8,#7c4dff);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">三级 Context · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三级总览</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · VM 级</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Plugin 级</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · NewPluginContext</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · HttpContext 接口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · SetContext 存数据</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · body 读取控制</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day05.html" class="nav-link" style="color:#00add8;">Day 05 SetCtx 选项 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 入门与生命周期</span>
+            <h1 class="part-title">三级 Context：数据挂在哪</h1>
+            <p class="part-desc">昨天知道有三级上下文，今天细看它们的字段和职责——以及最重要的：你在插件里想"暂存点数据"（比如请求开始时间、解析出的用户名），该挂在哪一级、活多久。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三级总览</h1></div>
+            <div class="card">
+                <div class="lvl">
+                    <div class="row"><b>VM 级 CommonVmCtx</b>（<code>plugin_wrapper.go:75</code>）：一个 Wasm 虚拟机一个，持有插件名、日志、所有回调函数、rebuild 参数。活得最久。</div>
+                    <div class="row"><b>Plugin 级 CommonPluginCtx</b>（<code>:551</code>）：一份配置一个，持有 RuleMatcher（规则）、tick 函数、userContext、Leader 状态。</div>
+                    <div class="row"><b>请求级 HttpContext</b>（<code>iface/context.go:41</code>）：一个 HTTP 请求一个，持有请求的 Scheme/Host/Path/Method + 一堆能力方法。请求结束就销毁。</div>
+                </div>
+                <div class="baby"><span class="t">用"公司"打比方</span>
+                <strong>VM 级像"公司"（开着就一直在）、Plugin 级像"部门"（一个配置=一个部门）、HttpContext 像"一次会议"（一个请求=一次会议，开完就散）。</strong>你要存的数据活多久，就挂在对应级别：全公司共用的挂 VM/Plugin，只这次请求用的挂 HttpContext。挂错了要么泄漏（该销毁的没销毁）要么丢失（该保留的没了）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>VM 级 CommonVmCtx</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:75-95</code>（Day 03 见过）核心字段：<code>pluginName</code>、<code>log</code>、<code>vmID</code>、<code>parseConfig</code>、8 个 <code>onHttpXxx</code> 回调、<code>rebuildAfterRequests</code>/<code>rebuildMaxMem</code>/<code>maxRequestsPerIoCycle</code>。</p>
+                <p>它由 <code>NewCommonVmCtx</code>（<code>:519-530</code>）创建，通过 <code>SetCtx</code> 里的 <code>proxywasm.SetVMContext</code> 注册给 proxy-wasm。</p>
+                <div class="anno">读法：<b>VM 级存的是"这个插件是什么样的"——名字、有哪些回调、性能参数。<strong>它是所有回调的"登记册",请求处理时从这里取出对应回调来执行。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Plugin 级 CommonPluginCtx</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:551-561</code>：</p>
+<pre><code class="language-go">type CommonPluginCtx[PluginConfig any] struct {
+    types.DefaultPluginContext
+    matcher.RuleMatcher[PluginConfig]   // 内嵌规则匹配器（第2周主角）
+    vm                 *CommonVmCtx[PluginConfig]
+    onTickFuncs        []TickFuncEntry   // 注册的定时任务
+    userContext        map[string]interface{}  // 插件级自定义数据
+    fingerPrint        string
+    ruleLevelIsolation bool
+    isLeader           bool              // Leader 选举结果（Day 17）
+}</code></pre>
+                <div class="baby"><span class="t">它内嵌了 RuleMatcher</span>
+                注意 <code>CommonPluginCtx</code> 内嵌了 <code>matcher.RuleMatcher</code>——<strong>这意味着"配置匹配"能力直接长在 Plugin 级上下文里。</strong>因为"用哪份配置"是按请求匹配的，而配置属于 Plugin 级。<code>userContext</code>（<code>SetContext</code>/<code>GetContext</code>）让你在插件级存跨请求的数据（比如启动时算好的东西）。<code>isLeader</code> 用于多实例里选一个"领导"干独占的活（Day 17）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>NewPluginContext</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:543-549</code>：VM 级负责"生"出 Plugin 级：</p>
+<pre><code class="language-go">func (ctx *CommonVmCtx[PluginConfig]) NewPluginContext(uint32) types.PluginContext {
+    return &CommonPluginCtx[PluginConfig]{
+        vm:          ctx,   // 反向持有 VM
+        userContext: map[string]interface{}{},
+    }
+}</code></pre>
+                <div class="anno">读法：<b>proxy-wasm 加载配置时调 <code>NewPluginContext</code> 造一个 Plugin 上下文。它反向持有 <code>vm</code>——这样 Plugin 级能拿到 VM 级的回调。<strong>三级之间通过这种"上级造下级、下级持有上级引用"串起来。</strong>同理 Plugin 级会 <code>NewHttpContext</code> 造请求级（在文件后半部分）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>HttpContext 接口</h1></div>
+            <div class="card">
+                <p><code>iface/context.go:41-118</code> 定义 HttpContext 接口，能力很丰富：</p>
+<pre><code class="language-go">type HttpContext interface {
+    Scheme() string; Host() string; Path() string; Method() string  // 请求基本信息
+    SetContext(key string, value interface{}); GetContext(...) ...   // 请求级存取数据
+    GetUserAttribute(key) / SetUserAttribute(...)                    // 用户属性（Day 12）
+    WriteUserAttributeToLog() / ...ToTrace()                        // 写自定义日志/追踪
+    DontReadRequestBody() / DontReadResponseBody()                  // 不读 body
+    BufferRequestBody() / BufferResponseBody()                      // 缓冲 body
+    DisableReroute()                                                // 禁止重新路由
+    RouteCall(method, url, headers, body, callback)                 // 调当前路由后端
+    HasRequestBody() / HasResponseBody() / IsWebsocket() / ...      // 各种判断
+}</code></pre>
+                <div class="anno">读法：<b>这一长串就是"你在处理请求时能做什么"的清单。<strong>请求级上下文不只是"存数据",还是"操作当前请求的遥控器"。</strong>Day 12 会精讲这些能力，今天先建立印象。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>SetContext 存数据</h1></div>
+            <div class="card">
+                <p>三级都有 <code>SetContext/GetContext</code>，但作用域不同：</p>
+                <ul>
+                    <li>Plugin 级 <code>userContext</code>：跨请求存活（插件级共享）。</li>
+                    <li>请求级 <code>SetContext</code>：只在这次请求内有效（还有类型化的 <code>GetBoolContext</code>/<code>GetStringContext</code>/<code>GetByteSliceContext</code>）。</li>
+                </ul>
+                <div class="baby"><span class="t">典型用法</span>
+                <strong>请求头阶段解析出用户名，想在请求体阶段用——存请求级 <code>ctx.SetContext("user", name)</code>，body 钩子里 <code>ctx.GetStringContext("user", "")</code> 取出。</strong>因为同一个请求的多个阶段共享同一个 HttpContext，这样就能在阶段间传递数据。<strong>切记别用全局变量传（并发请求会串数据！），一定用请求级 Context。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>body 读取控制</h1></div>
+            <div class="card">
+                <p>HttpContext 提供精细的 body 读取控制（<code>iface/context.go:61-96</code>）：</p>
+                <ul>
+                    <li><code>DontReadRequestBody()</code>/<code>DontReadResponseBody()</code>：不读 body（没注册 body 钩子时默认就不读）。</li>
+                    <li><code>BufferRequestBody()</code>/<code>BufferResponseBody()</code>：缓冲整个 body（没注册 streaming 钩子但注册了 body 钩子时默认缓冲）。</li>
+                    <li><code>SetRequestBodyBufferLimit(byteSize)</code>：单请求 body 缓冲上限（影响内存）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要这么在意 body？</span>
+                <strong>请求/响应体可能很大（上传文件、大 JSON）。全缓冲进内存会吃掉网关大量内存。</strong>所以 SDK 让你精细控制：不用就别读、要读可选缓冲或流式、还能设上限。<strong>Day 02 的 request-block 就调了 <code>DontReadRequestBody()</code>——没有 body 规则时明确说"别读",省内存。</strong>这是写高性能插件的重要意识。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>三级 Context 分别活多久？"公司/部门/会议"的比喻？</li>
+                    <li>为什么 CommonPluginCtx 内嵌 RuleMatcher？</li>
+                    <li>阶段间传数据该用哪级 Context？为什么不能用全局变量？</li>
+                    <li>body 读取的几种控制（DontRead/Buffer/Limit）各解决什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '551,562p' pkg/wrapper/plugin_wrapper.go
+sed -n '543,549p' pkg/wrapper/plugin_wrapper.go
+sed -n '29,118p' pkg/iface/context.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：<strong>SetCtx 与函数式选项</strong>——揭开 <code>SetCtx("name", 选项...)</code> 那些选项（<code>ParseConfig</code>/<code>ProcessRequestHeaders</code>…）的实现：CtxOption 接口 + Apply 模式，以及为什么有新旧两套 API。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day03.html" style="color:var(--accent-cyan);">&larr; Day 03</a>
+                <a href="wasm-go-day05.html" style="color:#00add8;">Day 05 · SetCtx 选项 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

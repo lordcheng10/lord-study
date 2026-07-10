@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 第一个插件 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00add8,#7c4dff);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">第一个插件 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · main 与 init</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SetCtx 注册</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 配置结构体</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · parseConfig</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · onHttpRequestHeaders</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · onHttpRequestBody</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · WasmPlugin 配置</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day03.html" class="nav-link" style="color:#00add8;">Day 03 proxy-wasm &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 入门与生命周期</span>
+            <h1 class="part-title">第一个插件：request-block</h1>
+            <p class="part-desc">最好的入门是读一个完整的小例子。今天逐行拆 <code>examples/request-block/main.go</code>——一个"拦截含某关键词请求"的插件。它虽小，却五脏俱全：注册、配置、请求头处理、请求体处理全都有。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>main 与 init</h1></div>
+            <div class="card">
+                <p><code>examples/request-block/main.go:31-40</code>：</p>
+<pre><code class="language-go">func main() {}   // :31 空的！
+
+func init() {    // :33 真正的入口
+    wrapper.SetCtx(
+        "request-block",
+        wrapper.ParseConfig(parseConfig),
+        wrapper.ProcessRequestHeaders(onHttpRequestHeaders),
+        wrapper.ProcessRequestBody(onHttpRequestBody),
+    )
+}</code></pre>
+                <div class="baby"><span class="t">为什么 main 是空的？</span>
+                普通 Go 程序从 <code>main()</code> 开始跑。<strong>但 Wasm 插件不是"程序"，而是"被网关加载的模块"——网关不会调用你的 <code>main</code>，而是在加载模块时触发 <code>init()</code>。</strong>Go 规定 <code>init()</code> 在包加载时自动执行。所以插件把"注册回调"写在 <code>init()</code> 里，<code>main()</code> 留空只为满足编译要求。<strong>记住：Wasm 插件的入口是 <code>init()</code>，不是 <code>main()</code>。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SetCtx 注册</h1></div>
+            <div class="card">
+                <p><code>SetCtx("request-block", 选项...)</code> 做了两件事：给插件起名、注册一组"回调函数"。这里注册了三个：</p>
+                <ul>
+                    <li><code>ParseConfig(parseConfig)</code>：怎么解析配置。</li>
+                    <li><code>ProcessRequestHeaders(onHttpRequestHeaders)</code>：请求头到达时干什么。</li>
+                    <li><code>ProcessRequestBody(onHttpRequestBody)</code>：请求体到达时干什么。</li>
+                </ul>
+                <div class="baby"><span class="t">"注册回调"是什么意思？</span>
+                <strong>你不主动调用这些函数——你把它们"登记"给 SDK，SDK 在合适的时机（配置加载时、请求头到达时…）替你调用。</strong>这叫"回调"（callback）或"钩子"（hook）。好比你在快递柜登记手机号，包裹到了它自动通知你，而不是你一直去查。<strong>写插件的本质就是"填这些回调"——你只关心"发生 X 时做 Y",何时发生由网关决定。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>配置结构体</h1></div>
+            <div class="card">
+                <p><code>:42-51</code> 定义这个插件能接受哪些配置：</p>
+<pre><code class="language-go">type RequestBlockConfig struct {
+    blockedCode      uint32          // 拦截时返回的状态码
+    blockedMessage   string          // 拦截时返回的消息
+    caseSensitive    bool            // 是否大小写敏感
+    blockUrls        []string        // 命中即拦的 URL 关键词
+    blockExactUrls   []string        // 精确匹配的 URL
+    blockHeaders     []string        // 命中即拦的请求头
+    blockBodies      []string        // 命中即拦的请求体关键词
+    blockRegExpArray []*regexp.Regexp // 正则规则
+}</code></pre>
+                <div class="anno">读法：<b>这个结构体就是"这个插件的配置形状"。<strong>泛型参数 <code>PluginConfig</code>（明天讲）就是它——SDK 用 Go 泛型把"配置类型"贯穿始终，parseConfig 填它、各钩子读它。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>parseConfig</h1></div>
+            <div class="card">
+                <p><code>:53-124</code> 把 JSON 配置读进结构体（用 gjson 按路径取值）：</p>
+<pre><code class="language-go">func parseConfig(json gjson.Result, config *RequestBlockConfig) error {
+    code := json.Get("blocked_code").Int()
+    if code != 0 && code > 100 && code < 600 {
+        config.blockedCode = uint32(code)
+    } else {
+        config.blockedCode = 403     // 默认 403
+    }
+    config.caseSensitive = json.Get("case_sensitive").Bool()
+    for _, item := range json.Get("block_urls").Array() {  // 遍历数组
+        url := item.String()
+        if url == "" { continue }
+        config.blockUrls = append(config.blockUrls,
+            ternaryLower(url, config.caseSensitive))
+    }
+    // ... block_exact_urls / block_regexp_urls / block_headers / block_bodies 同理
+    if len(config.blockUrls)==0 && len(config.blockHeaders)==0 && len(config.blockBodies)==0 {
+        return errors.New("there is no block rules")   // :121 配置校验
+    }
+    return nil
+}</code></pre>
+                <div class="anno">读法：<b><code>json.Get("block_urls").Array()</code> 直接从 JSON 取数组，不用定义中间结构体——这就是 gjson 的爽点。大小写不敏感时提前转小写存好，匹配时快。最后校验"至少有一条规则",没有就返回 error（插件启动会失败）。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>onHttpRequestHeaders</h1></div>
+            <div class="card">
+                <p><code>:126-185</code>：请求头到达时，检查 URL/请求头是否命中拦截规则：</p>
+<pre><code class="language-go">func onHttpRequestHeaders(ctx wrapper.HttpContext, config RequestBlockConfig) types.Action {
+    requestUrl, _ := proxywasm.GetHttpRequestHeader(":path")   // 取路径
+    if !config.caseSensitive { requestUrl = strings.ToLower(requestUrl) }
+    for _, blockUrl := range config.blockUrls {
+        if strings.Contains(requestUrl, blockUrl) {
+            proxywasm.SendHttpResponseWithDetail(config.blockedCode,
+                "request-block.url_blocked.keyword", nil,
+                []byte(config.blockedMessage), -1)   // 直接返回拦截响应
+            return types.ActionContinue
+        }
+    }
+    // ... 检查 block_headers ...
+    if len(config.blockBodies) == 0 {
+        ctx.DontReadRequestBody()   // :183 不需要读 body 就声明，省内存
+    }
+    return types.ActionContinue
+}</code></pre>
+                <div class="baby"><span class="t">SendHttpResponse 和 Action 是什么？</span>
+                <strong><code>SendHttpResponseWithDetail</code> 直接生成一个响应发回客户端（比如 403 拦截页）——请求不再往后端转发。</strong>返回值 <code>types.Action</code> 告诉网关"接下来怎么办"：<code>ActionContinue</code> = 继续处理，<code>ActionPause</code> = 暂停等待（Day 14 会用到）。<strong>关键细节 <code>DontReadRequestBody()</code>：如果不用检查请求体，主动声明"别读 body"，网关就不缓存请求体，省内存。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>onHttpRequestBody</h1></div>
+            <div class="card">
+                <p><code>:187-201</code>：请求体到达时，检查 body 是否含关键词：</p>
+<pre><code class="language-go">func onHttpRequestBody(ctx wrapper.HttpContext, config RequestBlockConfig, body []byte) types.Action {
+    bodyStr := string(body)
+    if !config.caseSensitive { bodyStr = strings.ToLower(bodyStr) }
+    for _, blockBody := range config.blockBodies {
+        if strings.Contains(bodyStr, blockBody) {
+            proxywasm.SendHttpResponseWithDetail(config.blockedCode,
+                "request-block.body_blocked", nil, []byte(config.blockedMessage), -1)
+            return types.ActionContinue
+        }
+    }
+    return types.ActionContinue
+}</code></pre>
+                <div class="anno">读法：<b>注意这个回调多了个 <code>body []byte</code> 参数——请求体作为参数传进来。<strong>只有注册了 <code>ProcessRequestBody</code> 且没调 <code>DontReadRequestBody</code>，网关才会读 body 并调这个回调。</strong>请求头阶段和请求体阶段是分开的两个钩子（Day 11 详讲各阶段）。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>WasmPlugin 配置（怎么用起来）</h1></div>
+            <div class="card">
+                <p><code>README.md</code> 给出应用方式——一个 <code>WasmPlugin</code> CRD（上一站 Higress/Console 讲过）：</p>
+<pre><code class="language-yaml">apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: request-block
+  namespace: higress-system
+spec:
+  defaultConfig:
+    block_urls:
+    - "swagger.html"     # ← 这就是 parseConfig 里读的 block_urls
+  url: oci://<your_registry>/request-block:1.0.0</code></pre>
+                <div class="anno">读法：<b><code>defaultConfig</code> 里的 JSON 就是 <code>parseConfig</code> 收到的 <code>json</code> 参数！<strong>回想上一站：Console 生成 WasmPlugin CR → Higress 下发 → Envoy 加载 <code>url</code> 指向的 wasm → 用 <code>defaultConfig</code> 调你的 <code>parseConfig</code>。</strong>配好后，访问含 <code>swagger.html</code> 的 URL 就会被 403 拦截。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么插件入口是 <code>init()</code> 不是 <code>main()</code>？</li>
+                    <li><code>SetCtx</code> 注册了哪几类回调？"回调"是什么意思？</li>
+                    <li>parseConfig 怎么用 gjson 读配置？为什么要校验？</li>
+                    <li><code>Action</code> 和 <code>SendHttpResponse</code>、<code>DontReadRequestBody</code> 各干什么？</li>
+                    <li>WasmPlugin CRD 的 <code>defaultConfig</code> 和 <code>parseConfig</code> 什么关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+cat examples/request-block/main.go
+# 试着编译（需要 Go 1.24+）
+cd examples/request-block && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o main.wasm main.go && ls -la main.wasm</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>proxy-wasm 与 ABI</strong>——往下探一层，看 <code>proxywasm.GetHttpRequestHeader</code> 这类调用底层怎么和 Envoy 通信，Wasm 虚拟机怎么按线程克隆，下行/上行钩子分别是什么。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day01.html" style="color:var(--accent-cyan);">&larr; Day 01</a>
+                <a href="wasm-go-day03.html" style="color:#00add8;">Day 03 · proxy-wasm &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

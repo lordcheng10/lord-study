@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00add8,#7c4dff);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · wasm-go 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 什么是 Wasm 插件</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · proxy-wasm 关系</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 目录结构</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 依赖清单</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 和前四站的关系</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 一个插件的一生</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day02.html" class="nav-link" style="color:#00add8;">Day 02 第一个插件 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 入门与生命周期</span>
+            <h1 class="part-title">项目全景：Higress 插件 SDK</h1>
+            <p class="part-desc">欢迎来到 wasm-go——higress-group 系列<strong>第 5 站，也是收官站</strong>。前四站教你网关（Envoy/Istio/Higress/Console）怎么工作，这一站教你<strong>怎么给网关写自己的插件</strong>。第一天先建立整体印象。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>wasm-go 是什么</h1></div>
+            <div class="card">
+                <p><strong>wasm-go</strong>（模块名 <code>github.com/higress-group/wasm-go</code>，<code>go.mod:1</code>）是 Higress 官方的 <strong>Go 语言 Wasm 插件开发 SDK</strong>。<code>README.md</code> 开头就说："This SDK is used to develop the WASM Plugins for Higress in Go."</p>
+                <div class="baby"><span class="t">用生活例子理解"插件 SDK"</span>
+                想象网关是一台"可以装 App 的手机"，Wasm 插件就是"App"（限流、鉴权、改请求…）。<strong>但直接对着手机的底层接口写 App 太难了。wasm-go 就是"App 开发套件"——它把底层接口封装成简单的几个函数，你只管写业务逻辑。</strong>好比 iOS 开发用 SwiftUI 而不是直接调内核。<strong>整个 SDK 只有约 2500 行 Go 代码，非常精悍。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>什么是 Wasm 插件</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Wasm 是什么？</span>
+                <strong>WebAssembly（Wasm）是一种"可移植的字节码"</strong>——你用 Go/Rust/C++ 写代码，编译成 <code>.wasm</code> 文件，它能在一个"沙箱虚拟机"里跑，跨语言、跨平台、还安全隔离。<strong>Envoy（网关数据面）内置了 Wasm 虚拟机，能加载 <code>.wasm</code> 插件并在处理请求时调用它们。</strong>于是你能用 Go 写插件、扩展网关能力，而不用改 Envoy 的 C++ 源码、不用重新编译网关。这就是"Wasm 插件"的价值：<strong>热插拔、多语言、安全沙箱</strong>。</div>
+                <div class="anno">读法：<b>回想 Envoy 课的 proxy-wasm——那是"网关侧怎么跑 Wasm"；wasm-go 是"插件侧怎么用 Go 写 Wasm"，两者是同一机制的两端。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>和 proxy-wasm 的关系</h1></div>
+            <div class="card">
+                <p>核心依赖（<code>go.mod</code>）：<code>github.com/higress-group/proxy-wasm-go-sdk</code>。wasm-go <strong>建立在 proxy-wasm-go-sdk 之上</strong>，再封装一层更友好的 API。</p>
+                <div class="glossary"><b>三层关系（记住这个栈）</b>：<br>
+                ① <b>proxy-wasm ABI</b>：Envoy 和 Wasm 插件之间的"通信协议"（一堆底层函数约定，如"读一个请求头""发起 HTTP 调用"）。<br>
+                ② <b>proxy-wasm-go-sdk</b>：把 ABI 的原始调用包成 Go 函数（<code>proxywasm.GetHttpRequestHeader</code> 等）。<br>
+                ③ <b>wasm-go（本课）</b>：再往上封装成"填回调"的极简模型 + 配置解析 + 规则匹配 + HTTP/Redis 客户端。</div>
+                <div class="baby"><span class="t">为什么要三层？</span>
+                每层都把下一层的复杂度藏起来。<strong>直接用 ABI 要处理内存指针、返回码，很痛苦；用 proxy-wasm-go-sdk 已经是 Go 函数了，但仍要自己管生命周期；用 wasm-go 你连生命周期都不用管，填几个回调就行。</strong>层层封装 = 越往上越好用。本课主要讲第③层，偶尔下探到第②层看它怎么调 ABI。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>目录结构</h1></div>
+            <div class="card">
+<pre><code class="language-bash">wasm-go/
+  go.mod / go.sum       模块与依赖
+  README.md             构建与使用说明
+  pkg/                  SDK 核心
+    wrapper/            主封装：plugin_wrapper(生命周期/SetCtx)、
+                        http_wrapper、cluster_wrapper、redis_wrapper、
+                        request_wrapper、response_wrapper、log_wrapper
+    matcher/            rule_matcher 规则匹配
+    iface/              context.go 接口定义（PluginContext/HttpContext）
+    log/                log.go 日志
+    tokenusage/         AI Token 用量解析
+    test/               单元测试辅助
+    protos/             protobuf（inject_encoded_data）
+  examples/             示例插件
+    request-block/ http-call/ complex-http-call/
+    safe-log-http-call/ rebuild-example/</code></pre>
+                <div class="anno">读法：<b>最核心是 <code>pkg/wrapper/</code>（尤其 <code>plugin_wrapper.go</code> 1290 行）。<code>examples/</code> 是最好的入门材料——<strong>明天就从 <code>request-block</code> 这个最简单的例子开始拆。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>依赖清单</h1></div>
+            <div class="card">
+                <p><code>go.mod:5-16</code> 关键依赖：</p>
+<pre><code class="language-go">github.com/higress-group/proxy-wasm-go-sdk  // proxy-wasm 底层
+github.com/tidwall/gjson    // 快速读 JSON（不解析成结构体，按路径取值）
+github.com/tidwall/sjson    // 快速改 JSON
+github.com/tidwall/resp     // Redis RESP 协议
+github.com/higress-group/gjson_template  // 模板
+github.com/invopop/jsonschema  // 生成 JSON Schema
+github.com/google/uuid      // 生成 vmID</code></pre>
+                <div class="baby"><span class="t">为什么用 gjson 而不是标准 json？</span>
+                标准库 <code>encoding/json</code> 要先定义结构体、再反序列化，代码多。<strong>gjson 让你直接按路径取值：<code>json.Get("block_urls").Array()</code>——不用定义结构体，读配置飞快。</strong>Wasm 环境对性能和体积敏感，gjson 这种"零分配、按需取"的库特别合适。这也是 Higress 全家（上一站的 ai-proxy 也用 gjson/sjson）的一贯选择。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>和前四站的关系（收官）</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">五站怎么串起来</span>
+                <strong>Envoy</strong>（数据面）跑 Wasm 虚拟机；<strong>Istio/Higress</strong>（控制面）把插件配置下发；<strong>Higress Console</strong>（上一站）提供界面配置插件。<strong>而这些被配置、被下发、被运行的插件，很多就是用 wasm-go 写的！</strong>你在 Console 里看到的 key-auth、ai-proxy、ai-statistics 等插件（上一站 Day 12 加载的那 43 个），底层实现就是 Go + wasm-go 编译的 Wasm。<strong>学完这一站，你就能自己写一个插件,走完"写代码 → 编译 → 打镜像 → Console 配置 → 网关运行"的完整闭环。</strong></div>
+                <div class="tip">建议先学完 Envoy（理解 Wasm 怎么在网关里跑）和 Higress（理解插件配置怎么下发）再学本课。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>一个插件的一生</h1></div>
+            <div class="card">
+<pre><code class="language-bash">① 你写 Go 代码：init() 里 SetCtx 注册回调 + 各阶段处理函数
+  → ② 编译：GOOS=wasip1 GOARCH=wasm go build → main.wasm
+    → ③ 打镜像：FROM scratch + COPY main.wasm → 推到 OCI 仓库
+      → ④ 配置：WasmPlugin CRD 指向 oci:// 镜像（或 Console 界面配）
+        → ⑤ 运行：Higress 下发 → Envoy 为每 worker 克隆 Wasm VM
+          → ⑥ 请求到来：Envoy 在各阶段调用你的回调（headers/body…）</code></pre>
+                <div class="anno">读法：<b>本课按这条链推进：第 1-2 周讲①（怎么写：生命周期/配置/匹配），第 3 周讲请求处理与外部调用，第 4 周讲高级特性 + ②③④⑤（怎么编译部署）。<strong>Day 20 会把整条链走一遍。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>wasm-go 是什么？它封装了谁、提供了什么？</li>
+                    <li>Wasm 插件为什么好（热插拔/多语言/沙箱）？</li>
+                    <li>ABI → proxy-wasm-go-sdk → wasm-go 三层各是什么？</li>
+                    <li>wasm-go 写的插件和前四站怎么串成闭环？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+head -30 README.md
+head -20 go.mod
+ls pkg/ pkg/wrapper/ examples/
+wc -l pkg/wrapper/plugin_wrapper.go pkg/matcher/rule_matcher.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>第一个插件 request-block</strong>——从最简单的例子入手，逐行读 <code>main/init/SetCtx/parseConfig/onHttpRequestHeaders</code>，看一个"拦截含某关键词请求"的插件是怎么炼成的。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="wasm-go-day02.html" style="color:#00add8;">Day 02 · 第一个插件 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · SetCtx 与函数式选项 — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        th{background:var(--bg-secondary);color:#00add8}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00add8,#7c4dff);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">SetCtx 与选项 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · SetCtx 做什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · CtxOption 接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Apply 模式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 8 个 Process 钩子</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 新旧两套 API</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 泛型贯穿</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 其他选项</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day06.html" class="nav-link" style="color:#7c4dff;">Day 06 配置解析 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周 入门与生命周期</span>
+            <h1 class="part-title">SetCtx 与函数式选项</h1>
+            <p class="part-desc">第 1 周收官。今天揭开 <code>SetCtx("name", 选项...)</code> 的实现——那些 <code>ParseConfig(...)</code>、<code>ProcessRequestHeaders(...)</code> 到底是什么。答案是 Go 里优雅的"函数式选项模式"，学会它你自己也能写出这种好用的 API。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>SetCtx 做什么</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:120-126</code>：</p>
+<pre><code class="language-go">func SetCtx[PluginConfig any](pluginName string, options ...CtxOption[PluginConfig]) {
+    proxywasm.SetVMContext(NewCommonVmCtx(pluginName, options...))
+}</code></pre>
+                <div class="anno">读法：<b><code>options ...CtxOption</code> 是"可变参数"——你能传 0 个或任意多个选项。<code>NewCommonVmCtx</code> 用这些选项配好一个 <code>CommonVmCtx</code>，再 <code>proxywasm.SetVMContext</code> 注册给底层。<strong>整个插件的行为，就由你传的这组选项决定。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>CtxOption 接口</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:128-130</code>：</p>
+<pre><code class="language-go">type CtxOption[PluginConfig any] interface {
+    Apply(*CommonVmCtx[PluginConfig])
+}</code></pre>
+                <div class="baby"><span class="t">什么是"函数式选项模式"？</span>
+                每个选项（<code>ParseConfig(f)</code>、<code>ProcessRequestHeaders(f)</code>…）都返回一个实现了 <code>Apply</code> 方法的对象。<strong>构造时挨个调 <code>opt.Apply(ctx)</code>，让每个选项把自己"装配"到 ctx 上。</strong>好处：<strong>加新选项不用改 SetCtx 的签名，参数顺序随意、可选可省。</strong>这是 Go 里配置复杂对象的最佳实践（gRPC、很多库都这么做）。对比"一个有 20 个参数的构造函数"——那种没法记、没法扩展。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Apply 模式（以 ParseConfig 为例）</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:132-166</code>：<code>ParseConfig(f)</code> 返回一个 <code>parseConfigOption</code>，它的 <code>Apply</code> 把回调装进 ctx：</p>
+<pre><code class="language-go">func ParseConfig[PluginConfig any](f ParseConfigFunc[PluginConfig]) CtxOption[PluginConfig] {
+    return &parseConfigOption[PluginConfig]{f: f}   // 返回选项对象
+}
+
+func (o parseConfigOption[PluginConfig]) Apply(ctx *CommonVmCtx[PluginConfig]) {
+    // ... 把你的 f 包装后赋给 ctx.parseConfig ...
+    ctx.parseConfig = func(context PluginContext, configBytes []byte, config *PluginConfig) error {
+        return o.f(gjson.ParseBytes(configBytes), config)   // 帮你把 bytes 转成 gjson
+    }
+}</code></pre>
+                <div class="anno">读法：<b>看这个包装——你写的 <code>parseConfig(json, config)</code> 只关心 gjson，但底层 SDK 收到的是 <code>[]byte</code>。<strong>Apply 帮你补上 <code>gjson.ParseBytes</code> 这步转换。</strong>选项模式让 SDK 能在"你的简单函数"外面套一层"适配底层"的壳，你无感。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>8 个 Process 钩子</h1></div>
+            <div class="card">
+                <p>请求处理相关的选项一共 8 个（<code>plugin_wrapper.go:232-397</code>），覆盖请求/响应 × 头/体/流式/结束：</p>
+                <table>
+                    <tr><th>选项</th><th>触发时机</th></tr>
+                    <tr><td>ProcessRequestHeaders</td><td>请求头到达</td></tr>
+                    <tr><td>ProcessRequestBody</td><td>请求体到达（整块）</td></tr>
+                    <tr><td>ProcessStreamingRequestBody</td><td>请求体到达（流式分块）</td></tr>
+                    <tr><td>ProcessResponseHeaders</td><td>响应头到达</td></tr>
+                    <tr><td>ProcessResponseBody</td><td>响应体到达（整块）</td></tr>
+                    <tr><td>ProcessStreamingResponseBody</td><td>响应体到达（流式分块）</td></tr>
+                    <tr><td>ProcessStreamDone</td><td>流结束</td></tr>
+                    <tr><td>ParseConfig / ParseOverrideConfig</td><td>配置加载</td></tr>
+                </table>
+                <div class="anno">读法：<b>你只注册需要的钩子——只关心请求头就只注册 ProcessRequestHeaders。<strong>没注册的钩子对应的 body 网关不会读（省内存，呼应 Day 04）。</strong>Day 11 会详讲这些阶段的顺序和 Action 语义。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>新旧两套 API</h1></div>
+            <div class="card">
+                <p>你会注意到很多选项有两个版本，比如 <code>ProcessRequestHeaders</code> 和 <code>ProcessRequestHeadersBy</code>（标了 <code>// Deprecated</code>，<code>:247-253</code>）：</p>
+<pre><code class="language-go">// 旧（Deprecated）：回调多一个 log 参数
+type oldOnHttpHeadersFunc[PluginConfig any] func(context HttpContext, config PluginConfig, log log.Log) types.Action
+// 新：回调不带 log（用全局 log 包函数即可）
+type onHttpHeadersFunc[PluginConfig any] func(context HttpContext, config PluginConfig) types.Action</code></pre>
+                <div class="baby"><span class="t">为什么演进出新 API？</span>
+                旧版每个回调都要手动接收并传递 <code>log</code> 参数，啰嗦。<strong>新版把日志改成全局的 <code>log.Infof(...)</code>（Day 16 讲），回调签名更干净。</strong>SDK 为了不破坏老插件，<strong>用 <code>Apply</code> 里的 <code>oldF/f</code> 分支同时支持两套——老代码不用改，新代码更简洁。</strong>这是成熟 SDK 的向后兼容做法。你写新插件用不带 <code>By</code> 后缀的新版即可。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>泛型贯穿</h1></div>
+            <div class="card">
+                <p>注意到处都是 <code>[PluginConfig any]</code>——这是 Go 泛型。<code>SetCtx</code>、<code>CtxOption</code>、各回调类型都带这个类型参数。</p>
+                <div class="baby"><span class="t">泛型在这里解决什么？</span>
+                你的配置类型（比如 <code>RequestBlockConfig</code>）是自定义的。<strong>泛型让 SDK 不写死配置类型，而是"你传什么配置类型，parseConfig 和各钩子就收到什么类型"——类型安全、无需强转。</strong><code>SetCtx</code> 的类型参数由你传的回调函数自动推断（Go 编译器帮你填）。所以 <code>request-block</code> 里 <code>wrapper.ParseConfig(parseConfig)</code> 就自动确定了 <code>PluginConfig = RequestBlockConfig</code>。这是 Go 1.18+ 泛型的漂亮应用。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>其他选项</h1></div>
+            <div class="card">
+                <p>除了配置和请求钩子，还有一批"能力开关"选项（后面几周会用到）：</p>
+                <ul>
+                    <li><code>WithLogger</code>（<code>:409</code>）：自定义日志实现。</li>
+                    <li><code>EnableSafeLog</code>（<code>:431</code>）：开启安全日志，屏蔽敏感信息（Day 16）。</li>
+                    <li><code>WithRebuildAfterRequests</code>（<code>:444</code>）/ <code>WithRebuildMaxMemBytes</code>（<code>:459</code>）：性能重建（Day 19）。</li>
+                    <li><code>WithMaxRequestsPerIoCycle</code>（<code>:490</code>）：IO 并发限制（Day 19）。</li>
+                    <li><code>PrePluginStartOrReload</code>（<code>:515</code>）：插件启动前的钩子。</li>
+                </ul>
+                <div class="anno">读法：<b>全都是同一个选项模式——返回一个带 <code>Apply</code> 的对象。<strong>SDK 的所有可配置行为都统一走这套机制，一致、可扩展。</strong>你要给插件加个能力开关，照葫芦画瓢加个 Option 即可。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 1 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周你应该能回答</h3>
+                <ul>
+                    <li>函数式选项模式怎么工作？比多参数构造函数好在哪？</li>
+                    <li><code>Apply</code> 里为什么要包一层（如补 gjson.ParseBytes）？</li>
+                    <li>8 个 Process 钩子覆盖哪些阶段？</li>
+                    <li>为什么有新旧两套 API？泛型 <code>PluginConfig</code> 解决什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '120,170p' pkg/wrapper/plugin_wrapper.go
+grep -n "func Process\|func Parse\|func With\|func Enable" pkg/wrapper/plugin_wrapper.go</code></pre>
+                <div class="tip"><strong>下周预告 · 第 2 周</strong>：<strong>配置与匹配</strong>——ParseConfig 家族的各种变体、<code>RuleMatcher</code> 怎么按路由/域名/服务匹配不同配置、运行时 <code>GetMatchConfig</code> 怎么选、以及 <code>OnPluginStart</code> 生命周期全貌。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day04.html" style="color:var(--accent-cyan);">&larr; Day 04</a>
+                <a href="wasm-go-day06.html" style="color:#7c4dff;">Day 06 · 配置解析 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

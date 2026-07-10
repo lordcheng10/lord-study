@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · proxy-wasm 与 ABI — wasm-go 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00add8,#7c4dff);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">proxy-wasm 与 ABI · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ABI 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两个方向的调用</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · VM 按线程克隆</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三级上下文对象</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · DefaultVMContext</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 沙箱与限制</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · CallForeignFunction</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="wasm-go-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="wasm-go-day04.html" class="nav-link" style="color:#00add8;">Day 04 三级 Context &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 入门与生命周期</span>
+            <h1 class="part-title">proxy-wasm 与 ABI</h1>
+            <p class="part-desc">昨天用了 <code>proxywasm.GetHttpRequestHeader</code> 这类调用。今天往下探一层：这些调用底层怎么和 Envoy 通信？Wasm 虚拟机怎么隔离？理解这层，你才明白插件"能做什么、不能做什么"的边界。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ABI 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">ABI = 两个程序之间的"接口约定"</span>
+                <strong>ABI（Application Binary Interface）是"Envoy 和 Wasm 插件之间约定好的一套函数"</strong>——比如"读某个请求头叫 <code>proxy_get_header_map_value</code>、发起 HTTP 调用叫 <code>proxy_http_call</code>"。<strong>proxy-wasm 是一套开放标准的 ABI</strong>，Envoy、其他代理都实现了它。插件只要按这套 ABI 写，就能跑在任何支持 proxy-wasm 的代理上。<strong>好比 USB 标准——插头和插座约定好形状，任何 USB 设备都能插任何 USB 口。</strong>proxy-wasm-go-sdk 就是把这些 ABI 函数包成 Go 函数。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两个方向的调用</h1></div>
+            <div class="card">
+                <p>proxy-wasm 的调用是双向的：</p>
+                <ul>
+                    <li><strong>Host → VM（下行钩子）</strong>：Envoy 调插件。如 <code>OnPluginStart</code>、<code>OnHttpRequestHeaders</code>——"请求头来了，插件你处理下"。</li>
+                    <li><strong>VM → Host（宿主调用/hostcall）</strong>：插件调 Envoy。如 <code>GetHttpRequestHeader</code>、<code>SendHttpResponse</code>、<code>HttpCall</code>——"帮我读个头/发个响应/调个后端"。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要分两个方向？</span>
+                <strong>插件是沙箱里的"客人"，不能直接碰网关的内存和网络。所有交互都得通过 ABI 这道"传话窗口"：</strong>Envoy 通过下行钩子把事件递进来（"有请求了"），插件通过宿主调用把请求递出去（"帮我读个头"）。<strong>回想 Envoy 课的 proxy-wasm——那节课从网关侧讲这两个方向，今天从插件侧再看一遍。</strong>wasm-go 的所有 <code>Process*</code> 钩子对应下行调用，所有 <code>proxywasm.Xxx</code> 对应宿主调用。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>VM 按线程克隆</h1></div>
+            <div class="card">
+                <p>回想 Envoy 课的线程模型：1 主 + N worker。<strong>每个 worker 线程有自己独立的一份 Wasm VM</strong>（VM 之间不共享内存）。<code>plugin_wrapper.go</code> 里每个 VM 有唯一 <code>vmID</code>（<code>NewCommonVmCtxWithOptions</code> 里 <code>uuid.New().String()</code>）。</p>
+                <div class="baby"><span class="t">为什么每线程一份 VM？</span>
+                Envoy 用多个 worker 线程并行处理请求。<strong>如果所有线程共享一个 VM，就得加锁，慢且易错。所以给每个 worker 克隆一份独立 VM——各跑各的，无锁、无竞争。</strong>代价是：<strong>插件里的全局变量在每个 VM 里是独立的</strong>（一个 worker 改了另一个看不到）。要跨 VM/跨线程共享数据，得用 SharedData（Day 17 讲），不能用普通全局变量。<code>vmID</code> 就是用来区分是哪份 VM 的（Leader 选举时用）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三级上下文对象</h1></div>
+            <div class="card">
+                <p>proxy-wasm 定义了三层上下文，一层套一层：</p>
+                <ul>
+                    <li><strong>VMContext</strong>：一个 VM 一个，管整个虚拟机生命周期。</li>
+                    <li><strong>PluginContext</strong>：一份配置一个，管插件配置和 tick。</li>
+                    <li><strong>HttpContext</strong>：一个请求一个，管单次请求处理。</li>
+                </ul>
+                <p>wasm-go 对应三个类型：<code>CommonVmCtx</code> / <code>CommonPluginCtx</code> / HttpContext（<code>plugin_wrapper.go:42-43</code> 定义了别名）。</p>
+                <div class="anno">读法：<b>层级关系：一个 VM 里可以有多份配置（多个 PluginContext），一份配置处理很多请求（多个 HttpContext）。<strong>明天 Day 04 专门拆这三级 Context 的字段和职责。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>DefaultVMContext</h1></div>
+            <div class="card">
+                <p><code>plugin_wrapper.go:75-95</code> 的 <code>CommonVmCtx</code> 内嵌了 <code>types.DefaultVMContext</code>：</p>
+<pre><code class="language-go">type CommonVmCtx[PluginConfig any] struct {
+    types.DefaultVMContext    // 内嵌 proxy-wasm 的默认实现
+    pluginName string
+    log        log.Log
+    parseConfig ParseRawConfigWithContextFunc[PluginConfig]
+    onHttpRequestHeaders  onHttpHeadersFunc[PluginConfig]
+    // ... 各阶段回调 ...
+}</code></pre>
+                <div class="baby"><span class="t">"内嵌"是 Go 的组合复用</span>
+                Go 没有类继承，但可以"内嵌"一个类型，白得它的所有方法。<strong><code>DefaultVMContext</code> 提供了 proxy-wasm 要求的一堆默认方法，<code>CommonVmCtx</code> 内嵌它就不用自己全写一遍,只需覆盖关心的（比如 <code>NewPluginContext</code>）。</strong>这是 Go 里"组合优于继承"的典型手法。你写插件时也是内嵌 SDK 提供的东西，只填自己关心的回调。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>沙箱与限制</h1></div>
+            <div class="card">
+                <p>Wasm 沙箱带来安全，也带来限制：</p>
+                <ul>
+                    <li>插件<strong>不能直接开线程、不能直接读写文件/网络</strong>——一切 IO 走宿主调用。</li>
+                    <li>外部调用（HTTP/Redis）是<strong>异步回调式</strong>的（Day 14），不能像普通 Go 那样同步阻塞。</li>
+                    <li>全局变量每 VM 独立，跨 VM 共享用 SharedData。</li>
+                </ul>
+                <div class="baby"><span class="t">"异步回调"为什么绕？</span>
+                普通 Go 里你写 <code>resp := http.Get(url)</code> 就阻塞等结果。<strong>但 Wasm 插件跑在网关的 IO 循环里，不能阻塞（阻塞会卡住整个线程的其他请求）。所以外部调用必须"发起后立刻返回 ActionPause，结果到了再用回调处理"。</strong>这就是为什么 Day 14 的 HttpCall 长得跟普通 HTTP 请求不一样。适应这个"回调式"思维是写插件的关键门槛。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>CallForeignFunction</h1></div>
+            <div class="card">
+                <p>有些高级能力不在标准 ABI 里，用"外部函数"扩展。例如 <code>plugin_wrapper.go:497-505</code> 设置 IO 并发限制：</p>
+<pre><code class="language-go">func setGlobalMaxRequestsPerIoCycle(maxRequests uint64) error {
+    param := make([]byte, 8)
+    binary.LittleEndian.PutUint64(param, maxRequests)
+    _, err := proxywasm.CallForeignFunction("set_global_max_requests_per_io_cycle", param)
+    // ...
+}</code></pre>
+                <div class="anno">读法：<b><code>CallForeignFunction</code> 是"调用宿主提供的自定义函数"——Higress 版 Envoy 扩展了一些标准 proxy-wasm 没有的能力（如 IO 限流、streaming 注入），用这个通道调用。<strong>这也说明 wasm-go 是为 Higress 定制的（依赖 Higress fork 的 Envoy 提供的扩展函数）。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ABI 是什么？proxy-wasm 为什么像 USB 标准？</li>
+                    <li>下行钩子 vs 宿主调用，分别对应 wasm-go 的什么？</li>
+                    <li>为什么每 worker 线程一份 VM？带来什么限制？</li>
+                    <li>三级上下文是哪三级？为什么外部调用必须异步？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/wasm-go
+sed -n '75,122p' pkg/wrapper/plugin_wrapper.go
+sed -n '497,505p' pkg/wrapper/plugin_wrapper.go
+# 看 proxy-wasm-go-sdk 提供的 proxywasm.* 函数
+go doc github.com/higress-group/proxy-wasm-go-sdk/proxywasm 2>/dev/null | head -40</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>三级 Context</strong>——细看 <code>CommonVmCtx</code>/<code>CommonPluginCtx</code>/<code>HttpContext</code> 各自的字段与职责，以及 <code>iface/context.go</code> 里 HttpContext 那一长串能力接口。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="wasm-go-day02.html" style="color:var(--accent-cyan);">&larr; Day 02</a>
+                <a href="wasm-go-day04.html" style="color:#00add8;">Day 04 · 三级 Context &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
