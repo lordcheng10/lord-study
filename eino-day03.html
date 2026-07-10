@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · schema 核心数据类型 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .roles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+        .role{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:11px;text-align:center}
+        .role b{display:block;font-family:'SF Mono',monospace;color:#00ADD8} .role span{font-size:11px;color:var(--text-muted)}
+        @media(max-width:768px){ .roles{grid-template-columns:repeat(2,1fr)} }
+        .streamd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:16px 4px}
+        .streamd .b{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 13px;font-size:12px;text-align:center}
+        .streamd .b b{display:block;color:#00ADD8} .streamd .a{color:#8b5cf6;font-weight:800}
+        .chunk{display:inline-block;background:rgba(0,173,216,.12);border:1px solid rgba(0,173,216,.3);border-radius:5px;padding:1px 7px;margin:2px;font-family:monospace;font-size:11px;color:#00ADD8}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00ADD8,#8b5cf6);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">schema 核心数据类型 · 9 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 9 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · schema 是数据契约层</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Message 结构（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 四种 Role</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Message 也是模板</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Stream 是什么</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · StreamReader/Writer（真实代码）</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Copy 扇出的巧思</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 流拼接成完整值</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 环境搭建</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 components &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 建立心智</span>
+            <h1 class="part-title">schema 核心数据类型</h1>
+            <p class="part-desc">最底层的 L1。重点两个：<code>Message</code>（一个结构体同时当输入/输出/模板）和 <code>StreamReader</code>（Eino 最精妙的流式抽象）。贴真实源码。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>schema 是"数据契约层"</h1></div>
+            <div class="card">
+                <p><code>schema/</code> 定义"数据长什么样"——它是全框架的<strong>通用货币</strong>。四个核心类型：</p>
+                <table>
+                    <thead><tr><th>类型</th><th>文件</th><th>是什么</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>Message</code></td><td>message.go</td><td>模型的输入输出统一结构（今天重点）</td></tr>
+                        <tr><td><code>StreamReader/Writer</code></td><td>stream.go</td><td>流式抽象（今天重点，全框架最精妙）</td></tr>
+                        <tr><td><code>ToolInfo</code></td><td>tool.go</td><td>工具的自描述（传给模型的工具定义）</td></tr>
+                        <tr><td><code>Document</code></td><td>document.go</td><td>RAG 文档（检索四组件间流通的货币）</td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">"数据契约"是什么意思？</span>
+                上层所有代码（组件、编排、Agent）都拿这几个类型说话——模型返回 <code>Message</code>、检索返回 <code>[]Document</code>、流式返回 <code>StreamReader</code>。<strong>统一了数据格式，各层才能无缝拼接。</strong>就像大家都用同一种货币交易，不用换汇。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Message：一个结构体走天下（真实代码）</h1></div>
+            <div class="card">
+                <p><code>Message</code>（<code>schema/message.go:498</code>）<strong>同时承载"用户输入"和"模型输出"</strong>，兼容纯文本和多模态。核心字段：</p>
+<pre><code class="language-go">type Message struct {
+    Role    RoleType   // 谁说的：System/User/Assistant/Tool
+    Content string     // 纯文本内容
+    // 多模态（新）：用户输入 / 模型输出 分开
+    UserInputMultiContent     []MessageInputPart
+    AssistantGenMultiContent  []MessageOutputPart
+    // 仅 Assistant 消息：模型要发起的工具调用
+    ToolCalls []ToolCall
+    // 仅 Tool 消息：把工具执行结果关联回之前某次 tool_call
+    ToolCallID string
+    ToolName   string
+    ResponseMeta      *ResponseMeta   // 元信息：FinishReason、Usage(token 数)
+    ReasoningContent  string          // 推理模型的思维链
+    Extra map[string]any              // 各实现自定义扩展位
+}</code></pre>
+                <div class="anno">读法：<b>一个结构体覆盖对话全生命周期</b>——你发的话是 <code>User</code> Message，模型回的话是 <code>Assistant</code> Message，工具跑完的结果是 <code>Tool</code> Message。避免了"请求类型"和"响应类型"两套。</div>
+                <div class="glossary"><b>为什么不拆成 Request/Response 两个类型？</b> 因为对话是"一来一回"的连续过程——你的输入、模型的输出、工具的结果，会不断拼进同一个消息列表 <code>[]*Message</code> 再发给模型（就像 claude-code 教程里的消息回填）。用<strong>一个统一结构</strong>，消息列表里各种角色的消息能自然共存、追加。<code>ToolCalls</code>（模型说"我要调工具"）和 <code>ToolCallID</code>（工具结果"回应哪次调用"）靠 ID 配对——这就是 Agent 工具循环的数据基础。</div>
+                <p>便捷构造器：<code>SystemMessage()</code> / <code>UserMessage()</code> / <code>AssistantMessage()</code> / <code>ToolMessage()</code>（<code>message.go:1105</code> 起）。</p>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>四种 Role</h1></div>
+            <div class="card">
+                <p><code>RoleType</code> 四种常量（<code>message.go:111</code>）：</p>
+                <div class="roles">
+                    <div class="role"><b>System</b><span>系统指令<br>"你是谁、规矩"</span></div>
+                    <div class="role"><b>User</b><span>用户输入<br>你说的话</span></div>
+                    <div class="role"><b>Assistant</b><span>模型输出<br>含 ToolCalls</span></div>
+                    <div class="role"><b>Tool</b><span>工具结果<br>含 ToolCallID</span></div>
+                </div>
+                <div class="baby"><span class="t">一次带工具的对话，消息列表长这样</span>
+                <code>[System: 你是助手] [User: 北京天气?] [Assistant: 我要调 get_weather(北京), ToolCalls=...] [Tool: 晴 25℃, ToolCallID=...] [Assistant: 北京今天晴，25℃]</code>——五条消息，四种角色都用上了。模型每次看到<strong>整个列表</strong>，就知道"聊到哪了、工具返回了啥"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Message 还是"模板"</h1></div>
+            <div class="card">
+                <p>有意思的是——<code>Message</code> 自己实现了 <code>MessagesTemplate</code> 接口（<code>message.go:573</code>），能当提示词模板用：</p>
+<pre><code class="language-go">Format(ctx, vs map[string]any, formatType FormatType) ([]*Message, error)</code></pre>
+                <p>支持三种模板语法（<code>message.go:99</code>）：<code>FString</code>（Python 风格 <code>{name}</code>）、<code>GoTemplate</code>、<code>Jinja2</code>。还有 <code>MessagesPlaceholder(key)</code>（<code>message.go:595</code>）——把"历史消息列表"原样插进模板某处。</p>
+                <div class="glossary"><b>为什么模板要用 Message 而非纯字符串？</b> 因为 LLM 的输入本来就是"一串带角色的消息"，不是一段文本。模板渲染后直接产出 <code>[]*Message</code>，能无缝喂给模型。<code>MessagesPlaceholder</code> 尤其重要——它让你在模板里留一个"历史对话插这里"的坑，多轮对话时把之前的消息填进去。这是 Day 04 <code>ChatTemplate</code> 组件的基础。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Stream 是什么：边想边吐</h1></div>
+            <div class="card">
+                <p>大模型不是"憋完整段话再返回"，而是<strong>一个 token 一个 token 地吐</strong>（你看 ChatGPT 打字机效果就是）。Eino 用 <code>StreamReader[T]</code> 抽象这种"流"。</p>
+                <div class="streamd">
+                    <span class="b"><b>模型</b>逐 token 生成</span><span class="a">→</span>
+                    <span>
+                        <span class="chunk">北</span><span class="chunk">京</span><span class="chunk">今</span><span class="chunk">天</span><span class="chunk">晴</span>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:4px">一个个 chunk 从 StreamReader 里 Recv 出来</div>
+                    </span>
+                </div>
+                <div class="baby"><span class="t">为什么要流？</span>
+                ① <b>体验</b>：用户不用干等，字一出来就能看（打字机效果）。② <b>性能</b>：不用把整段话攒在内存里。<code>StreamReader[T]</code> 就是"一个能一块块读出 T 的管道"——<code>T</code> 通常是 <code>*Message</code>（每个 chunk 是一小片消息）。<b>泛型 <code>[T]</code></b> 意思是"装什么类型都行"，这里装 Message 分片。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>StreamReader / StreamWriter（真实代码）</h1></div>
+            <div class="card">
+                <p>核心是一对泛型类型（<code>schema/stream.go</code>）：<strong>StreamWriter[T]（生产端，往里写）</strong> 和 <strong>StreamReader[T]（消费端，往外读）</strong>。用 <code>Pipe</code> 一次造出一对（<code>stream.go:99</code>）：</p>
+<pre><code class="language-go">sr, sw := schema.Pipe[*Message](cap)   // 造一读一写，底层是带缓冲 channel
+
+// 生产端（比如模型实现）：
+sw.Send(chunk, err)   // 发一个分片（stream.go:126）；返回 closed=true 说明读端已关，可停手
+sw.Close()            // 发完关闭
+
+// 消费端（比如你的代码）：
+for {
+    chunk, err := sr.Recv()   // 收一个分片（stream.go:195）
+    if err == io.EOF { break }  // channel 关了 → EOF，读完了
+    // 用 chunk...
+}
+sr.Close()   // ★ 必须调一次！即使已 EOF 或提前 break</code></pre>
+                <div class="anno">读法：<b>Pipe 造出一读一写的管道；生产者 Send/Close，消费者 Recv 直到 EOF、最后必须 Close。</b>底层是 Go 的 <code>channel</code>（协程间通信的管道）。</div>
+                <div class="glossary"><b>为什么 <code>Recv</code> 后一定要 <code>Close</code>？</b> 因为流底层可能有一个 goroutine（协程）在往里写。如果你读一半就不读了、也不 Close，那个 goroutine 会永远卡在 <code>Send</code>——<strong>goroutine 泄漏</strong>（内存越占越多）。所以 Eino 的铁律：<strong>StreamReader 用完必须 Close 一次</strong>。<code>SetAutomaticClose()</code>（<code>stream.go:279</code>）还能借 GC 兜底自动关。<b>channel</b> 是 Go 里"一个协程写、另一个协程读"的线程安全队列——流的底层就是它。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Copy：一份流喂给多个消费者（巧思）</h1></div>
+            <div class="card">
+                <p><code>StreamReader</code> 是<strong>单消费者</strong>的（一个流只能被读一次）。但编排时经常要"同一份输出既喂给下一个节点、又喂给回调 handler"。解决办法是 <code>Copy(n)</code>（<code>stream.go:261</code>）——扇出成 n 个独立 reader，各自都能读到全部元素：</p>
+<pre><code class="language-go">readers := sr.Copy(2)   // 变成 2 个独立流，原 sr 作废
+// readers[0] 给下一个节点，readers[1] 给回调 handler，互不影响</code></pre>
+                <div class="glossary"><b>Copy 的巧思（零拷贝惰性链表）</b>：它不会预先把整个流读进内存复制两份（那太浪费）。而是让多个子 reader <strong>共享父流</strong>，通过一个隐藏的链表 + <code>sync.Once</code>，保证<strong>每个上游元素只从父流真正 Recv 一次</strong>，后到的子 reader 复用已缓存的元素（<code>stream.go:837</code> 的 <code>peek</code>）。所有子流都 Close 后才真正关父流。<strong>既支持多消费者，又不预先把整流塞进内存。</strong>这是 Eino 流式设计里最精妙的一处（Day 17 会更深入）。<b>sync.Once</b> = "保证某段代码只执行一次"，用来确保每个元素只从父流取一次。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>流拼接成完整值：4 范式自动转换的地基</h1></div>
+            <div class="card">
+                <p>Day 01 讲的"Runnable 4 范式自动转换"（流↔非流），底层就靠这里——把一串消息分片<strong>拼成一条完整消息</strong>。<code>ConcatMessages</code>（<code>message.go:1644</code>）：</p>
+<pre><code class="language-go">// 把 [北] [京] [今] [天] [晴] 这些分片 → 拼成一条完整 Message{Content: "北京今天晴"}
+full, _ := schema.ConcatMessages(chunks)
+// ConcatMessageStream：直接把整条流拼成一条消息（message.go:1842）
+full, _ := schema.ConcatMessageStream(stream)</code></pre>
+                <div class="glossary"><b>拼接不只是拼字符串</b>：Content 字符串拼接、<code>ToolCalls</code> 按 <code>Index</code> 分组合并（把碎片化的工具参数 JSON 拼回完整）、Usage 取最大值、多模态分片合并。<strong>关键机制</strong>：这些拼接函数在 <code>init()</code>（<code>message.go:40</code>）里通过 <code>RegisterStreamChunkConcatFunc</code> <strong>注册</strong>——编排层遇到"需要把流降级成完整值"时（比如下一个节点只要非流输入），就自动按类型调用对应的拼接函数。<strong>这就是 Day 01 说的"组件只实现有意义的范式，框架补齐其余"的底层魔法</strong>（Day 06/17 深入）。</div>
+                <div class="baby"><span class="t">一句话总结今天</span>
+                <code>Message</code> 是"数据"，<code>StreamReader</code> 是"流动的数据"，<code>Concat</code> 是"把流动的数据凝固成完整数据"。这三者构成了 Eino 数据层的全部，也是上面所有编排/Agent 的基石。</div>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Message 一个结构体同时当输入/输出/模板？</li>
+                    <li>四种 Role？一次带工具对话的消息列表长什么样？</li>
+                    <li>Stream 为什么需要？StreamReader 用完为什么必须 Close？</li>
+                    <li>Copy 怎么做到"多消费者但不预存整流"？（惰性链表 + sync.Once）</li>
+                    <li>ConcatMessages 干什么？它怎么支撑"4 范式自动转换"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. Message 结构与 Role（L02/L03）
+sed -n '498,532p' schema/message.go
+sed -n '111,120p' schema/message.go
+
+# 2. Stream 的 Pipe/Send/Recv/Copy（L06/L07）
+sed -n '99,140p' schema/stream.go
+sed -n '261,300p' schema/stream.go
+
+# 3. 拼接函数的注册（L08，4 范式的地基）
+sed -n '40,48p' schema/message.go
+grep -n "func ConcatMessages\|func ConcatMessageStream" schema/message.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：数据类型清楚了，往上一层——<code>components</code> 组件接口。ChatModel/Tool/Retriever/ChatTemplate 各是什么接口、有哪些方法。它们是编排的"积木"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 环境搭建</a>
+                <a href="eino-day04.html" style="color:var(--accent-green);">Day 04 · components 组件接口 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
