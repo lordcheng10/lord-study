@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 渠道抽象接口 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#0ea5e9}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#0ea5e9);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">渠道抽象接口 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 渠道两层架构</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 注册表</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ChannelPlugin</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 组合式 adapter</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 发消息 adapter</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 连接/收消息 adapter</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 能力声明</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 扩展</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day14.html" class="nav-link" style="color:#0ea5e9;">Day 14 渠道实现 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 技能与渠道</span>
+            <h1 class="part-title">渠道抽象接口</h1>
+            <p class="part-desc">OpenClaw 支持二十多个聊天平台。它们千差万别（Telegram 长轮询、Slack Socket、Discord WebSocket…），却都实现同一个契约 <code>ChannelPlugin</code>。关键：这是"组合式 adapter"而非"基类继承"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>渠道两层架构</h1></div>
+            <div class="card">
+                <p>渠道代码分两层：</p>
+                <ul>
+                    <li><strong>抽象/契约层</strong> <code>src/channels/</code>（~175 文件）：接口定义、注册表、会话、鉴权门控等共享逻辑。</li>
+                    <li><strong>平台实现层</strong>：每个真实平台是一个扩展 <code>extensions/&lt;平台&gt;/</code>（Day 12），其 <code>src/channel.ts</code> 定义 <code>ChannelPlugin</code> 对象；繁重的连接/收发代码在顶层专属目录 <code>src/telegram/</code>、<code>src/slack/</code>、<code>src/discord/</code> 等。</li>
+                </ul>
+                <div class="baby"><span class="t">"插座标准" vs "各家电器"</span>
+                想象家里的插座标准（220V、两孔三孔）——这是<strong>契约层</strong>。冰箱、电视、微波炉各是不同电器，但都做成符合插座标准的插头——这是<strong>实现层</strong>。<strong>OpenClaw 定义一个"渠道插座标准"（ChannelPlugin），每个聊天平台把自己做成符合标准的"插头"，插上就能用。</strong>Gateway 只认插座标准，不关心插的是 Telegram 还是飞书。这就是二十多个平台能统一管理的秘密。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>注册表</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/channels/registry.ts:7 —— 核心内置渠道排序
+export const CHAT_CHANNEL_ORDER = [
+  "telegram","whatsapp","discord","irc","googlechat",
+  "slack","signal","imessage","line",
+] as const;
+// CHAT_CHANNEL_META（:27-121）：每个渠道的 label/docsPath/图标等元数据
+// CHAT_CHANNEL_ALIASES（:123）：别名，如 imsg→imessage、gchat→googlechat</code></pre>
+                <p>访问入口 <code>src/channels/plugins/index.ts:74</code>：<code>listChannelPlugins()</code> / <code>getChannelPlugin(id)</code>。</p>
+                <div class="anno">读法：<b>注册表是"所有渠道的花名册"——按 <code>CHAT_CHANNEL_ORDER</code> 排序、附元数据。<code>getChannelPlugin(id)</code> 按 id 取出某渠道的实现。</b>实际以插件形式实现的渠道远不止这 9 个核心：还有飞书、matrix、teams、mattermost、nostr、twitch 等二十多个（各在 <code>extensions/*/src/channel.ts</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>ChannelPlugin 契约</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/channels/plugins/types.plugin.ts:49
+export type ChannelPlugin&lt;ResolvedAccount = any, ...&gt; = {
+  id: ChannelId;
+  meta: ChannelMeta;
+  capabilities: ChannelCapabilities;       // 声明支持哪些能力（L07）
+  config: ChannelConfigAdapter;            // ★ 唯一必填 adapter：账号解析
+  outbound?: ChannelOutboundAdapter;       // 发消息（L05）
+  gateway?: ChannelGatewayAdapter;         // 连接/收消息生命周期（L06）
+  onboarding?; setup?; pairing?; security?; groups?;
+  status?; threading?; messaging?; directory?; actions?;
+  heartbeat?; agentTools?;                 // …… 共约 30 个可选能力字段
+};</code></pre>
+                <div class="anno">读法：<b>一个大对象类型，只有 <code>id/meta/capabilities/config</code> 必填，其余全是<strong>可选</strong>的能力 adapter。渠道"能做什么就填什么"。</b>Telegram 填 outbound+gateway+很多；一个只能发不能收的极简渠道可能只填 config+outbound。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>组合式 adapter（不是继承）</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么用"组合"不用"继承"？</span>
+                传统 OOP 会写 <code>abstract class Channel</code>，各平台 <code>extends</code> 它、重写方法。<strong>但聊天平台能力差异极大：有的支持线程、有的支持投票、有的能发语音、有的只能发文字。用继承+抽象方法，会逼每个渠道实现一堆它根本不支持的空方法。</strong>OpenClaw 改用<strong>组合</strong>：把契约切成 ~30 个小 adapter（outbound、gateway、threading、polls…），渠道<strong>按需实现哪几个</strong>。支持投票就填 <code>sendPoll</code>，不支持就不填。<strong>"组合优于继承"——这是现代 TS/Go 设计的主流，比僵硬的类继承灵活得多。</strong>统一性靠"一个大对象类型 + 归一化收口 + 注册表"三者保证，而非基类。</div>
+                <div class="anno">读法：<b>教程里别找 <code>abstract class Channel</code>——它不存在。渠道 = 一个填了若干 adapter 的普通对象。adapter 类型定义在 <code>types.adapters.ts</code>。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>发消息 adapter</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/channels/plugins/types.adapters.ts:108
+export type ChannelOutboundAdapter = {
+  deliveryMode: "direct" | "gateway" | "hybrid";
+  chunker?: ((text, limit) =&gt; string[]) | null;  // 长文本切分（各平台字数上限不同）
+  textChunkLimit?: number;
+  sendPayload?: (ctx) =&gt; Promise&lt;OutboundDeliveryResult&gt;;   // 主发送
+  sendText?:    (ctx) =&gt; Promise&lt;OutboundDeliveryResult&gt;;
+  sendMedia?:   (ctx) =&gt; Promise&lt;OutboundDeliveryResult&gt;;   // 图片/文件
+  sendPoll?:    (ctx) =&gt; Promise&lt;ChannelPollResult&gt;;        // 投票（支持的才填）
+};</code></pre>
+                <div class="anno">读法：<b>发消息的统一形状：文本/媒体/投票分别有方法，长文本自动切分（<code>chunker</code>，因为 Telegram 4096、其他平台各不同）。</b><code>deliveryMode</code> 决定是渠道自己直发（direct）还是走网关（gateway）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>连接/收消息 adapter</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/channels/plugins/types.adapters.ts:275
+export type ChannelGatewayAdapter&lt;ResolvedAccount&gt; = {
+  startAccount?: (ctx) =&gt; Promise&lt;unknown&gt;;   // 建立连接、开始收消息
+  stopAccount?:  (ctx) =&gt; Promise&lt;void&gt;;
+  loginWithQrStart?: (...) =&gt; ...;             // WhatsApp 二维码登录
+  loginWithQrWait?:  (...) =&gt; ...;
+  logoutAccount?:    (ctx) =&gt; ...;
+};</code></pre>
+                <p>关键是 <code>startAccount</code> 收到的 <code>ChannelGatewayContext</code>（<code>:168</code>）带 <code>abortSignal</code>、<code>getStatus/setStatus</code>（回写运行态）、<code>channelRuntime</code>（<code>:238</code>，含 reply/routing/text/session/media 等运行时能力）。</p>
+                <div class="anno">读法：<b><code>startAccount</code> 是"渠道的启动开关"：Gateway 调它，渠道就连上平台、开始监听消息。<code>abortSignal</code> 让 Gateway 能干净地停掉它；<code>setStatus</code> 让渠道回报"我连上了/我挂了"。</b>Day 14 看 Telegram 的 startAccount 实现。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>能力声明</h1></div>
+            <div class="card">
+                <p><code>ChannelCapabilities</code>（<code>types.core.ts:181</code>）让渠道<strong>声明</strong>自己支持什么：reactions（表情回应）、threads（线程）、media、polls、nativeCommands 等。</p>
+                <div class="anno">读法：<b>上层逻辑先查能力声明，再决定能不能用某功能。比如"给消息加表情回应"前先看 <code>capabilities.reactions</code>——不支持就不尝试，避免报错。</b>能力声明 + 可选 adapter 配合：声明我支持投票（capabilities）+ 实现 sendPoll（adapter），两者对上才真能投票。这是"能力发现"模式，让统一上层能优雅处理异构渠道。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>渠道两层架构：契约层 vs 实现层各在哪？</li>
+                    <li>注册表干什么？getChannelPlugin 怎么用？</li>
+                    <li>ChannelPlugin 里哪个 adapter 必填？为什么其余可选？</li>
+                    <li>为什么用组合式 adapter 而不是基类继承？</li>
+                    <li>outbound 和 gateway adapter 各管什么？能力声明有什么用？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+sed -n '1,20p' src/channels/registry.ts
+sed -n '49,90p' src/channels/plugins/types.plugin.ts     # ChannelPlugin
+grep -n 'ChannelOutboundAdapter\|ChannelGatewayAdapter' src/channels/plugins/types.adapters.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>渠道实现举例</strong>——拆 Telegram（长轮询）、Slack（Socket Mode）、Discord（Gateway WebSocket）三个真实渠道：怎么连接、收消息、发回复，三种截然不同的连接方式如何统一到同一契约。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 扩展</a>
+                <a href="openclaw-day14.html" style="color:#0ea5e9;">Day 14 · 渠道实现举例 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

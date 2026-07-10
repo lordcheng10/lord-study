@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 渠道实现举例 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#0ea5e9}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#0ea5e9);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">渠道实现举例 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三种连接方式</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Telegram 注册</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Telegram 连接</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Telegram 收消息</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Slack Socket Mode</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Discord Gateway</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Gateway 拉起渠道</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 渠道抽象</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day15.html" class="nav-link" style="color:#0ea5e9;">Day 15 归一化 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 技能与渠道</span>
+            <h1 class="part-title">渠道实现举例</h1>
+            <p class="part-desc">拆三个真实渠道：Telegram（长轮询）、Slack（Socket Mode）、Discord（Gateway WebSocket）。三种截然不同的连接技术，如何统一到 Day 13 的同一契约。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三种连接方式</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>渠道</th><th>连接技术</th><th>收消息</th><th>发消息</th></tr>
+                    <tr><td>Telegram</td><td>长轮询（grammY runner）/ webhook</td><td>message_id</td><td>REST，direct</td></tr>
+                    <tr><td>Slack</td><td>Socket Mode（Bolt，WebSocket）</td><td>ts</td><td>Bolt client</td></tr>
+                    <tr><td>Discord</td><td>Gateway WebSocket（carbon）</td><td>message id</td><td>REST + 富组件</td></tr>
+                </table>
+                <div class="anno">读法：<b>三种平台连接机制完全不同，但都实现 Day 13 的 <code>ChannelGatewayAdapter.startAccount</code>（连接）+ <code>ChannelOutboundAdapter.sendPayload</code>（发送），并都把收到的消息归一成同一个 <code>MsgContext</code>（Day 15）。</b>这就是抽象的威力：上层完全不用管底层是轮询还是 WebSocket。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Telegram 注册</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// extensions/telegram/index.ts:11
+register(api) {
+  setTelegramRuntime(api.runtime);
+  api.registerChannel({ plugin: telegramPlugin as ChannelPlugin });
+}</code></pre>
+                <p>插件定义 <code>extensions/telegram/src/channel.ts:120</code> 的 <code>telegramPlugin</code>：声明能力（<code>:144</code> reactions/threads/media/polls/nativeCommands），接上发送/连接实现。</p>
+                <div class="anno">读法：<b>Day 12 讲的扩展加载 + Day 13 讲的渠道契约在这里合流：Telegram 是一个扩展，其 register 调 <code>api.registerChannel</code> 把 telegramPlugin（一个 ChannelPlugin 对象）注册进注册表。</b>之后 Gateway 就能 <code>getChannelPlugin("telegram")</code> 拿到它。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Telegram 连接（收消息入口）</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// channel.ts:486 —— gateway.startAccount 实现
+// 1. probeTelegram 拿 bot 名（验证 token 有效）
+// 2. monitorTelegramProvider({ token, abortSignal, useWebhook, ... })
+
+// src/telegram/monitor.ts:77 —— monitorTelegramProvider
+// 用 grammY runner 长轮询；createTelegramRunnerOptions(:37) 配并发/重试
+// allowed_updates 由 resolveTelegramAllowedUpdates() 决定（含 reactions）
+// webhook 模式走 startTelegramWebhook</code></pre>
+                <div class="baby"><span class="t">"长轮询"是什么？</span>
+                Telegram bot 收消息有两种方式：<strong>长轮询</strong>——bot 主动反复问 Telegram"有我的新消息吗？"（有就返回，没有就挂着等一会儿）；<strong>webhook</strong>——你给 Telegram 一个网址，有新消息它主动 POST 给你。<strong>长轮询简单（不需要公网地址），适合个人自部署；webhook 高效，适合有公网服务器的场景。</strong>OpenClaw 两种都支持，<code>startAccount</code> 里按配置选。<code>abortSignal</code>（Day 13）让 Gateway 能随时喊停这个轮询循环。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Telegram 收消息 → 归一化</h1></div>
+            <div class="card">
+                <p><code>src/telegram/bot-message-context.session.ts:186</code> 把 Telegram 原生 <code>msg</code> 转成统一 <code>MsgContext</code>：</p>
+<pre><code class="language-typescript">const ctxPayload = finalizeInboundContext({
+  Body: combinedBody, BodyForAgent: bodyText,
+  From: isGroup ? buildTelegramGroupFrom(chatId, threadId) : `telegram:${chatId}`,
+  To: `telegram:${chatId}`,
+  ChatType: isGroup ? "group" : "direct",
+  SenderName, SenderId, SenderUsername,
+  Provider: "telegram", Surface: "telegram",
+  MessageSid: String(msg.message_id),          // ← Telegram 用 message_id
+  Timestamp: msg.date ? msg.date * 1000 : undefined,  // 秒→毫秒
+  OriginatingChannel: "telegram",              // ★ 回复路由用（Day 15）
+  OriginatingTo: `telegram:${chatId}`,
+});</code></pre>
+                <div class="anno">读法：<b>把 Telegram 特有的字段（message_id、chat、date）映射成 OpenClaw 通用字段（MessageSid、From/To、Timestamp）。<code>OriginatingChannel</code> 记住"这消息从 telegram 来"，回复时原路送回。</b><code>finalizeInboundContext</code>（Day 15）统一收尾清洗。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Slack Socket Mode</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/slack/monitor/provider.ts:97 —— monitorSlackProvider
+// :196 用 Bolt：new App({ token: botToken, appToken, socketMode: true })
+// :239 app.client.auth.test() 拿 botUserId/teamId
+// :416-474 断线重连（指数退避 computeBackoff）
+
+// 收消息归一 src/slack/monitor/message-handler/prepare.ts:684
+finalizeInboundContext({
+  Provider: "slack", Surface: "slack",
+  MessageSid: message.ts,                       // ← Slack 用 ts（时间戳）作消息 id
+  MessageThreadId: threadContext.messageThreadId,   // 线程 thread_ts
+  NativeChannelId: message.channel,             // 原生 channel id（C…/D…）
+  OriginatingChannel: "slack",
+});</code></pre>
+                <div class="anno">读法：<b>对照 Telegram：Slack 用 WebSocket（Socket Mode，不用公网）、用 <code>ts</code> 而非 message_id 作消息标识、有原生线程（thread_ts）。<strong>但归一化后都进同一个 MsgContext 的 <code>MessageSid</code>/<code>MessageThreadId</code></strong>。</b>断线重连是长连接渠道的必备（Telegram 长轮询、Slack/Discord WebSocket 都需要）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Discord Gateway</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// 连接：@buape/carbon/gateway 的 GatewayPlugin（WebSocket）
+// src/discord/monitor/gateway-plugin.ts:22 resolveDiscordGatewayIntents
+//   默认 Guilds|GuildMessages|MessageContent|DirectMessages|VoiceStates
+//   按配置追加 GuildPresences/GuildMembers
+// 发送走 REST：src/discord/client.ts:73 createDiscordClient
+//   send.outbound.ts / send.components.ts（Components V2 富组件卡片）</code></pre>
+                <div class="baby"><span class="t">"Intents（意图）"是什么？</span>
+                Discord 出于隐私/性能，要求 bot <strong>显式声明"我要接收哪几类事件"</strong>（叫 intents）——比如"我要收服务器消息、私信、语音状态"。不声明就收不到。<strong>这是 Discord 特有的机制，Telegram/Slack 没有。</strong>OpenClaw 在 <code>resolveDiscordGatewayIntents</code> 里按需组合这些 intents。Discord 还是唯一用"富组件卡片"（Components V2）做跨上下文转发的渠道——其他渠道退化为纯文本（Day 15 路由会讲）。<strong>看，三个渠道各有独门机制（Telegram 轮询/webhook、Slack Socket、Discord intents+富组件），但对上层都是"一个 ChannelPlugin"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Gateway 拉起渠道</h1></div>
+            <div class="card">
+                <p>谁来调 <code>startAccount</code>？Gateway 的 <code>startChannelInternal</code>（<code>src/gateway/server-channels.ts:149</code>）：</p>
+<pre><code class="language-typescript">// 1. getChannelPlugin(channelId) 取插件，读 plugin.gateway.startAccount
+// 2. plugin.config.listAccountIds(cfg) 枚举多账号
+// 3. 每账号检查 isEnabled / isConfigured
+// 4. 建 AbortController，写运行态 running:true
+// 5. startAccount({ cfg, account, runtime, abortSignal, setStatus, channelRuntime })  ← 拉起！
+// 6. .finally 回写 running:false（配合外层重连自动重启）</code></pre>
+                <div class="anno">读法：<b>Gateway 是"总调度"：按注册表逐个拉起每个已配置渠道账号的连接，用 <code>abortSignal</code> 统一管停、<code>setStatus</code> 收集状态。</b>这就是 README 说的"The Gateway is just the control plane"（网关只是控制面）——它不处理消息内容，只管理渠道连接的生命周期。多账号支持（一个渠道多个 bot）也在这里。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Telegram/Slack/Discord 三种连接方式各是什么？</li>
+                    <li>长轮询 vs webhook 的区别？</li>
+                    <li>三个渠道的消息 id 各叫什么？归一化后进哪个字段？</li>
+                    <li>Discord 的 intents 是干什么的？</li>
+                    <li>Gateway 的 startChannelInternal 六步在做什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+sed -n '480,500p' extensions/telegram/src/channel.ts   # startAccount
+sed -n '190,200p' src/slack/monitor/provider.ts         # Bolt App
+sed -n '149,250p' src/gateway/server-channels.ts | head -50  # 拉起渠道</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>消息归一化 + 语音 + Canvas</strong>——统一消息类型 <code>MsgContext</code>（~170 字段）、<code>finalizeInboundContext</code> 收口清洗、回复路由怎么原路送回、语音 TTS、Canvas 实时可视化。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 渠道抽象</a>
+                <a href="openclaw-day15.html" style="color:#0ea5e9;">Day 15 · 归一化+语音+Canvas &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

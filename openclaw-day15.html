@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · 归一化+语音+Canvas — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#0ea5e9);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">归一化+语音+Canvas · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · MsgContext</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · finalizeInboundContext</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两段式归一</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 回复路由</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 出站投递</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 语音 TTS</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Canvas</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 渠道实现</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day16.html" class="nav-link" style="color:#f97316;">Day 16 沙箱 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">消息归一化 + 语音 + Canvas</h1>
+            <p class="part-desc">二十多个平台的消息，怎么变成"同一种"内部消息？回复又怎么原路送回？统一类型 <code>MsgContext</code>、收口函数 <code>finalizeInboundContext</code>、回复路由，外加语音 TTS 和 Canvas 可视化。收官第 3 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>MsgContext 统一类型</h1></div>
+            <div class="card">
+                <p><code>MsgContext</code>（<code>src/auto-reply/templating.ts:14</code>）是全系统统一的入站消息类型（~170 字段）。核心分组：</p>
+                <ul>
+                    <li><strong>正文</strong>：<code>Body</code> / <code>BodyForAgent</code>（喂 LLM）/ <code>RawBody</code> / <code>BodyForCommands</code>——区分"给模型的"和"用于命令解析的"。</li>
+                    <li><strong>路由</strong>：<code>From</code> / <code>To</code> / <code>SessionKey</code> / <code>AccountId</code>。</li>
+                    <li><strong>标识</strong>：<code>MessageSid</code>、<code>ReplyToId</code>、<code>MessageThreadId</code>、<code>NativeChannelId</code>。</li>
+                    <li><strong>发送者</strong>：<code>SenderName/SenderId/SenderUsername</code>。</li>
+                    <li><strong>来源</strong>：<code>Provider</code> / <code>Surface</code> / <code>OriginatingChannel</code> / <code>OriginatingTo</code>。</li>
+                    <li><strong>媒体</strong>：<code>MediaPath(s)/MediaType(s)</code>、<code>Transcript</code>、<code>MediaUnderstanding</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">MsgContext = "万能翻译后的标准消息"</span>
+                Telegram、Slack、Discord 的消息格式天差地别（字段名、id 类型、结构都不同）。<strong>MsgContext 是它们翻译后的"通用语"——不管消息从哪来，翻译成 MsgContext 后，上层的 Agent、路由、命令逻辑就只需要认识这一种格式。</strong>好比联合国的同声传译：各国代表说各国语言（平台原生消息），但会议记录统一成一种官方语言（MsgContext）。<strong>~170 个字段覆盖了正文、发送者、媒体、线程、路由等一切可能——足够表达任何平台的任何消息。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>finalizeInboundContext 收口</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/auto-reply/reply/inbound-context.ts:37
+export function finalizeInboundContext&lt;T&gt;(ctx: T, opts = {}): T &amp; FinalizedMsgContext { ... }</code></pre>
+                <p><strong>所有渠道</strong>（Day 14 见过 Telegram/Slack 都调它）构造好各自字段后，都调这一个函数收口。它统一做：</p>
+                <ul>
+                    <li>换行归一化（<code>normalizeInboundTextNewlines</code>）。</li>
+                    <li>剥离注入的系统标签（<code>sanitizeInboundSystemTags</code>，安全防注入）。</li>
+                    <li><code>ChatType</code> 归一、<code>BodyForAgent</code>/<code>BodyForCommands</code> 回退链推导。</li>
+                    <li><code>UntrustedContext</code> 净化、强制 <code>CommandAuthorized</code> 默认 false（默认拒绝）。</li>
+                </ul>
+                <div class="anno">读法：<b>各渠道负责"平台格式→MsgContext 字段"的映射，<code>finalizeInboundContext</code> 负责"统一清洗 + 安全默认"。</b>把清洗集中到一个函数，保证每条入站消息都经过同样的安全处理——不会因为某个渠道忘了清洗而留漏洞。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>两段式归一</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么分两段（渠道映射 + 统一收口）？</span>
+                如果让每个渠道各自完整归一化（包括清洗、安全默认），会有两个问题：<strong>①二十多个渠道会重复写同样的清洗代码；②某个渠道漏写一步清洗就是安全漏洞。</strong>两段式设计：<strong>渠道只做自己独有的部分（把 Telegram 的 message_id 映射到 MessageSid），通用的清洗+安全默认全交给 <code>finalizeInboundContext</code> 统一做一遍。</strong>这样安全策略只写一处、改一处生效所有渠道，也杜绝了"某渠道忘了清洗"。<strong>"公共逻辑收口到一个函数"是消除重复、堵住漏洞的经典手法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>回复路由（原路送回）</h1></div>
+            <div class="card">
+                <p>回复怎么知道该发回哪个渠道？靠入站时写入的 <code>OriginatingChannel</code>/<code>OriginatingTo</code>（Day 14 各渠道都设了）：</p>
+<pre><code class="language-typescript">// 出站时从 sessionCtx.OriginatingChannel/OriginatingTo 读回
+//   （agent-runner-utils.ts:27-31, agent-runner.ts:147）
+// 渠道选择 src/infra/outbound/channel-selection.ts:86 resolveMessageChannelSelection：
+//   显式指定 &gt; tool-context 回退 &gt; 唯一已配置渠道 &gt; 报错（多渠道必须显式）
+// Agent 路由（消息→哪个 agent/session）src/routing/resolve-route.ts:26-59
+//   matchedBy: binding.peer / binding.guild+roles / binding.team / binding.channel / default</code></pre>
+                <div class="anno">读法：<b>入站时记住"从哪来"（OriginatingChannel），出站时据此"回哪去"——用户在 Telegram 问的，答复就回 Telegram。</b>多渠道并存时必须显式指定目标（防止发错群）。Agent 路由则决定"这条消息该由哪个 agent/会话处理"（支持按对端、群+角色、团队等多级绑定匹配）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>出站投递</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// src/infra/outbound/deliver.ts:141 createChannelHandler
+//   → src/channels/plugins/outbound/load.ts:13 loadChannelOutboundAdapter(id)
+//     （轻量 loader：只取 plugin.outbound，不加载重的 monitor 代码）
+//   → 包成 handler 调 sendPayload/sendText/sendMedia（Day 13 的 outbound adapter）
+// 富组件差异 src/infra/outbound/channel-adapters.ts:51 getChannelMessageAdapter：
+//   仅 Discord supportsComponentsV2:true（用卡片），其它退化为纯文本</code></pre>
+                <div class="anno">读法：<b>发送时只加载目标渠道的 outbound adapter（Day 13）——不会为了发个消息把整个渠道的 monitor（收消息）代码也加载进来，省内存。</b>富组件（Discord 卡片）只对支持的渠道启用，其余优雅退化为纯文本。这呼应 Day 13 的能力声明。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>语音 TTS（能说会听）</h1></div>
+            <div class="card">
+                <p>核心 <code>src/tts/tts.ts</code>：</p>
+<pre><code class="language-typescript">textToSpeech(:562)              // 合成语音（后端 ElevenLabs / OpenAI TTS）
+textToSpeechTelephony(:732)     // 电话专用格式
+maybeApplyTtsToPayload(:821)    // 按开关把回复转成语音
+resolveTtsConfig(:261)          // 解析 messages.tts.* 配置</code></pre>
+                <div class="anno">读法：<b>回复流里 <code>maybeApplyTtsToPayload</code> 按配置/内联指令决定"这条要不要转成语音发出去"。</b>相关扩展：<code>extensions/talk-voice</code>（ElevenLabs 音色）、<code>extensions/voice-call</code>（电话呼入呼出，Twilio 式媒体流）。"听"（语音唤醒/转录）主要由原生 App 端负责（Day 18 的 Swabble 唤醒词），服务端管合成/转录。Discord 语音频道播放在 <code>src/discord/voice/manager.ts</code>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Canvas（实时可视化）</h1></div>
+            <div class="card">
+                <p>Canvas 是 agent 驱动的实时可视界面（README 说的"render a live Canvas"）：</p>
+<pre><code class="language-typescript">// src/canvas-host/a2ui.ts
+//   路径常量 A2UI_PATH / CANVAS_HOST_PATH / CANVAS_WS_PATH（:8-12）
+//   handleA2uiHttpRequest(:142) 提供 A2UI 静态资源
+//   injectCanvasLiveReload(:81) 注入动作桥（iOS/Android 的点击回传 node）
+// src/canvas-host/server.ts
+//   CanvasHostServer（:36）基于 ws 的 WebSocketServer
+//   向 node 端推送 A2UI 更新（push/reset/eval/snapshot）</code></pre>
+                <div class="baby"><span class="t">Canvas = "助理能画给你看的屏幕"</span>
+                纯文字聊天有局限——有时助理想给你看个图表、一个可交互的表单、一个进度面板。<strong>Canvas 就是给助理一块"可实时更新的画布"：Agent 用工具往画布推 UI（A2UI 描述），网关通过 WebSocket 推给你的设备（mac/iOS/Android）渲染，你在画布上的点击又通过"动作桥"回传给 Agent。</strong>这让助理从"只会打字"进化到"能画界面、能交互"。网关做 host（托管画布内容），原生 App 做渲染面。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 3 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周（技能与渠道）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 11</strong> 技能 skills：SKILL.md + frontmatter 门控 + 三层发现 + 渐进式披露</li>
+                    <li><strong>Day 12</strong> 扩展 extensions：register(api) 注入能力 + 加载流水线 + 生命周期钩子</li>
+                    <li><strong>Day 13</strong> 渠道抽象：ChannelPlugin 组合式 adapter（非继承）+ 能力声明</li>
+                    <li><strong>Day 14</strong> 渠道实现：Telegram 轮询 / Slack Socket / Discord Gateway 三种连接统一契约</li>
+                    <li><strong>Day 15</strong> MsgContext 归一化 + 两段式清洗 + 回复路由 + 语音/Canvas</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 OpenClaw 的"手和嘴"：<strong>技能/扩展让它可无限扩展本领，渠道抽象让它在任何平台说话，归一化让异构消息统一处理</strong>。第 4 周进入"筋骨"——沙箱、安全、原生应用、构建部署。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+grep -n 'export type MsgContext\|OriginatingChannel' src/auto-reply/templating.ts | head
+sed -n '37,90p' src/auto-reply/reply/inbound-context.ts   # 收口
+grep -n 'textToSpeech\|CanvasHostServer' src/tts/tts.ts src/canvas-host/server.ts | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 16（第4周开始）</strong>：<strong>沙箱与运行时</strong>——助理执行工具/代码怎么不搞坏你的机器？Docker 沙箱（三份镜像）、默认极度收紧的安全配置、容器生命周期、防"配置注入"校验。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 渠道实现</a>
+                <a href="openclaw-day16.html" style="color:#f97316;">Day 16 · 沙箱与运行时 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
