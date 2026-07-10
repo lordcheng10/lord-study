@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · PushContext — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">PushContext · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · PushContext 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 预建索引</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · InitContext</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 全量 vs 增量</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Sidecar 作用域</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 可见性 exportTo</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 依赖跟踪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 服务注册</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day06.html" class="nav-link" style="color:#7c4dff;">Day 06 DiscoveryServer &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">PushContext 配置快照</h1>
+            <p class="part-desc">配置和服务读进来了，怎么高效地给每个 proxy 生成 xDS？答案是 <code>PushContext</code>——世界当前状态的<strong>不可变快照 + 预建索引</strong>。再讲 Sidecar 作用域（决定 proxy 看到哪些配置）。收官第 1 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>PushContext 是什么</h1></div>
+            <div class="card">
+                <p><code>PushContext</code>（<code>pilot/pkg/model/push_context.go:215</code>）= 世界当前状态的<strong>不可变快照</strong>，每次推送（通常部分）重新生成（<code>pilot.md:71</code>）。</p>
+                <div class="baby"><span class="t">PushContext = "配置的一张定格照片 + 索引"</span>
+                istiod 要给成百上千个 Envoy 生成配置。如果每个 Envoy 都现查 ConfigStore/ServiceDiscovery，又慢又容易读到"变化中"的不一致状态。<strong>PushContext 的思路：在某个时刻把所有配置和服务"定格"成一张不可变快照，并预先建好各种索引（按命名空间、按 host、按 gateway…）。之后为每个 proxy 生成配置时，都从这张快照的索引里查——快且一致。</strong>因为不可变，大多数查找<strong>无锁</strong>（<code>pilot.md:71-75</code>）。<strong>配置一变，就重新生成一张新快照（下一课）。</strong>这是"读多写少 → 快照 + 索引"的经典优化。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>预建索引</h1></div>
+            <div class="card">
+<pre><code class="language-go">// push_context.go:215 PushContext 的索引字段：
+ServiceIndex          // :225 服务索引（按 host/ns/port）
+virtualServiceIndex   // :231 VS 索引（按 gateway/host）
+destinationRuleIndex  // :234
+gatewayIndex          // :237
+sidecarIndex          // :243
+envoyFiltersByNamespace // :246
+AuthnPolicies/AuthzPolicies/Telemetry // :252+
+Mesh / PushVersion / InitDone         // :268/:271/:285</code></pre>
+                <div class="anno">读法：<b>每种配置都预建了"按最常用的维度"索引好的结构。比如 <code>virtualServiceIndex</code> 按 gateway 分组（生成某 gateway 的路由时直接取）。<strong>这些索引就是"带 Proxy 翻译"（Day 01）能快起来的原因</strong>——生成配置时不用遍历全部，查索引即可。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>InitContext</h1></div>
+            <div class="card">
+<pre><code class="language-go">// push_context.go:1401 createNewContext —— 全量按序初始化所有索引：
+initServiceRegistry → initKubernetesGateways → initVirtualServices
+  → initDestinationRules → initAuthnPolicies → initAuthorizationPolicies
+  → initTelemetry → initProxyConfigs → initWasmPlugins → initEnvoyFilters
+  → initGateways → initAmbient → initSidecarScopes  // ★ Sidecar 作用域必须最后</code></pre>
+                <div class="anno">读法：<b><code>InitContext</code>（<code>:1371</code>）是快照构建入口。<code>createNewContext</code> 严格按依赖顺序初始化各索引。<strong><code>initSidecarScopes</code> 必须最后</strong>——因为它依赖前面所有索引（要算"每个 proxy 能看到哪些 service/VS/DR"）。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>全量 vs 增量</h1></div>
+            <div class="card">
+<pre><code class="language-go">// push_context.go:1388 InitContext 分支：
+//   首建/强制 → createNewContext（全量重建所有索引）
+//   否则 → updateContext（增量：只重算变更的索引，其余从旧快照复制）
+// updateContext（:1423）：按 ConfigsUpdated 的 Kind 设 xxxChanged 标志
+//   服务未变则 ps.ServiceIndex = old.ServiceIndex（直接复用旧的！）</code></pre>
+                <div class="baby"><span class="t">即便"全量推送"也尽量复用旧快照</span>
+                重建整张 PushContext 很贵（要重新索引所有配置）。<strong>优化：如果这次变更只涉及 VirtualService，那 ServiceIndex、DestinationRuleIndex 等没变的索引<strong>直接从旧快照复制指针</strong>，只重算 virtualServiceIndex。</strong>这就是 <code>updateContext</code> 做的——按 <code>ConfigsUpdated</code> 判断哪些变了，只重算变的。<strong>这是三级优化（<code>pilot.md:166-181</code>）的第二级：debounce 合并（Day 09）→ PushContext 增量复用（这里）→ proxy 级裁剪（Day 09）。</strong>层层减少不必要的计算。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Sidecar 作用域</h1></div>
+            <div class="card">
+                <p><code>SidecarScope</code>（<code>pilot/pkg/model/sidecar.go:140</code>）= 每个 proxy 预算出的"视图"——它到底能看到哪些 service/VS/DR。</p>
+                <div class="baby"><span class="t">Sidecar 作用域 = "给每个 Envoy 划定的视野"</span>
+                默认情况下，一个 Envoy 会收到<strong>全网格所有服务</strong>的配置——集群大了，这是巨量配置（内存爆炸、推送慢）。<strong>Sidecar 资源（Day 03 的 CRD）让你限定"这个服务只需要知道哪几个上游"。SidecarScope 就是据此算出的"该 proxy 实际能看到的配置子集"。</strong>比如 frontend 只调 backend，就只给它 backend 的配置，不给全网格的。<strong>这是大规模网格的关键优化——用 Sidecar 资源收敛配置，能把单个 Envoy 的内存从 GB 级降到 MB 级。</strong>默认作用域（无 Sidecar 资源）看到所有 public 服务（<code>*/*</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>可见性 exportTo</h1></div>
+            <div class="card">
+                <p>配置和服务有可见性（<code>pkg/config/visibility/</code>）：<code>Private="."</code>（仅本命名空间）、<code>Public="*"</code>（全网格）、<code>None="~"</code>（不可见）。三个 init* 按 <code>exportTo</code> 把配置分类进 public/private/exported。</p>
+                <div class="anno">读法：<b><code>exportTo</code> 控制"这条配置/服务给谁看"。默认 public（全网格可见）；设成 <code>.</code> 就只有本命名空间能用（隔离）；设成具体命名空间就导出给那几个。<strong>这和 Sidecar 作用域配合，共同决定"某 proxy 能看到什么"</strong>——可见性从"提供方"角度限制，Sidecar 从"消费方"角度限制。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>依赖跟踪</h1></div>
+            <div class="card">
+                <p><code>SidecarScope</code> 有 <code>configDependencies</code>（<code>sidecar.go:182</code>）——记录"这个作用域依赖哪些配置"。<code>DependsOnConfig</code>（<code>:559</code>）判断某配置变更是否需推给使用此作用域的 proxy。</p>
+                <div class="baby"><span class="t">依赖跟踪 = "只通知关心的人"</span>
+                配置变了，要推给哪些 Envoy？<strong>如果推给所有 Envoy，浪费（大部分不关心这个变更）。依赖跟踪：每个 SidecarScope 记下"我依赖哪些配置"。某配置变更时，只推给<strong>依赖它的</strong>那些 proxy。</strong>比如改了 payment 服务的路由，只推给"会调用 payment"的那些 Envoy，其他的不动。<strong>这是三级优化的第三级（proxy 级裁剪，Day 09 的 <code>ProxyNeedsPush</code> 用它）——把推送范围精确到"真正受影响的代理"。</strong>大规模网格里这个优化省下海量无效推送。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 1 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 1 周（控制面全景）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 01</strong> 控制面 vs 数据面、xDS 五兄弟、三段式职责、带 Proxy 翻译</li>
+                    <li><strong>Day 02</strong> istiod 启动：pilot-discovery → NewServer 装配 → Start 监听</li>
+                    <li><strong>Day 03</strong> 配置模型：CRD、config.Config 统一信封、ConfigStore、schema</li>
+                    <li><strong>Day 04</strong> 服务注册：Service/IstioEndpoint 模型、聚合/K8s/SE 注册表</li>
+                    <li><strong>Day 05</strong> PushContext 快照 + 索引、全量/增量、Sidecar 作用域、可见性、依赖跟踪</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 istiod 的"数据基础"：配置和服务怎么读进来（摄取）、怎么组织成高效可查的快照。第 2 周进入核心——这张快照怎么翻译成 Envoy xDS 并推送下去。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'type PushContext struct\|func.*InitContext\|createNewContext\|updateContext' pilot/pkg/model/push_context.go | head
+grep -n 'type SidecarScope struct\|configDependencies\|func.*DependsOnConfig' pilot/pkg/model/sidecar.go | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 06（第2周开始）</strong>：<strong>xDS DiscoveryServer</strong>——istiod 怎么向 Envoy 提供 ADS gRPC 流？<code>DiscoveryServer</code> 结构、<code>StreamAggregatedResources</code>、收发分离、ACK/NACK 状态机。这是"发送端"的核心。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 服务注册</a>
+                <a href="istio-day06.html" style="color:#7c4dff;">Day 06 · xDS DiscoveryServer &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

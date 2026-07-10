@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 服务注册 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">服务注册 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要服务发现</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Service 模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · IstioEndpoint</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ServiceDiscovery 接口</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 聚合注册表</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · K8s 注册表</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ServiceEntry 注册表</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 配置模型</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day05.html" class="nav-link" style="color:#4a7fd6;">Day 05 PushContext &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 控制面全景</span>
+            <h1 class="part-title">服务注册</h1>
+            <p class="part-desc">istiod 要生成"路由到哪个后端"的配置，前提是知道集群里有哪些服务、每个服务有哪些实例（端点）。今天看 <code>ServiceDiscovery</code> 抽象、Service/Endpoint 模型，以及 K8s 和 ServiceEntry 两个注册表。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要服务发现</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">服务发现 = "维护一张实时的服务电话簿"</span>
+                集群里服务的实例（Pod）随时在增删（扩缩容、发布、故障）。<strong>istiod 要给 Envoy 下发"reviews 服务当前有哪些 IP:Port"，就必须实时知道这张"电话簿"。服务发现（ServiceDiscovery）就是维护这张簿的机制——watch K8s，服务/Pod 一变就更新。</strong>这是 Day 01 三段式里"配置摄取"的另一半（配置摄取 = ConfigStore 读 CRD + ServiceDiscovery 读服务）。<strong>没有准确的服务发现，Envoy 就会把流量发到不存在的实例（黑洞）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Service 模型</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/service.go:74 —— 平台无关的服务抽象
+type Service struct {
+  Hostname   host.Name       // :90 FQDN 主键（如 reviews.default.svc.cluster.local）
+  Ports      PortList        // :81 服务端口
+  ClusterVIPs AddressMap      // :94 多集群：同 host 各集群不同 ClusterIP
+  Resolution Resolution       // :120 ClientSideLB(EDS)/DNSLB/Passthrough…
+  Attributes ServiceAttributes // :77 registry/labels/exportTo/selector…
+}</code></pre>
+                <div class="anno">读法：<b><code>Service</code> 是"平台无关"的服务抽象——K8s Service、ServiceEntry 都转成它。<code>Hostname</code> 是主键。<code>Resolution</code> 决定端点怎么解析（呼应 Envoy 课 Day 15 的服务发现类型）。</b>多集群支持体现在 <code>ClusterVIPs</code>（同一 host 在不同集群有不同 VIP）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>IstioEndpoint</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/service.go:522 —— 最细粒度的端点
+type IstioEndpoint struct {
+  Addresses      []string    // :541 双栈 IP
+  ServiceAccount string      // :551 mTLS 身份
+  Network        string      // :554 网络（多网络支持）
+  Locality       Locality    // :557 地域/可用区（就近路由）
+  EndpointPort   uint32      // :561 工作负载实际端口
+  TLSMode        string      // :567 istio/disabled
+  HealthStatus   HealthStatus // :585 Healthy/Draining/Terminating
+}</code></pre>
+                <div class="baby"><span class="t">Service vs Endpoint vs Instance</span>
+                <strong><code>Service</code> = 逻辑服务（reviews）；<code>IstioEndpoint</code> = 一个具体实例（某个 Pod 的 IP:Port + 元数据）；<code>ServiceInstance</code> = "一个 endpoint × 一个服务 × 一个端口"的组合。</strong>Envoy 课的 EDS 下发的就是这些 endpoint（转成 <code>ClusterLoadAssignment</code>）。<strong>注意 endpoint 带了丰富元数据：ServiceAccount（用于 mTLS 身份，Day 14）、Locality（就近路由）、HealthStatus（剔除不健康的）。</strong>这些元数据让 Istio 能做地域感知路由、健康过滤等高级功能。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ServiceDiscovery 接口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/service.go:917
+type ServiceDiscovery interface {
+  Services() []*Service                          // :921 所有服务
+  GetService(hostname) *Service                  // :924
+  GetProxyServiceTargets(*Proxy) []ServiceTarget // :943 某 proxy 同机的目标
+  GetProxyWorkloadLabels(*Proxy) labels.Instance // :944
+}</code></pre>
+                <div class="anno">读法：<b>又是"接口 + 多实现"：<code>ServiceDiscovery</code> 抽象"怎么发现服务"，K8s/ServiceEntry 各是一个实现。<code>GetProxyServiceTargets</code> 很关键——它返回"和某个 Envoy 同机的服务"，用于生成入站配置（这个 Envoy 代理哪些本地服务）。</b>Day 01 说的 istiod 两大数据接口之一（另一个是 ConfigStore）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>聚合注册表</h1></div>
+            <div class="card">
+                <p><code>pilot/pkg/serviceregistry/aggregate/controller.go:42</code> 把多个注册表聚合：</p>
+<pre><code class="language-go">// addRegistry（:199）：K8s 注册表插到非 K8s 之前（K8s 服务优先）
+// Services（:296）：非 K8s 直接追加；K8s 按 hostname 去重、跨集群合并 ClusterVIPs（mergeService :358）
+// HasSynced（:461）：全部注册表都同步才 true</code></pre>
+                <div class="baby"><span class="t">为什么要"聚合"多个注册表？</span>
+                服务不一定都在 K8s 里——有的是 VM、有的是外部服务（通过 ServiceEntry 手工登记）、多集群场景还有多个 K8s。<strong>聚合注册表（aggregate）把这些来源"合并成一张统一的电话簿"：查服务时它扇出到所有注册表、合并结果。K8s 注册表优先级最高（防外部登记抢占域名）。</strong>istiod 上层只跟聚合注册表打交道，不用管服务到底来自哪。<strong>这又是"统一抽象"——用一个聚合层屏蔽多来源的差异。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>K8s 注册表</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/serviceregistry/kube/controller/controller.go:217
+// 用 informer watch Service/EndpointSlice/Pod
+// onServiceEvent（:461）→ ConvertService（conversion.go:48）→ XDSUpdater.SvcUpdate
+// endpointslice.go:269 updateEndpointCacheForSlice：EndpointSlice → IstioEndpoint
+//   → pushEDS（:451）→ XDSUpdater.EDSUpdate</code></pre>
+                <div class="anno">读法：<b>K8s 注册表用 informer（K8s 的 watch 机制）监听 Service/EndpointSlice/Pod 变化，转成 Istio 的 Service/IstioEndpoint，通过 <code>XDSUpdater</code>（<code>SvcUpdate</code>/<code>EDSUpdate</code>）通知 xDS 层触发推送（Day 09）。</b><code>ConvertService</code>（<code>conversion.go:48</code>）是 K8s Service → model.Service 的核心翻译（ClusterIP=None → Passthrough headless 等）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ServiceEntry 注册表</h1></div>
+            <div class="card">
+                <p><code>pilot/pkg/serviceregistry/serviceentry/controller.go:101</code>：把 ServiceEntry CRD（Day 03）转成服务/端点。一个 SE → 多个 Service（每 host 一个）。</p>
+                <div class="baby"><span class="t">两个注册表怎么"互喂"？</span>
+                有个巧妙设计：<strong>K8s 注册表和 ServiceEntry 注册表<strong>互相通知对方的工作负载</strong>——K8s 的 Pod 派生出 WorkloadInstance 通知 ServiceEntry（让带 WorkloadSelector 的 SE 能选中 Pod）；SE 的 WorkloadEntry（VM）通知 K8s（让 K8s Service 能选中 VM）。</strong>于是"K8s Service 选中 VM""ServiceEntry 选中 Pod"这种混合场景都能工作。<strong>这是 Istio 支持"K8s + VM 混合网格"的关键——服务发现不局限于 K8s。</strong>IP 自动分配（<code>autoAllocateIPs</code>）给无地址的外部服务分配确定性虚拟 IP。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>服务发现解决什么？和 ConfigStore 什么关系？</li>
+                    <li>Service / IstioEndpoint / ServiceInstance 的区别？</li>
+                    <li>ServiceDiscovery 接口的核心方法？</li>
+                    <li>聚合注册表为什么必要？K8s 为什么优先？</li>
+                    <li>K8s 注册表怎么工作？两个注册表怎么互喂？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'type Service struct\|type IstioEndpoint struct\|type ServiceDiscovery interface' pilot/pkg/model/service.go
+grep -n 'func ConvertService' pilot/pkg/serviceregistry/kube/controller/conversion.go
+ls pilot/pkg/serviceregistry/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：<strong>PushContext</strong>——istiod 把所有配置和服务预建成一个"全量快照"（PushContext），供给每个 proxy 快速生成 xDS。以及 Sidecar 作用域（决定 proxy 看到哪些配置）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 配置模型</a>
+                <a href="istio-day05.html" style="color:#4a7fd6;">Day 05 · PushContext &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

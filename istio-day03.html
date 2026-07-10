@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 配置模型与 CRD — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#4a7fd6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">配置模型与 CRD · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · CRD 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 五大网络 CRD</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Spec 只是数据</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · config.Config</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ConfigStore 接口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · schema 类型系统</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · GVK 三坐标</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 istiod 启动</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day04.html" class="nav-link" style="color:#4a7fd6;">Day 04 服务注册 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 控制面全景</span>
+            <h1 class="part-title">配置模型与 CRD</h1>
+            <p class="part-desc">用户写 VirtualService/DestinationRule 这些 YAML（CRD）来配置 Istio。它们在 istiod 内部怎么表示？今天看统一配置单元 <code>config.Config</code>、<code>ConfigStore</code> 接口、schema 类型系统。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>CRD 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">CRD = "给 K8s 加的自定义资源类型"</span>
+                Kubernetes 内置了 Pod/Service/Deployment 等资源。<strong>CRD（Custom Resource Definition，自定义资源定义）让你能给 K8s 加新的资源类型。Istio 就定义了一堆 CRD——VirtualService、DestinationRule、Gateway 等。</strong>于是你能 <code>kubectl apply</code> 一个 VirtualService YAML，就像操作原生资源一样。<strong>用户通过写这些 CRD 来"告诉 Istio 想要什么"（把 10% 流量导到 v2）。istiod watch 这些 CRD，翻译成 Envoy 配置下发。CRD 是用户和 Istio 之间的"接口语言"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>五大网络 CRD</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>CRD</th><th>作用</th></tr>
+                    <tr><td><strong>VirtualService</strong></td><td>请求路由：匹配、重写、重试、超时、故障注入、镜像、金丝雀</td></tr>
+                    <tr><td><strong>DestinationRule</strong></td><td>路由后对目标的策略：负载均衡、连接池、熔断、subset（版本）</td></tr>
+                    <tr><td><strong>Gateway</strong></td><td>配置网格边缘的独立 Envoy（暴露端口/协议/host/TLS）</td></tr>
+                    <tr><td><strong>ServiceEntry</strong></td><td>把外部/手工服务加入注册表</td></tr>
+                    <tr><td><strong>Sidecar</strong></td><td>微调 sidecar 的入/出站范围（收敛配置，Day 05）</td></tr>
+                </table>
+                <div class="baby"><span class="t">VirtualService vs DestinationRule（最常混）</span>
+                <strong>VirtualService 管"去哪"——请求怎么匹配、路由到哪个服务/版本、重试超时。DestinationRule 管"到了怎么办"——选中目标后的负载均衡策略、连接池、熔断，以及定义 subset（比如把 reviews 服务按 label 分成 v1/v2 两个子集）。</strong>典型配合：VirtualService 说"90% 流量到 reviews 的 v1、10% 到 v2"，DestinationRule 定义 v1/v2 这两个 subset 是什么。它们的结构体在 <code>istio.io/api</code>（VirtualService <code>:265</code>，DestinationRule <code>:415</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Spec 只是数据</h1></div>
+            <div class="card">
+<pre><code class="language-go">// istio.io/client-go .../networking/v1/types.gen.go:255
+type VirtualService struct {
+  metav1.TypeMeta   // apiVersion + kind
+  metav1.ObjectMeta // metadata（name/namespace/labels…）
+  Spec   v1alpha3.VirtualService  // ★ proto 结构体只是 .spec
+  Status v1alpha1.IstioStatus
+}</code></pre>
+                <div class="anno">读法：<b>关键心智模型：<code>istio.io/api</code> 里的 proto 结构体（如 <code>v1alpha3.VirtualService</code>）<strong>只是 CRD 的 <code>.spec</code> 部分</strong>。带 metadata/kind/status 的完整对象在 <code>client-go</code> 里。</b>CRD 数据结构由 proto 生成（.pb.go + deepcopy + json shim 四文件模式）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>config.Config 统一单元</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/config/model.go:103
+type Config struct {
+  Meta                    // GVK/Name/Namespace/Labels/ResourceVersion…（:49）
+  Spec   Spec             // 具体的 proto message（:107）
+  Status Status
+}</code></pre>
+                <div class="baby"><span class="t">config.Config = "所有配置的统一信封"</span>
+                istiod 内部不想为每种 CRD 写一套处理逻辑。<strong>所以它把任意一条配置（不管是 VirtualService 还是 Gateway）都归一成一个 <code>config.Config</code>——统一的信封：<code>Meta</code> 装元信息（谁、在哪、什么类型），<code>Spec</code> 装具体内容（一个 proto）。</strong>于是 ConfigStore、事件处理、PushContext 都只跟 <code>config.Config</code> 打交道，用 GVK（类型标识）区分具体是什么。<strong>这是"统一抽象"——把千变万化的 CRD 收敛成一个类型，大大简化了内部代码。</strong>（和 OpenClaw 的 MsgContext、Envoy 的统一接口一个思想。）</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ConfigStore 接口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/config.go:137
+type ConfigStore interface {
+  Get(typ, name, ns) *config.Config       // :144
+  List(typ, ns) []config.Config           // :148
+  Create/Update/Delete(...)               // :153+
+}
+// :188 ConfigStoreController = ConfigStore + RegisterEventHandler + Run
+//   （带 informer 缓存 + 事件回调的 ConfigStore）</code></pre>
+                <div class="anno">读法：<b><code>ConfigStore</code> 是"配置的 CRUD 抽象"——平台无关（不绑定 K8s）。<code>ConfigStoreController</code> 加了"watch 变更 + 回调"（Day 09 的事件源）。</b>Istio 从 K8s CRD 读配置的实现（Day 04 会提到 krt/crdclient）就实现这个接口。旧版的 <code>IstioConfigStore</code>（带便捷方法）已被 PushContext 索引取代。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>schema 类型系统</h1></div>
+            <div class="card">
+                <p><code>pkg/config/schema/</code> 是"类型总登记处"——每种 CRD 类型的元信息（GVK、复数名、Go 类型、校验器）都在这里注册（由 <code>metadata.yaml</code> 代码生成）。</p>
+<pre><code class="language-go">// collections/collections.gen.go 以 VirtualService 为例：
+//   ReflectType: reflect.TypeOf(&v1alpha3.VirtualService{}).Elem()  // 绑到 api 结构体
+//   ValidateProto: validation.ValidateVirtualService                // 挂校验器
+// 聚合 bundle：All、Kube、Pilot（istiod 监听的集合）</code></pre>
+                <div class="anno">读法：<b>schema 系统让 istiod 能"根据 GVK 动态处理任意类型"——查到 schema 就知道"这个类型的 Go 结构、怎么校验、复数资源名是什么"。<code>collections.Pilot</code> 是"istiod 关心的所有类型"的集合。</b>这是"元编程"——用数据描述类型，避免为每种类型硬编码。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>GVK 三坐标</h1></div>
+            <div class="card">
+                <p>schema 系统在三套坐标间映射：<strong>Kind</strong>（快枚举，热路径用）、<strong>GVK</strong>（GroupVersionKind，如 <code>networking.istio.io/v1alpha3/VirtualService</code>）、<strong>GVR</strong>（GroupVersionResource，复数资源名，K8s client 用）。</p>
+                <div class="baby"><span class="t">为什么要三套坐标？</span>
+                同一个类型有三种"叫法"，各有用途：<strong>Kind（一个 uint8 枚举）——热路径上比较快（比字符串快）；GVK——人类可读的完整标识，事件处理用；GVR——K8s API 认的复数资源名（virtualservices），调 K8s client 用。</strong>schema 系统提供 <code>ToGVR</code>/<code>ToKind</code>/<code>FromGVR</code> 等转换函数在三者间切换。<strong>理解这三套坐标，读 istiod 代码时看到 <code>gvk.VirtualService</code>、<code>kind.VirtualService</code> 就不会晕——它们是同一类型的不同表示。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CRD 是什么？它是用户和 Istio 的什么？</li>
+                    <li>VirtualService 和 DestinationRule 各管什么？</li>
+                    <li>proto 结构体和完整 CRD 对象什么关系？</li>
+                    <li>config.Config 为什么是"统一信封"？</li>
+                    <li>schema 系统解决什么？GVK 三坐标各是什么用途？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'type Config struct\|type Meta struct' pkg/config/model.go
+grep -n 'type ConfigStore interface\|ConfigStoreController' pilot/pkg/model/config.go
+ls pkg/config/schema/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<strong>服务注册</strong>——istiod 怎么知道集群里有哪些服务？<code>ServiceDiscovery</code> 抽象、Service/Endpoint 模型、Kubernetes 注册表、聚合注册表。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day02.html" style="color:var(--accent-cyan);">&larr; Day 02 istiod 启动</a>
+                <a href="istio-day04.html" style="color:#4a7fd6;">Day 04 · 服务注册 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
