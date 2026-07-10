@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · Pregel / BSP 模型 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .phases{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .phases .n{border:1px solid var(--border-color);border-radius:8px;padding:9px 13px;background:var(--bg-secondary);text-align:center}
+        .phases .n b{display:block;color:#6366f1;font-size:11px} .phases .a{color:#14b8a6;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">Pregel / BSP 模型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 不是调用链</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · actor + channel</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 三阶段超步</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 快照隔离</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 版本号触发</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 何时停</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么用 BSP</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 Channels &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 Pregel 引擎</span>
+            <h1 class="part-title">Pregel / BSP 模型</h1>
+            <p class="part-desc">LangGraph 的执行引擎。它借鉴 Google Pregel（图计算）/ BSP（整体同步并行）模型——按"超步（super-step）"执行图。读 <code>pregel/main.py</code> 的 docstring。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>不是传统调用链</h1></div>
+            <div class="card">
+                <p>LangGraph 的运行时<strong>不是</strong>"函数 A 调用函数 B"的传统调用链，而是 <strong>Pregel / BSP 模型</strong>。<code>pregel/main.py:454</code> 的 docstring 说得清楚：<em>"Pregel combines actors and channels... following the Pregel Algorithm / Bulk Synchronous Parallel model."</em></p>
+                <div class="baby"><span class="t">Pregel / BSP 是什么？（一句话）</span>
+                Pregel 是 Google 为超大规模图计算设计的模型，BSP（Bulk Synchronous Parallel，整体同步并行）是它的执行范式。<strong>核心思想：计算分成一个个"超步（super-step）"，每个超步里"该干活的节点并行干活、干完统一同步一次状态"，然后进入下一超步。</strong>就像多人协作："大家各自干（并行）→ 到点了统一汇报同步（barrier）→ 再各自干下一轮"。<strong>LangGraph 把这个模型用于执行 Agent 图——比传统 while 循环更适合"并行 + 可中断 + 可持久化"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>actor + channel</h1></div>
+            <div class="card">
+                <p>Pregel 的两个主角：<strong>actor（节点/PregelNode）</strong>和 <strong>channel（通道）</strong>。核心心智：</p>
+                <div class="glossary"><b>节点之间不直接通信，而是通过通道间接通信。</b>actor 从它"订阅（subscribe）"的 channel 读数据、往 channel 写数据。一个 actor 只有在它订阅的 channel 在上一步被更新过时，才会在下一步运行。<strong>这就是 Day 04 讲的"通道触发"——节点不互相调用，靠"写通道→通道触发订阅者"解耦。</strong></div>
+                <div class="baby"><span class="t">为什么用"通道间接通信"？</span>
+                如果节点 A 直接调用 B（<code>b(a())</code>），它们就<strong>耦合</strong>了——A 必须知道 B 存在。而"A 写通道、B 订阅通道"则<strong>解耦</strong>——A 只管往通道写，谁订阅了谁就被触发，A 不用知道 B。<strong>好处：能并行（多个节点同时读同一通道）、能动态路由（改订阅关系就改了流程）、能持久化（通道值就是可存的状态）。</strong>这是分布式系统的经典解耦思想。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>三阶段超步</h1></div>
+            <div class="card">
+                <p>每个超步分三阶段（<code>main.py:464</code>）：</p>
+                <div class="phases">
+                    <span class="n"><b>Plan 计划</b>选出这步要跑的节点</span><span class="a">→</span>
+                    <span class="n"><b>Execution 执行</b>并行跑这些节点</span><span class="a">→</span>
+                    <span class="n"><b>Update 更新</b>把写入应用到通道</span><span class="a">↺</span>
+                </div>
+                <div class="anno">读法：<b><strong>Plan</strong>：第一步选订阅 input 通道的节点；后续步选"订阅了上一步被更新的通道"的节点。<strong>Execution</strong>：并行跑所有选中节点，直到全完成。<strong>Update</strong>：把节点写出的值用 reducer 应用到通道。<strong>重复，直到没有节点可选。</strong></b>（这就是 Day 05 每个超步的三阶段。）</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>快照隔离（关键设计）</h1></div>
+            <div class="card">
+                <p><code>main.py:2960</code> 的注释是精华，值得背下来：</p>
+<pre><code class="language-python"># Channel updates from step N are only visible in step N+1
+# channels are guaranteed to be immutable for the duration of the step,
+# with channel updates applied only at the transition between steps.</code></pre>
+                <div class="baby"><span class="t">快照隔离：一步之内通道不变</span>
+                关键规则：<strong>一个超步执行期间，通道是"冻结"的（不可变）——节点看到的是这一步开始时的状态快照。所有写入都攒着，只在超步之间（transition）统一应用。第 N 步的更新，第 N+1 步才可见。</strong>为什么这么设计？<strong>避免并行节点互相干扰！</strong>如果 A、B 同一步并行跑，B 读的状态不会被 A 中途改掉（都读同一份快照）——结果确定、可复现，不用担心竞态。<strong>"一步之内快照隔离、步末统一提交"是 BSP 让并行安全的核心。</strong>这和数据库的快照隔离一个道理。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>版本号触发</h1></div>
+            <div class="card">
+                <p>怎么判断"一个节点这步该不该跑"？<code>_triggers</code>（<code>_algo.py:1260</code>）——两个条件：</p>
+<pre><code class="language-python">for chan in proc.triggers:            # 遍历节点订阅的触发通道
+    if channels[chan].is_available()  # ① 通道有值
+       and versions.get(chan) > seen.get(chan):  # ② 通道版本 > 节点上次见过的版本
+        return True                    # 该跑！</code></pre>
+                <div class="baby"><span class="t">版本号防重复触发</span>
+                每个通道有个<strong>版本号</strong>（每次被更新就 +1）；每个节点记录它<strong>上次见过</strong>每个通道的版本。<strong>触发条件：通道有值 且 当前版本 > 节点上次见过的版本（说明这通道被新更新了、节点还没处理）。</strong>处理后节点更新"已见版本"，于是<strong>同一次更新不会重复触发同一节点</strong>。这个 <code>channel_versions</code> vs <code>versions_seen</code> 的机制保证了幂等触发——BSP 里"上一步更新才触发下一步"的精确实现。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>何时停</h1></div>
+            <div class="card">
+                <p>超步循环<strong>一直转到没有节点可跑</strong>（<code>main.py:464</code>："Repeat until no actors are selected"）。<code>tick()</code>（<code>_loop.py:652</code>）：没有任务 → <code>status="done"</code>、循环终止。</p>
+                <div class="baby"><span class="t">"没节点可跑"就是自然结束</span>
+                Plan 阶段如果发现"没有任何节点的触发通道被更新"——就没节点要跑了，图执行结束。<strong>对 Agent 图：走到 END 意味着不再点亮任何节点的触发通道 → 下一步 Plan 选不出节点 → 停机。</strong>还有个安全网：<code>recursion_limit</code>（超步数上限），防止无限循环（<code>tick</code> 里 <code>status="out_of_steps"</code>）。<strong>正常靠"无节点可跑"结束，异常靠超步上限兜底——和其它框架的 max_iterations 一个思路。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么用 BSP（回味）</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>并行安全</strong>：快照隔离让同步的节点互不干扰、结果确定。</li>
+                    <li><strong>可持久化</strong>：超步之间是清晰的"边界"，正好在这存检查点（Day 11）。</li>
+                    <li><strong>可中断</strong>：超步边界可以暂停（human-in-the-loop，Day 14）。</li>
+                    <li><strong>可重放</strong>：状态全在通道、每步存档，能回到任意超步重跑（时间旅行，Day 13）。</li>
+                </ul>
+                <div class="glossary"><b>为什么不用简单的 while 循环？</b> while 循环里状态是内存变量，难并行（要手动加锁）、难持久化（内存不能存档）、难中断（跑到一半停不下来）。<strong>BSP 的"超步边界"给了天然的"暂停/存档/恢复点"——LangGraph 的持久执行、时间旅行、人在环，全建立在这个模型上。</strong>选 Pregel/BSP 不是炫技，是为了这些能力。这和 eino 的 Pregel 引擎（也叫这个名）异曲同工。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Pregel/BSP 模型是什么？和传统调用链的区别？</li>
+                    <li>actor + channel 为什么"间接通信"？</li>
+                    <li>三阶段超步（Plan/Execution/Update）？</li>
+                    <li>快照隔离是什么？为什么让并行安全？</li>
+                    <li>版本号触发怎么防重复？为什么 BSP 能持久/中断/重放？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
+sed -n '454,477p' $P/main.py            # Pregel docstring 三阶段
+sed -n '2958,2988p' $P/main.py          # 驱动循环 + 快照隔离注释
+sed -n '1260,1277p' $P/_algo.py         # _triggers 版本号触发</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>Channels 通道</strong>——状态存在通道里，reducer 就是通道的 update()。精读 LastValue/BinaryOperatorAggregate/Topic/NamedBarrierValue。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a>
+                <a href="langgraph-day07.html" style="color:var(--accent-green);">Day 07 · Channels &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
