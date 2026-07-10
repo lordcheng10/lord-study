@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · 嵌入 Embeddings — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f472b6,#38bdf8);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">嵌入 Embeddings · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是嵌入</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 语义相似度</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · BaseEmbedding</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · text vs query 嵌入</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · similarity 计算</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 批量与缓存</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 各家嵌入模型</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day07.html" class="nav-link" style="color:#f472b6;">Day 07 索引 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 索引/嵌入/存储</span>
+            <h1 class="part-title">嵌入 Embeddings</h1>
+            <p class="part-desc">第 2 周开始。RAG 的魔法核心是"嵌入"——把文本变成向量，让计算机能算"两段文本有多像"。今天讲透嵌入是什么、怎么算相似度、<code>BaseEmbedding</code> 的接口设计。这是"语义检索"的地基。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>什么是嵌入</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">嵌入 = 把文本变成一串数字（向量）</span>
+                <strong>嵌入模型（embedding model）把一段文本变成一个高维向量（比如 1536 个数字）。神奇之处：<strong>意思相近的文本，向量也相近</strong>。</strong>"猫" 和 "小猫" 的向量很接近，"猫" 和 "汽车" 的向量很远。<strong>这样"找语义相似的文本"就变成了"找向量相近的向量"——变成纯数学问题（算向量距离），计算机很擅长。</strong>这是 RAG "语义检索"的地基：用户问"怎么退款"，即使文档里写的是"退货流程"，向量相近也能检索到。<strong>比关键词匹配强太多（关键词不同也能匹配语义）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>语义相似度</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">向量距离 = 语义远近</span>
+                <strong>两个向量有多"近"，常用<strong>余弦相似度</strong>（cosine similarity）衡量——算两个向量夹角的余弦值，范围 -1 到 1，越接近 1 越相似。</strong>还有点积、欧氏距离等。<code>utils.py</code> 里的 <code>SimilarityMode</code> 定义了这些模式（DEFAULT=余弦、DOT_PRODUCT、EUCLIDEAN）。<strong>检索时：把用户问题也嵌入成向量，然后算它和库里所有 Node 向量的相似度，取最相似的几个——这就是"向量检索"（Day 09）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>BaseEmbedding</h1></div>
+            <div class="card">
+                <p><code>embeddings/</code> 里 <code>BaseEmbedding</code>（继承 TransformComponent，所以能进 ingestion 管道）的核心方法：</p>
+<pre><code class="language-python">get_text_embedding(text) -> List[float]        # 单条文本 → 向量
+get_text_embedding_batch(texts) -> List[...]    # 批量
+get_query_embedding(query) -> List[float]       # 查询文本 → 向量
+similarity(emb1, emb2, mode) -> float           # 算两个向量相似度
+def __call__(nodes) -> nodes                     # 作为转换：给每个 Node 填 embedding</code></pre>
+                <div class="anno">读法：<b>作为 <code>TransformComponent</code>（Day 05），嵌入模型能直接进 ingestion 管道——<code>__call__</code> 遍历 Node、给每个填 <code>node.embedding</code>（Day 02 的字段）。<strong>接口统一，所以 OpenAI/HuggingFace/本地各种嵌入模型都能互换。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>text vs query 嵌入</h1></div>
+            <div class="card">
+                <p>注意有 <code>get_text_embedding</code>（嵌入文档）和 <code>get_query_embedding</code>（嵌入查询）两个方法。</p>
+                <div class="baby"><span class="t">为什么文档和查询要分开？</span>
+                <strong>有些嵌入模型对"文档"和"查询"用不同的处理（比如加不同前缀 <code>"search_document: "</code> / <code>"search_query: "</code>）——因为"一段文档"和"一个问题"的语言风格不同，分开处理能让检索更准。</strong>大部分模型两者一样，但接口留了这个区分。<strong>建库时用 text 嵌入 Node，检索时用 query 嵌入问题——各走各的方法。</strong>这个细节直接影响检索质量。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>similarity 计算</h1></div>
+            <div class="card">
+                <p><code>embeddings/utils.py</code> / <code>indices/query</code> 里的相似度函数（如 <code>get_top_k_embeddings</code>，Day 09 会用）：给一个查询向量和一堆候选向量，算相似度、排序、返回 top-k。</p>
+                <div class="anno">读法：<b>核心就是"查询向量 vs N 个候选向量，各算 cosine，取最高的 k 个"。<strong>SimpleVectorStore（Day 09）的 query 就调这个。</strong>大规模时（百万向量）用专门的向量数据库（Faiss/HNSW）加速，但原理一样——找最近邻。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>批量与缓存</h1></div>
+            <div class="card">
+                <p><code>get_text_embedding_batch</code>：一次嵌入多条（<code>embed_batch_size</code> 控制批大小）。嵌入模型多是调 API（OpenAI 等），批量能减少请求数。</p>
+                <div class="baby"><span class="t">嵌入是要花钱的（省着用）</span>
+                <strong>调 OpenAI 嵌入 API 按 token 收费。建库嵌入几万个 Node = 不少钱。所以：① 批量调用（一次发多条，省请求开销）；② 缓存（Day 05 的 ingestion 缓存——没变的 Node 不重嵌）。</strong>这就是为什么 Day 05 的管道缓存那么重要——它省的主要就是嵌入费用。<strong>本地嵌入模型（HuggingFace）虽免费但慢/占资源——权衡。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>各家嵌入模型</h1></div>
+            <div class="card">
+                <p>core 只有 <code>MockEmbedding</code>（测试用）等；真实模型在 integrations：<code>llama-index-embeddings-openai</code>（text-embedding-3）、<code>-huggingface</code>（本地 BGE 等）、<code>-cohere</code>、<code>-ollama</code>…</p>
+                <div class="baby"><span class="t">选嵌入模型的考量</span>
+                <strong>OpenAI text-embedding-3：效果好、要联网付费。BGE/GTE（HuggingFace 本地）：免费、数据不出本地、但要 GPU/慢。多语言场景选支持中文的模型（BGE-zh 等）。</strong>嵌入模型的选择直接影响检索质量——和你的语言、领域、预算都相关。<strong>换模型只需换一个 integration + 重新嵌入（因为不同模型的向量空间不通用，混用会乱）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>嵌入是什么？为什么"意思近→向量近"能做语义检索？</li>
+                    <li>余弦相似度怎么衡量语义远近？</li>
+                    <li>为什么 text 和 query 嵌入要分开？</li>
+                    <li>嵌入为什么要批量+缓存？和 Day 05 管道缓存什么关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls embeddings/
+grep -rn "SimilarityMode\|def similarity\|get_top_k_embeddings" embeddings/utils.py indices/query/embedding_utils.py 2>/dev/null | head
+ls ../../../../llama-index-integrations/embeddings/ 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>索引 Index</strong>——嵌入好的 Node 怎么组织成可检索的"索引"？精读 <code>VectorStoreIndex</code>：from_documents 怎么串起切块+嵌入+入库、build_index_from_nodes 怎么建。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day05.html" style="color:var(--accent-cyan);">&larr; Day 05</a>
+                <a href="llama-index-day07.html" style="color:#f472b6;">Day 07 · 索引 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

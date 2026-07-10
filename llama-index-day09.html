@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 向量存储 VectorStore — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f472b6,#38bdf8);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">向量存储 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 向量库的职责</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SimpleVectorStore</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · add 存向量</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · query 检索</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · top_k 相似度</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · metadata 过滤</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · MMR 多样性</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day10.html" class="nav-link" style="color:#f472b6;">Day 10 其他索引 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 索引/嵌入/存储</span>
+            <h1 class="part-title">向量存储 VectorStore</h1>
+            <p class="part-desc">向量库是 RAG 检索的"引擎"。今天精读 <code>SimpleVectorStore</code> 的 add 和 query：向量怎么存、"给一个查询向量找最相似的 k 个"怎么算、metadata 过滤和 MMR 多样性检索。理解它，就理解了检索的底层。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>向量库的职责</h1></div>
+            <div class="card">
+                <p><code>vector_stores/types.py</code> 的 <code>BasePydanticVectorStore</code> 核心方法：<code>add(nodes)</code>（存向量）、<code>query(VectorStoreQuery)</code>（相似度检索）、<code>delete</code>。</p>
+                <div class="baby"><span class="t">"存向量 + 找最近邻"两件事</span>
+                <strong>向量库就干两件事：① add——把 Node 的向量存起来；② query——给一个查询向量，返回"最相似的 k 个 Node id + 相似度分数"。</strong>这就是"最近邻检索"（nearest neighbor search）。<strong>Day 06 讲的"意思近→向量近"在这里兑现：找最相似向量 = 找语义最相关的 Node。</strong>SimpleVectorStore 是默认实现（暴力算），生产用 Chroma/Qdrant 等（用 HNSW 等算法加速）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SimpleVectorStore</h1></div>
+            <div class="card">
+                <p><code>vector_stores/simple.py:64</code> <code>class SimpleVectorStore(BasePydanticVectorStore)</code>，数据存在 <code>SimpleVectorStoreData</code>（<code>:48</code>）里：</p>
+<pre><code class="language-python">class SimpleVectorStoreData:
+    embedding_dict: Dict[str, List[float]]   # node_id → 向量
+    text_id_to_ref_doc_id: Dict[str, str]
+    metadata_dict: Dict[str, Any]             # node_id → metadata（用于过滤）</code></pre>
+                <div class="anno">读法：<b>就是几个字典：<code>embedding_dict</code>（每个 Node 的向量）+ <code>metadata_dict</code>（每个 Node 的元数据，供过滤）。<strong>内存里的字典——简单直接，小规模够用。</strong>persist 时序列化成 JSON。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>add 存向量</h1></div>
+            <div class="card">
+                <p><code>simple.py:174</code> 的 <code>add(nodes)</code>：遍历 Node，把 <code>node.embedding</code> 存进 <code>embedding_dict[node.id_]</code>、metadata 存进 <code>metadata_dict</code>。</p>
+                <div class="anno">读法：<b>回收 Day 07——VectorStoreIndex 的 <code>_add_nodes_to_index</code> 就是调这个 <code>add</code>。<strong>Node 必须先有 embedding（Day 06 嵌入过）才能 add。</strong>专业向量库的 add 会把向量写进它的索引结构（HNSW 图等），SimpleVectorStore 只是塞进字典。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>query 检索</h1></div>
+            <div class="card">
+                <p><code>simple.py:244-305</code> 的 <code>query(VectorStoreQuery)</code>：</p>
+<pre><code class="language-python">def query(self, query: VectorStoreQuery, **kwargs) -> VectorStoreQueryResult:
+    # 1. 按 metadata filters 和 node_ids 预过滤（缩小候选，L06）
+    query_filter_fn = build_metadata_filter_fn(...)
+    # 2. 收集通过过滤的候选向量
+    for node_id, embedding in self.data.embedding_dict.items():
+        if node_filter_fn(node_id) and query_filter_fn(node_id):
+            node_ids.append(node_id); embeddings.append(embedding)
+    # 3. 按 mode 算 top-k（DEFAULT/MMR/LEARNER）
+    query_embedding = query.query_embedding
+    if query.mode == MMR_MODE:
+        top_similarities, top_ids = get_top_k_mmr_embeddings(...)     # 多样性（L07）
+    elif query.mode == VectorStoreQueryMode.DEFAULT:
+        top_similarities, top_ids = get_top_k_embeddings(query_embedding, embeddings,
+            similarity_top_k=query.similarity_top_k, embedding_ids=node_ids)</code></pre>
+                <div class="baby"><span class="t">三步：过滤 → 算相似度 → 取 top-k</span>
+                <strong>① 先按 metadata/node_ids 缩小候选（比如"只在 2024 年的文档里找"）；② 对候选算查询向量和它们的相似度；③ 按 mode 取 top-k。</strong><code>VectorStoreQuery</code> 装了查询向量、top_k、filters、mode。返回 <code>VectorStoreQueryResult</code>（node_ids + 相似度）。<strong>SimpleVectorStore 是"暴力法"——遍历所有向量算相似度（N 个就算 N 次）。小数据没问题，百万级才需要专业库的近似算法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>top_k 相似度</h1></div>
+            <div class="card">
+                <p><code>get_top_k_embeddings</code>（Day 06 提过）：查询向量对每个候选算 cosine 相似度，排序取最高的 <code>similarity_top_k</code> 个，返回 <code>(相似度列表, node_id 列表)</code>。</p>
+                <div class="anno">读法：<b><code>similarity_top_k</code>（默认 2）就是 Day 07 <code>as_retriever(similarity_top_k=5)</code> 传的——检索返回几个 Node。<strong>取太少可能漏掉相关内容，取太多引入噪声 + 塞爆 LLM 上下文。</strong>这个值是 RAG 调优的常见旋钮。返回的 node_id + score 会被包装成 <code>NodeWithScore</code>（Day 02）。</b></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>metadata 过滤</h1></div>
+            <div class="card">
+                <p><code>simple.py:262</code> 的 <code>build_metadata_filter_fn</code>：按 <code>query.filters</code>（如 <code>{"year": 2024, "category": "finance"}</code>）先过滤 Node，只在符合条件的里面算相似度。</p>
+                <div class="baby"><span class="t">"先过滤再检索"提升精度</span>
+                <strong>纯语义检索有时不够——你想"只在财务类、2024 年的文档里找"。metadata 过滤让你先按结构化条件缩小范围（用 Day 02/03 存的 metadata），再在子集里做语义检索。</strong>比如问答机器人按用户权限过滤（只检索该用户能看的文档）。<strong>注意 SimpleVectorStore 若 persist 时没存 metadata，过滤会报错（<code>:255-259</code>）——所以 metadata 要一路带好。</strong>这是"混合检索"（结构化过滤 + 语义）的基础。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>MMR 多样性</h1></div>
+            <div class="card">
+                <p><code>simple.py:295</code> 的 <code>get_top_k_mmr_embeddings</code>（MMR = Maximal Marginal Relevance）：不只选"最相似的",还兼顾"结果之间要不同"，用 <code>mmr_threshold</code> 平衡相关性和多样性。</p>
+                <div class="baby"><span class="t">避免检索出一堆"重复内容"</span>
+                <strong>纯 top-k 可能返回 5 个几乎一样的段落（都在讲同一点）——浪费上下文、答案片面。MMR 在"相关"和"彼此不同"之间平衡：选相关的，但也避免选和已选内容太像的。</strong>这样 5 个 Node 覆盖更全面的信息。<strong><code>mmr_threshold</code> 调平衡（偏相关 or 偏多样）。</strong>还有 LEARNER 模式（<code>get_top_k_embeddings_learner</code>，用 SVM 等学习式检索）。这些高级检索模式让 RAG 结果更好。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>向量库的两个核心职责？"最近邻检索"是什么？</li>
+                    <li>query 的三步（过滤→算相似度→取 top-k）？</li>
+                    <li>similarity_top_k 取太少/太多分别有什么问题？</li>
+                    <li>metadata 过滤和 MMR 各解决什么问题？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+sed -n '48,90p' vector_stores/simple.py
+sed -n '244,305p' vector_stores/simple.py
+grep -n "def get_top_k_embeddings\|def get_top_k_mmr" indices/query/embedding_utils.py 2>/dev/null | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第 2 周收官）</strong>：<strong>其他索引类型</strong>——除了 VectorStoreIndex，还有 SummaryIndex（全量遍历）、KeywordTableIndex（关键词）、DocumentSummaryIndex、PropertyGraphIndex（知识图谱）。看它们各自适合什么场景。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day08.html" style="color:var(--accent-cyan);">&larr; Day 08</a>
+                <a href="llama-index-day10.html" style="color:#f472b6;">Day 10 · 其他索引 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

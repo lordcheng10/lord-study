@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 其他索引类型 — LlamaIndex 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        th,td{border:1px solid var(--border-color);padding:5px 8px;text-align:left;vertical-align:top}
+        th{background:var(--bg-secondary);color:#f472b6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f472b6,#38bdf8);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">其他索引 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 索引不止向量</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SummaryIndex</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · KeywordTableIndex</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · DocumentSummaryIndex</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · TreeIndex</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · PropertyGraphIndex</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 怎么选索引</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="llama-index-day11.html" class="nav-link" style="color:#38bdf8;">Day 11 检索器 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 索引/嵌入/存储</span>
+            <h1 class="part-title">其他索引类型</h1>
+            <p class="part-desc">第 2 周收官。VectorStoreIndex 最常用，但不是唯一。今天概览其他索引——SummaryIndex/KeywordTable/DocumentSummary/Tree/PropertyGraph，看它们各自的组织方式和适用场景。理解"索引类型 = 检索策略"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>索引不止向量</h1></div>
+            <div class="card">
+                <p><code>indices/</code> 目录：<code>vector_store/</code>（Day 07）、<code>list/</code>（SummaryIndex）、<code>keyword_table/</code>、<code>document_summary/</code>、<code>tree/</code>、<code>property_graph/</code>、<code>knowledge_graph/</code>、<code>struct_store/</code>（SQL 等）。</p>
+                <div class="baby"><span class="t">"索引类型"决定"怎么找"</span>
+                <strong>不同索引 = 不同的"数据组织方式" = 不同的"检索策略"。向量索引按语义找；关键词索引按词找；摘要索引先看摘要再定位；图索引按实体关系找。</strong>它们都继承 BaseIndex（Day 07 统一接口），但内部 index_struct 和检索逻辑不同。<strong>选对索引类型能大幅提升特定场景的效果。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SummaryIndex（列表索引）</h1></div>
+            <div class="card">
+                <p><code>indices/list/</code>：把所有 Node 存成一个列表，检索时<strong>遍历全部</strong>（或用 LLM/嵌入辅助选）。</p>
+                <div class="baby"><span class="t">最简单：全都要</span>
+                <strong>SummaryIndex 不做"筛选"——它把所有 Node 都拿来（或按顺序过一遍）。适合"需要综合全部内容"的场景，比如"总结这份文档"（要看全文）。</strong>缺点：文档多了慢（全遍历 + 全喂 LLM）。<strong>它的 index_struct 就是一个 Node id 列表。和 VectorStoreIndex（只取最相关几个）相反——一个"全要"，一个"精选"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>KeywordTableIndex（关键词索引）</h1></div>
+            <div class="card">
+                <p><code>indices/keyword_table/</code>：给每个 Node 抽取关键词，建"关键词 → Node"的倒排表。查询时从问题抽关键词，找含这些关键词的 Node。</p>
+                <div class="baby"><span class="t">经典的关键词/倒排检索</span>
+                <strong>这是搜索引擎式的检索——按词匹配（像 Google 早期）。适合"精确术语匹配"场景（产品型号、专有名词），这些用向量反而可能不准。</strong>缺点：不懂语义（"退款"和"退货"是不同词）。<strong>实践中常和向量检索"混合"（既按词又按语义），取长补短。</strong>关键词可用 LLM 抽或简单规则抽。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>DocumentSummaryIndex</h1></div>
+            <div class="card">
+                <p><code>indices/document_summary/</code>：给每份文档生成一个摘要，检索时先按摘要选出相关文档，再深入其 Node。</p>
+                <div class="baby"><span class="t">"两级检索"：先选文档再选段落</span>
+                <strong>当你有很多份文档（每份很长）时，直接在所有 Node 里找可能被"局部相似但整体无关"的段落误导。DocumentSummaryIndex 先用摘要判断"哪几份文档相关",再在这些文档里细找。</strong>好比先看书的目录/简介选书，再翻具体章节。<strong>提升"文档级相关性"的准确度。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>TreeIndex（树索引）</h1></div>
+            <div class="card">
+                <p><code>indices/tree/</code>：把 Node 建成树——叶子是原始 Node，上层是 LLM 生成的"子节点摘要"，层层向上。检索时从根往下走（或从叶子向上）。</p>
+                <div class="baby"><span class="t">层级摘要，支持"从粗到细"</span>
+                <strong>建树时用 LLM 把每组 Node 摘要成父节点，形成"摘要金字塔"。查询时可以从顶层摘要逐层向下定位到最相关的叶子。</strong>适合超长文档的层级导航。<strong>回想 Day 02 的 PARENT/CHILD 关系——TreeIndex 就是用它们建的层级结构。</strong>建树要调很多次 LLM（贵），但检索时能高效聚焦。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>PropertyGraphIndex（知识图谱）</h1></div>
+            <div class="card">
+                <p><code>indices/property_graph/</code>（较新，取代旧的 knowledge_graph）：用 LLM 从文档抽取"实体-关系-实体"三元组，建成知识图谱。检索时按图关系遍历（GraphRAG）。</p>
+                <div class="baby"><span class="t">GraphRAG：按"关系"检索</span>
+                <strong>普通向量检索找"语义相似的段落";但有些问题需要"多跳推理"——"A 公司的 CEO 创办的另一家公司在哪上市?"。这要顺着"CEO→创办→公司→上市地"的关系链走。</strong>PropertyGraphIndex 把文档变成知识图谱（实体是点、关系是边），检索时沿图遍历。<strong>这是 2024 年很火的 GraphRAG 方向——适合需要关系推理、多跳问答的场景。</strong>建图要大量 LLM 抽取（贵），但能回答向量检索答不了的关系型问题。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>怎么选索引</h1></div>
+            <div class="card">
+                <table>
+                    <tr><th>场景</th><th>推荐索引</th></tr>
+                    <tr><td>通用问答（默认）</td><td>VectorStoreIndex</td></tr>
+                    <tr><td>总结/需要全文</td><td>SummaryIndex</td></tr>
+                    <tr><td>精确术语匹配</td><td>KeywordTableIndex（或混合）</td></tr>
+                    <tr><td>多份长文档</td><td>DocumentSummaryIndex</td></tr>
+                    <tr><td>关系/多跳推理</td><td>PropertyGraphIndex</td></tr>
+                </table>
+                <div class="baby"><span class="t">可以组合（Router/Composable）</span>
+                <strong>不必二选一——LlamaIndex 支持"路由"（RouterQueryEngine，问题来了自动选合适的索引）和"可组合"（composability，一个索引嵌套另一个）。</strong>比如用 DocumentSummaryIndex 选文档、再用 VectorStoreIndex 在文档内检索。<strong>90% 的入门场景 VectorStoreIndex 就够——其他是特定需求的进阶选择。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手（第 2 周收官）</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周你应该能回答</h3>
+                <ul>
+                    <li>"索引类型 = 检索策略"怎么理解？</li>
+                    <li>SummaryIndex（全要）和 VectorStoreIndex（精选）的对立？</li>
+                    <li>DocumentSummaryIndex 的"两级检索"好在哪？</li>
+                    <li>PropertyGraphIndex（GraphRAG）适合什么向量检索答不了的问题？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
+ls indices/
+grep -rn "class SummaryIndex\|class KeywordTableIndex" indices/list/base.py indices/keyword_table/base.py 2>/dev/null | head
+ls indices/property_graph/</code></pre>
+                <div class="tip"><strong>下周预告 · 第 3 周</strong>：<strong>检索与查询</strong>——终于到 RAG 的"在线查询"阶段：Retriever 怎么检索、QueryEngine 怎么端到端问答、响应合成怎么把多个片段合成答案、后处理怎么重排、LLM 抽象。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="llama-index-day09.html" style="color:var(--accent-cyan);">&larr; Day 09</a>
+                <a href="llama-index-day11.html" style="color:#38bdf8;">Day 11 · 检索器 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
