@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 集成与凭证 OAuth — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .two .c{border:1px solid var(--border-color);border-radius:9px;padding:13px;background:var(--bg-secondary)}
+        .two .c h4{margin:0 0 6px;font-size:13px} .two .c.a h4{color:#22c55e} .two .c.b h4{color:#6366f1} .two .c li{font-size:11.5px;color:var(--text-secondary);margin:3px 0}
+        @media(max-width:768px){.two{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">集成与凭证 OAuth · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两类凭据</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 系统凭据托管</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 凭据存取加密</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · OAuth 登录流程</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · state 防 CSRF</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 凭据管理器</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 执行时注入回顾</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 Credits</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 API/REST &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 平台底座</span>
+            <h1 class="part-title">集成与凭证 OAuth</h1>
+            <p class="part-desc">Block 要调 Google/GitHub 等第三方服务需要凭证。Day 08 从 Block 视角看过，今天从平台管理视角：系统 vs 用户凭据、OAuth 授权流程、凭据管理器。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两类凭据</h1></div>
+            <div class="card">
+                <div class="two">
+                    <div class="c a"><h4>系统凭据（平台托管）</h4>
+                        <ul><li>平台自己出钱的一批 API key</li><li>写死固定 UUID（credentials_store.py:58）</li><li>如 openai/anthropic 的 key</li><li>用它 → 平台付费、按 credit 收你钱</li></ul>
+                    </div>
+                    <div class="c b"><h4>用户凭据</h4>
+                        <ul><li>用户自己接的账号（OAuth）或填的 key</li><li>如你自己的 GitHub 授权</li><li>加密存在用户的 UserIntegrations</li><li>用它 → 用你自己的额度</li></ul>
+                    </div>
+                </div>
+                <div class="baby"><span class="t">为什么要区分两类？</span>
+                <strong>系统凭据</strong>：让新手<strong>零配置就能用</strong>——不用自己去 OpenAI 申请 key，直接用平台的，按 credit 付费（Day 16）。<strong>用户凭据</strong>：让高级用户<strong>用自己的账号/额度</strong>——比如用你自己的 GitHub 账号发 PR（PR 显示是你发的）、用你自己的 OpenAI key（不走平台计费）。<strong>系统凭据降低上手门槛，用户凭据提供灵活性——两者兼顾。</strong><code>is_system_credential(id)</code>（<code>credentials_store.py:297</code>）判断是哪类——这正是 Day 16 平台成本追踪的判据（用系统凭据才记平台成本）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>系统凭据托管</h1></div>
+            <div class="card">
+<pre><code class="language-python"># integrations/credentials_store.py:58 —— 写死固定 UUID
+openai_credentials = APIKeyCredentials(
+    id="53c25cb8-...",          # 固定 UUID
+    provider="openai",
+    api_key=SecretStr(settings.secrets.openai_api_key),  # 平台的 key（从 env）
+    title="Use Credits for OpenAI", expires_at=None,
+)
+# 汇总成 DEFAULT_CREDENTIALS（:259），派生 SYSTEM_CREDENTIAL_IDS（:291）</code></pre>
+                <div class="anno">读法：<b>系统凭据用固定 UUID + 平台自己的 API key（从环境变量读）。</b>用户在画布上选"Use Credits for OpenAI"就是用这个——真实 key 由平台提供，用户只按 credit 付费。<code>title</code> 明确写"Use Credits"提示用户"这会消耗你的 credit"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>凭据存取（加密）</h1></div>
+            <div class="card">
+                <p><code>IntegrationCredentialsStore</code>（<code>credentials_store.py:307</code>）负责持久化——用户凭据<strong>加密存</strong>在 <code>UserIntegrations</code>。方法：<code>add_creds</code>、<code>get_all_creds</code>（会把配了环境变量的系统凭据也拼进来）、<code>get_creds_by_id</code>、<code>update_creds</code>。</p>
+                <div class="baby"><span class="t">凭据必须加密存储</span>
+                用户的 API key、OAuth token 是<strong>高度敏感</strong>的——泄漏了别人就能冒充你调服务、花你的钱。<strong>存数据库前必须加密</strong>（即使数据库被拖库，拿到的也是密文）。这和 Day 08 的 <code>SecretStr</code>（内存里防误打印）配合——<strong>凭据全生命周期都被保护：内存里 SecretStr 包裹、存储时加密、传输时只传引用（Day 08）。</strong>多层防护是敏感数据的标准做法。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>OAuth 登录流程</h1></div>
+            <div class="card">
+                <p>用户连接第三方账号（如 GitHub）走 OAuth（<code>api/features/integrations/router.py</code>）：</p>
+                <ol>
+                    <li><code>GET /{provider}/login</code>（<code>:93</code>）：生成带 state token 的授权 URL，用户跳转过去授权。</li>
+                    <li>用户在第三方页面点"同意" → 第三方带 code 回调 <code>POST /{provider}/callback</code>（<code>:182</code>）。</li>
+                    <li>验 state → <code>exchange_code_for_tokens</code> 用 code 换 access/refresh token → 存库。</li>
+                </ol>
+                <div class="baby"><span class="t">OAuth 是什么？为什么不直接要密码？</span>
+                OAuth 是"<strong>授权而不给密码</strong>"的标准协议。你要让 AutoGPT 代表你操作 GitHub，<strong>不是把 GitHub 密码告诉 AutoGPT</strong>（危险！），而是：跳转到 GitHub → GitHub 问你"同意 AutoGPT 访问吗" → 你同意 → GitHub 给 AutoGPT 一个<strong>令牌（token）</strong>。这个令牌权限有限、可随时撤销、不等于密码。<strong>OAuth 让第三方应用"有限地代表你行动"，而你的密码从不外泄——这是现代授权的基石。</strong>每个第三方一个 handler（<code>integrations/oauth/google.py</code>/<code>github.py</code>/...，都继承 <code>BaseOAuthHandler</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>state 防 CSRF</h1></div>
+            <div class="card">
+                <p>OAuth login 生成一个 <code>state</code> token（<code>credentials_store.py:530</code> 的 <code>store_state_token</code>），callback 时 <code>verify_state_token</code>（<code>:575</code>）校验，还带 PKCE code challenge。</p>
+                <div class="baby"><span class="t">state 防的是什么攻击？</span>
+                CSRF（跨站请求伪造）——攻击者可能伪造一个 OAuth 回调，把<strong>他的</strong>账号 token 塞给<strong>你的</strong>会话（让你的 Agent 用了攻击者的账号，或反之）。<strong>state 是登录时生成的随机值，回调时校验"这个回调确实对应我发起的那次登录"</strong>——伪造的回调没有正确的 state，被拒。PKCE 是进一步的防护（防授权码被截获）。<strong>OAuth 流程里 state 校验是安全必备——少了它就有账号劫持风险。</strong>安全无小事，尤其涉及第三方授权。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>凭据管理器（Day 08 复习+平台视角）</h1></div>
+            <div class="card">
+                <p><code>IntegrationCredentialsManager</code>（<code>creds_manager.py:74</code>）是执行时用的门面，职责：<strong>按需刷新 OAuth token + 分布式锁保证同一凭据同一时刻只被一个 Block 用</strong>（Day 08 讲过）：</p>
+                <ul>
+                    <li><code>get()</code>（<code>:125</code>）：取凭据，OAuth2 快过期就 <code>refresh_if_needed()</code>。</li>
+                    <li><code>_refresh_locked()</code>（<code>:207</code>）：加锁调 <code>oauth_handler.refresh_tokens()</code> 换新 token 存回。</li>
+                    <li><code>acquire()</code>（<code>:145</code>）：取凭据 + 拿系统级读写锁。</li>
+                </ul>
+                <div class="glossary"><b>MCP 是特例</b>：endpoint 动态发现，用 <code>create_mcp_oauth_handler()</code>（<code>:347</code>）从凭据 metadata 现场重建 handler。<strong>整套凭据管理（引用/实体分离 + 加密存储 + 自动刷新 + 加锁）保证了"Block 安全地用第三方服务"——这是可视化 Agent 平台能安全地接入几百个服务的基础。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>执行时注入回顾</h1></div>
+            <div class="card">
+                <p>Day 05/08 讲过的执行时注入（<code>executor/manager.py:263</code>），串起整条凭据链：</p>
+<pre><code class="language-python">credentials, lock = await creds_manager.acquire(user_id, credentials_meta.id)
+extra_exec_kwargs[field_name] = credentials
+# ... block.execute(input_data, **extra_exec_kwargs)  # 注入到 run
+</code></pre>
+                <div class="glossary"><b>完整凭据链（三天串起来）</b>：Block 声明凭据字段（Day 08）→ 用户连接账号走 OAuth 存加密凭据（今天 L04）或用系统凭据（L02）→ 执行时 <code>acquire</code> 取出解密、刷新、加锁的凭证注入 run（Day 05）→ Block 用它调 API →（用系统凭据则记平台成本，Day 16）。<strong>Day 05/08/16/17 讲的是同一条凭据/计费链的不同环节——现在你能看清全貌了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>系统凭据 vs 用户凭据各解决什么？</li>
+                    <li>凭据为什么要加密存储 + SecretStr + 只传引用（多层防护）？</li>
+                    <li>OAuth 为什么"授权而不给密码"？</li>
+                    <li>state token 防什么攻击？</li>
+                    <li>凭据管理器的职责？完整凭据链怎么串？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend/integrations
+grep -n 'openai_credentials\|SYSTEM_CREDENTIAL_IDS\|is_system_credential' $P/credentials_store.py
+grep -n 'def get\|def acquire\|def refresh_if_needed' $P/creds_manager.py
+grep -n 'login\|callback\|store_state_token' $P/../api/features/integrations/router.py | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>API / REST 层</strong>——FastAPI 应用结构、进程编排、主要端点（建图/执行/商店）、付费墙 402、Store 市场。看平台对外的门面。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 Credits</a>
+                <a href="autogpt-day18.html" style="color:var(--accent-green);">Day 18 · API/REST &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

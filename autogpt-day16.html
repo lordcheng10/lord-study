@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · Credits 积分计费 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">Credits 积分计费 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 计费全景</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 预扣 charge_usage</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 对账 reconciled</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 原子 SQL 扣费</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Stripe 充值闭环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 自动充值</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 平台成本追踪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 WebSocket</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 集成凭证 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 平台底座</span>
+            <h1 class="part-title">Credits 积分计费</h1>
+            <p class="part-desc">AutoGPT Platform 与经典最大的区别——它是计量收费 SaaS。今天深入计费：两阶段扣费、原子 SQL 保余额正确、Stripe 充值闭环。这是平台的"钱袋子"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>计费全景</h1></div>
+            <div class="card">
+                <p>用户余额存 <code>UserBalance</code> 表，每笔变动记一条 <code>CreditTransaction</code>（充值 TOP_UP / 赠送 GRANT / 消费 USAGE）。Day 09 学了"每个 Block 值多少 credit"，今天学"执行时怎么扣、怎么充"。</p>
+                <div class="baby"><span class="t">计费系统 = 一个"账本"</span>
+                核心就是一个账本：<strong>余额（现在有多少钱）+ 流水（每笔进出记录）。</strong>充值 → 加余额、记一条 TOP_UP 流水；跑 Block → 扣余额、记一条 USAGE 流水。任何时刻余额 = 所有流水之和。<strong>金融系统的铁律：每一分钱的变动都要有流水记录（可审计、可对账）。</strong>Day 09 的价格表 + 今天的扣费/充值 = 完整的计费闭环。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>预扣 charge_usage</h1></div>
+            <div class="card">
+                <p>节点运行<strong>前</strong>，<code>charge_usage()</code>（<code>executor/billing.py:118</code>）按 pre-flight 估算扣费：</p>
+<pre><code class="language-python">remaining_balance = db_client.spend_credits(
+    user_id=..., cost=cost,
+    metadata=UsageTransactionMetadata(graph_exec_id=..., block=block.name, ...))
+# 动态计费 block（pre-flight=0）会检查余额必须为正，否则抛 InsufficientBalanceError</code></pre>
+                <div class="anno">读法：<b>执行前先按估算扣一笔（Day 09 的静态成本准、动态成本用历史均值估）。</b>动态 Block 即使预扣 0，也要检查"余额为正才放行"——防止用户零余额还白嫖真实 API 开销。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>对账 charge_reconciled_usage</h1></div>
+            <div class="card">
+                <p>Block 跑完拿到真实用量，<code>charge_reconciled_usage()</code>（<code>billing.py:200</code>）算 delta = 真实 - 预扣：</p>
+<pre><code class="language-python">delta = post_flight - pre_flight
+if delta == 0: return
+# delta > 0 → 补扣（fail_insufficient_credits=False，允许扣成负余额！）
+# delta < 0 → 退款（比如 token 实际用得少）
+spend_credits(..., cost=delta, fail_insufficient_credits=False)</code></pre>
+                <div class="anno">读法：<b>Day 05/09 讲的"预扣+对账"在这兑现——执行后按真实用量多退少补。</b>注意补扣时 <code>fail_insufficient_credits=False</code>：<strong>允许扣成负余额</strong>！因为服务已经消耗了（平台已付钱给供应商），宁可记用户欠款，也不能漏账。</div>
+                <div class="baby"><span class="t">"允许负余额"是什么财务考量？</span>
+                预扣时估少了，执行后发现真实成本更高，要补扣——但用户余额可能已经不够补了。<strong>如果这时"余额不足就不扣"，平台就白干了（钱花出去了却没收回）。所以补扣<strong>强制执行、允许扣成负数</strong>——记为用户欠款，下次充值时先还。</strong>这是"服务已消耗必须记账"的财务正确性优先于"余额不能为负"的直觉。<strong>金融系统里，正确性（不漏账）压倒一切。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>原子 SQL 扣费（最关键）</h1></div>
+            <div class="card">
+                <p>所有余额变动走 <code>_add_transaction()</code>（<code>data/credit.py:501</code>），用一整条 PostgreSQL <strong>CTE + FOR UPDATE 行锁</strong>保证原子性（<code>:583</code>）：</p>
+<pre><code class="language-python"># 一条 SQL 里原子地：
+# (a) 锁住并读取余额（FOR UPDATE）
+# (b) 更新 UserBalance（带上溢/下溢保护）
+# (c) 插入 CreditTransaction 流水
+# 余额不足时 WHERE ... balance + $2 >= 0 让更新落空 → 抛 InsufficientBalanceError</code></pre>
+                <div class="baby"><span class="t">为什么扣费必须原子？</span>
+                想象两个执行同时扣同一用户的钱。如果"读余额→计算→写余额"分三步，可能：都读到余额 100，都算"扣 60 后剩 40"，都写 40——<strong>实际扣了 120 却只显示扣了 60（丢了 60 的账）。</strong>这在金融系统是灾难。<strong>用一条 SQL（CTE + FOR UPDATE 行锁）把"读+算+写+记流水"锁成一个原子操作——同一时刻只有一个扣费能进行，杜绝竞态。</strong>源码注释明确："金融操作正确性优先于性能，宁可接受 10-50ms 行锁延迟"。<strong>钱的事，慢一点也要对。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Stripe 充值闭环</h1></div>
+            <div class="card">
+                <p>充值三步（<code>data/credit.py</code>）：</p>
+                <ol>
+                    <li><code>top_up_intent()</code>（<code>:1123</code>）：调 <code>stripe.checkout.Session.create()</code> 生成支付页，插一条 <code>is_active=False</code> 的 TOP_UP 流水（未生效）。</li>
+                    <li>用户付款完成 → Stripe 回调 → <code>fulfill_checkout()</code>（<code>:1199</code>）：若 <code>payment_status="paid"</code> 就 <code>_enable_transaction()</code> 激活那条流水、真正加到余额。</li>
+                    <li>Webhook 入口 <code>stripe_webhook()</code>（<code>api/features/v1.py:1381</code>）：<code>construct_event()</code> 验签 + 事件去重（防 Stripe 重试重复入账）。</li>
+                </ol>
+                <div class="baby"><span class="t">为什么充值要"先记未生效、付款后才激活"？</span>
+                因为"创建支付会话"和"用户真的付了钱"是<strong>两个时刻</strong>（用户可能创建了会话但没付）。<strong>先记一条 is_active=False 的流水（占位、待确认），等 Stripe 确认"钱到账了"（webhook 回调）才激活加余额。</strong>这保证"只有真付了钱才加余额"。<strong>验签 + 事件去重</strong>防两类攻击/问题：验签防伪造回调（别人假装 Stripe 说"用户付款了"）、去重防 Stripe 重试导致重复加钱。<strong>和钱有关的外部回调，验签和幂等（去重）是必须的。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>自动充值</h1></div>
+            <div class="card">
+                <p><code>spend_credits()</code>（<code>credit.py:739</code>）扣完后检查是否触发<strong>自动充值</strong>（<code>:757</code>）：余额低于 <code>auto_top_up.threshold</code> 就自动走 Stripe 补钱。还有余额预警 <code>handle_low_balance()</code>（<code>billing.py:455</code>，跌破阈值发邮件+Discord）。</p>
+                <div class="baby"><span class="t">自动充值解决什么？</span>
+                对"持续运行"的 Agent（Day 14 的定时任务），你不希望半夜余额耗尽、任务失败。<strong>自动充值 = "余额低于阈值就自动刷卡补钱"</strong>——保证 Agent 不断电。这对"托管的、无人值守的 Agent"很重要。配合余额预警（快没钱了先通知你），用户体验友好。<strong>计量 SaaS 的贴心设计：既要收费，也要保证用户的 Agent 不因缺钱意外中断。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>平台成本追踪（内部盈亏）</h1></div>
+            <div class="card">
+                <p><code>executor/cost_tracking.py</code> 是<strong>给平台自己算成本用的</strong>（不是给用户扣费）。当 Block 用<strong>平台系统凭据</strong>（Day 17）时，<code>log_system_credential_cost()</code>（<code>:200</code>）记录这次调用真实消耗了平台多少钱。</p>
+                <div class="baby"><span class="t">"向用户收费"和"平台自己的成本"是两笔账</span>
+                <strong>向用户收费</strong>（前面讲的 credit 扣费）：按 Day 09 价格表（含 1.5x 毛利）向用户收。<strong>平台成本</strong>（这里）：平台用自己的 API key 替用户调服务，真实花了多少钱（供应商价）。<strong>两者之差就是平台毛利。</strong>成本追踪让平台能算清"这个 Block/这个用户，我赚了还是亏了"——运营/定价决策的数据基础。它是 best-effort 异步写入，绝不影响 Block 执行。<strong>一个认真的 SaaS 必须同时记"收入账"和"成本账"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>计费账本由什么组成？（余额 + 流水）</li>
+                    <li>预扣 + 对账为什么？补扣为什么允许负余额？</li>
+                    <li>扣费为什么必须原子（CTE+行锁）？</li>
+                    <li>Stripe 充值为什么"先记未生效、付款后激活"？验签/去重防什么？</li>
+                    <li>自动充值解决什么？平台成本追踪和用户扣费什么关系？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+grep -n 'def charge_usage\|def charge_reconciled_usage' $P/executor/billing.py
+sed -n '501,660p' $P/data/credit.py | head -50       # _add_transaction 原子 SQL
+grep -n 'def top_up_intent\|def fulfill_checkout\|def spend_credits' $P/data/credit.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>集成与凭证 OAuth</strong>（平台视角）——系统凭据 vs 用户凭据、OAuth handler、凭证管理器加锁刷新、执行时注入。Day 08 从 Block 视角看过，今天从平台管理视角。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 WebSocket</a>
+                <a href="autogpt-day17.html" style="color:var(--accent-green);">Day 17 · 集成凭证 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
