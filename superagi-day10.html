@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · LLM 抽象 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#3b82f6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">LLM 抽象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · BaseLlm 统一接口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · OpenAi 实现</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 自动重试退避</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 适配器抹平差异</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工厂选实现</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 统一返回格式</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · token 计数</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 输出解析</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 工具深入 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周 Agent 执行（收官）</span>
+            <h1 class="part-title">LLM 抽象</h1>
+            <p class="part-desc">第2周收官。大模型是智能体的"大脑"。今天读 <code>llms/</code>：BaseLlm 统一接口、适配器抹平各家 API 差异、工厂选实现、自动重试、token 计数。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>BaseLlm 统一接口</h1></div>
+            <div class="card">
+                <p><code>BaseLlm</code>（<code>llms/base_llm.py:4</code>）是纯抽象基类，所有厂商实现（OpenAI/Palm/Replicate/HuggingFace/本地）必须实现这几个方法：</p>
+<pre><code class="language-python">class BaseLlm(ABC):
+    @abstractmethod
+    def chat_completion(self, prompt): ...   # ★ 核心：发消息、拿回复
+    @abstractmethod
+    def get_source(self): ...                # 厂商标识
+    @abstractmethod
+    def get_model(self)/get_models(self): ...
+    @abstractmethod
+    def verify_access_key(self): ...         # 校验密钥</code></pre>
+                <div class="anno">读法：<b>核心就一个 <code>chat_completion(messages)</code>——发一组消息、拿回复。</b>Agent 和工具（Day 03 的 ThinkingTool 等）只依赖 <code>BaseLlm</code>，<strong>从不直接 import openai</strong>——换厂商时业务代码一行不改。</div>
+                <div class="baby"><span class="t">"面向接口"的经典收益</span>
+                这是策略模式：<code>BaseLlm</code> 是接口，多个厂商是可替换的策略。<strong>Agent 逻辑里写 <code>self.llm.chat_completion(...)</code>——它不知道也不关心背后是 GPT-4 还是 Palm 还是本地模型。</strong>想换模型？注入不同的 <code>BaseLlm</code> 实现即可。这和 eino/CrewAI/AutoGPT 的 LLM 抽象完全同构——<strong>五个框架都用"统一 LLM 接口"来解耦"用哪个模型"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>OpenAi 实现</h1></div>
+            <div class="card">
+<pre><code class="language-python"># llms/openai.py:73 chat_completion（简化）
+def chat_completion(self, messages, max_tokens=...):
+    response = openai.ChatCompletion.create(
+        n=self.number_of_results, model=self.model, messages=messages,
+        temperature=self.temperature, max_tokens=max_tokens, top_p=self.top_p, ...)
+    content = response.choices[0].message["content"]
+    return {"response": response, "content": content}</code></pre>
+                <div class="anno">读法：<b>OpenAi 实现把 <code>chat_completion</code> 落到 <code>openai.ChatCompletion.create</code>，返回统一的 <code>{"response":..., "content":...}</code> 字典。</b>构造函数（<code>:20</code>）收集所有模型参数（temperature/max_tokens/top_p/penalty…）。<code>get_models</code>（<code>:131</code>）过滤出支持的模型（gpt-4/gpt-3.5-turbo…）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>自动重试退避</h1></div>
+            <div class="card">
+                <p><code>chat_completion</code> 上挂着 <code>@retry</code>（tenacity 库，<code>openai.py:62</code>）：</p>
+<pre><code class="language-python">@retry(
+    retry=(retry_if_exception_type(RateLimitError) | Timeout | TryAgain),
+    stop=stop_after_attempt(5),                       # 最多 5 次
+    wait=wait_random_exponential(min=30, max=300))    # 30~300s 指数退避
+def chat_completion(self, messages, ...): ...</code></pre>
+                <div class="baby"><span class="t">为什么 LLM 调用必须自动重试？</span>
+                调 LLM API 经常遇到 <strong>限流（RateLimitError）</strong>和<strong>超时</strong>——尤其智能体高频调用时。如果一遇限流就失败，智能体动不动就断。<strong><code>@retry</code> 自动重试 + 指数退避（等待时间越来越长，避免"越限流越猛打"）——遇到限流/超时自动等一会再试，最多 5 次。</strong>这是生产级 LLM 调用的必备防御。<strong>面对不稳定的外部依赖（LLM API），自动重试是韧性的关键。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>适配器抹平差异（精髓）</h1></div>
+            <div class="card">
+                <p>各家 API 长得不一样。<code>GooglePalm</code>（<code>llms/google_palm.py:45</code>）——Palm 用 <code>generate_text</code> + 单个 prompt 字符串，没有"消息数组"概念。它在 <code>chat_completion</code> 里做适配：</p>
+<pre><code class="language-python">def chat_completion(self, messages, ...):
+    # 把 OpenAI 风格的 messages 数组"压平"成一段 prompt 文本
+    prompt = "\n".join(["`" + m["role"] + "`: " + m["content"] for m in messages])
+    completion = palm.generate_text(model=..., prompt=prompt, ...)
+    return {"response": completion, "content": completion.result}   # 仍返回统一格式</code></pre>
+                <div class="baby"><span class="t">🎯 这是整个抽象层的精髓</span>
+                Palm 的原生 API 和 OpenAI 完全不同（Palm 只吃一段 prompt 字符串，不吃消息数组）。<strong>但 <code>chat_completion(messages)</code> 的入参格式（消息数组）和出参格式（统一字典）被 SuperAGI 强行统一——Palm 内部把消息数组"压平"成带角色标注的 prompt，对外却和 OpenAI 表现一致。</strong>这就是适配器（Adapter）模式：<strong>调用方永远用同一套方式，各家 API 的差异全被封在各自实现的 <code>chat_completion</code> 里。</strong>换厂商，业务零改动。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工厂选实现</h1></div>
+            <div class="card">
+                <p><code>get_model</code>（<code>llms/llm_model_factory.py:12</code>）——按 provider 名返回对应实现：</p>
+<pre><code class="language-python">def get_model(organisation_id, api_key, model="gpt-3.5-turbo", **kwargs):
+    provider_name = 查 DB 确定该模型属于哪个 provider
+    if provider_name == 'OpenAI':      return OpenAi(...)
+    elif provider_name == 'Replicate': return Replicate(...)
+    elif provider_name == 'Google Palm': return GooglePalm(...)
+    elif provider_name == 'Local LLM': return LocalLLM(...)
+    # 返回类型统一是 BaseLlm</code></pre>
+                <div class="anno">读法：<b>工厂方法——调用方只给"模型名 + 密钥"，工厂查 DB 确定 provider、返回对应的 BaseLlm 子类。</b>拿到手后调用方不用管是哪家（返回类型都是 BaseLlm）。Day 03 的 <code>ToolBuilder</code> 就是通过 <code>get_model</code> 拿 LLM 再注入给工具的 <code>tool.llm</code>——工具系统和 LLM 抽象在这里闭环。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>统一返回格式</h1></div>
+            <div class="card">
+                <p>所有实现的 <code>chat_completion</code> 都返回 <code>{"response":..., "content":...}</code>；出错时返回 <code>{"error":..., "message":...}</code>。</p>
+                <div class="baby"><span class="t">统一返回格式的价值</span>
+                调用方（工具、迭代步）拿到结果，只需：想要文本读 <code>result["content"]</code>、判断成败看 <code>'error' in result</code>——<strong>不管底层是哪家模型，处理方式完全一样。</strong>回忆 Day 03 的 <code>ThinkingTool._execute</code> 里 <code>result["content"]</code>、Day 09 判断失败——都依赖这个统一格式。<strong>统一入参（messages）+ 统一出参（字典）= 调用方彻底不用管厂商差异。</strong>这是抽象层给上层的最大礼物。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>token 计数</h1></div>
+            <div class="card">
+                <p><code>TokenCounter</code>（<code>helper/token_counter.py:11</code>）用 OpenAI 的 <code>tiktoken</code> 数 token。<code>count_message_tokens</code>（<code>:37</code>）按官方规则给每条消息加固定开销；<code>count_text_tokens</code>（<code>:85</code>）数纯文本；<code>token_limit</code>（<code>:17</code>）查各模型上下文上限。</p>
+                <div class="baby"><span class="t">为什么处处要数 token？</span>
+                LLM 有<strong>硬性上下文长度限制</strong>（比如 8K/32K token）且<strong>按 token 计费</strong>。框架在拼 prompt、塞历史、截断工具输出前，都要先算清楚 token 数——<strong>避免超限报错（内容塞不下）、避免浪费钱（塞太多）。</strong>Day 08 的滚动记忆压缩（超预算才压缩）、Day 03 工具的 max_token_limit（限制输出），都靠 TokenCounter 算。<strong>token 是 LLM 应用的"计量单位"，管好它是成本和可靠性的基础。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 2 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 2 周（Day 06-10）你已吃透 Agent 执行</h3>
+                <ul>
+                    <li><b>Day 06</b> 执行循环：两级 step、think→act→observe</li>
+                    <li><b>Day 07</b> 工作流：数据驱动有向图、条件路由、LLM 当路由器</li>
+                    <li><b>Day 08</b> 提示词构建：模板+变量、滚动记忆压缩</li>
+                    <li><b>Day 09</b> 输出解析：AgentGPTAction、容错、自我纠错</li>
+                    <li><b>Day 10</b> LLM 抽象：统一接口、适配器、工厂、重试、token</li>
+                </ul>
+                <p style="margin-top:8px">你已理解智能体"怎么想、怎么被驱动、怎么调模型"。下周（Day 11-15）进入 <strong>工具/记忆/资源</strong>——工具体系、工具市场、向量记忆、资源管理、数据模型。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi/llms
+cat base_llm.py
+sed -n '62,115p' openai.py                 # @retry + chat_completion
+sed -n '45,75p' google_palm.py             # 适配器抹平差异
+sed -n '12,55p' llm_model_factory.py       # 工厂
+sed -n '37,98p' ../helper/token_counter.py # token 计数</code></pre>
+                <div class="tip"><strong>下周预告 · Day 11</strong>：深入 <strong>工具体系</strong>——base_tool 完整、Toolkit、真实工具精读、@tool 装饰器把普通函数变工具。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 输出解析</a>
+                <a href="superagi-day11.html" style="color:var(--accent-green);">Day 11 · 工具深入 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
