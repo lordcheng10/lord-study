@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · API controllers — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">API controllers · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · FastAPI 装配</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 控制器分组</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 创建智能体</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 发起运行（入队）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Feed 与权限</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工具市场端点</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 前端驱动链路</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 数据模型</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day17.html" class="nav-link" style="color:var(--accent-green);">Day 17 Celery &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 平台/异步/生态</span>
+            <h1 class="part-title">API controllers</h1>
+            <p class="part-desc">平台对外的门面。今天读 <code>controllers/</code>（28 个）：FastAPI 装配、主要端点、前端怎么通过 API 创建和运行智能体。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>FastAPI 装配</h1></div>
+            <div class="card">
+                <p><code>main.py:62</code> <code>app = FastAPI()</code>，<code>:109-137</code> 用 <code>include_router</code> 把 30+ 控制器挂到不同前缀（<code>/agents</code>、<code>/agentexecutions</code>、<code>/tools</code>…）。用 <code>fastapi-jwt-auth</code> 做 JWT 登录、<code>FastAPI-SQLAlchemy</code> 中间件管 DB session。</p>
+                <div class="anno">读法：<b>main.py 是装配点——把各功能模块的路由聚合到一个 FastAPI app，加 JWT 鉴权和 DB session 管理。</b>几乎所有接口都 <code>Depends(check_auth)</code> 鉴权、通过 <code>fastapi_sqlalchemy.db.session</code> 访问数据库。<strong>和 AutoGPT/OpenHands 的 include_router 模块化装配一致。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>控制器分组</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>控制器</th><th>前缀</th><th>管什么</th></tr>
+                    <tr><td>agent.py</td><td>/agents</td><td>智能体定义与调度</td></tr>
+                    <tr><td>agent_execution.py</td><td>/agentexecutions</td><td>一次运行的生命周期</td></tr>
+                    <tr><td>agent_execution_feed.py</td><td>/agentexecutionfeeds</td><td>GUI 拿实时进度</td></tr>
+                    <tr><td>agent_execution_permission.py</td><td>/agentexecutionpermissions</td><td>人工审批</td></tr>
+                    <tr><td>tool.py / toolkit.py</td><td>/tools /toolkits</td><td>工具 + 工具市场</td></tr>
+                    <tr><td>resources.py</td><td>/resources</td><td>文件上传/读取</td></tr>
+                    <tr><td>project.py / organisation.py</td><td>/projects /organisations</td><td>多租户层级</td></tr>
+                    <tr><td>config.py</td><td>/configs</td><td>组织级配置</td></tr>
+                </table>
+                <div class="glossary">每个控制器一个 <code>APIRouter()</code>，用 Pydantic 的 <code>*Out</code>/<code>*In</code> 定义出入参。<strong>按功能拆分——清晰、易维护、不同团队管不同模块。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>创建智能体</h1></div>
+            <div class="card">
+                <p><code>POST /agents/create</code>（<code>controllers/agent.py:60</code> <code>create_agent_with_config</code>）：</p>
+<pre><code class="language-python"># 接收 AgentConfigInput（name/project_id/goal/constraints/tools/toolkits/model/max_iterations/...）
+# ① 校验 project 和 tools（:89-97）
+# ② Agent.create_agent_with_config 落库
+# ③ 立刻建一条 AgentExecution（status='CREATED'，:109）
+# ④ 把 goal/tools/model 写进 AgentExecutionConfiguration</code></pre>
+                <div class="anno">读法：<b>"在 GUI 点 Create Agent"背后就是这个接口——同时创建"定义"（Agent+配置）和"第一次运行"（AgentExecution）。</b>还有 <code>/agents/schedule</code>（创建并定时）、<code>/get/project/{id}</code>（列项目下智能体，标记 is_running/is_scheduled）、软删除。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>发起运行（入队）</h1></div>
+            <div class="card">
+                <p><code>POST /agentexecutions/add</code>（<code>controllers/agent_execution.py:65</code>）——发起运行的关键：</p>
+<pre><code class="language-python"># 建 AgentExecution → status 改成 RUNNING → 关键一步（:148）：
+execute_agent.delay(db_agent_execution.id, datetime.now())   # 丢进 Celery 队列
+# API 立即返回，不阻塞</code></pre>
+                <div class="anno">读法：<b><code>.delay()</code> 把运行任务推给 Celery（Day 17），API 秒回。</b>真正的执行由后台 worker 领走（Day 05 追踪过）。<code>PUT /update/{id}</code>（<code>:322</code>）用于暂停/继续——恢复时同样再 <code>execute_agent.delay()</code>。</div>
+                <div class="baby"><span class="t">API 层的核心职责</span>
+                API 层<strong>不亲自跑智能体</strong>——它只负责"建记录、改状态、入队、返回"。<strong>把慢的执行推给 Celery，自己保持轻快响应。</strong>这是"接单/干活分离"（Day 01/04）在 API 层的落地。所有"发起/恢复运行"的接口最后都汇到 <code>execute_agent.delay()</code>——单一执行入口。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Feed 与权限</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>/agentexecutionfeeds</code>：GUI <strong>轮询</strong>这里拿智能体每一步的 feed（思考/动作/结果），实现"实时展示"（Day 05）。</li>
+                    <li><code>/agentexecutionpermissions</code>：智能体配了需人工审批时，某步停在 <code>WAITING_FOR_PERMISSION</code>，用户在 GUI 批准/拒绝走这里。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么用轮询而非 WebSocket？</span>
+                SuperAGI 的 GUI <strong>定期问后端"有新 feed 吗"</strong>（轮询），而非 AutoGPT/OpenHands 的 WebSocket 推送。轮询更简单（不用维护长连接），代价是有轮询间隔的延迟、和额外请求。<strong>对"看智能体思考流"这种秒级更新够用了。</strong>权限接口则实现 HITL——智能体停下等人点头（又见人工审批，五框架一致）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>工具市场端点</h1></div>
+            <div class="card">
+                <p><code>toolkit.py</code>（<code>/toolkits</code>）提供整套市场交互：<code>/marketplace/list/{page}</code>（列市场工具）、<code>/marketplace/details</code>、<code>/marketplace/readme</code>、<code>/get/install/{toolkit_name}</code>（安装）、本地安装、更新检查。</p>
+                <div class="glossary">这就是 Day 12 工具市场的 API 层——GUI 通过这些端点浏览、查看、安装工具包。<code>resources.py</code>（<code>/resources</code>）则处理文件上传（<code>POST /add/{agent_id}</code>，上传后触发后台 <code>summarize_resource</code> 任务，Day 14/17）。<strong>API 把 Day 12-14 的能力（工具市场、资源）暴露给前端。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>前端驱动链路</h1></div>
+            <div class="card">
+                <p>把 API 串成前端的完整操作链：</p>
+<pre><code class="language-bash">GUI → POST /agents/create        定义智能体（+ 自动建 Execution）
+    → POST /agentexecutions/add   发起运行（execute_agent.delay 入队）
+    → 轮询 GET /agentexecutionfeeds  看智能体一步步的进度
+    → （需要时）POST /agentexecutionpermissions  批准/拒绝敏感动作</code></pre>
+                <div class="anno">读法：<b>前端的每个功能都对应这些 API 端点。创建、运行、监控、审批——一条完整的用户操作链。</b>结构规律：APIRouter + Pydantic 出入参 + JWT 鉴权 + DB session。<strong>这就是 GUI 和后端之间的完整接口契约。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>main.py 怎么装配 FastAPI app？鉴权/DB 怎么处理？</li>
+                    <li>主要控制器有哪些？/agents/create 做什么？</li>
+                    <li>/agentexecutions/add 的关键一步（入队）？API 为什么不阻塞？</li>
+                    <li>Feed 为什么用轮询？权限接口实现什么？</li>
+                    <li>前端驱动智能体的完整 API 链路？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+grep -n 'include_router' main.py | head
+grep -n 'def create_agent_with_config' $P/controllers/agent.py
+grep -n 'execute_agent.delay' $P/controllers/agent_execution.py
+ls $P/controllers/ | head -28</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>Celery 异步执行</strong>——平台的核心！worker 怎么跑智能体循环、self-reschedule（自我重排）、Celery beat 定时调度、其它后台任务。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 数据模型</a>
+                <a href="superagi-day17.html" style="color:var(--accent-green);">Day 17 · Celery &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

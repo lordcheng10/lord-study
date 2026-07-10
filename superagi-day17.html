@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Celery 异步执行 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .loop{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .loop .n{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);text-align:center}
+        .loop .a{color:#f59e0b;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Celery 异步执行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么异步</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · execute_agent 任务</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 自我重排循环</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 自动重试</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Celery beat 定时</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 定时智能体</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 其它后台任务</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 API</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 GUI &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 平台/异步/生态</span>
+            <h1 class="part-title">Celery 异步执行</h1>
+            <p class="part-desc">平台的核心机制。智能体的自主循环在 Celery 后台 worker 里跑（不阻塞 API）。今天读 <code>worker.py</code> + <code>jobs/</code>，看"循环在队列里"如何实现。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么异步</h1></div>
+            <div class="card">
+                <p>一个自主智能体要循环很多轮（每轮调 LLM、可能几十秒），<strong>绝不能卡在 HTTP 请求里</strong>。所以 SuperAGI 把"运行智能体"变成 Celery 后台任务。</p>
+                <div class="baby"><span class="t">同步 vs 异步的天壤之别</span>
+                如果智能体在 HTTP 请求里同步跑：用户点"运行"，浏览器就转圈等几分钟（甚至超时断开）、服务器一个请求占用几分钟。<strong>异步：API 收到"运行"请求，把任务丢进 Celery 队列、秒回；后台 worker 慢慢跑；用户轮询看进度。</strong>API 保持轻快、能扛高并发，长任务在后台可靠执行。<strong>对"长时间自主任务"，异步是唯一正确选择</strong>——AutoGPT（MQ+executor）、OpenHands（双进程）都这么做。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>execute_agent 任务</h1></div>
+            <div class="card">
+                <p><code>worker.py:66</code>——智能体的每一步是一个 Celery task：</p>
+<pre><code class="language-python">@app.task(name="execute_agent", autoretry_for=(Exception,), retry_backoff=2, max_retries=5)
+def execute_agent(agent_execution_id: int, time):
+    from superagi.jobs.agent_executor import AgentExecutor
+    handle_tools_import()
+    AgentExecutor().execute_next_step(agent_execution_id=agent_execution_id)</code></pre>
+                <div class="anno">读法：<b>Day 16 的 <code>execute_agent.delay(...)</code> 就是把这个任务推给 Redis 队列，某个 worker 领走执行。</b>注意它叫 <code>execute_next_step</code>（<strong>下一步</strong>）——不是"跑到底"，只跑一步（Day 06）。broker 和 backend 都指向 Redis（<code>worker.py:25</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>自我重排循环（核心中的核心）</h1></div>
+            <div class="card">
+                <p><code>AgentExecutor.execute_next_step</code>（<code>jobs/agent_executor.py:39</code>）跑完一步，若没完成就<strong>再排一个任务给自己</strong>（<code>:94</code>）：</p>
+                <div class="loop">
+                    <span class="n">worker 跑第 N 步</span><span class="a">→</span>
+                    <span class="n">apply_async(countdown=2)</span><span class="a">→</span>
+                    <span class="n">Redis 队列</span><span class="a">→</span>
+                    <span class="n">worker 跑第 N+1 步</span><span class="a">↺</span>
+                </div>
+<pre><code class="language-python">if agent_execution.status in ("COMPLETED", "WAITING_FOR_PERMISSION"):
+    return
+superagi.worker.execute_agent.apply_async((agent_execution_id, datetime.now()), countdown=2)</code></pre>
+                <div class="baby"><span class="t">"循环 = 任务反复自我重新调度"</span>
+                这是 SuperAGI 最精妙的设计（Day 02/05 反复强调）：<strong>不是一个进程里的大 while 循环，而是"每跑一步就排下一步任务"——Celery 任务链自我延续。</strong>进度存 DB（current_agent_step_id）、对话存 Feed。<strong>好处：① 进程可断可恢复（状态都持久化）；② 多 worker 能水平扩展；③ 崩溃不丢进度；④ 天然支持暂停/审批挂起（status 变了就不再重排）。</strong><code>countdown=2</code> 让每步之间隔 2 秒——避免打爆 LLM API。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>自动重试</h1></div>
+            <div class="card">
+                <p><code>execute_agent</code> 任务本身配了 <code>autoretry_for=(Exception,), retry_backoff=2, max_retries=5</code>；<code>execute_next_step</code> 出错时也 <code>apply_async(countdown=15)</code> 延迟重试（<code>agent_executor.py:89</code>）。</p>
+                <div class="baby"><span class="t">两层重试保障</span>
+                智能体一步可能因各种原因失败（LLM 限流、工具报错、网络抖动）。<strong>Celery 的 <code>autoretry_for</code> 自动重试（最多 5 次、指数退避），加上出错时延迟 15 秒再排——让智能体面对临时故障能自愈，不会一遇错就死。</strong>加上 Day 10 的 LLM 调用层重试，多层容错保证长任务的韧性。<strong>"长时间运行的东西必须能扛住临时故障"——异步任务队列 + 自动重试是标准答案。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Celery beat 定时</h1></div>
+            <div class="card">
+                <p><code>worker.py:32</code> 配置了 Celery beat 定时任务（Day 04 的 <code>--beat</code>）：</p>
+<pre><code class="language-python">beat_schedule = {
+  'initialize-schedule-agent': {'schedule': timedelta(minutes=5)},   # 每 5 分钟
+  'execute_waiting_workflows': {'schedule': timedelta(minutes=2)},   # 每 2 分钟
+}</code></pre>
+                <div class="anno">读法：<b>Celery beat 是"定时闹钟"——按固定间隔触发任务。</b><code>initialize-schedule-agent</code>（每 5 分钟）检查有没有到点的定时智能体（L06）；<code>execute_waiting_workflows</code>（每 2 分钟）唤醒等待中的工作流（WAIT_STEP 时间到了的）改回 RUNNING 并重排。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>定时智能体</h1></div>
+            <div class="card">
+                <p><code>initialize-schedule-agent</code> 调 <code>AgentScheduleHelper.run_scheduled_agents</code>（<code>helper/agent_schedule_helper.py:16</code>）——查出"过去 5 分钟内到点、status=SCHEDULED"的计划，交给 <code>ScheduledAgentExecutor</code>（<code>jobs/scheduling_executor.py:25</code>）：新建一条 AgentExecution、设 RUNNING、<code>execute_agent.delay(...)</code>。</p>
+                <div class="baby"><span class="t">定时和手动殊途同归</span>
+                <strong>定时触发和用户手动点"运行"最后都调 <code>execute_agent.delay()</code>——汇入同一个执行任务。</strong>Scheduler 只是"按时间自动调用"那个入口，执行逻辑完全复用（和 AutoGPT Day 14 一样）。<strong>这让"每天早上自动跑智能体"成为可能——SuperAGI"持续运行的智能体"（Day 01）的价值就在于此。</strong>"多种触发源 → 同一执行入口"是清晰架构的标志。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>其它后台任务</h1></div>
+            <div class="card">
+                <ul>
+                    <li><code>summarize_resource</code>（<code>worker.py:75</code>）：上传文件后异步做摘要 + 写向量库（Day 14）。</li>
+                    <li><code>webhook_callback</code>（<code>worker.py:106</code>）：智能体状态变化时通过 SQLAlchemy <code>event.listens_for</code> 触发 webhook 回调（通知外部系统）。</li>
+                </ul>
+                <div class="glossary"><b>为什么这些也放后台？</b> 文件摘要要调 LLM（慢）、webhook 要发 HTTP（可能慢/失败）——都不该阻塞主流程。<strong>凡是"慢的、可失败的、不需即时结果的"操作，都丢给 Celery 后台异步跑。</strong>主流程只管快速响应，副作用后台处理。<strong>Celery 是平台所有异步工作的统一执行器——智能体循环、定时、摘要、webhook 全走它。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么智能体执行必须异步？同步会怎样？</li>
+                    <li>execute_agent 任务为什么叫"next_step"？</li>
+                    <li>"自我重排循环"怎么工作？好处（可断可恢复/可扩展/不丢进度）？</li>
+                    <li>两层重试保障是什么？</li>
+                    <li>Celery beat 定时干什么？定时和手动为什么殊途同归？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+sed -n '25,72p' $P/worker.py | head -40             # Celery app + beat + execute_agent
+sed -n '39,100p' $P/jobs/agent_executor.py | head -40   # 自我重排
+grep -n 'def run_scheduled_agents' $P/helper/agent_schedule_helper.py
+sed -n '25,83p' $P/jobs/scheduling_executor.py | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>GUI 与前端</strong>——Next.js 界面怎么创建智能体、实时监控执行、逛工具市场。前端如何驱动整个后端。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 API</a>
+                <a href="superagi-day18.html" style="color:var(--accent-green);">Day 18 · GUI &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
