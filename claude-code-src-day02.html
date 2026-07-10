@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 环境搭建与启动链 — Claude Code CLI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .boot { position:relative; padding-left:26px; }
+        .boot::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:linear-gradient(var(--accent-orange),var(--accent-purple))}
+        .bs{position:relative;margin-bottom:15px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:12px 14px}
+        .bs::before{content:'';position:absolute;left:-22px;top:14px;width:11px;height:11px;border-radius:50%;background:var(--accent-orange);box-shadow:0 0 0 3px var(--bg-primary)}
+        .bs .n{font-size:11px;font-weight:800;color:var(--accent-purple);font-family:monospace}
+        .bs h4{font-size:13.5px;margin:2px 0 4px} .bs h4 code{font-size:12px;color:var(--accent-cyan)}
+        .bs p{font-size:12.5px;color:var(--text-secondary);margin:0}
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .twocol{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .twocol .c{border-radius:9px;padding:14px;font-size:12.5px} .twocol .a{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.25)} .twocol .b{background:rgba(6,182,212,.06);border:1px solid rgba(6,182,212,.25)}
+        .twocol h5{font-size:13px;margin:0 0 6px} .twocol .a h5{color:var(--accent-orange)} .twocol .b h5{color:var(--accent-cyan)}
+        @media(max-width:768px){ .twocol{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#8b5cf6);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">环境搭建与启动链 · 9 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 9 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 今天的目标</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 装 Bun 与跑起来</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · dev 模式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 入口 cli.tsx</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · fast-path 分发器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · main() 与 init()</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · REPL 挂载</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 构建双管线</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="claude-code-src-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 项目全景</a></li>
+            <li><a href="claude-code-src-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="claude-code-src-day03.html" class="nav-link" style="color:var(--accent-green);">Day 03 Agent 循环 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 建立心智</span>
+            <h1 class="part-title">环境搭建与启动链</h1>
+            <p class="part-desc">从 <code>ccb</code> 命令到终端里出现交互界面，这一路代码怎么跑？今天追一遍完整启动链，并把项目在本地跑起来。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>今天的目标</h1></div>
+            <div class="card">
+                <p>Day 01 我们知道了真正的入口是 <code>src/entrypoints/cli.tsx</code>。今天沿着这条线一路追到"REPL 界面渲染出来"，你会看清：</p>
+                <ul>
+                    <li>怎么装 Bun、怎么 build、怎么用 <code>dev</code> 模式带源码跑；</li>
+                    <li><code>cli.tsx</code> 里那个"按优先级短路"的<strong>快速分发器</strong>——为什么 <code>--version</code> 能零额外加载；</li>
+                    <li><code>main() → init() → setup() → launchRepl()</code> 这条启动主链；</li>
+                    <li>为什么构建要拆成几百个 chunk（内存原因）。</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>装 Bun 与跑起来</h1></div>
+            <div class="card">
+                <p>这个项目跑在 <strong>Bun</strong> 上（<code>.tool-versions</code> 锁 <code>bun 1.3.13</code>，<code>package.json:24</code> 要求 <code>bun &gt;= 1.3.0</code>）。三步跑起来：</p>
+<pre><code class="language-bash"># 1. 装 Bun（若没有）
+curl -fsSL https://bun.sh/install | bash
+
+# 2. 装依赖（monorepo 一次装全部 workspace）
+cd claude-code
+bun install
+
+# 3. 构建，产出 dist/cli.js + 几个 bin
+bun run build          # = bun run build.ts
+
+# 4. 跑
+./dist/cli-node.js     # 或 node dist/cli-node.js
+# 也可用 bin 名（若 link 了）：ccb</code></pre>
+                <div class="glossary"><b>为什么用 Bun 不用 Node？</b> Bun 是一个更快、自带打包/测试/包管理的 JS 运行时。这个项目大量用 Bun 特有 API（如 <code>Bun.build</code>、<code>bun:ffi</code>）。但它构建时会"打补丁"让产物<strong>node/bun 都能跑</strong>（L08 讲），所以 <code>ccb</code>（node）和 <code>ccb-bun</code>（bun）两个入口都可用。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>dev 模式：不构建直接跑源码</h1></div>
+            <div class="card">
+                <p>读源码调试时，不用每次 build。<code>bun run dev</code>（<code>scripts/dev.ts</code>）用 Bun 的 <code>-d</code> flag 注入编译期常量后<strong>直接跑 <code>src/entrypoints/cli.tsx</code></strong>：</p>
+<pre><code class="language-bash">bun run dev            # 直接跑源码，全部 feature 默认开启，版本号显示 888
+bun run dev:inspect    # 带调试器</code></pre>
+                <div class="glossary"><b>为什么 dev 模式版本号是 888？</b> 因为正式版本号（如 2.8.3）是构建时通过"宏（MACRO）"从 package.json 注入的常量。dev 模式没走构建，就用一个占位值 888 提醒你"这是开发态"。看到 888 就知道自己在跑源码。</div>
+                <p>另外有一堆脚本：<code>bun test</code>（跑测试）、<code>biome check</code>（lint+格式）、<code>bun run typecheck</code>（类型检查）、<code>bun run precheck</code>（提交前三合一）。</p>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>入口 cli.tsx：最先跑的几行</h1></div>
+            <div class="card">
+                <p>打开 <code>src/entrypoints/cli.tsx</code>，最顶上几行有讲究（<code>cli.tsx:5-40</code>）：</p>
+                <ul>
+                    <li><strong>第一行必须是 performance shim</strong>（<code>cli.tsx:5</code>）：替换 <code>globalThis.performance</code>，防止 Bun 底层的 JSC 引擎里某个 C++ Vector 无限增长。<strong>顺序敏感，必须最先执行。</strong></li>
+                    <li>MACRO 运行时兜底（<code>cli.tsx:11</code>）：dev 模式下没有构建注入的 <code>VERSION</code> 等常量，这里给个兜底。</li>
+                    <li>设若干环境变量（<code>cli.tsx:40</code>）。</li>
+                </ul>
+                <div class="note"><strong>细节里藏着工程经验</strong>：为什么一个 CLI 的第一行要 patch <code>performance</code>？因为作者在真实运行中发现了内存泄漏，定位到运行时底层。读源码时遇到这种"莫名其妙必须放最前面"的代码，往往背后是一个踩过的坑——留意注释。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>fast-path 分发器：能短路就不加载</h1></div>
+            <div class="card">
+                <p><code>cli.tsx</code> 的 <code>main()</code>（<code>cli.tsx:76-360</code>）是一个<strong>"按优先级短路"的巨型分发器</strong>。它的设计目标：<strong>用最少的模块加载处理简单命令</strong>。几乎每个分支都用<strong>动态 import</strong>——用到才加载。</p>
+<pre><code class="language-typescript">// cli.tsx:80 —— --version 零额外模块加载，直接打印
+if (arg === '--version' || arg === '-v') { console.log(MACRO.VERSION); return }
+
+// 各种子命令都在加载 5640 行的 main.tsx 之前就短路：
+// --dump-system-prompt / --acp / --daemon-worker /
+// remote-control|rc / daemon / --bg / job / weixin ...
+
+// cli.tsx:352 —— 默认路径：才真正加载重量级的 main.tsx
+const { startCapturingEarlyInput } = await import('../utils/earlyInput.js');
+startCapturingEarlyInput();
+const { main: cliMain } = await import('../main.jsx');   // = src/main.tsx
+await cliMain();</code></pre>
+                <div class="glossary"><b>为什么这么设计？</b> <code>main.tsx</code> 有 5640 行，加载它很"重"。但用户可能只是想看个版本号、或跑个后台子命令——没必要为此加载整个交互式 UI 的代码。<strong>动态 import + fast-path 短路</strong>让常见轻量操作的冷启动几乎零开销。这是 CLI 冷启动优化的经典手法，值得学。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>main() 与 init()：一次性初始化</h1></div>
+            <div class="card">
+                <p>默认路径进入 <code>src/main.tsx</code> 的 <code>main()</code>（<code>main.tsx:743</code>）。它用 <strong>Commander</strong> 构建命令行程序（<code>main.tsx:1082</code>），并在真正执行命令前跑一个 <code>preAction</code> 钩子（<code>main.tsx:1087</code>）做初始化：</p>
+                <div class="boot">
+                    <div class="bs"><div class="n">main.tsx:749</div><h4>进程级防护</h4><p>设 Windows PATH 劫持防护、warning handler、注册 <code>process.on('exit')</code>（含 workflow 关闭）和 SIGINT。</p></div>
+                    <div class="bs"><div class="n">main.tsx:1096</div><h4><code>await init()</code></h4><p>调 <code>src/entrypoints/init.ts:66</code> 的 init（用 <code>memoize</code> 包着，只跑一次）：启用配置、注册 Ink 主题、telemetry/Sentry、优雅关闭、证书/代理、仓库检测……全是一次性初始化。</p></div>
+                    <div class="bs"><div class="n">main.tsx:1100+</div><h4>迁移与远程设置</h4><p>设 <code>process.title='claude'</code>、<code>runMigrations()</code>（配置格式升级）、异步加载企业托管设置/策略。</p></div>
+                    <div class="bs"><div class="n">setup.ts:57</div><h4><code>setup()</code></h4><p>校验 Node ≥18、设置工作目录、抓取 hooks 配置快照、初始化 SessionMemory / SkillLearning、发启动 beacon。</p></div>
+                </div>
+                <div class="glossary"><b>memoize 是什么？</b> "记忆化"——把一个函数的结果缓存起来，第二次调用直接返回缓存、不重复执行。<code>init()</code> 被 memoize 包着，保证无论被调几次，那些一次性初始化只真正跑一次。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>REPL 挂载：Ink 接管终端</h1></div>
+            <div class="card">
+                <p>初始化完，默认命令的 <code>.action()</code>（<code>main.tsx:1434</code>）处理权限模式、MCP、会话恢复后，交互式会话会挂载 React/Ink 应用：</p>
+<pre><code class="language-typescript">// main.tsx:2749 —— 创建 Ink 渲染根
+const { createRoot } = await import('@anthropic/ink');
+root = await createRoot(ctx.renderOptions);
+
+// replLauncher.tsx:14 —— 组装元素树
+&lt;SentryErrorBoundary name="RootREPLBoundary"&gt;
+  &lt;App {...appProps}&gt;
+    &lt;REPL {...replProps} /&gt;      // ← 真正的交互界面
+  &lt;/App&gt;
+&lt;/SentryErrorBoundary&gt;
+
+// interactiveHelpers.tsx:124 —— 渲染并等待退出
+export async function renderAndRun(root, element) {
+  root.render(element);
+  startDeferredPrefetches();
+  await root.waitUntilExit();      // ← 阻塞在这，直到用户退出
+  await gracefulShutdown(0);
+}</code></pre>
+                <div class="glossary"><b>REPL</b> = Read-Eval-Print-Loop（读取-求值-打印-循环）——就是那个能反复输入、看输出的交互式界面。<code>root.render(element)</code> 之后，Ink 就接管了终端，你看到的所有消息、输入框、进度都是这个 React 树在渲染。<code>waitUntilExit()</code> 让进程一直挂在交互界面，直到你退出（Day 04 讲 Ink，Day 18 讲界面细节）。</div>
+                <p><strong>完整启动链一句话</strong>：<code>ccb</code> → <code>dist/cli-node.js</code> → <code>cli.tsx</code>（fast-path 分发）→ <code>main.tsx main()</code>（Commander + init + setup）→ <code>createRoot</code> + <code>launchRepl</code> → Ink 渲染 REPL → 等待交互。</p>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>构建双管线：为什么要拆几百个 chunk</h1></div>
+            <div class="card">
+                <p>项目有两条并行构建管线（<code>package.json:44</code>）：</p>
+                <div class="twocol">
+                    <div class="c a"><h5>Bun.build（默认）</h5><code>bun run build</code> → <code>build.ts</code>。用 <code>Bun.build</code> 打包 <code>cli.tsx</code>，<strong>splitting: true</strong> 拆分代码，产出后处理成 node/bun 双兼容，最后生成 <code>cli-bun.js</code>/<code>cli-node.js</code> 两个 shim。</div>
+                    <div class="c b"><h5>Vite / Rollup</h5><code>bun run build:vite</code> → <code>vite.config.ts</code>。发布用；内联依赖、minify、拆 chunk 到 <code>chunks/</code>。</div>
+                </div>
+                <div class="note"><strong>为什么必须拆 chunk（关键内存教训）</strong>：Bun 底层的 JSC 引擎会<strong>急切地全量解析</strong>单个大文件。一个 17MB 的单文件 bundle 会让内存（RSS）飙到约 1GB！拆成几百个小 chunk 后，Bun 按需加载，<code>--version</code> 的内存从 966MB 降到 35MB。（Node 的 V8 因为懒解析没这问题，但为兼容 Bun 必须拆。）这是"打包策略直接影响运行时内存"的真实案例。</div>
+                <p>另一个巧思：产物通过<strong>正则打补丁</strong>（<code>build.ts:44</code>）把 Bun 专有的 <code>import.meta.require</code> 换成 Node 兼容写法、给裸 <code>globalThis.Bun</code> 加 <code>typeof</code> 守卫——于是同一份 <code>dist/cli.js</code> node 和 bun 都能跑。</p>
+                <p>版本号、feature flag 都是构建时用"宏（MACRO）"注入的编译期常量（<code>scripts/defines.ts</code>），运行时通过 <code>import { feature } from 'bun:bundle'</code> 消费——关掉某个 feature，相关代码会被死代码消除掉。</p>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>怎么装 Bun、build、dev 模式跑源码？（dev 版本号 888）</li>
+                    <li>cli.tsx 的 fast-path 分发器为什么用动态 import？（冷启动优化，--version 零额外加载）</li>
+                    <li>启动主链是哪几步？（cli.tsx → main() → init()/setup() → createRoot → launchRepl → Ink 渲染）</li>
+                    <li>init() 为什么用 memoize？（一次性初始化只跑一次）</li>
+                    <li>构建为什么拆几百个 chunk？（Bun/JSC 急切解析导致大 bundle 内存爆炸）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash"># 1. 装依赖 + dev 模式跑（看到版本 888 就对了）
+bun install
+bun run dev --version
+
+# 2. 读入口的 fast-path 分发器
+sed -n '1,120p' src/entrypoints/cli.tsx
+
+# 3. 读启动主链
+sed -n '743,1141p' src/main.tsx | head -80
+sed -n '60,90p' src/entrypoints/init.ts
+
+# 4. 看 REPL 怎么挂载
+cat src/replLauncher.tsx
+
+# 5. 看构建脚本
+sed -n '1,110p' build.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：界面挂起来了，你在输入框敲了一句话回车——Agent 内部那个"循环"就开始转了。Day 03 从宏观讲清 <strong>Agent 循环</strong>：请求模型 → 检测工具调用 → 执行 → 回填 → 再循环，直到停。Day 06 再深入源码。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="claude-code-src-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 项目全景</a>
+                <a href="claude-code-src-day03.html" style="color:var(--accent-green);">Day 03 · Agent 循环总览 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
