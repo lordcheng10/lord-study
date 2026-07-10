@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apache APISIX 源码学习 · 20 天总目录（Lua/OpenResty API 网关）</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .content { max-width: 1180px; }
+        .arch-anim { position:relative; display:flex; flex-direction:column; gap:9px; padding:18px; margin:10px 0 4px;
+            background:radial-gradient(120% 120% at 50% 0%, rgba(20,160,133,.09), transparent 70%); border-radius:14px; }
+        .arch-row { position:relative; border:1px solid var(--lc,var(--border-color)); border-radius:11px; padding:12px 16px;
+            background:var(--bg-card); overflow:hidden; transition:transform .25s,box-shadow .25s; }
+        .arch-row:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(0,0,0,.35); }
+        .arch-row::before { content:''; position:absolute; inset:0;
+            background:linear-gradient(90deg,transparent,var(--glow,rgba(20,160,133,.12)),transparent);
+            transform:translateX(-100%); animation:sweep 4.5s linear infinite; animation-delay:var(--d,0s); }
+        @keyframes sweep { 0%{transform:translateX(-100%)} 60%,100%{transform:translateX(100%)} }
+        .arch-row .lbl { font-size:11px; font-weight:800; letter-spacing:.06em; color:var(--lc); margin-bottom:7px; position:relative; }
+        .arch-row .boxes { display:flex; gap:7px; flex-wrap:wrap; position:relative; }
+        .arch-row .b { flex:1; min-width:110px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color);
+            border-radius:7px; padding:8px 9px; font-size:12px; color:var(--text-secondary); }
+        .arch-row .b strong { display:block; color:var(--text-primary); font-size:12.5px; margin-bottom:2px; }
+        .L1{--lc:#14a085;--glow:rgba(20,160,133,.16)} .L2{--lc:#6366f1;--glow:rgba(99,102,241,.14)}
+        .L3{--lc:#f59e0b;--glow:rgba(245,158,11,.13)} .L4{--lc:#ec4899;--glow:rgba(236,72,153,.12)}
+        .flow-dot { position:absolute; left:50%; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:#fff;
+            box-shadow:0 0 10px 3px rgba(20,160,133,.85); animation:fall 3.4s cubic-bezier(.6,0,.4,1) infinite; z-index:3; opacity:0; }
+        @keyframes fall { 0%{top:7%;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:93%;opacity:0} }
+        .loopd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;font-size:12.5px;text-align:center}
+        .loopd .n b{display:block;color:#14a085;font-size:13px}.loopd .a{color:#6366f1;font-weight:800;font-size:16px}
+        .week-bar { display:flex; align-items:center; gap:12px; margin:36px 0 14px; padding-left:2px; }
+        .week-bar .wk { width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+        .week-bar h2 { font-size:17px; font-weight:700; margin:0; } .week-bar span { font-size:12px; color:var(--text-muted); }
+        .day-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+        .day-card { display:flex; flex-direction:column; gap:8px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:18px; text-decoration:none; transition:transform .2s,border-color .2s,box-shadow .2s; }
+        .day-card:hover { transform:translateY(-4px); border-color:rgba(20,160,133,.45); box-shadow:0 12px 34px rgba(20,160,133,.10); }
+        .day-card .top { display:flex; align-items:center; gap:10px; }
+        .day-card .num { width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;font-family:'SF Mono',monospace; }
+        .day-card h3 { font-size:15px; font-weight:700; color:var(--text-primary); margin:0; line-height:1.35; }
+        .day-card p { font-size:12.5px; color:var(--text-secondary); margin:0; line-height:1.6; flex:1; }
+        .day-card .foot { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+        .day-card .mins { font-size:11px; color:var(--text-muted); }
+        .day-card .go { font-size:12px; font-weight:600; color:#14a085; }
+        .day-card.soon { opacity:.55; cursor:default; }
+        .day-card.soon:hover { transform:none; border-color:var(--border-color); box-shadow:none; }
+        .day-card.soon .go { color:var(--text-muted); }
+        .badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; background:rgba(34,197,94,.12); color:var(--accent-green); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14a085,#6366f1);">AX</div>
+            <h2>Apache APISIX</h2>
+            <p class="version">Lua/OpenResty API 网关 · 20 天源码学习</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">总目录</li>
+            <li><a href="#intro" class="nav-link active">开篇 · 这是个什么项目</a></li>
+            <li><a href="#arch" class="nav-link">架构全景（动图）</a></li>
+            <li><a href="#how" class="nav-link">怎么用这份教程</a></li>
+            <li class="nav-group-title">第 1 周 · 全景与请求生命周期</li>
+            <li><a href="#week1" class="nav-link">Day 01 - 05</a></li>
+            <li class="nav-group-title">第 2 周 · 路由/配置/数据面</li>
+            <li><a href="#week2" class="nav-link">Day 06 - 10</a></li>
+            <li class="nav-group-title">第 3 周 · 插件系统</li>
+            <li><a href="#week3" class="nav-link">Day 11 - 15</a></li>
+            <li class="nav-group-title">第 4 周 · 高级子系统与运维</li>
+            <li><a href="#week4" class="nav-link">Day 16 - 20</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">源码深度学习 · 零基础友好</span>
+            <h1 class="part-title">Apache APISIX 源码学习</h1>
+            <p class="part-desc">20 天 · 每天 30 分钟 · 逐层读懂 Apache APISIX——一个用 <strong>Lua + OpenResty（Nginx + LuaJIT）</strong>写的高性能云原生 API 网关。它以 <strong>etcd 存配置、全动态热更新</strong>著称：加路由/改插件<strong>不用 reload</strong>。这是继 higress-group 之后的另一条网关技术路线——和 Envoy/Higress 形成鲜明对照。</p>
+        </div>
+
+        <section id="intro" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>开篇 · 这是个什么项目</h1></div>
+            <div class="card">
+                <p><strong>Apache APISIX</strong>（<code>README.md</code>：Apache APISIX API Gateway ｜ AI Gateway）是 Apache 顶级项目，一个<strong>动态、实时、高性能的云原生 API 网关</strong>。它基于 <strong>OpenResty</strong>（Nginx + LuaJIT），用 <strong>etcd</strong> 做配置中心，支持热插拔的 Lua 插件（仓库自带 <strong>104 个插件</strong>）。</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：APISIX = <strong>OpenResty（Nginx 的 Lua 编程能力）</strong> + <strong>etcd（配置中心 + watch 热更新）</strong> + <strong>radixtree 路由</strong> + <strong>插件系统（按 priority 在 Nginx 各阶段运行）</strong>。改配置写进 etcd，所有网关节点 watch 到<strong>秒级生效、无需 reload</strong>。</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-item"><div class="feature-icon">⚡</div><h4>OpenResty 内核</h4><p>Nginx + LuaJIT，用 Lua 在 Nginx 各阶段编程。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🔄</div><h4>全动态热更新</h4><p>etcd watch，加路由/改插件不用 reload。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🧩</div><h4>104 个插件</h4><p>鉴权/限流/可观测/AI，按 priority 编排。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🎯</div><h4>radixtree 路由</h4><p>高性能前缀树路由匹配。</p></div>
+                </div>
+                <div class="info-box"><strong>和 higress-group 的对照</strong>：Envoy/Higress 是 <strong>C++ 数据面 + 控制面下发 xDS</strong> 的路线；APISIX 是 <strong>OpenResty 单体 + etcd 配置</strong> 的路线——两种主流网关架构。学完能横向对比"C++/xDS"和"Lua/etcd"两条技术路径的取舍。源码在 <code>apisix/</code>（Lua），核心是 <code>init.lua</code>（请求生命周期）+ <code>plugin.lua</code>（插件）+ <code>router.lua</code>（路由）+ <code>core/</code>（基础设施）。</div>
+            </div>
+        </section>
+
+        <section id="arch" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>架构全景（动起来看）</h1></div>
+            <div class="card">
+                <p>下图那颗<strong>发光小球</strong>是"一个请求进 APISIX → 匹配路由 → 跑插件 → 转发上游"的旅程。从上到下：请求 → Nginx 阶段 → APISIX 核心 → 上游。</p>
+                <div class="arch-anim">
+                    <div class="flow-dot"></div>
+                    <div class="arch-row L1" style="--d:0s"><div class="lbl">L1 · 请求进入（OpenResty/Nginx）</div><div class="boxes">
+                        <div class="b"><strong>HTTP 请求</strong>ngx access 阶段</div>
+                        <div class="b"><strong>ssl_phase</strong>动态证书</div>
+                        <div class="b"><strong>api_ctx</strong>请求上下文</div>
+                    </div></div>
+                    <div class="arch-row L2" style="--d:.6s"><div class="lbl">L2 · APISIX 核心（Lua）</div><div class="boxes">
+                        <div class="b"><strong>router</strong>radixtree 匹配</div>
+                        <div class="b"><strong>consumer</strong>鉴权识别</div>
+                        <div class="b"><strong>plugin.filter</strong>选插件</div>
+                    </div></div>
+                    <div class="arch-row L3" style="--d:1.2s"><div class="lbl">L3 · 插件与配置</div><div class="boxes">
+                        <div class="b"><strong>run_plugin</strong>各阶段执行</div>
+                        <div class="b"><strong>etcd</strong>配置 watch</div>
+                        <div class="b"><strong>schema</strong>校验</div>
+                    </div></div>
+                    <div class="arch-row L4" style="--d:1.8s"><div class="lbl">L4 · 上游（Upstream）</div><div class="boxes">
+                        <div class="b"><strong>balancer</strong>负载均衡</div>
+                        <div class="b"><strong>health check</strong>健康检查</div>
+                        <div class="b"><strong>discovery</strong>服务发现</div>
+                    </div></div>
+                </div>
+                <p>心智模型是"<strong>请求进 → 匹配路由 → 选插件 → 各阶段跑插件 → 负载均衡转发上游</strong>"：</p>
+                <div class="loopd">
+                    <span class="n"><b>请求进入</b>access 阶段</span><span class="a">→</span>
+                    <span class="n"><b>router</b>匹配路由</span><span class="a">→</span>
+                    <span class="n"><b>plugin</b>各阶段执行</span><span class="a">→</span>
+                    <span class="n"><b>balancer</b>转发上游</span>
+                </div>
+                <div class="tip"><strong>APISIX 为什么快 + 动态？</strong> "快"来自 OpenResty——Nginx 的 C 级性能 + LuaJIT 的即时编译；"动态"来自 etcd——配置存 etcd，每个网关节点 watch 变化，<strong>加路由/改插件写进 etcd 后秒级生效、无需 <code>nginx -s reload</code>。</strong>这和传统 Nginx"改配置要 reload"是本质区别。</div>
+            </div>
+        </section>
+
+        <section id="how" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>怎么用这份教程</h1></div>
+            <div class="feature-grid">
+                <div class="feature-item"><div class="feature-icon">⏱️</div><h4>每天 30 分钟</h4><p>一天一个独立页面，跟着"今日小结 + 动手"收尾。</p></div>
+                <div class="feature-item"><div class="feature-icon">👶</div><h4>零基础友好</h4><p>不假设你懂 Lua/OpenResty/Nginx 阶段，术语首次出现都有大白话解释。</p></div>
+                <div class="feature-item"><div class="feature-icon">📍</div><h4>精确到行号</h4><p>关键代码标 <code>文件:行号</code>，可在真源码里跳转对照。</p></div>
+            </div>
+            <div class="tip"><strong>一条主线</strong>：从"APISIX 是什么、Nginx 阶段与请求生命周期",到"路由/配置/上游怎么组织",到"插件系统怎么运行",最后是"服务发现/Admin/stream/SSL 等子系统 + 部署收官"。<strong>不需要先学 higress-group，但学过的话能做精彩的横向对比。</strong></div>
+        </section>
+
+        <!-- W1 -->
+        <div class="week-bar" id="week1"><div class="wk" style="background:linear-gradient(135deg,#14a085,#6366f1);">W1</div><h2>第 1 周 · 全景与请求生命周期</h2><span>全景、Nginx 阶段、启动、请求旅程、api_ctx</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14a085,#6366f1);">01</div><h3>项目全景（Lua 网关）</h3></div><p>APISIX 是什么、OpenResty/etcd、和 Envoy/Higress 对照。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14a085,#6366f1);">02</div><h3>OpenResty 与 Nginx 阶段</h3></div><p>init/init_worker/access/header_filter/body_filter/log/balancer。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14a085,#6366f1);">03</div><h3>启动流程</h3></div><p>bin/apisix CLI → nginx.conf 生成 → http_init/http_init_worker。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14a085,#6366f1);">04</div><h3>请求生命周期总览</h3></div><p>http_access_phase 逐段：ctx→路由→consumer→plugin→upstream。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14a085,#6366f1);">05</div><h3>core.ctx 与 api_ctx</h3></div><p>请求上下文、ngx.ctx、变量惰性求值。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W2 -->
+        <div class="week-bar" id="week2"><div class="wk" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">W2</div><h2>第 2 周 · 路由/配置/数据面</h2><span>router、etcd 配置、抽象对象、schema、upstream/balancer</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">06</div><h3>路由 router</h3></div><p>radixtree、router_http/router_ssl、匹配流程。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">07</div><h3>配置中心 etcd</h3></div><p>config_etcd watch 增量同步 vs config_yaml standalone。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">08</div><h3>六大抽象对象</h3></div><p>Route/Service/Upstream/Consumer/Plugin_config/Global_rule。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">09</div><h3>schema 校验</h3></div><p>schema_def、core.schema、jsonschema。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#6366f1,#f59e0b);">10</div><h3>upstream 与 balancer</h3></div><p>负载均衡 roundrobin/chash/least_conn、健康检查。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W3 -->
+        <div class="week-bar" id="week3"><div class="wk" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">W3</div><h2>第 3 周 · 插件系统</h2><span>插件机制、运行、配置合并、鉴权、典型插件</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">11</div><h3>插件机制全景</h3></div><p>plugin.load、priority、phase、filter 选插件。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">12</div><h3>插件运行</h3></div><p>run_plugin 各阶段、global_rules 全局插件。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">13</div><h3>插件配置合并</h3></div><p>merge_service_route/merge_consumer_route。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">14</div><h3>鉴权与 consumer</h3></div><p>key-auth/jwt-auth、consumer 识别与匹配。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">15</div><h3>典型插件精读</h3></div><p>limit-count 限流 / proxy-rewrite / ai-proxy。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W4 -->
+        <div class="week-bar" id="week4"><div class="wk" style="background:linear-gradient(135deg,#ec4899,#14a085);">W4</div><h2>第 4 周 · 高级子系统与运维</h2><span>服务发现、Admin/control、stream、SSL/secret/wasm、收官</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14a085);">16</div><h3>服务发现 discovery</h3></div><p>nacos/consul/dns/eureka/kubernetes。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14a085);">17</div><h3>Admin API 与 control API</h3></div><p>admin/ 增删改配置、control 健康检查接口。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14a085);">18</div><h3>stream 子系统</h3></div><p>L4 TCP/UDP 代理、stream_preread_phase。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14a085);">19</div><h3>SSL/secret/wasm/pubsub</h3></div><p>动态证书、密钥管理、Wasm 插件、发布订阅。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14a085);">20</div><h3>部署与收官串讲</h3></div><p>bin/apisix、config.yaml + 三种网关大对比。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <div class="card" style="margin-top:26px;text-align:center;">
+            <p style="margin:0;">📅 <strong>日拱一卒，陆续上线</strong>。零基础也能跟——每个 Lua/Nginx 概念都有大白话铺垫。</p>
+        </div>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+        });
+    </script>
+</body>
+</html>
