@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Router 路由过滤器 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ff7043,#e91e63);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Router 路由过滤器 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 终端过滤器</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 拿路由</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 选集群主机</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 发上游请求</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 响应回程</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 重试与超时</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 交汇点</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 L7 过滤器</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day10.html" class="nav-link" style="color:#e91e63;">Day 10 Codec &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 过滤器与请求</span>
+            <h1 class="part-title">Router 路由过滤器</h1>
+            <p class="part-desc">Router（<code>router.cc</code>，2600+ 行）是 decode 链的<strong>终端过滤器</strong>——它选上游、发请求、收响应，把响应灌回 encode 链。它是"请求进"和"响应出"的交汇点。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>终端过滤器</h1></div>
+            <div class="card">
+                <p><code>Filter</code>（<code>router.h:298</code>）继承 <code>Http::StreamDecoderFilter</code>——它是 decode 链的<strong>最后一个</strong>过滤器。</p>
+                <div class="baby"><span class="t">"终端过滤器"是什么？</span>
+                前面的 L7 过滤器（认证、限流…）处理完都调 Continue 往下传。<strong>Router 是最后一站——它不再往下传，而是<strong>把请求转发到上游后端</strong>，然后等响应。</strong>它是"请求方向的终点、响应方向的起点"。好比工厂流水线的最后一个工位负责"打包发货（转发上游）"，收到回执（响应）后再启动"返程流水线（encode 链）"。<strong>所有请求最终都汇到 Router 转发出去（除非被前面的过滤器 sendLocalReply 截胡）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>拿路由</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// router.cc:440 Filter::decodeHeaders
+route_ = callbacks_-&gt;route();       // :471 读 HCM 已缓存的路由（Day 05/07 强调：路由在 HCM 算好）
+if (!route_) { sendLocalReply(404); return StopIteration; }  // :472 没路由 → 404
+// 直接响应（direct response）处理 :483
+route_entry_ = route_-&gt;routeEntry();  // :512</code></pre>
+                <div class="anno">读法：<b>Router <strong>不算路由</strong>，只读 HCM 缓存好的 <code>route()</code> 结果（Day 05 易错点）。没匹配到路由就直接返回 404。</b><code>routeEntry()</code> 拿到路由条目（含目标集群名、重试策略、超时等）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>选集群主机</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// router.cc:517 从线程本地拿目标集群（Day 13 的 getThreadLocalCluster）
+cluster = config_-&gt;cm_.getThreadLocalCluster(route_entry_-&gt;clusterName());
+cluster_ = cluster-&gt;info();                    // :529
+// :677 cluster->chooseHost(this) 负载均衡选一个上游主机（Day 14 的 chooseHost）
+// 同步选到主机 → continueDecodeHeaders（:686）→ return StopIteration（:688 等上游）</code></pre>
+                <div class="anno">读法：<b>把第 3 周的知识用起来了：<code>getThreadLocalCluster</code>（Day 13 无锁拿集群）→ <code>chooseHost</code>（Day 14 负载均衡选后端）。选到主机后返回 <code>StopIteration</code>——因为要等上游响应，decode 链暂停。</b></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>发上游请求</h1></div>
+            <div class="card">
+                <p><code>continueDecodeHeaders</code>（<code>router.cc:725</code>）：<code>createConnPool</code>（<code>:732</code>）拿连接池 → 选主机 → 创建 <code>UpstreamRequest</code>（<code>:831</code>）向上游编码请求。请求体经 <code>decodeData</code>（<code>:975</code>）转发给上游。</p>
+                <div class="baby"><span class="t">连接池：复用上游连接</span>
+                Router 不为每个请求都新建一条到上游的连接（太慢）。<strong>它用"连接池"——把到某个上游主机的连接缓存复用。</strong>要发请求时从池里取一条空闲连接（或新建），用完放回。<strong>这对性能至关重要：建立 TCP + TLS 连接开销大，复用能省掉大量握手。</strong><code>UpstreamRequest</code> 代表"这次转发到上游的请求"，管理它的生命周期。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>响应回程（启动 encode 链）</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// router.cc:1711 Filter::onUpstreamHeaders（上游响应头到达）
+// 处理 gRPC 状态映射、outlier detection（Day 15 被动健康检查上报）
+callbacks_-&gt;encodeHeaders(std::move(headers), end_stream, ...);  // :1927 ★启动 encode 过滤器链！
+// onUpstreamData（:1931）→ callbacks_->encodeData（:1945）</code></pre>
+                <div class="anno">读法：<b>上游响应回来，Router 调 <code>callbacks_-&gt;encodeHeaders</code>——这就是<strong>启动 encode 过滤器链的触发点</strong>（Day 08 的 encode 路径从这里开始）。</b>它还顺便向 outlier detection 上报请求结果（Day 15 被动健康检查靠这个累积统计）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>重试与超时</h1></div>
+            <div class="card">
+                <p>Router 还负责<strong>重试</strong>（上游失败/超时时按路由配置的重试策略换个主机再试）和<strong>超时</strong>（请求太久没响应就中断）。这些配置来自 <code>route_entry_</code>（路由条目）。</p>
+                <div class="baby"><span class="t">重试为什么在 Router 做？</span>
+                重试需要"重新选一个上游主机再发一次"——这正是 Router 的职责范围。<strong>比如后端 A 返回 503，Router 按重试策略（重试 2 次、只对 5xx 重试）换后端 B 再发。</strong>这对用户透明（用户只看到最终结果）。超时同理——Router 起个定时器（Day 04），到点还没响应就放弃/重试。<strong>把"选主机 + 发请求 + 重试 + 超时"都放在 Router，因为它掌握着"和上游打交道"的全部上下文。</strong>这是 Envoy 提供"弹性"（resilience）的核心。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>交汇点</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Router 是理解 Envoy 请求流的枢纽</b>：<br>
+                • decode 链在这里<strong>终结</strong>（请求方向的终点）<br>
+                • 在这里<strong>选集群</strong>（Day 13）<strong>+ 负载均衡选主机</strong>（Day 14）<strong>+ 用连接池发上游</strong><br>
+                • 上游响应回来，在这里<strong>启动 encode 链</strong>（响应方向的起点）<br>
+                <strong>所以 Router 是"decode 和 encode 的交汇点"，也是"L7 过滤器世界和上游世界的边界"。搞懂 Router，就把前 3 周（过滤器 + 集群 + 负载均衡）全串起来了。</strong>想看更简单的过滤器例子，可读 <code>source/extensions/filters/http/</code> 下的 cors、buffer 等。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>"终端过滤器"是什么？Router 为什么是终端？</li>
+                    <li>Router 拿路由是"算"还是"读"？</li>
+                    <li>选集群和选主机分别用哪个前面学过的机制？</li>
+                    <li>连接池为什么重要？响应回程怎么启动 encode 链？</li>
+                    <li>重试/超时为什么在 Router 做？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '440,530p' source/common/router/router.cc | head -50
+grep -n 'getThreadLocalCluster\|chooseHost\|encodeHeaders' source/common/router/router.cc | head
+ls source/extensions/filters/http/ | head -30</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>Codec（H1/H2 抽象）</strong>——HTTP/1、HTTP/2 怎么被统一抽象成同一接口，让 HCM/过滤器代码零改动支持多协议。端到端 11 步串讲收官。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 L7 过滤器</a>
+                <a href="envoy-day10.html" style="color:#e91e63;">Day 10 · Codec 抽象 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

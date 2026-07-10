@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · Codec 抽象 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .flow{counter-reset:s;margin:12px 0}
+        .flow .step{position:relative;padding:7px 10px 7px 34px;border:1px solid var(--border-color);border-radius:7px;margin:5px 0;font-size:12px;background:var(--bg-card)}
+        .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:7px;top:7px;width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#ff7043,#e91e63);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:10px}
+        .flow .step code{font-size:10.5px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ff7043,#e91e63);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">Codec 抽象 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Codec 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 统一接口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · dispatch 解码</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · newStream 回调</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · HTTP/1 实现</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · HTTP/2 多路复用</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 端到端 11 步</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 Router</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day11.html" class="nav-link" style="color:#7c4dff;">Day 11 xDS &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">Codec 抽象（H1/H2）</h1>
+            <p class="part-desc">HTTP/1、HTTP/2、HTTP/3 差异巨大，Envoy 怎么让上层代码"无感"地支持它们？答案是 codec 抽象——统一接口。今天看这层抽象，并用端到端 11 步串讲收官第 2 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Codec 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Codec = "编解码器"</span>
+                Codec = coder + decoder（编码器 + 解码器）。<strong>解码：把网络字节流解析成结构化的 HTTP 请求（HCM 的 <code>onData</code> 靠它）。编码：把 HTTP 响应转回字节流写出去。</strong>难点在于 HTTP/1 和 HTTP/2 的"线上格式"完全不同（H1 是文本、H2 是二进制帧 + 多路复用）。<strong>Codec 抽象把这种差异藏起来——给上层（HCM、过滤器）一套统一接口，不管底层是 H1 还是 H2，上层代码一个样。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>统一接口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/http/codec.h:572 —— codec 连接基类
+class Connection {
+  virtual Status dispatch(Buffer::Instance&amp; data) PURE;  // :582 喂字节，解析并回调
+  virtual Protocol protocol() PURE;                       // :593 我是 H1/H2/H3
+};
+// ServerConnection（:665）服务端、ClientConnection（:671）客户端
+// 解码方向：RequestDecoder（:246，decodeHeaders/decodeData）—— ActiveStream 实现它
+// 编码方向：ResponseEncoder（:146，encodeHeaders）—— HCM 的 response_encoder_ 是它</code></pre>
+                <div class="anno">读法：<b>核心是 <code>dispatch(data)</code>——喂字节进去，codec 解析并回调上层。<code>RequestDecoder</code>（解析出的请求往哪送，ActiveStream 实现）和 <code>ResponseEncoder</code>（响应怎么编码写出，HCM 持有）是两个方向的接口。</b>H1/H2 都实现这套接口——这就是抽象的价值。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>dispatch 解码</h1></div>
+            <div class="card">
+                <p>HCM 的 <code>onData</code>（Day 07）调 <code>codec_-&gt;dispatch(data)</code>。codec 逐字节解析，解析到 HTTP 结构就回调上层（<code>newStream</code>/<code>decodeHeaders</code>/<code>decodeData</code>）。</p>
+                <div class="anno">读法：<b><code>dispatch</code> 是"字节 → HTTP 事件"的转换器。它是有状态的解析器：喂进来的字节可能是半个请求，codec 攒着，攒够一个完整头就回调 <code>decodeHeaders</code>。</b>这种"流式增量解析"适配网络数据分片到达的特点。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>newStream 回调</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// codec.h:658 ServerConnectionCallbacks
+virtual RequestDecoder&amp; newStream(ResponseEncoder&amp; response_encoder, ...) PURE;
+// codec 解析到新请求时回调，返回一个 RequestDecoder（即 HCM 的 ActiveStream）
+// response 和 request 共享同一个 Stream</code></pre>
+                <div class="anno">读法：<b>这是 codec 和 HCM 的接头点（Day 07 见过）：codec 解析出新请求，调 <code>newStream</code> 问 HCM 要一个 <code>RequestDecoder</code>（ActiveStream），之后把解析出的头/体都往这个 decoder 送。<code>response_encoder</code> 同时给出——请求和响应共享一个 Stream。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>HTTP/1 实现</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/common/http/http1/codec_impl.cc（基于 balsa/legacy parser 逐字节解析）
+// :1268 onMessageBeginBase：新请求开始 → newStream 拿 RequestDecoder
+// :1201 onHeadersCompleteBase：请求头解析完 → decodeHeaders 回调进 HCM
+// :1292 onBody → decodeData</code></pre>
+                <div class="baby"><span class="t">HTTP/1 的特点：一次一条消息</span>
+                HTTP/1 是文本协议，一条连接上请求串行（一个处理完才下一个）。<strong>codec 用 parser 逐字节解析文本（<code>GET /path HTTP/1.1\r\n...</code>），解析到不同阶段回调不同方法（消息开始、头完成、body、消息完成）。</strong>为了和 HTTP/2 语义统一，无 body 的请求会"延迟"到 message complete 才回调 decodeHeaders（模拟 H2 的 end_stream 语义）。<strong>关键：无论 H1 怎么解析，回调给 HCM 的都是统一的 decodeHeaders/decodeData——上层不用知道这是 H1。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>HTTP/2 多路复用</h1></div>
+            <div class="card">
+                <p><code>source/common/http/http2/codec_impl.cc</code>（基于 nghttp2）：一条连接<strong>多路复用</strong>多条 stream，每个 H2 stream 对应一次 <code>newStream</code>/<code>ActiveStream</code>。同样实现 <code>dispatch()</code>，通过 nghttp2 回调驱动 <code>decodeHeaders/decodeData</code>。</p>
+                <div class="baby"><span class="t">抽象的价值在这里闪光</span>
+                HTTP/2 是二进制协议、一条连接能<strong>并发多个请求</strong>（多路复用）——和 HTTP/1 天差地别。<strong>但因为都实现同一套 codec 接口（<code>dispatch</code> + <code>newStream</code> + <code>RequestDecoder</code>），HCM 和所有 L7 过滤器代码<strong>零改动</strong>就同时支持 H1 和 H2！</strong>H2 的多路复用体现为"一条连接上多次 newStream、多个 ActiveStream 并存"（Day 07 的 streams_ 链表）。<strong>这就是"面向接口编程"的终极威力：新增 HTTP/3 也只是再写一个 codec 实现，上层不动。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>端到端 11 步串讲</h1></div>
+            <div class="card">
+                <div class="flow">
+                    <div class="step">Listener accept 连接，装 L4 读过滤器链（HCM 是终端）</div>
+                    <div class="step">网络数据到达 → <code>FilterManagerImpl::onContinueReading</code> 遍历 L4 过滤器</div>
+                    <div class="step">到 HCM 的 <code>onData</code> → <code>codec_-&gt;dispatch(data)</code></div>
+                    <div class="step">codec 解析 → <code>newStream</code> 建 ActiveStream → 头解析完 <code>decodeHeaders</code></div>
+                    <div class="step">HCM <code>ActiveStream::decodeHeaders</code>：<code>refreshCachedRoute</code>（算路由）+ 建 L7 链</div>
+                    <div class="step"><code>filter_manager_.decodeHeaders</code> 启动 L7 decode 链迭代</div>
+                    <div class="step">逐个 L7 过滤器（认证/限流…），按 FilterHeadersStatus 继续/停止</div>
+                    <div class="step">到 Router（终端）：读路由、选集群、选主机、发上游</div>
+                    <div class="step">上游响应 → Router <code>onUpstreamHeaders</code> → <code>encodeHeaders</code> 启动 encode 链</div>
+                    <div class="step">L7 encode 链逆序走 → HCM <code>ActiveStream::encodeHeaders</code></div>
+                    <div class="step">codec 编码 → L4 写链 → 写回下游 socket</div>
+                </div>
+                <div class="anno">读法：<b>这 11 步把第 1-2 周全部串起来——请求从进到出的完整旅程。建议对照这 11 步在源码里各跳一遍，画一张时序图。</b></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周（过滤器与请求生命周期）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 06</strong> L4 网络过滤器：FilterStatus、ReadFilter/WriteFilter、FIFO/LIFO 洋葱模型</li>
+                    <li><strong>Day 07</strong> HCM：L4→L7 桥、onData→dispatch、newStream/ActiveStream</li>
+                    <li><strong>Day 08</strong> L7 HTTP 过滤器：丰富状态码、decode/encode 双向、sendLocalReply</li>
+                    <li><strong>Day 09</strong> Router 终端过滤器：选集群主机、发上游、响应回程、重试超时</li>
+                    <li><strong>Day 10</strong> Codec 抽象：H1/H2 统一接口、端到端 11 步</li>
+                </ul>
+                <p style="margin-top:10px;">你现在完全理解了"一个请求怎么被 Envoy 处理"。第 1 周是骨架引擎、第 2 周是请求处理，第 3 周（已学）是动态配置与上游，第 4 周是扩展生态。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '572,620p' envoy/http/codec.h                       # Connection 接口
+grep -n 'onMessageBeginBase\|onHeadersCompleteBase' source/common/http/http1/codec_impl.cc | head
+grep -n 'newStream' source/common/http/http2/codec_impl.cc | head</code></pre>
+                <div class="tip"><strong>下一步 · Day 16（第4周）</strong>：第 3 周（Day 11-15 xDS 与上游）你已学过。接下来是第 4 周 <strong>扩展机制</strong>——<code>Registry::RegisterFactory</code> 工厂模式，理解它才能看懂 Wasm、过滤器等一切扩展。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 Router</a>
+                <a href="envoy-day16.html" style="color:#26a69a;">Day 16 · 扩展机制 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
