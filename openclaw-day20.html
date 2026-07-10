@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 20 · 部署与收官（七框架对比） — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f97316}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#f97316);">20</div>
+            <h2>Day 20</h2>
+            <p class="version">部署与收官 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 多阶段 Dockerfile</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · docker-compose</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · fly / render</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · rootless podman</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 绑定与鉴权</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 20 天全景</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 七框架对比</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 结业寄语</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day19.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 19 构建</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 20 / 共 20 天 · 结业 🎓</span>
+            <h1 class="part-title">部署与收官（七框架对比）</h1>
+            <p class="part-desc">最后一天：怎么把 OpenClaw 部署上线（Docker/compose/fly/render/podman），然后回顾 20 天全程，并把你学过的<strong>七大框架</strong>横向对比一遍。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>多阶段 Dockerfile</h1></div>
+            <div class="card">
+                <p><code>Dockerfile</code>（249 行）多阶段构建：</p>
+                <ul>
+                    <li><strong>ext-deps</strong>（<code>:27</code>）：只抽 opted-in 扩展的 package.json（避免扩展改动使主层缓存失效）。</li>
+                    <li><strong>build</strong>（<code>:40</code>）：<code>node:24-bookworm</code>，pnpm install --frozen-lockfile（带 store cache），<code>pnpm build:docker</code> + <code>ui:build</code>。</li>
+                    <li><strong>runtime-assets</strong>：<code>pnpm prune --prod</code> + 删 .d.ts/.map。</li>
+                    <li><strong>runtime</strong>（<code>:114</code>）：非 root <code>USER node</code>，只 COPY dist/node_modules/extensions/skills；<code>HEALTHCHECK /healthz</code>；<code>CMD node openclaw.mjs gateway --allow-unconfigured</code>。</li>
+                </ul>
+                <div class="baby"><span class="t">"多阶段构建"省什么？</span>
+                构建时需要一堆工具（编译器、全部依赖），但<strong>运行时不需要它们</strong>。多阶段构建：在"build 阶段"用全套工具编译，然后只把<strong>产物</strong>（dist + 生产依赖）拷进干净的"runtime 阶段"。<strong>最终镜像小、攻击面小、不含源码和构建工具。</strong>非 root 用户运行、健康检查、缓存优化（ext-deps 单独抽出减少缓存失效）都是生产级 Docker 的标准实践。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>docker-compose</h1></div>
+            <div class="card">
+<pre><code class="language-yaml"># docker-compose.yml —— 两个服务
+openclaw-gateway:   # gateway --bind lan --port 18789，映射 18789/18790，healthcheck
+openclaw-cli:       # network_mode: service:openclaw-gateway（共享网络）
+                    # cap_drop: [NET_RAW, NET_ADMIN], security_opt: no-new-privileges
+# 挂载 OPENCLAW_CONFIG_DIR → /home/node/.openclaw
+#      OPENCLAW_WORKSPACE_DIR → …/workspace
+# 注释掉的 docker.sock 挂载 = 可选开启沙箱隔离（Day 16）</code></pre>
+                <div class="anno">读法：<b>compose 一键起"网关 + CLI"两个容器。注意默认<strong>不挂</strong> docker.sock（Day 16 说过危险）——只有你显式要沙箱隔离才挂。</b>辅助脚本 <code>docker-setup.sh</code>（20KB）读 token、装 compose、按需配 docker.sock。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>fly / render 云部署</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>平台</th><th>要点</th></tr>
+                    <tr><td>fly.toml</td><td>进程 gateway --port 3000 --bind lan，force_https，<code>min_machines_running=1</code> + <code>auto_stop_machines=false</code>（保持长连接），<code>openclaw_data → /data</code></td></tr>
+                    <tr><td>render.yaml</td><td>docker web 服务，<code>healthCheckPath:/health</code>，<code>OPENCLAW_GATEWAY_TOKEN: generateValue:true</code>（自动生成），1GB 磁盘挂 /data</td></tr>
+                </table>
+                <div class="anno">读法：<b><code>auto_stop_machines=false</code> 很关键：OpenClaw 靠长连接（渠道 WebSocket、node 设备），机器不能自动休眠，否则连接断。</b>持久数据挂 <code>/data</code>（配置/工作区/记忆）。render 自动生成网关 token（免手配）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>rootless podman（生产推荐）</h1></div>
+            <div class="card">
+                <p><code>setup-podman.sh</code>（11KB）一次性宿主配置：创建非登录 <code>openclaw</code> 用户、<code>loginctl enable-linger</code>（让 rootless podman 无需登录常驻）、生成 <code>OPENCLAW_GATEWAY_TOKEN</code>（chmod 600）、<code>podman build</code> + 装 launch 脚本或 systemd Quadlet。</p>
+                <div class="baby"><span class="t">为什么生产推荐 rootless podman？</span>
+                Docker 守护进程通常以 root 跑——一旦被攻破影响大。<strong>rootless podman 让容器以<strong>普通用户</strong>身份运行，没有 root 守护进程，安全性更高。</strong><code>enable-linger</code> 让这个普通用户的服务开机自启、常驻（不用他登录）。<strong>对一个 7×24 在线、连着你所有账号的个人助理，"以最小权限跑"是明智的——这延续了整个第 4 周"默认最安全"的姿态。</strong>systemd Quadlet 则让容器像系统服务一样被管理（开机启动、崩溃重启）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>绑定与鉴权</h1></div>
+            <div class="card">
+                <p>部署最关键的安全点（<code>.env.example</code> + <code>SECURITY.md</code>）：</p>
+                <ul>
+                    <li>env 优先级：<code>process env → ./.env → ~/.openclaw/.env → openclaw.json env 块</code>。</li>
+                    <li><code>gateway.bind</code> 默认 <code>loopback</code>（<code>src/gateway/call.ts:152</code>）——只监听本机。</li>
+                    <li>绑定超出回环（<code>lan</code>）时<strong>必须</strong>配 <code>OPENCLAW_GATEWAY_TOKEN</code>（或 password）。</li>
+                    <li>Web/Control UI 仅本地用；远程走 SSH 隧道或 Tailscale，<strong>勿直接暴露公网</strong>。</li>
+                    <li>健康探针：<code>/healthz</code>（liveness）、<code>/readyz</code>（readiness）。</li>
+                </ul>
+                <div class="anno">读法：<b>默认只听本机（loopback）是最安全的起点；要让手机/其他设备连，才开到 lan 并强制配 token。</b>这又是"默认最严、按需放开"（Day 16/17 一以贯之）。绝不建议裸奔公网——个人助理连着你的一切，暴露公网风险极高。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>20 天全景</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>周</th><th>主题</th><th>核心收获</th></tr>
+                    <tr><td>W1</td><td>入门与全景</td><td>个人助理定位、Gateway 控制平面、消息旅程、配置（本周单独成篇）</td></tr>
+                    <tr><td>W2</td><td>Agent 大脑</td><td>内嵌 Pi 内核、两层故障转移、执行循环、提示词、两套记忆</td></tr>
+                    <tr><td>W3</td><td>技能与渠道</td><td>skills 渐进披露、extensions 注入、渠道抽象/实现、消息归一化</td></tr>
+                    <tr><td>W4</td><td>运行时/安全/部署</td><td>Docker 沙箱、安全纵深、原生 App、构建 SDK、部署</td></tr>
+                </table>
+                <div class="glossary"><b>如果只记一件事</b>：OpenClaw = <strong>"控制平面 + 渠道 + 大脑 + 技能 + 沙箱"</strong>五件套。<br>消息从<strong>渠道</strong>进 → <strong>Gateway</strong> 归一化+路由 → <strong>大脑</strong>（内嵌 Pi + 编排外壳）想+做 → 用<strong>技能</strong>扩本领、在<strong>沙箱</strong>里安全执行 → 答复原路返回。<strong>它的独特价值不在"造了个 Agent 引擎"（那是 Pi），而在"把一个 Agent 变成可靠、安全、随处可达的个人产品"的全套工程。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>七框架终极对比</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>框架</th><th>语言</th><th>定位</th><th>你带走的核心思想</th></tr>
+                    <tr><td>eino</td><td>Go</td><td>强类型编排框架</td><td>组件 + 编排、编译期准备</td></tr>
+                    <tr><td>OpenHands</td><td>Py/TS</td><td>软件工程 Agent</td><td>事件流 + Runtime 解耦</td></tr>
+                    <tr><td>crewAI</td><td>Python</td><td>多智能体协作</td><td>角色分工 + 事件总线</td></tr>
+                    <tr><td>AutoGPT</td><td>Python</td><td>可视化工作流平台</td><td>Block 图 + 低代码</td></tr>
+                    <tr><td>SuperAGI</td><td>Python</td><td>Agent 运行平台</td><td>循环在 DB/队列、GUI 调度</td></tr>
+                    <tr><td>LangGraph</td><td>Py/JS</td><td>状态图运行时</td><td>图 + 通道 + 每步检查点</td></tr>
+                    <tr><td><strong>OpenClaw</strong></td><td>TS</td><td><strong>个人 AI 助理产品</strong></td><td><strong>控制平面 + 多渠道 + 编排外壳</strong></td></tr>
+                </table>
+                <div class="baby"><span class="t">OpenClaw 在这七个里最"不一样"的点</span>
+                前六个都是<strong>给开发者的框架/库/平台</strong>——你用它们<strong>造</strong> Agent。<strong>OpenClaw 是唯一一个"面向个人用户的成品"</strong>——它本身就是一个能用的助理。而且它<strong>不自造 Agent 引擎</strong>（内嵌 Pi），把精力全花在"产品级工程"上：多渠道接入、故障转移、安全纵深、原生 App、一键部署。<strong>这教会你一个重要区分：做"Agent 引擎"和做"Agent 产品"是两回事——后者 90% 的工作是引擎之外的编排、韧性、安全、集成。</strong>这也是从"能跑的 demo"到"能用的产品"之间的鸿沟。</div>
+                <div class="glossary"><b>七个框架的共同设计哲学</b>（这才是最大的收获）：<strong>接口/实现分离</strong>（ChatModel/Block/ChannelPlugin/streamFn 无处不在）、<strong>统一抽象</strong>（把异构收敛成一个接口）、<strong>编译期/加载期准备、运行期高速</strong>、<strong>默认最小权限 + 纵深防御</strong>、<strong>优雅降级/故障转移</strong>。这些跨语言、跨框架、跨时代通用——具体 API 会过时，这些思想不会。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>结业寄语 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🎉 恭喜完成 OpenClaw 20 天！</h3>
+                <p>你从"个人 AI 助理是什么"，走到了它的每一层：Gateway 控制平面、内嵌 Pi 的大脑、故障转移与记忆、技能与扩展、二十多个渠道的统一抽象、Docker 沙箱与安全纵深、原生 App 协议、构建与部署。</p>
+                <p style="margin-top:10px;">更重要的是——<strong>这是本系列的第 7 个框架</strong>。你现在看任何一个 AI 系统，都能条件反射地问：<strong>它用什么抽象？怎么编排？状态存哪？怎么保证韧性和安全？信任边界画在哪？它是"引擎"还是"产品"？</strong>这套从源码里提炼架构与设计哲学的眼光，比记住任何一个 API 都值钱。</p>
+                <p style="margin-top:10px;">框架会更新，明星项目会更替，但你建立的"看穿一个系统"的能力会一直陪着你。继续读源码，继续动手造。下一个项目见！🦞🚀</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+sed -n '1,50p' Dockerfile | head -40
+cat docker-compose.yml | head -40
+grep -n 'gateway.bind\|loopback' src/gateway/call.ts | head</code></pre>
+                <div class="tip"><strong>🏁 OpenClaw 教程全部完成</strong>——回到 <a href="openclaw-tutorial.html" style="color:#f97316;">20 天总目录</a> 或 <a href="index.html" style="color:var(--accent-cyan);">学习主页</a> 探索更多框架。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day19.html" style="color:var(--accent-cyan);">&larr; Day 19 构建</a>
+                <a href="openclaw-tutorial.html" style="color:#f97316;">返回总目录 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
