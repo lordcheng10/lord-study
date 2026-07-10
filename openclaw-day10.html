@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 记忆系统 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#e11d48}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e11d48,#8b5cf6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">记忆系统 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两套记忆</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 静态：bootstrap</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 动态：语义检索</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 双后端 + 回退</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 混合检索</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 强制召回</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 仅追加回写</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 提示词</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day11.html" class="nav-link" style="color:#8b5cf6;">Day 11 技能 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">记忆系统</h1>
+            <p class="part-desc">助理怎么"记得你"？OpenClaw 有<strong>两套并存</strong>的记忆：静态 bootstrap 文件注入（Day 09 见过）+ 动态语义检索（memory_search 工具 + 向量嵌入）。今天讲全，并收官第 2 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两套记忆</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th></th><th>静态注入（bootstrap）</th><th>动态检索（语义）</th></tr>
+                    <tr><td>时机</td><td>每次运行都注入系统提示</td><td>模型按需调 memory_search 工具</td></tr>
+                    <tr><td>内容</td><td>SOUL/USER/MEMORY.md 等固定文件</td><td>MEMORY.md + memory/*.md 的相关片段</td></tr>
+                    <tr><td>代价</td><td>每次都占 token（有字符预算）</td><td>只在需要时检索，省 token</td></tr>
+                    <tr><td>代码</td><td>workspace.ts + bootstrap-files.ts</td><td>src/memory/ + memory-tool.ts</td></tr>
+                </table>
+                <div class="baby"><span class="t">"随身笔记" vs "档案室"</span>
+                <strong>静态注入</strong>像助理口袋里的随身便签——最重要的几条（你是谁、我的性格、核心记忆）每次都带着。<strong>动态检索</strong>像一间档案室——记了成百上千条，不可能每次全带，需要时"去档案室按关键词查相关的几条"。<strong>两者互补：便签保证基本一致性，档案室提供海量长期记忆而不撑爆上下文。</strong>一个成熟助理两者都要。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>静态：bootstrap 文件</h1></div>
+            <div class="card">
+                <p>Day 09 见过：<code>loadWorkspaceBootstrapFiles</code>（<code>workspace.ts:481-541</code>）读取工作区的 AGENTS/SOUL/USER/MEMORY.md 等，<code>resolveBootstrapContextForRun</code>（<code>bootstrap-files.ts:98-118</code>）按 context-mode、字符预算过滤后注入 <code># Project Context</code> 段。</p>
+                <div class="anno">读法：<b>子 Agent 用 <code>MINIMAL_BOOTSTRAP_ALLOWLIST</code>（<code>workspace.ts:543-549</code>）只保留部分文件（呼应 Day 09 的 minimal 模式）。</b>MEMORY 项由 <code>resolveMemoryBootstrapEntry</code> 解析（优先 <code>MEMORY.md</code>，缺失才 <code>memory.md</code>）。这套是"每次都带的随身记忆"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>动态：语义检索</h1></div>
+            <div class="card">
+                <p>动态记忆暴露为两个工具：<code>memory_search</code>（语义搜索）、<code>memory_get</code>（按路径取）。入口 <code>getMemorySearchManager</code>（<code>search-manager.ts:25</code>）。工具定义（<code>memory-tool.ts:40</code>）：</p>
+<pre><code class="language-typescript">const MemorySearchSchema = Type.Object({          // TypeBox 参数 schema
+  query: Type.String(),
+  maxResults: Type.Optional(Type.Number()),
+  minScore: Type.Optional(Type.Number()),
+});
+return {
+  label: "Memory Search", name: "memory_search",
+  description: "Mandatory recall step: semantically search MEMORY.md ...",
+  parameters: MemorySearchSchema,
+  execute: async (_id, params) =&gt; { /* getMemorySearchManager().search() */ },
+};</code></pre>
+                <div class="anno">读法：<b>这是一个标准工具（Day 11 讲工具形状）：名字 + 描述 + 参数 schema + execute。模型想回忆就调它，传 query，拿回相关记忆片段。</b>检索对象是 <code>MEMORY.md</code> + <code>memory/*.md</code>（可选含会话转录）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>双后端 + 回退</h1></div>
+            <div class="card">
+                <p>语义检索有两个后端，失败自动回退（<code>search-manager.ts</code>）：</p>
+                <ul>
+                    <li><code>QmdMemoryManager</code>（<code>:31-42</code>）：外部 <code>qmd</code> 进程后端。</li>
+                    <li><code>MemoryIndexManager</code>（<code>manager.ts</code>）：内建索引后端。</li>
+                    <li><code>FallbackMemoryManager</code>（<code>:104</code>）：qmd 失败时切内建。</li>
+                </ul>
+                <div class="anno">读法：<b>又是"接口/实现分离 + 优雅降级"：优先用外部 qmd（更强），挂了自动退到内建索引（保底）。</b>和 Day 07 的模型故障转移同一种"永不彻底失败"的韧性哲学，这里用在记忆检索上。记忆也能作为扩展提供（<code>extensions/memory-core</code>、<code>memory-lancedb</code>，Day 12）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>混合检索</h1></div>
+            <div class="card">
+                <p>内建索引不是简单的向量搜索，而是一套组合拳（<code>src/memory/</code>）：</p>
+                <table class="k">
+                    <tr><th>文件</th><th>作用</th></tr>
+                    <tr><td><code>embeddings*.ts</code></td><td>多 provider 向量嵌入（openai/gemini/mistral/voyage/ollama）</td></tr>
+                    <tr><td><code>sqlite-vec.ts</code></td><td>向量存储（SQLite 向量扩展）</td></tr>
+                    <tr><td><code>hybrid.ts</code></td><td>向量 + 关键词混合检索</td></tr>
+                    <tr><td><code>mmr.ts</code></td><td>最大边际相关，去冗余</td></tr>
+                    <tr><td><code>temporal-decay.ts</code></td><td>时间衰减（新记忆权重更高）</td></tr>
+                    <tr><td><code>query-expansion.ts</code></td><td>查询扩展</td></tr>
+                </table>
+                <div class="baby"><span class="t">为什么不只用向量搜索？</span>
+                纯向量搜索有短板：可能漏掉精确关键词、返回一堆重复内容、把很旧的记忆和新记忆同等对待。<strong>OpenClaw 叠加了：关键词混合（补向量的漏）、MMR 去重（结果更多样）、时间衰减（新记忆更重要）、查询扩展（把"我车"扩成"我的汽车/座驾"）。</strong>这些是工业级记忆/RAG 系统的标配技巧——目标是"检索出真正相关且不冗余的记忆"，而不是"向量最近的几条"。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>强制召回</h1></div>
+            <div class="card">
+                <p>系统提示里的 <code>## Memory Recall</code> 段（<code>system-prompt.ts:38-63</code>，仅当具备 memory 工具时出现）<strong>强制</strong>模型"回答历史相关问题前先检索"，可带引用 <code>Source: &lt;path#line&gt;</code>。工具描述里也写了 "Mandatory recall step"。</p>
+                <div class="anno">读法：<b>光有 memory_search 工具还不够——模型可能"懒得"用。所以在提示词里<strong>强制</strong>它"答历史问题前必须先搜记忆"。</b>这是"用提示词约束模型行为"的典型：能力（工具）+ 纪律（提示指令）双管齐下，才能保证记忆真的被用起来。带 Source 引用则让回答可追溯。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>仅追加回写</h1></div>
+            <div class="card">
+                <p>助理产生新记忆要写回文件时，OpenClaw 限制得很紧（<code>pi-tools.ts:538-559</code>）：</p>
+<pre><code class="language-typescript">// memoryFlushWritePath + MEMORY_FLUSH_ALLOWED_TOOL_NAMES
+// wrapToolMemoryFlushAppendOnlyWrite：把 write 包装成"仅追加"到指定记忆文件
+// 记忆刷写运行时只允许受限的几个工具</code></pre>
+                <div class="baby"><span class="t">为什么只能"追加"不能"覆盖"？</span>
+                记忆是宝贵的长期资产。<strong>如果允许模型随意覆盖/删除记忆文件，一次幻觉或提示注入就可能抹掉你多年的记忆。</strong>所以回写被限制成<strong>只能往指定记忆文件末尾追加</strong>（append-only），且只有受限的几个工具能做。<strong>这是"最小权限 + 防误删/防攻击"的安全设计</strong>——宁可记多了（可后续整理），也不让它有能力毁掉已有记忆。Day 17 会看到更多这类安全纵深。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周（Agent 大脑）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 06</strong> OpenClaw 内嵌 Pi 内核，streamFn 抽象 + 装饰器中间件</li>
+                    <li><strong>Day 07</strong> 两层故障转移：外层换模型、内层换鉴权 profile（OAuth&gt;token&gt;key）</li>
+                    <li><strong>Day 08</strong> 执行链路、会话串行排队、prompt() 触发、订阅式观察、溢出压缩</li>
+                    <li><strong>Day 09</strong> 段式系统提示、PromptMode 三档、技能目录/工具清单/项目上下文注入</li>
+                    <li><strong>Day 10</strong> 两套记忆：静态 bootstrap + 动态语义检索（混合/MMR/时间衰减），仅追加回写</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 OpenClaw 的"大脑"：<strong>它不造 LLM 循环，而是用一整套工程外壳（韧性、提示、记忆、安全）把 Pi 内核包装成可靠的个人助理</strong>。第 3 周进入"手和嘴"——技能、扩展、渠道。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+ls src/memory/                                    # 混合检索各模块
+sed -n '40,90p' src/agents/tools/memory-tool.ts   # memory_search 工具
+grep -n 'wrapToolMemoryFlushAppendOnlyWrite' src/agents/pi-tools.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 11（第3周开始）</strong>：<strong>技能系统 skills</strong>——skills/ 里 52 个技能怎么定义（SKILL.md + frontmatter）、三层发现加载、渐进式披露怎么"调用"，以及斜杠命令直达工具。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 提示词</a>
+                <a href="openclaw-day11.html" style="color:#8b5cf6;">Day 11 · 技能系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

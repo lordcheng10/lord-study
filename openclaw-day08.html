@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Agent 执行循环 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e11d48,#8b5cf6);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">Agent 执行循环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ReAct 在哪</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 完整链路</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 会话串行排队</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 一次尝试 attempt</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · prompt() 触发点</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 订阅式观察</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 溢出自动压缩</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 故障转移</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day09.html" class="nav-link" style="color:#f97316;">Day 09 提示词 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Agent 大脑</span>
+            <h1 class="part-title">Agent 执行循环</h1>
+            <p class="part-desc">一条消息怎么变成 LLM 调用 → 工具调用 → 回复？ReAct 循环在 Pi 里，但 OpenClaw 负责"准备输入 + 观察输出"。今天走完从入站到回复的完整链路。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ReAct 在哪</h1></div>
+            <div class="card">
+                <p>ReAct 循环（LLM 输出 → 有工具调用就执行 → 结果回灌 → 再调 LLM → 直到没有工具调用）<strong>在 Pi 库内部</strong>，由 <code>session.prompt()</code> 驱动。OpenClaw 不重写它，只"喂输入、看输出"。</p>
+                <div class="baby"><span class="t">回顾 ReAct（Day 06 讲过发动机在 Pi）</span>
+                ReAct = Reasoning + Acting，模型"边想边做"：想一下 → 要调工具就调 → 看结果再想 → …… → 觉得够了给最终答复。<strong>这个循环是 Pi 发动机的活儿。OpenClaw 的活儿在循环的"两端"：进循环前准备好模型/工具/提示词/历史，循环跑起来后订阅它吐出的每个事件（文字增量、工具调用、用量）转成自己的回调。</strong>理解"OpenClaw 管两端、Pi 管中间"，这一天就通了。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>完整链路</h1></div>
+            <div class="card">
+                <ol>
+                    <li>入站消息经渠道层 → auto-reply → <code>agent-runner-execution.ts</code> 组装运行参数。</li>
+                    <li><code>runWithModelFallback</code>（外层，Day 07）→ <code>runEmbeddedPiAgent</code>（<code>run.ts:256</code>，内层 + 会话排队）。</li>
+                    <li><code>runEmbeddedAttempt</code>（<code>attempt.ts:1369</code>）——单次尝试：修复会话 → 建系统提示 → <code>createAgentSession</code> + 挂 streamFn → <strong><code>session.prompt()</code></strong> 触发循环。</li>
+                    <li><code>subscribeEmbeddedPiSession</code>（<code>attempt.ts:2187</code>）订阅事件流，转成 <code>onPartialReply</code>/<code>onToolResult</code> 等回调。</li>
+                    <li>usage 累加回 <code>run.ts</code>（<code>UsageAccumulator</code>）。</li>
+                </ol>
+                <div class="anno">读法：<b>Day 07 的两层 failover 在最外面，本课的 attempt/prompt/subscribe 是"一次尝试"内部的事。</b>一次尝试失败 → Day 07 的循环换 profile/模型再来一次 attempt。层层嵌套但职责清晰。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>会话串行排队</h1></div>
+            <div class="card">
+                <p><code>runEmbeddedPiAgent</code> 用 <code>enqueueSession</code>/<code>enqueueGlobal</code>（<code>run.ts:275-276</code>）把运行串行化。</p>
+                <div class="baby"><span class="t">为什么要排队？</span>
+                同一个会话的状态（消息历史）存在文件里。<strong>如果用户连发两条消息、两个 Agent 运行同时去读写同一个会话文件，就会写坏（竞态）。</strong>解决办法：<strong>同一会话的运行排成一队，一个跑完再跑下一个</strong>（enqueueSession）；某些全局资源还有全局队列（enqueueGlobal）。这和 Day 07 SuperAGI 的"状态存 DB"、LangGraph 的"检查点"一样，都是在解决"Agent 状态并发安全"这个共性问题——只是 OpenClaw 用"会话级串行队列"来解。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>一次尝试 attempt</h1></div>
+            <div class="card">
+                <p><code>runEmbeddedAttempt</code>（<code>attempt.ts:1369</code>）在真正调模型前做一堆"准备+修复"：</p>
+                <ul>
+                    <li><code>SessionManager.open</code>（<code>attempt.ts:1731</code>）打开会话，修复畸形的 tool_use/tool_result 配对（<code>sanitizeToolUseResultPairing</code>）。</li>
+                    <li><code>buildEmbeddedSystemPrompt</code>（<code>attempt.ts:1642</code>）建系统提示（Day 09）。</li>
+                    <li><code>createAgentSession</code> + 挂 <code>streamFn</code>（Day 06）。</li>
+                    <li>修复尾部孤立 user 消息以免连续 user turn（<code>attempt.ts:2364-2378</code>）。</li>
+                    <li>加载 prompt 里引用的图片（<code>detectAndLoadPromptImages</code>，<code>attempt.ts:2390</code>）。</li>
+                </ul>
+                <div class="anno">读法：<b>大模型 API 对消息格式很挑剔（tool_use 必须配 tool_result、不能连续两条 user）。attempt 在调用前"体检并修复"会话，避免因历史脏数据直接报错。</b>这些防御性修复是长期运行的 Agent 必备——历史越长越容易出现边角脏数据。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>prompt() 触发点</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// attempt.ts:2460 —— 这一行进入 Pi 的 ReAct 循环
+await abortable(activeSession.prompt(effectivePrompt, { images }));
+// 无图则 attempt.ts:2462: await abortable(activeSession.prompt(effectivePrompt));</code></pre>
+                <div class="anno">读法：<b>整个"想+做"循环就浓缩在 <code>session.prompt(...)</code> 这一次调用里——它内部反复调 LLM、执行工具、直到收敛。</b><code>abortable(...)</code> 包裹让它可被超时/用户中止打断；yield 式中止被当成"干净停止"（<code>attempt.ts:2468-2473</code>）。这一行是 OpenClaw"喂输入"与"看输出"的交界。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>订阅式观察</h1></div>
+            <div class="card">
+                <p>循环跑的同时，<code>subscribeEmbeddedPiSession</code>（<code>pi-embedded-subscribe.ts:34</code>）订阅 Pi 会话事件流，把内部事件转成 OpenClaw 的回调：</p>
+<pre><code class="language-typescript">// assistant 文本增量 → onPartialReply（流式打字）
+// 完整消息块 → onBlockReply
+// 工具调用/结果 → onToolResult
+// 推理过程 → onReasoningStream
+// 事件处理器分文件：pi-embedded-subscribe.handlers.{messages,tools,lifecycle,compaction}.ts</code></pre>
+                <div class="baby"><span class="t">"观察者模式"——不打断循环，只旁听</span>
+                OpenClaw 不去改 Pi 循环内部，而是<strong>在旁边"订阅/旁听"它发生的每件事</strong>：模型吐了一段文字 → 转成流式回复推给渠道；调了个工具 → 记录工具结果；用了多少 token → 累加计费。<strong>这就是观察者模式：循环是"广播电台"，OpenClaw 是"听众"，听到什么就做相应的事，但不干涉广播本身。</strong>这样 OpenClaw 既能利用 Pi 的循环，又能把结果接到自己的渠道/计费/日志体系。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>溢出自动压缩</h1></div>
+            <div class="card">
+                <p>对话越来越长，迟早超出模型上下文窗口。<code>run.ts</code> 在尝试失败后检测溢出并自动压缩重试：</p>
+<pre><code class="language-typescript">// MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3（run.ts:740）
+// 检测到 isLikelyContextOverflowError（Day 07 的错误分类）→ 触发 auto-compaction 重试
+//   （run.ts:1003-1188），压缩逻辑在 pi-embedded-runner/compact.ts
+// 另有：thinking 级别回退（pickFallbackThinkingLevel）、超大工具结果截断
+//       （truncateOversizedToolResultsInSession, run.ts:69）</code></pre>
+                <div class="anno">读法：<b>"上下文超长"不换 key（Day 07），而是<strong>把历史压缩</strong>（总结旧消息、截断超大工具结果）再重试，最多 3 次。</b>还有 thinking 降级（高强度思考失败就降一档重试）。<strong>这些自动恢复让长对话不会因为"聊太多"而卡死——又是"长期运行 Agent"的必备能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ReAct 循环在哪？OpenClaw 管哪两端？</li>
+                    <li>从入站到回复的完整链路 5 步？</li>
+                    <li>为什么要会话串行排队？</li>
+                    <li>attempt 在调模型前为什么要"修复会话"？</li>
+                    <li>订阅式观察是什么模式？溢出压缩怎么触发？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+grep -n 'activeSession.prompt' src/agents/pi-embedded-runner/run/attempt.ts
+grep -n 'enqueueSession\|enqueueGlobal' src/agents/pi-embedded-runner/run.ts
+grep -n 'MAX_OVERFLOW_COMPACTION_ATTEMPTS' src/agents/pi-embedded-runner/run.ts
+ls src/agents/pi-embedded-subscribe.handlers.*.ts</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>提示词构造</strong>——模型到底看到什么？<code>buildAgentSystemPrompt</code> 怎么把技能目录、记忆召回、身份、工具清单、项目上下文一段段拼成系统提示；PromptMode 三档（full/minimal/none）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 故障转移</a>
+                <a href="openclaw-day09.html" style="color:#f97316;">Day 09 · 提示词构造 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

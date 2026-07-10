@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 提示词构造 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .stack{border:1px solid var(--border-color);border-radius:8px;overflow:hidden;margin:12px 0;font-size:12.5px}
+        .stack div{padding:8px 12px;border-bottom:1px solid var(--border-color)}.stack div:last-child{border-bottom:0}
+        .stack b{color:#e11d48}.stack span{color:var(--text-muted);font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#e11d48,#8b5cf6);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">提示词构造 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 系统提示是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 段式组装</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · PromptMode 三档</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 技能目录段</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工具清单段</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 项目上下文注入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 覆盖与钩子注入</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 Agent 循环</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day10.html" class="nav-link" style="color:#f97316;">Day 10 记忆 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 Agent 大脑</span>
+            <h1 class="part-title">提示词构造与上下文组装</h1>
+            <p class="part-desc">模型到底"看到"什么？答案在 <code>buildAgentSystemPrompt</code>（<code>system-prompt.ts:189</code>）——它把技能、记忆、身份、工具、项目上下文一段段拼成系统提示。这是 Agent 行为的"总说明书"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>系统提示是什么</h1></div>
+            <div class="card">
+                <p>系统提示（system prompt）是每次对话都放在最前面、告诉模型"你是谁、能干什么、要遵守什么"的一大段文字。它由 <code>buildAgentSystemPrompt</code>（<code>system-prompt.ts:189-689</code>）动态生成，经 <code>createSystemPromptOverride</code> 覆盖进 Pi 会话。</p>
+                <div class="baby"><span class="t">系统提示 = 给助理的"岗前培训手册"</span>
+                同一个大模型，给它不同的系统提示，就变成不同的助理。<strong>OpenClaw 的系统提示是运行时"现拼"的——根据当前有哪些技能、有没有记忆能力、你是不是主人、当前用什么工具，动态组装出一份"本次专属"的手册。</strong>模型读完这份手册，才知道自己此刻的身份、可用能力、行为规范。<strong>看懂这份手册怎么拼，就看懂了 OpenClaw 的"人格"和"行为边界"从哪来。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>段式组装</h1></div>
+            <div class="card">
+                <p>提示由一系列 <code>build*Section</code> 函数拼接，每个返回字符串数组，最后 <code>lines.filter(Boolean).join("\n")</code>（<code>system-prompt.ts:688</code>）：</p>
+                <div class="stack">
+                    <div><b>## Skills (mandatory)</b> <span>buildSkillsSection :20 — 可用技能目录</span></div>
+                    <div><b>## Memory Recall</b> <span>buildMemorySection :38 — 先搜记忆再答</span></div>
+                    <div><b>## Authorized Senders</b> <span>buildUserIdentitySection :66 — 谁是主人</span></div>
+                    <div><b>时间 / 回复标签 / 消息 / 语音 / 文档</b> <span>:97-171</span></div>
+                    <div><b>工具清单</b> <span>coreToolSummaries :240 + toolOrder :274</span></div>
+                    <div><b># Project Context</b> <span>:616 — 注入记忆/人格/AGENTS 文件</span></div>
+                    <div><b>## Silent Replies / ## Heartbeats</b> <span>:652 / :670 — 静默与心跳协议</span></div>
+                    <div><b>## Runtime</b> <span>:682 — agent/host/os/model/channel/能力</span></div>
+                </div>
+                <div class="anno">读法：<b>每段职责单一、可开可关，最后拼成一整篇。<code>filter(Boolean)</code> 把空段（比如没有记忆能力时的 Memory 段）自动剔除。</b>这种"段式组装 + 空段自动省略"让提示词既模块化又不留空洞。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>PromptMode 三档</h1></div>
+            <div class="card">
+<pre><code class="language-typescript">// system-prompt.ts:12-17
+type PromptMode = "full" | "minimal" | "none";
+// full    → 主 Agent，完整手册
+// minimal → 子 Agent，仅 Tooling / Workspace / Runtime 三段（省 token）
+// none    → 仅一行身份（system-prompt.ts:419）</code></pre>
+                <div class="baby"><span class="t">为什么子 Agent 用精简版？</span>
+                主 Agent 是"总管"，需要完整培训手册。<strong>但它可能派出许多子 Agent 去干专门的小活儿（比如"读这个文件总结一下"）——这些子 Agent 不需要知道所有技能、所有身份规则，给全套手册纯属浪费 token（花钱又占上下文）。</strong>所以 minimal 只给它干活必需的几段。<strong>none 则用于极轻量场景，只留一句"你是谁"。按需裁剪提示词是重要的成本优化——我们在 SuperAGI/crewAI 也见过类似的"上下文预算"思想。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>技能目录段</h1></div>
+            <div class="card">
+                <p><code>buildSkillsSection</code>（<code>system-prompt.ts:20-36</code>，标题"## Skills (mandatory)"）只放技能的<strong>目录</strong>（名称+描述+文件路径），不放技能全文：</p>
+<pre><code class="language-typescript">// 提示里长这样（XML 形式，由 Pi 的 formatSkillsForPrompt 生成）：
+// &lt;available_skills&gt;
+//   &lt;skill&gt;&lt;name&gt;weather&lt;/name&gt;&lt;description&gt;查天气…&lt;/description&gt;
+//          &lt;location&gt;skills/weather/SKILL.md&lt;/location&gt;&lt;/skill&gt;
+//   ...
+// &lt;/available_skills&gt;
+// 指令：先扫描描述，命中后用 read 工具读对应 SKILL.md，再照做</code></pre>
+                <div class="anno">读法：<b>这是"渐进式披露"——提示里只给菜单（技能名+简介+路径），模型觉得需要哪个，才用 read 工具去读那个 SKILL.md 全文。</b>避免把几十个技能全文塞进每次请求（省 token）。Day 11 详讲技能系统。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工具清单段</h1></div>
+            <div class="card">
+                <p>工具清单由 <code>coreToolSummaries</code>（<code>:240</code>）+ <code>toolOrder</code>（<code>:274</code>）+ 规范化工具名（<code>:301-311</code>）生成 <code>- name: summary</code> 列表，告诉模型"你有这些工具、各是干嘛的"。</p>
+                <div class="anno">读法：<b>模型要调工具，前提是知道有哪些工具、怎么用。这一段就是工具的"说明目录"。</b>真正的工具定义（参数 schema、执行函数）在 Day 11 讲；这里是它们在提示词里的"自我介绍"。工具名会先规范化（统一命名风格）再列出。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>项目上下文注入</h1></div>
+            <div class="card">
+                <p><code># Project Context</code> 段（<code>system-prompt.ts:616-649</code>）注入工作区的 bootstrap 文件——这就是 README 说的"注入记忆文件"：</p>
+<pre><code class="language-typescript">// 注入的文件（src/agents/workspace.ts:25-33）：
+// AGENTS.md, SOUL.md, TOOLS.md, IDENTITY.md, USER.md, HEARTBEAT.md,
+// BOOTSTRAP.md, MEMORY.md
+// 若含 SOUL.md → 追加 "embody its persona and tone"（:632-636）人格设定</code></pre>
+                <div class="baby"><span class="t">这些文件 = 助理的"人设 + 长期记忆"</span>
+                <strong>SOUL.md</strong> 定义助理的性格语气（读到就"入戏"）、<strong>USER.md</strong> 记你是谁、<strong>MEMORY.md</strong> 是长期记忆、<strong>AGENTS.md</strong> 是行为准则。<strong>把这些文件塞进每次系统提示，助理就"记得"你的偏好、保持一致的人格。</strong>这是"静态记忆注入"——每次都带上（Day 10 还有"动态语义检索"记忆）。字符预算会限制注入总量，防止把上下文撑爆。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>覆盖与钩子注入</h1></div>
+            <div class="card">
+                <p>系统提示还能被追加/覆盖：</p>
+                <ul>
+                    <li><code>params.extraSystemPrompt</code>（<code>:587</code>）：调用方额外追加。</li>
+                    <li><code>before_prompt_build</code> 钩子：扩展注入内容（受 <code>allowPromptInjection</code> 策略门控）。</li>
+                    <li>运行中 <code>prependSystemPromptAddition</code>（<code>attempt.ts:2109</code>）。</li>
+                    <li>诊断：<code>buildSystemPromptReport</code>（<code>attempt.ts:1673</code>）记录截断/注入/技能/工具，供排障。</li>
+                </ul>
+                <div class="anno">读法：<b>提示词不是死的——扩展可通过钩子注入自己的指令，但受安全策略门控（不是谁都能乱塞，Day 17 安全）。</b>诊断报告让你能回看"这次模型到底收到了什么提示"，是调试 Agent 行为的利器。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>系统提示是什么？为什么是运行时动态拼的？</li>
+                    <li>段式组装 + filter(Boolean) 的好处？</li>
+                    <li>PromptMode 三档分别用在哪、为什么子 Agent 用 minimal？</li>
+                    <li>技能段为什么只放目录不放全文？</li>
+                    <li>Project Context 注入哪些文件？SOUL.md 起什么作用？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+grep -n 'function build.*Section\|PromptMode' src/agents/system-prompt.ts | head -20
+sed -n '616,649p' src/agents/system-prompt.ts   # Project Context
+sed -n '25,33p' src/agents/workspace.ts          # bootstrap 文件名</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>记忆系统</strong>——OpenClaw 有<strong>两套记忆</strong>：静态 bootstrap 文件注入（今天见过）+ 动态语义检索（memory_search 工具 + 向量嵌入）。以及记忆"仅追加"回写的安全设计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 Agent 循环</a>
+                <a href="openclaw-day10.html" style="color:#f97316;">Day 10 · 记忆系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
