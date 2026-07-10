@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 微代理与 Skills — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/markdown.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#06b6d4}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">微代理与 Skills · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要"教"Agent</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · microagent → skill 演进</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · skill 长什么样</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 五个来源合并</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 触发式 vs 常驻</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · .openhands 目录</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 加载源码</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 安全</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 企业版 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 前端/安全/生态</span>
+            <h1 class="part-title">微代理 microagents 与 Skills</h1>
+            <p class="part-desc">不改一行代码，就能"教" Agent 你的项目规范、领域知识、常用流程。这就是微代理（在 V1 里演进成 skills）。今天读它的真实机制。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要"教" Agent</h1></div>
+            <div class="card">
+                <p>默认 Agent 很通用，但你的项目有特殊规矩：用什么测试框架、代码风格、部署流程、内部术语……你希望 Agent 一上来就知道这些，而不是每次都在提示里重复交代。<strong>微代理/skills 就是"把项目知识固化下来，自动喂给 Agent"。</strong></p>
+                <div class="baby"><span class="t">类比：给新员工的"入职手册 + 便签"</span>
+                新来的通用 Agent 像个能力很强但不了解你项目的外包程序员。你不想每次都口头交代"我们用 pytest、提交前要跑 lint、数据库叫 xxx"。<strong>skills 就是贴在他工位上的便签和入职手册</strong>——遇到相关任务自动翻出来看。这样 Agent 表现得像"懂你项目的老员工"，而你没改任何代码，只写了几个知识文件。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>microagent → skill 的演进</h1></div>
+            <div class="card">
+                <p>经典 OpenHands 里这个概念叫 <strong>microagents（微代理）</strong>。V1 里演进/统一成了 <strong>skills</strong>，但保留了向后兼容——看 <code>skills_router.py:34</code> 这行就懂：</p>
+<pre><code class="language-python">GLOBAL_SKILLS_DIR = Path(openhands.__file__).parent.parent / 'skills'
+USER_SKILLS_DIR = Path.home() / '.openhands' / 'microagents'   # ★ 仍叫 microagents（兼容）</code></pre>
+                <div class="anno">读法：<b>用户级 skill 目录仍然是 <code>~/.openhands/microagents</code>——保留旧名字，让老用户的微代理继续能用。</b>这是 Day 10 见过的"向后兼容"哲学的又一例：概念升级了，但不破坏老配置。所以你看文档说 microagents、代码里说 skills，指的是同一件事。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>skill 长什么样</h1></div>
+            <div class="card">
+                <p>一个 skill 通常就是一个 Markdown 文件，带元数据头（frontmatter）+ 知识正文：</p>
+<pre><code class="language-markdown">---
+name: our-testing-convention
+triggers: ["test", "测试", "pytest"]     # 触发词（可选）
+---
+# 我们项目的测试规范
+- 用 pytest，测试放在 tests/ 目录
+- 提交前必须跑 `make test` 且全绿
+- mock 外部 API，不要真实网络请求</code></pre>
+                <div class="anno">读法：<b>元数据头声明 skill 的名字和"触发词"，正文是要注入给 Agent 的知识（自然语言）。</b>有触发词的 skill 是"按需激活"——用户消息里出现触发词才注入（省 token）；没触发词的可以是"常驻知识"。<code>SkillInfo</code> 结构在 <code>skills_router.py:38</code>。</div>
+                <div class="baby"><span class="t">为什么是 Markdown + 自然语言？</span>
+                因为 skill 的受众是 <strong>LLM</strong>——它读自然语言最在行。你不用写代码，就用大白话把"我的项目该怎么搞"写清楚，Agent 就懂了。<strong>这是"提示词工程"的产品化：把有效的提示沉淀成可复用、可分享的文件。</strong>写 skill 本质是在写"给 AI 的说明书"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>五个来源合并</h1></div>
+            <div class="card">
+                <p>skills 可以来自多个层级，Agent 启动时全部加载合并（<code>app_conversation_service_base.py:110</code> 的 <code>load_and_merge_all_skills</code> 调 agent-server 的 <code>/api/skills</code>）：</p>
+                <table class="k">
+                    <tr><th>来源</th><th>范围</th><th>例</th></tr>
+                    <tr><td>Public（公共）</td><td>来自 <code>OpenHands/skills</code> GitHub 仓库</td><td>通用最佳实践</td></tr>
+                    <tr><td>User（用户）</td><td><code>~/.openhands/microagents</code></td><td>你个人的偏好</td></tr>
+                    <tr><td>Org（组织）</td><td>团队/公司级</td><td>公司编码规范</td></tr>
+                    <tr><td>Repo（仓库）</td><td>项目里的 <code>.openhands/skills/</code></td><td>本项目的特殊约定</td></tr>
+                    <tr><td>Sandbox（沙箱）</td><td>沙箱环境内置</td><td>环境相关</td></tr>
+                </table>
+                <div class="glossary"><b>多来源合并的意义</b>：知识分层管理——公共的大家共享、组织的团队统一、仓库的随项目走、个人的自己定制。就像"国家法律 + 公司制度 + 部门规定 + 个人习惯"层层叠加。<strong>Repo 级 skill（放项目 <code>.openhands/skills/</code>）尤其实用——把 Agent 知识随代码一起版本管理，团队共享，Agent 一 clone 项目就懂规矩。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>触发式 vs 常驻</h1></div>
+            <div class="card">
+                <p>两种 skill：</p>
+                <ul>
+                    <li><strong>触发式（有 triggers）</strong>：用户消息里出现触发词才注入。比如只在提到"部署"时才把部署流程知识加进来。</li>
+                    <li><strong>常驻式（无 triggers / knowledge 类）</strong>：始终在上下文里，比如项目总体说明。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么要区分？还是 token 经济学</span>
+                如果把所有知识都常驻在上下文里，会占大量 token（贵 + 挤占对话空间）。<strong>触发式让"部署知识只在聊部署时出现、数据库知识只在聊数据库时出现"</strong>——按需加载，省 token。这和 Day 03 的历史压缩、Day 14 的成本控制一脉相承：<strong>上下文空间是稀缺资源，要精打细算地用。</strong>回忆 Day 03 的 MessageEvent 有个 <code>activated_microagents</code> 字段——记录"这轮激活了哪些微代理"，就是触发式在起作用的证据。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>.openhands 目录：项目的"Agent 配置"</h1></div>
+            <div class="card">
+                <p>回忆 Day 07：会话启动时会处理项目里的 <code>.openhands/</code> 目录（<code>app_conversation_service_base.py:66</code> 注释列出）。它是"随项目走的 Agent 配置"：</p>
+                <ul>
+                    <li><code>.openhands/setup.sh</code>：项目环境准备脚本（装依赖等）</li>
+                    <li><code>.openhands/skills/</code>：仓库级 skills（本课重点）</li>
+                    <li><code>.openhands/pre-commit.sh</code>：git 提交前钩子</li>
+                    <li><code>PLAN.md</code>：规划型 Agent（Day 11）的计划文件</li>
+                </ul>
+                <div class="glossary"><b>把 Agent 配置放进代码仓库</b>意味着：团队共享同一套 Agent 行为、随版本演进、code review 时也能审查"我们怎么配 Agent"。<strong>"Agent 配置即代码"（Agent-config-as-code）</strong>——和"基础设施即代码"同理，让 AI 协作可复现、可协同、可审计。这是 OpenHands 用于团队的关键设计。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>加载源码</h1></div>
+            <div class="card">
+                <p>本仓的 skills 加载逻辑（<code>app_conversation_service_base.py:102</code>）：</p>
+<pre><code class="language-python">async def load_and_merge_all_skills(self, ...):
+    # 调用 agent-server 的 /api/skills 端点，加载并合并所有来源的 skill
+    # agent-server 负责：public（GitHub repo）/ user / org / repo / sandbox
+    return await load_skills_from_agent_server(...)</code></pre>
+                <div class="anno">读法：<b>又是"薄代理"模式（Day 07）——app_server 不自己实现 skill 合并逻辑，而是调沙箱里 agent-server 的 <code>/api/skills</code>，由它统一处理五个来源。</b>还有一个 <code>skills_router.py</code> 提供"浏览可用 skills、marketplace 预览"等 UI 支持接口。skill 的具体类型 <code>Skill</code> 来自 <code>openhands.sdk.skills</code>（外部包）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要"教" Agent？microagents/skills 解决什么？</li>
+                    <li>microagent 和 skill 的关系？（演进 + 向后兼容）</li>
+                    <li>一个 skill 长什么样？为什么用 Markdown+自然语言？</li>
+                    <li>五个来源分别是？触发式 vs 常驻为什么要区分？</li>
+                    <li>.openhands 目录里有什么？"Agent 配置即代码"什么意思？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -n 'GLOBAL_SKILLS_DIR\|USER_SKILLS_DIR\|microagents\|class SkillInfo' openhands/app_server/user/skills_router.py
+grep -n 'def load_and_merge_all_skills\|\.openhands\|setup.sh\|skills' openhands/app_server/app_conversation/app_conversation_service_base.py | head
+grep -rn 'activated_microagents' frontend/src/types/v1/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>enterprise 企业版扩展</strong>——本仓 <code>enterprise/</code> 目录一览：多租户、鉴权（Keycloak）、计费、Git 平台集成、会话分享。看 OpenHands 如何从"单机工具"扩展成"企业级 SaaS"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 安全</a>
+                <a href="openhands-day19.html" style="color:var(--accent-green);">Day 19 · 企业版 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

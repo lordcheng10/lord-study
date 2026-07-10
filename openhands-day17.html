@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 安全与权限 — OpenHands 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .layers{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+        .layers .ly{border-radius:9px;padding:11px 14px;border:1px solid var(--border-color);background:var(--bg-secondary);font-size:12.5px}
+        .layers .ly b{color:#06b6d4}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">安全与权限 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 核心矛盾</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 第1层：沙箱隔离</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 第2层：风险评估</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 第3层：人工确认</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 密钥按需下发</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 用户隔离</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 熔断与脱敏</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openhands-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 前端</a></li>
+            <li><a href="openhands-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openhands-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 微代理 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 前端/安全/生态</span>
+            <h1 class="part-title">安全与权限</h1>
+            <p class="part-desc">"让 AI 自主执行命令"既是威力也是风险。今天把散落各处的安全机制汇总成一套<b>纵深防御</b>体系，看 OpenHands 如何"敢把执行权交给 AI"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>核心矛盾</h1></div>
+            <div class="card">
+                <p>OpenHands 的价值在于"AI 真的能动手操作"，但这天然危险：AI 可能误删文件、泄漏密钥、执行恶意命令（如果被提示注入攻击）。<strong>如何在"给 AI 足够权限干活"和"防止它闯祸"之间平衡？</strong>答案是<strong>纵深防御</strong>——多层安全，一层被突破还有下一层。</p>
+                <div class="layers">
+                    <div class="ly"><b>第 1 层 沙箱隔离</b> — 物理隔离，AI 碰不到宿主机（Day 09）</div>
+                    <div class="ly"><b>第 2 层 风险评估</b> — LLM 给每个动作打风险等级（security_risk，Day 03）</div>
+                    <div class="ly"><b>第 3 层 人工确认</b> — 高危动作执行前暂停等人点头（confirmation mode）</div>
+                    <div class="ly"><b>第 4 层 密钥/数据隔离</b> — 密钥按需下发、用户数据路径隔离（Day 08/09）</div>
+                    <div class="ly"><b>第 5 层 熔断/脱敏</b> — 步数预算上限、错误信息脱敏（Day 04/07）</div>
+                </div>
+                <div class="baby"><span class="t">纵深防御是什么？</span>
+                像古代城池——护城河、城墙、内城、卫兵，一层层。不指望单一防线万无一失，而是<strong>每层都拦一部分，叠加起来极难全部突破</strong>。OpenHands 的安全不是靠某一个机制，而是这五层叠加。今天逐层看。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>第 1 层：沙箱隔离（地基）</h1></div>
+            <div class="card">
+                <p>最根本的一层（Day 09 详讲）：AI 的一切执行都在隔离的 Docker 容器里。就算 AI 执行了 <code>rm -rf /</code>，删的也是容器里的东西，删掉重建即可，<strong>宿主机毫发无伤</strong>。</p>
+                <div class="glossary"><b>沙箱是安全的"地基"</b>——正因为有它，其他层即使失效，损害也被限制在容器内。这也是为什么 npm 直接运行（无沙箱）模式会打<strong>风险警告</strong>（Day 04）：那模式下 AI 有宿主机完整文件权限，地基没了。<strong>生产环境永远要用沙箱。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>第 2 层：风险评估 security_risk</h1></div>
+            <div class="card">
+                <p>回忆 Day 03：每个 <code>ActionEvent</code> 带一个 <code>security_risk</code> 字段——LLM 在产出动作时同时评估它的风险等级。配置 <code>[security]</code> 的 <code>security_analyzer = "llm"</code>（Day 04）指定用 LLM 做这个评估。</p>
+                <div class="baby"><span class="t">让 AI 自己评估风险，可靠吗？</span>
+                单独看不够可靠（AI 可能误判），所以它<strong>只是"第2层"，不是唯一防线</strong>——它的作用是"给动作分级"，供第 3 层（人工确认）决定"哪些需要人看一眼"。比如"读文件"评为低危、自动执行；"删数据库""<code>curl</code> 外部地址"评为高危、触发人工确认。<strong>风险评估 = 智能地决定"哪些操作值得打扰人类"，避免每个动作都问（烦）或都不问（险）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>第 3 层：人工确认 confirmation mode</h1></div>
+            <div class="card">
+                <p>配置 <code>[security]</code> 的 <code>confirmation_mode = true</code> 开启。开启后，（高危）动作<strong>执行前暂停</strong>，通过事件通知前端，等你点"批准/拒绝"：</p>
+<pre><code class="language-python"># 概念：动作执行前
+if confirmation_mode and action.security_risk >= 阈值:
+    暂停，发出等待确认的事件（execution_status = waiting_for_confirmation）
+    # 等前端返回用户决定
+    if 用户拒绝: 产生 UserRejectObservation（Day 03 见过）
+    else: 执行</code></pre>
+                <div class="anno">读法：<b>这就是 Human-in-the-loop（人在环中）——AI 干到关键处停下来等人拍板。</b>Day 03 的 <code>UserRejectObservation</code>（带 <code>rejection_reason</code>）就是"用户拒绝了某动作"的记录；<code>V1ExecutionStatus</code> 的 <code>waiting_for_confirmation</code> 状态就是"正在等你确认"。</div>
+                <div class="baby"><span class="t">这和 eino 的"中断/恢复"是一回事</span>
+                还记得 eino 教程 Day 14 的 Interrupt/Resume 吗？完全同一个思想——<strong>Agent 遇到敏感操作暂停、存现场、等人工批准、再从断点继续</strong>。转账要审批、删库要确认，都是这个模式。<strong>能自主行动的 AI，必须能在关键点"停下来等人"——这是敢部署它的底线。</strong>OpenHands 靠 <code>security_risk</code>（第2层）+ confirmation（第3层）实现智能的人工确认。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>第 4 层之一：密钥按需下发</h1></div>
+            <div class="card">
+                <p>Day 09 讲过：密钥<strong>不打进镜像、不一次性全塞进容器</strong>，而是沙箱用时凭 session key 回 app_server 单独领取（<code>sandbox_router.py:157</code>，<code>_valid_sandbox_from_session_key</code> 校验）。</p>
+                <div class="glossary"><b>为什么这是安全关键</b>：如果密钥都在容器环境变量里，一旦 AI 被提示注入攻击诱导执行 <code>env</code> 或把环境变量发到外部，密钥就泄漏了。<strong>按需下发 + 最小暴露</strong>让容器里任何时刻都只有"当下用到的那个密钥"，攻击面最小。<strong>处理机密的黄金准则：能不给就不给，要给只给当下需要的那一点。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>第 4 层之二：用户隔离</h1></div>
+            <div class="card">
+                <p>Day 08 讲过：事件存储路径 = <code>{prefix}/{user_id}/conversations/{id}</code>——<strong>带 user_id 的严格前缀是权限控制的唯一手段</strong>。你拼不出别人的路径，就读不到别人的数据。沙箱鉴权也靠 <code>session_api_key</code> 与 sandbox 强绑定校验（Day 09）。</p>
+                <div class="baby"><span class="t">多用户场景的隔离（尤其 SaaS）</span>
+                OpenHands 可以是多人共用的服务（enterprise 版，Day 19）。这时必须保证"用户 A 绝对看不到用户 B 的会话/事件/沙箱"。做法是把 user_id <strong>编码进每一处资源标识</strong>（存储路径、沙箱归属 SandboxRecord.owner）。请求进来先确定 user_id，之后所有资源访问都被这个 id 框住。<strong>把隔离"结构化"进数据布局，比到处写权限检查更不容易出漏洞。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>第 5 层：熔断与脱敏</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>步数/预算熔断</strong>（Day 04）：<code>max_iterations</code>（默认 500）、<code>max_budget_per_task</code>——防止 AI 失控无限循环烧钱/搞破坏。</li>
+                    <li><strong>错误脱敏</strong>（Day 07）：启动失败等错误信息经 <code>redact_text_secrets</code> 处理，防止密钥意外出现在日志/报错里泄漏。</li>
+                    <li><strong>限流</strong>（Day 10）：中间件按 IP 限流，防止接口被打爆。</li>
+                </ul>
+                <div class="glossary"><b>这些是"兜底层"</b>——前面几层管"正常运行时的安全"，这层管"出意外/被滥用时把损害控制住"。熔断防失控、脱敏防信息泄漏、限流防资源耗尽。<strong>安全设计不仅要防"坏人主动攻击"，也要防"AI 自己抽风"和"意外泄漏"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>OpenHands 安全的核心矛盾？纵深防御是什么？</li>
+                    <li>五层防御分别是什么？</li>
+                    <li>security_risk + confirmation mode 怎么配合？和 eino 的中断/恢复哪里像？</li>
+                    <li>密钥为什么按需下发？用户隔离怎么做？</li>
+                    <li>熔断/脱敏/限流各防什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '/\[security\]/,/^\[/p' config.template.toml
+grep -n 'confirmation\|security_risk\|UserReject\|waiting_for_confirmation' \
+  frontend/src/types/v1/core/base/common.ts frontend/src/types/v1/core/events/*.ts
+grep -n 'redact_text_secrets' openhands/app_server/app_conversation/live_status_app_conversation_service.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>微代理 microagents</strong>——不改代码就能定制 Agent 行为：用"知识片段 + 触发词"往 Agent 上下文注入领域知识/规范。看 OpenHands 怎么让你"教" Agent。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openhands-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 前端</a>
+                <a href="openhands-day18.html" style="color:var(--accent-green);">Day 18 · 微代理 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
