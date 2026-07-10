@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · Wasm 扩展 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#26a69a,#e91e63);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">Wasm 扩展 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要 Wasm</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · proxy-wasm</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Wasm filter 工厂</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Context 翻译层</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 双向 ABI</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · VM 与运行时</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Higress 定制</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 扩展机制</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day18.html" class="nav-link" style="color:#e91e63;">Day 18 可观测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 扩展/可观测/构建</span>
+            <h1 class="part-title">Wasm 扩展（Higress 的基础）</h1>
+            <p class="part-desc">这是全课最关键的一课之一——因为 <strong>Higress 的插件生态就建立在 Envoy 的 Wasm 支持上</strong>。今天看 WebAssembly 插件怎么工作、proxy-wasm ABI、<code>Context</code> 双向翻译层。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要 Wasm</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Wasm 解决"加插件要重编译 C++"的痛点</span>
+                Day 16 说 Envoy 扩展是编译进二进制的——加个自定义过滤器要用 C++ 写、重新编译整个 Envoy（几十分钟到几小时），门槛极高。<strong>WebAssembly（Wasm）改变了这一切：你用 Go/Rust/C++ 写插件，编译成一个 <code>.wasm</code> 文件，Envoy <strong>运行时动态加载</strong>它——不用重编译 Envoy、不用懂 Envoy C++ 内核、还能热更新插件。</strong>而且 Wasm 运行在沙箱里（安全隔离，插件崩了不影响 Envoy）。<strong>这就是 Higress "插件市场"的技术基础——用户用 wasm-go（本系列后面）写插件，Higress 动态加载。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>proxy-wasm</h1></div>
+            <div class="card">
+                <p>Envoy 的 Wasm 支持基于 <strong>proxy-wasm</strong>（代理的 Wasm 规范）。higress-group 这个 fork 用的是 Higress 定制版依赖（<code>bazel/repository_locations.bzl</code>）：<code>proxy_wasm_cpp_host</code>（宿主，来自 github.com/higress-group）、<code>proxy_wasm_cpp_sdk</code>（SDK）。运行时引擎有 v8/wamr/wasmtime/null 四种（<code>source/extensions/wasm_runtime/</code>）。</p>
+                <div class="baby"><span class="t">proxy-wasm 是"代理和插件之间的合同"</span>
+                <strong>proxy-wasm 定义了一套标准 ABI（应用二进制接口）——规定"代理怎么调插件"（onRequestHeaders 等钩子）和"插件怎么调代理"（getHeader/sendResponse 等宿主函数）。</strong>只要遵守这套合同，任何语言写的插件都能跑在任何支持 proxy-wasm 的代理上（Envoy、其他代理）。<strong>host（宿主）= Envoy 侧的实现；SDK = 给插件作者用的库（wasm-go 就是 Go 版 SDK）。</strong>引擎（v8 是 Google 的 JS/Wasm 引擎）负责真正执行 .wasm 字节码。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Wasm filter 工厂</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/filters/http/wasm/config.h（name="envoy.filters.http.wasm"）
+// createFilterFactoryFromProtoTyped 返回闭包：
+return [filter_config](Http::FilterChainFactoryCallbacks&amp; callbacks) -&gt; void {
+  auto filter = filter_config-&gt;createContext();   // 每条请求创建一个 Context
+  callbacks.addStreamFilter(filter);              // config.h:62 作为 HTTP filter
+  callbacks.addAccessLogHandler(filter);          // config.h:63
+};</code></pre>
+                <div class="anno">读法：<b>Wasm 就是一个普通的 HTTP 过滤器扩展（Day 16 的工厂模式）——<code>REGISTER_FACTORY</code> 注册、配置里写 <code>envoy.filters.http.wasm</code> 就启用。每个请求创建一个 <code>Context</code>（L04）。</b>所以 Wasm 插件对 Envoy 来说就是"一个特殊的 L7 过滤器"，无缝融入 Day 08 的过滤器链。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Context 翻译层</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// source/extensions/common/wasm/context.h:107
+class Context : public proxy_wasm::ContextBase,   // proxy-wasm ABI 上下文
+                public Http::StreamFilter,        // 同时是 Envoy HTTP filter
+                public Network::Filter, ... { };</code></pre>
+                <div class="baby"><span class="t">Context = "双面翻译官"</span>
+                <code>Context</code> 一身两职：<strong>对 Envoy 它是一个 <code>Http::StreamFilter</code>（Day 08 的 L7 过滤器）；对 Wasm 插件它是 <code>proxy_wasm::ContextBase</code>（ABI 上下文）。</strong>它坐在中间做双向翻译：<strong>Envoy 的过滤器事件（decodeHeaders 等）→ 翻译成 proxy-wasm 的钩子（onRequestHeaders）调用插件；插件调宿主函数（getHeader）→ 翻译成操作 Envoy 的数据。</strong>就像同声传译：一边是 Envoy 的"语言"，一边是 Wasm 插件的"语言"，Context 让它们能对话。每个请求一个 Context 实例。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>双向 ABI</h1></div>
+            <div class="card">
+                <p><strong>下行（Envoy → Wasm，filter 钩子）</strong>：<code>decodeHeaders</code>（<code>context.h:179</code>）→ 调插件的 onRequestHeaders；<code>decodeData</code>/<code>encodeHeaders</code>/<code>encodeData</code>/<code>log</code> 同理。</p>
+                <p><strong>上行（Wasm → 宿主，host functions）</strong>：插件调这些，Context 实现：</p>
+<pre><code class="language-cpp">getHeaderMapValue（:240）/ addHeaderMapValue（:238）  // 读写 header
+getBuffer（:252）                                     // 读 body
+sendLocalResponse（:217）                             // 直接返回响应
+httpCall（:262）/ grpcCall（:281）                    // 外呼其他服务
+defineMetric（:275）/ incrementMetric（:276）         // 指标（映射到 Envoy stats，Day 18）</code></pre>
+                <div class="anno">读法：<b>下行 = Envoy 通知插件"请求头来了、body 来了"；上行 = 插件反过来操作 Envoy"给我这个 header、帮我发个 HTTP 请求、加个指标"。<strong>这套双向 ABI 就是 Wasm 插件的全部能力边界</strong>——插件能做什么，取决于宿主暴露了哪些 host functions。</b>Buffer 桥接类零拷贝挂接 Envoy buffer（Day 19）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>VM 与运行时</h1></div>
+            <div class="card">
+                <p><code>Wasm</code>（<code>wasm.h:44</code>）是一个 Wasm 执行实例；<code>PluginConfig</code>（<code>wasm.h:224</code>）是配置载体，<code>getOrCreateThreadLocalPlugin</code>（<code>:216</code>）<strong>按线程惰性克隆 VM</strong>。运行时工厂 <code>WasmRuntimeFactory</code>（<code>wasm_runtime_factory.h:15</code>）决定用哪个引擎（默认 V8）。</p>
+                <div class="baby"><span class="t">"按线程克隆 VM"呼应线程模型</span>
+                还记得 Day 03 的线程模型吗？每个 worker 线程独立、无锁。<strong>Wasm 也遵守这个规矩：每个 worker 线程有自己的 Wasm VM 实例（<code>getOrCreateThreadLocalPlugin</code> 按线程克隆），插件状态线程隔离——不用加锁。</strong>这就是为什么 Wasm 能无缝融入 Envoy 的高性能架构。<code>WasmRuntimeFactory</code> 是又一个 Day 16 的工厂模式应用——V8/WAMR/Wasmtime 各是一个可选引擎实现（<code>REGISTER_FACTORY(V8RuntimeFactory, WasmRuntimeFactory)</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Higress 定制</h1></div>
+            <div class="card">
+                <p>higress-group fork 对 Wasm 做了增强（<code>#if defined(HIGRESS)</code>）：<code>setBuffer</code>（改请求/响应体）、<code>redisCall</code>（<code>context.h:270</code>，插件直接调 Redis）、<code>getUpstreamHosts</code>/<code>setUpstreamOverrideHost</code>（<code>:223/:224</code>，插件干预负载均衡选主机）、VM 失败时按 <code>FailurePolicy</code> + 退避热重载。</p>
+                <div class="glossary"><b>这就是 Higress 插件比原生 Envoy Wasm 更强的地方</b>：Higress 给 Wasm 插件开了更多 host functions（调 Redis、改 body、干预路由）。<strong>所以 Higress 的 Wasm 插件能做更丰富的业务逻辑——AI 网关的很多能力（如调用模型 API、改写请求）就靠这些定制 ABI。</strong>本系列后面的 wasm-go 就是用 Go 调用这套 ABI 写插件的 SDK。理解了今天的双向 ABI，就理解了 wasm-go 插件的运行原理。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Wasm 解决 C++ 扩展的什么痛点？（重编译/门槛/热更新/沙箱）</li>
+                    <li>proxy-wasm 是什么？host / SDK / 引擎各是什么？</li>
+                    <li>Context 为什么是"双面翻译官"？</li>
+                    <li>双向 ABI：下行和上行各是什么方向？</li>
+                    <li>Wasm VM 怎么呼应 Envoy 线程模型？Higress 定制了什么 ABI？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '107,120p' source/extensions/common/wasm/context.h   # Context 多继承
+grep -n 'getHeaderMapValue\|httpCall\|redisCall\|setUpstreamOverrideHost' source/extensions/common/wasm/context.h | head
+ls source/extensions/wasm_runtime/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>可观测性 + Admin</strong>——stats（无锁指标，呼应线程模型）、access log、tracing，以及 Admin 接口（<code>/stats</code> <code>/clusters</code> <code>/config_dump</code>）怎么内省运行状态。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 扩展机制</a>
+                <a href="envoy-day18.html" style="color:#e91e63;">Day 18 · 可观测性 + Admin &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · 扩展机制 — Envoy 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#26a69a,#e91e63);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">扩展机制 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 按类别组织</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Registry 注册表</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · RegisterFactory</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · REGISTER_FACTORY 宏</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工厂接口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 完整注册链路</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 编译期裁剪</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="envoy-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 Codec</a></li>
+            <li><a href="envoy-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="envoy-day17.html" class="nav-link" style="color:#e91e63;">Day 17 Wasm &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 扩展/可观测/构建</span>
+            <h1 class="part-title">扩展机制</h1>
+            <p class="part-desc">第 4 周讲 Envoy 的生态。今天是地基：<strong>扩展机制</strong>。Envoy 有 275 个扩展（62 个 HTTP 过滤器…），靠 <code>Registry::RegisterFactory</code> 工厂模式 + 编译期静态注册 + 裁剪。理解它才能看懂 Wasm、过滤器等一切扩展。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>按类别组织</h1></div>
+            <div class="card">
+                <p><code>source/extensions/</code> 每个子目录 = 一个扩展点类别：<code>filters/http</code>（62 个：cors/ext_authz/jwt_authn/wasm/lua…）、<code>filters/network</code>、<code>clusters</code>、<code>transport_sockets</code>、<code>access_loggers</code>、<code>tracers</code>、<code>load_balancing_policies</code>、<code>wasm_runtime</code>…</p>
+                <div class="anno">读法：<b>每个类别对应一个"扩展点"——Envoy 在这些点上允许插入不同实现。你前面学的负载均衡（Day 14）、健康检查（Day 15）、L7 过滤器（Day 08）全是扩展。</b>类别名如 <code>envoy.filters.http</code>、<code>envoy.tracers</code>。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Registry 注册表</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/registry/registry.h（扩展体系地基，669 行）
+template&lt;class Base&gt; class FactoryRegistry {          // :166 按 Base 类型模板化的全局注册表
+  static ... factories();                             // :190 name → 工厂 的静态单例哈希表
+  static void registerFactory(Base&amp;, name);           // :230 按名注册（重复注册抛异常）
+  static Base* getFactory(name);                      // :293 按名查找
+};</code></pre>
+                <div class="baby"><span class="t">注册表 = "按名字找实现的电话簿"</span>
+                你在配置里写 <code>envoy.filters.http.wasm</code>，Envoy 怎么知道用哪段代码？<strong>靠注册表：每个扩展在程序启动时把"我的名字 → 我的工厂"登记进一个全局哈希表（电话簿）。运行时按配置里的名字一查，就拿到对应的工厂。</strong><code>FactoryRegistry&lt;Base&gt;</code> 按扩展类型（Base）分表——HTTP 过滤器一张表、tracer 一张表…，避免混淆。这是"依赖注入/服务定位"的经典实现。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>RegisterFactory</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// registry.h:507
+template&lt;class T, class Base&gt; class RegisterFactory {
+  RegisterFactory() {   // :512 构造函数静态实例化时自动注册
+    FactoryRegistry&lt;Base&gt;::registerFactory(instance_, instance_.name());
+    // :522 并把 category() 注册进 FactoryCategoryRegistry
+  }
+};</code></pre>
+                <div class="baby"><span class="t">"构造即注册"的巧思</span>
+                注意 <code>RegisterFactory</code> 的<strong>构造函数</strong>里做注册——只要在全局作用域创建一个它的实例，程序启动（静态初始化）时就自动执行注册，把工厂登记进电话簿。<strong>这是 C++ "静态初始化时自动执行代码"的常用技巧：你不用手动调"注册"，只要声明一个全局对象，链接进二进制就自动生效。</strong>下一课的 <code>REGISTER_FACTORY</code> 宏就是包装这个。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>REGISTER_FACTORY 宏</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// registry.h:641
+#define REGISTER_FACTORY(FACTORY, BASE)                    \
+  void forceRegister##FACTORY() {                          \
+    static auto registered = new RegisterFactory&lt;FACTORY, BASE&gt;();  \
+  }
+// 用法（source/extensions/filters/http/wasm/config.cc:15）：
+REGISTER_FACTORY(WasmFilterConfig, NamedHttpFilterConfigFactory);</code></pre>
+                <div class="anno">读法：<b>一个宏，一行搞定注册。写完一个扩展，在它的 <code>config.cc</code> 里 <code>REGISTER_FACTORY(你的工厂, 类别基类)</code>，它就自动登记。</b>Wasm 过滤器就是这样注册的。<code>LEGACY_REGISTER_FACTORY</code> 带旧名别名（兼容）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工厂接口</h1></div>
+            <div class="card">
+<pre><code class="language-cpp">// envoy/server/filter_config.h:310 —— HTTP 过滤器工厂接口
+class NamedHttpFilterConfigFactory {
+  virtual absl::StatusOr&lt;Http::FilterFactoryCb&gt;
+  createFilterFactoryFromProto(const Protobuf::Message&amp; config, ...) PURE;  // :323
+  std::string category() const override { return "envoy.filters.http"; }   // :265
+};</code></pre>
+                <div class="anno">读法：<b><code>createFilterFactoryFromProto</code> 是核心：拿到配置（proto），返回一个 <code>FilterFactoryCb</code>（一个"把过滤器塞进链子"的闭包）。<code>category()</code> 声明"我属于哪类扩展"。</b>模板基类 <code>CommonFactoryBase</code> 去掉样板代码，子类只写关键逻辑。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>完整注册链路</h1></div>
+            <div class="card">
+<pre><code class="language-bash">配置里出现 envoy.filters.http.wasm
+ → HCM 用该 name 调 getFactory("envoy.filters.http.wasm")   # 查电话簿
+ → 拿到 WasmFilterConfig 工厂
+ → createFilterFactoryFromProto()  # 返回一个把 filter 塞进链的闭包
+ → 每个请求建链时执行闭包，安装 filter</code></pre>
+                <div class="anno">读法：<b>这就是"配置里的一个名字"到"运行时真正装上过滤器"的完整链路。注册（启动时静态）+ 查找（配置解析时）+ 创建（每请求建链时）三个阶段。</b>Day 05/07 讲的"创建 L7 过滤器链"就是在这一步查工厂、执行闭包。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>编译期裁剪</h1></div>
+            <div class="card">
+                <p>哪些扩展被编进二进制？由 Bazel 的 <code>extensions_build_config.bzl</code>（275 条）决定。下游（Higress/Istio）可以<strong>整体替换</strong>这份配置来裁剪扩展集，无需改 Envoy 源码。</p>
+                <div class="baby"><span class="t">"静态注册 + 编译期裁剪"的取舍</span>
+                Envoy 的扩展是<strong>编译进二进制</strong>的（不是运行时动态加载 .so）。好处：性能最优（无动态加载开销）、类型安全、链接期就能发现问题。<strong>代价：加/减扩展要重新编译。</strong>但 Bazel 的裁剪机制让这很灵活——<code>extensions_build_config.bzl</code> 列出要编入哪些扩展，Higress 可以提供自己的这份清单（去掉用不到的、加上自己的），生成一个定制的 Envoy 二进制。<strong>Wasm（Day 17）则提供了"运行时动态加载"的补充——用 WebAssembly 插件避免重编译。</strong>这就是为什么 Higress 生态重度依赖 Wasm。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>扩展按什么组织？举几个扩展类别。</li>
+                    <li>Registry 注册表解决什么问题？</li>
+                    <li>"构造即注册"是什么技巧？REGISTER_FACTORY 宏怎么用？</li>
+                    <li>工厂接口的 createFilterFactoryFromProto 返回什么？</li>
+                    <li>"配置名 → 装上过滤器"的完整链路？编译期裁剪的取舍？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/envoy
+sed -n '166,240p' envoy/registry/registry.h | head -40
+sed -n '641,655p' envoy/registry/registry.h    # REGISTER_FACTORY 宏
+grep -n 'REGISTER_FACTORY' source/extensions/filters/http/wasm/config.cc</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>Wasm 扩展（Higress 的基础！）</strong>——WebAssembly 插件怎么工作、proxy-wasm ABI、<code>Context</code> 双向翻译层、VM 生命周期。这是理解 Higress 插件生态的关键一课。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="envoy-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 Codec</a>
+                <a href="envoy-day17.html" style="color:#e91e63;">Day 17 · Wasm 扩展 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
