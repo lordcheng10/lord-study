@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 01 · 项目全景 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#4a7fd6}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">01</div>
+            <h2>Day 01</h2>
+            <p class="version">项目全景 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Istio 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 控制面 vs 数据面</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · xDS 五兄弟</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三段式职责</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 带 Proxy 翻译</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 目录地图</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 与 Envoy 承接</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day02.html" class="nav-link" style="color:#4a7fd6;">Day 02 istiod 启动 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 01 / 共 20 天 · 第 1 周 控制面全景</span>
+            <h1 class="part-title">项目全景：服务网格控制面</h1>
+            <p class="part-desc">欢迎来到 Istio——higress-group 系列第 2 站。学完 Envoy（数据面），现在看控制面。第一天建立全局图：控制面 vs 数据面、xDS 五兄弟、istiod 的三段式职责，以及它和你学过的 Envoy 怎么承接。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Istio 是什么</h1></div>
+            <div class="card">
+                <p><strong>Istio</strong> 是最主流的<strong>服务网格</strong>（Go 编写）。它给你的微服务集群加上"流量治理 + 安全 + 可观测"能力——而且业务代码零改动。核心组件叫 <strong>istiod</strong>（一个"模块化单体"，<code>pilot.md:4</code>），内含 Pilot（配置代理）、Citadel（证书）等。</p>
+                <div class="baby"><span class="t">服务网格 = "给微服务装的公共基础设施"</span>
+                微服务多了，每个服务都要处理：怎么找到别的服务、失败重试、超时、加密通信、限流、监控…… <strong>如果每个服务自己写这些，重复且易错。服务网格的思路：把这些"网络治理"能力下沉到每个服务旁边的一个代理（Envoy sidecar），由一个中央大脑（istiod）统一配置。</strong>业务只管业务，治理交给网格。<strong>Istio = 那个中央大脑 + 遍布各处的 Envoy 代理。你已经学了代理（Envoy），现在学大脑（istiod）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>控制面 vs 数据面</h1></div>
+            <div class="card">
+                <p>架构文档 <code>architecture/networking/pilot.md</code> 是最佳起点。核心定位（<code>pilot.md:15</code>）：</p>
+                <div class="glossary"><b>Envoy 是 xDS 客户端（消费者），istiod 是 xDS 服务端（发送者）。</b>本仓库实现的正是"发送者"这一侧。</div>
+                <div class="baby"><span class="t">大脑（控制面）和手脚（数据面）</span>
+                <strong>数据面（data plane）= 遍布各处的 Envoy，真正转发流量、执行策略——它是"手脚"。控制面（control plane）= istiod，决定"流量该怎么转、谁能访问谁、怎么加密"，然后把决策下发给所有 Envoy——它是"大脑"。</strong>大脑不碰具体流量（那太慢），只负责"想清楚 + 分发指令"。手脚不做决策（那太分散），只负责"执行"。<strong>这个分离是现代云原生基础设施的黄金法则。你学 Istio，就是学这个大脑怎么工作。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>xDS 五兄弟</h1></div>
+            <div class="card">
+                <p>大脑怎么给手脚下指令？靠 <strong>xDS 协议</strong>（一组 gRPC 流式 API）。Envoy 通过 xDS 向 istiod 索取配置（<code>pilot.md:13</code>）：</p>
+                <table class="k">
+                    <tr><th>xDS</th><th>下发</th></tr>
+                    <tr><td>LDS</td><td>监听器（Listener）</td></tr>
+                    <tr><td>RDS</td><td>路由（Route）</td></tr>
+                    <tr><td>CDS</td><td>集群（Cluster）</td></tr>
+                    <tr><td>EDS</td><td>端点（Endpoint）</td></tr>
+                    <tr><td>SDS</td><td>证书（Secret）</td></tr>
+                </table>
+                <div class="anno">读法：<b>这五个你在 Envoy 课 Day 11 学过（从<strong>接收端</strong>视角）！现在从<strong>发送端</strong>看：istiod 怎么生成这些配置并推给 Envoy。</b>还有 ECDS（扩展配置）、NDS（DNS）等。理解"同一套 xDS，Envoy 收、istiod 发"，就打通了两门课。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三段式职责</h1></div>
+            <div class="card">
+                <p>istiod 的代理配置职责分三段（<code>pilot.md:8-11</code>）：</p>
+                <ol>
+                    <li><strong>Config Ingestion（配置摄取）</strong>：从 20+ 种来源（K8s CRD、文件、xDS）读取，聚合成 <code>ConfigStore</code>（配置，Day 03）和 <code>ServiceDiscovery</code>（服务发现，Day 04）。</li>
+                    <li><strong>Config Translation（配置翻译）</strong>：<code>Generators</code> 把输入翻译成 Envoy xDS（Day 07-08）。</li>
+                    <li><strong>Config Serving（配置下发）</strong>：接受 Envoy 的 gRPC 流，通过"请求"和"推送"下发（Day 06/09）。</li>
+                </ol>
+                <div class="anno">读法：<b>核心数据流（<code>pilot.md:143-162</code>）：<code>Config Update → Debounce → Recompute PushContext → Push Queue → Push Job → Client</code>。这条链是整个第 2 周的主线。</b>摄取（W1）→ 翻译 + 下发（W2）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>带 Proxy 翻译</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">为什么每个 Envoy 收到的配置都不一样？</span>
+                关键洞察（<code>pilot.md:104</code>）：<strong>xDS 翻译不是"一份配置发给所有人"，而是<strong>针对每个客户端（proxy）单独翻译</strong>。</strong>因为 Istio 要根据每个 Envoy 的标签、命名空间、Sidecar 作用域决定"该给它哪些配置"——比如 A 服务的 Envoy 只需要知道它会调用的那几个服务，不需要全网格的配置。<strong>"带 Proxy 信息翻译"带来两个后果：①无法静态预生成（每个 proxy 不同）；②需要缓存和"部分计算"优化（否则每次都全量算太慢）。</strong>这解释了第 2 周为什么有那么多缓存和优化逻辑。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>目录地图</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>目录</th><th>内容</th></tr>
+                    <tr><td><code>pilot/</code></td><td>控制面核心：<code>cmd/pilot-discovery</code>(istiod 入口) <code>pkg/bootstrap</code>(装配) <code>pkg/xds</code>(xDS 服务) <code>pkg/networking/core</code>(配置生成) <code>pkg/model</code>(数据模型) <code>pkg/serviceregistry</code>(服务发现)</td></tr>
+                    <tr><td><code>pkg/istio-agent/</code></td><td>sidecar 里的 pilot-agent（Day 12）</td></tr>
+                    <tr><td><code>security/</code></td><td>CA、证书、mTLS（Day 14）</td></tr>
+                    <tr><td><code>istioctl/</code> <code>operator/</code></td><td>CLI（Day 18）、安装（Day 19）</td></tr>
+                    <tr><td><code>architecture/</code></td><td>架构文档（<code>networking/pilot.md</code> 必读）</td></tr>
+                </table>
+                <div class="anno">读法：<b>控制面核心几乎都在 <code>pilot/pkg/</code>。这是 higress-group 的 fork，代码里有 <code>// Added by ingress</code> 标记 Higress 的定制（Day 17/20 会重点讲）。</b></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>与 Envoy 承接</h1></div>
+            <div class="card">
+                <div class="glossary"><b>Istio 和 Envoy 怎么接上</b>：<br>
+                • Envoy 课你学了：Envoy 从 bootstrap 里的 ADS 地址连控制面，通过 xDS 收配置、执行。<br>
+                • Istio 课你会学：istiod 就是那个"控制面"——它<strong>生成</strong>那些 xDS 配置。<br>
+                • 中间还有 pilot-agent（Day 12）：sidecar 里 Envoy 旁边的管家，拉起 Envoy、代理 xDS、发证书。<br>
+                <strong>完整链路：你写 CRD（VirtualService 等）→ istiod 翻译成 xDS → 经 pilot-agent 转发 → Envoy 执行。这门课讲前半段（istiod 生成 + agent 转发），Envoy 课讲后半段（Envoy 执行）。两门课拼起来就是完整的服务网格。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>服务网格解决什么问题？istiod 是什么？</li>
+                    <li>控制面 vs 数据面的分工？Istio 实现的是哪一侧？</li>
+                    <li>xDS 五兄弟各下发什么？和 Envoy 课怎么对应？</li>
+                    <li>istiod 三段式职责？核心数据流？</li>
+                    <li>为什么每个 Envoy 收到的配置不同？（带 Proxy 翻译）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+sed -n '1,60p' architecture/networking/pilot.md
+ls pilot/pkg/
+ls pilot/cmd/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 02</strong>：<strong>istiod 启动</strong>——<code>pilot-discovery</code> 二进制怎么 boot：<code>main → NewServer</code>（装配总入口）<code>→ Start</code>（监听 xDS gRPC）。看控制面怎么组装起来。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-tutorial.html" style="color:var(--accent-cyan);">&larr; 总目录</a>
+                <a href="istio-day02.html" style="color:#4a7fd6;">Day 02 · istiod 启动 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · istiod 启动 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4a7fd6,#7c4dff);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">istiod 启动 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 二进制入口</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · RunE 三步</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 关键端口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · NewServer 装配</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 生成器注册</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Start 监听</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ready 门禁</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01 全景</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day03.html" class="nav-link" style="color:#4a7fd6;">Day 03 配置模型 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 共 20 天 · 第 1 周 控制面全景</span>
+            <h1 class="part-title">istiod 启动</h1>
+            <p class="part-desc">istiod 是个"模块化单体"——一个进程装了配置摄取、xDS 生成、CA 等一堆模块。今天追它的启动：<code>pilot-discovery</code> 入口 → <code>NewServer</code>（装配总入口）→ <code>Start</code>（开始监听 xDS）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>二进制入口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/cmd/pilot-discovery/main.go:23 极简 main，构造 cobra 根命令
+func main() {
+  rootCmd := app.NewRootCommand()
+  rootCmd.Execute()
+}
+// app/cmd.go: NewRootCommand（:41）注册 discovery/version/request 子命令
+//   newDiscoveryCommand（:71）是核心子命令</code></pre>
+                <div class="anno">读法：<b>istiod 的二进制名叫 <code>pilot-discovery</code>（历史原因，Pilot 是 istiod 的配置代理模块）。<code>main</code> 极简——cobra 命令行框架，核心是 <code>discovery</code> 子命令。</b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>RunE 三步</h1></div>
+            <div class="card">
+<pre><code class="language-go">// app/cmd.go newDiscoveryCommand RunE（:92）启动主逻辑：
+stop := make(chan struct{})
+discoveryServer, _ := bootstrap.NewServer(serverArgs)  // 构造（装配）
+discoveryServer.Start(stop)                            // 启动（监听）
+cmd.WaitSignal(stop)                                   // 阻塞等信号
+discoveryServer.WaitUntilCompletion()                  // 优雅退出</code></pre>
+                <div class="anno">读法：<b>启动就三步：<strong>NewServer（把所有模块装配好）→ Start（开始监听/服务）→ WaitSignal（阻塞运行直到收到退出信号）</strong>。和 Envoy 课 Day 02 的"构造 → run → 等信号"结构一模一样——不同项目同一套启动骨架。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>关键端口</h1></div>
+            <div class="card">
+<pre><code class="language-go">// app/cmd.go addFlags（:159）重要默认端口：
+// HTTP :8080 | Webhook HTTPS :15017 | 监控 :15014
+// 明文 gRPC(xDS) :15010  |  安全 gRPC(xDS) :15012  ★</code></pre>
+                <div class="baby"><span class="t">15010 vs 15012：明文 vs mTLS</span>
+                istiod 在两个端口提供 xDS 服务：<strong><code>:15012</code>（安全，mTLS）——生产用，Envoy 用工作负载证书双向认证连它；<code>:15010</code>（明文）——调试用，不加密。</strong>Envoy 课讲的 bootstrap 里那个"discovery address"，指向的就是这里（通过 pilot-agent 代理）。<strong>记住 15012 是生产 xDS 端口——排查"Envoy 连不上控制面"时先看它。</strong>其余端口：8080 调试 HTTP、15014 监控指标、15017 注入 webhook。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>NewServer 装配</h1></div>
+            <div class="card">
+                <p><code>bootstrap/server.go</code> 的 <code>NewServer</code>（<code>:230-431</code>）是 istiod 装配总入口，按顺序组装：</p>
+<pre><code class="language-go">// :232 建 Environment + 聚合服务发现 aggregate.NewController
+// :267 建 xDS 服务器 xds.NewDiscoveryServer(e, ...)
+// :268 建配置生成器 core.NewConfigGenerator(...)
+// :291 初始化 MeshConfig / MeshNetworks
+// :315 CA options + maybeCreateCA
+// :331 initControllers(args)  // 启动 config/service 控制器
+// :335 InitGenerators(...)    // 注册所有 xDS 生成器（L05）
+// :375 initRegistryEventHandlers()  // 事件接到 ConfigUpdate（Day 09）
+// :415 startCA(caOpts)</code></pre>
+                <div class="baby"><span class="t">"模块化单体"的装配</span>
+                istiod 一个进程里塞了很多模块（xDS 服务器、配置生成器、服务发现、CA、webhook…）。<strong><code>NewServer</code> 就是"总装配线"——按依赖顺序把这些模块一个个建好、接起来。</strong>先建数据源（Environment/服务发现）→ 建 xDS 服务器和生成器 → 建 CA → 启动控制器（开始 watch K8s）→ 注册生成器和事件处理器。<strong>读懂这个装配顺序，就有了 istiod 的"零件清单"——后面每天深入其中一个零件。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>生成器注册</h1></div>
+            <div class="card">
+<pre><code class="language-go">// bootstrap/discovery.go:29 InitGenerators —— typeURL → generator 路由表
+generators[v3.ClusterType]  = &xds.CdsGenerator{...}   // CDS
+generators[v3.ListenerType] = &xds.LdsGenerator{...}   // LDS
+generators[v3.RouteType]    = &xds.RdsGenerator{...}   // RDS
+generators[v3.EndpointType] = edsGen                    // EDS（独立）
+generators[v3.SecretType]   = xds.NewSecretGen(...)     // SDS
+generators[v3.ScopedRouteType] = &xds.SrdsGenerator{...} // Added by ingress（Higress）</code></pre>
+                <div class="anno">读法：<b>一张"资源类型 → 生成器"的路由表。Envoy 请求某类型（如 CDS），istiod 就用对应的生成器（CdsGenerator）生成配置。<code>SrdsGenerator</code>（ScopedRoute）是 Higress 加的（大规模路由优化）。</b>Day 07 详讲生成器。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Start 监听</h1></div>
+            <div class="card">
+<pre><code class="language-go">// server.go Start（:463）：
+// :471 启动所有组件（含 xDS server 的 handleUpdates/sendPushes 协程）
+// :474 waitForCacheSync 等 K8s 缓存同步
+// :478 XDSServer.CachesSynced() —— 标记 ready
+// :482 在 :15012(secure) 与 :15010(plaintext) 上 grpcServer.Serve()</code></pre>
+                <div class="anno">读法：<b>Start = "启动后台协程 → 等缓存同步好 → 标记 ready → 在两个端口开始 serve xDS gRPC"。<code>DiscoveryServer.Register</code> 把 ADS 服务注册进 gRPC（Day 06）。</b>后台协程 <code>handleUpdates</code>（debounce）和 <code>sendPushes</code>（推送）是第 2 周主角。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ready 门禁</h1></div>
+            <div class="card">
+                <p><code>CachesSynced()</code>（<code>discovery.go:208</code>）在 K8s 缓存同步完成前，istiod <strong>不接受 Envoy 连接</strong>（<code>ads.go:204</code> 未 ready 返回 <code>Unavailable</code>）。</p>
+                <div class="baby"><span class="t">为什么要"缓存同步才服务"？</span>
+                istiod 启动时要从 K8s 拉取所有服务、CRD、端点信息（建 informer 缓存）。<strong>如果缓存还没同步完就给 Envoy 发配置，会发出"不完整"的配置——比如漏了一半服务，导致 Envoy 把流量发到黑洞。</strong>所以有个"ready 门禁"：缓存全同步好了才标记 ready、才接受 Envoy 连接（issue #25495 就是这个问题）。<strong>这是分布式系统"启动时数据完整性"的经典处理——宁可晚点服务，也不发错配置。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>istiod 的二进制叫什么？RunE 三步？</li>
+                    <li>15010 vs 15012 端口的区别？</li>
+                    <li>NewServer 装配了哪些核心模块？</li>
+                    <li>InitGenerators 的路由表是什么？</li>
+                    <li>为什么要"缓存同步才接受连接"？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+sed -n '23,30p' pilot/cmd/pilot-discovery/main.go
+grep -n 'func NewServer\|InitGenerators\|func (s \*Server) Start' pilot/pkg/bootstrap/server.go
+sed -n '29,72p' pilot/pkg/bootstrap/discovery.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>配置模型与 CRD</strong>——用户写的 VirtualService/DestinationRule 等 CRD，在 istiod 内部怎么表示？<code>config.Config</code> 统一模型、<code>ConfigStore</code> 接口、schema 类型系统。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day01.html" style="color:var(--accent-cyan);">&larr; Day 01 全景</a>
+                <a href="istio-day03.html" style="color:#4a7fd6;">Day 03 · 配置模型与 CRD &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
