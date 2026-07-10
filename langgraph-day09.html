@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · 编译 StateGraph → Pregel — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">编译 StateGraph→Pregel · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 编译干什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 状态键 → 通道</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 节点 → PregelNode</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 触发通道</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · writers 写回状态</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 边 = 写触发通道</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 反查表</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 super-step</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 节点执行 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 Pregel 引擎</span>
+            <h1 class="part-title">编译：StateGraph → Pregel</h1>
+            <p class="part-desc">你写的高层 StateGraph 怎么变成底层 Pregel？今天看 <code>compile()</code> 做的翻译：状态键→通道、节点→PregelNode、边→写触发通道。前两周在这里合流。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>编译干什么</h1></div>
+            <div class="card">
+                <p><code>compile()</code>（<code>state.py:1164</code>）把 StateGraph（图纸）翻译成 <code>CompiledStateGraph</code>（继承 Pregel，Day 02）。核心两件翻译：<strong>状态键 → 通道、节点 → PregelNode</strong>。</p>
+                <div class="baby"><span class="t">"编译"= 从用户语言翻译成引擎语言</span>
+                你用 StateGraph 的语言写图（State 字段、add_node、add_edge）——直观、面向业务。但引擎（Pregel）的语言是"通道、PregelNode、触发"。<strong>compile 就是翻译器：把你的高层描述翻译成引擎能执行的低层结构。</strong>好比源代码编译成机器码。<strong>一套 Pregel 引擎，能执行任何编译好的图——你的 StateGraph、预制 create_react_agent、甚至函数式 API，最终都编译成 Pregel。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>状态键 → 通道</h1></div>
+            <div class="card">
+                <p><code>_get_channel</code>（<code>state.py:1836</code>，Day 03 看过）为每个 State 字段选一个通道类型：</p>
+                <table class="k">
+                    <tr><th>字段标注</th><th>→ 通道</th></tr>
+                    <tr><td>无 reducer（如 <code>count: int</code>）</td><td>LastValue（覆盖）</td></tr>
+                    <tr><td><code>Annotated[list, operator.add]</code></td><td>BinaryOperatorAggregate（累加）</td></tr>
+                    <tr><td><code>Annotated[..., 某 Channel]</code></td><td>直接用那个通道</td></tr>
+                </table>
+                <div class="anno">读法：<b>每个 State 字段变成一个通道，reducer 决定通道类型（Day 07）。</b><code>_add_schema</code>（<code>state.py:342</code>）把 State schema 展开成 <code>self.channels</code>。这就是"State 底层是一组通道"的实现。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>节点 → PregelNode</h1></div>
+            <div class="card">
+                <p>每个用户节点编译成一个 <code>PregelNode</code>（<code>state.py:1518</code>），关键字段：</p>
+<pre><code class="language-python">self.nodes[key] = PregelNode(
+    triggers=[branch_channel],       # 订阅的触发通道（branch:to:自己）
+    channels=input_channels,          # 读哪些 state 键（通道）
+    writers=[ChannelWrite(...)],      # 跑完把返回值写回哪些 state 键
+    bound=用户节点函数,
+)</code></pre>
+                <div class="anno">读法：<b>PregelNode（<code>_read.py:97</code>）= actor 的运行时容器。三要素：<code>triggers</code>（订阅哪些通道 → 被触发）、<code>channels</code>（读哪些通道 → 输入）、<code>writers</code>（写哪些通道 → 输出）。</b>这正是 Day 06 的"actor 读通道→算→写通道"三段式。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>触发通道</h1></div>
+            <div class="card">
+                <p>每个节点被分配一个专属触发通道 <code>branch:to:&lt;节点名&gt;</code>（<code>state.py:1512</code>），节点订阅它作为触发条件：</p>
+<pre><code class="language-python">branch_channel = _CHANNEL_BRANCH_TO.format(key)   # branch:to:<node>
+self.channels[branch_channel] = EphemeralValue(Any, guard=False)  # 一次性触发信号
+# PregelNode(triggers=[branch_channel], ...)</code></pre>
+                <div class="baby"><span class="t">触发通道 = 节点的"门铃"</span>
+                每个节点有一个专属的"门铃通道"（<code>branch:to:自己</code>）。<strong>别的节点想启动它，就往它的门铃通道写一下（按门铃）——下一超步引擎发现门铃响了（通道被更新），就跑这个节点。</strong>门铃通道用 <code>EphemeralValue</code>（只活一步）——响过就清，不会一直触发。<strong>这就是 Day 04/06 讲的"通道触发"的编译实现：把"边"翻译成"按门铃"的动作。</strong>节点之间不直接调用，靠按彼此的门铃解耦。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>writers 写回状态</h1></div>
+            <div class="card">
+                <p>节点的 <code>writers</code> 是 <code>ChannelWrite(write_entries)</code>——用 <code>_get_updates</code> 把节点返回的 dict 拆成"对各 State 键通道的写入"（<code>state.py:1482</code>）。</p>
+                <div class="anno">读法：<b>节点函数返回 <code>{"messages": [...], "count": 5}</code>，<code>writers</code> 负责把它拆成"往 messages 通道写 [...]、往 count 通道写 5"。</b>这些写入在超步末被 apply_writes（Day 08）用 reducer 合并。<code>_control_branch</code> 处理 <code>Command</code>/条件边跳转（写触发通道）。</div>
+                <div class="baby"><span class="t">节点的"输出"怎么变成"状态更新"</span>
+                节点只返回一个普通 dict（<code>{"count": 5}</code>）。<strong>writers 把这个 dict 翻译成"往 count 这个通道写 5"的通道写入操作。</strong>于是节点函数保持简单（只返回 dict），框架负责把它落到正确的通道、走对的 reducer。<strong>writers 是"节点返回值"和"通道写入"之间的桥。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>边 = 写触发通道</h1></div>
+            <div class="card">
+                <p>边怎么翻译？<code>attach_edge</code>（<code>state.py:1537</code>）：让起点节点跑完后往终点的 <code>branch:to:*</code> 通道写一下：</p>
+<pre><code class="language-python"># 普通边 a→b：给 a 节点加一个 writer，往 branch:to:b 写
+self.nodes[starts].writers.append(
+    ChannelWrite((ChannelWriteEntry(_CHANNEL_BRANCH_TO.format(end), None),)))</code></pre>
+                <div class="anno">读法：<b>普通边 <code>a→b</code> 编译成"给 a 加一个 writer——跑完往 b 的触发通道写"（按 b 的门铃）。</b>条件边 <code>attach_branch</code>（<code>state.py:1563</code>）则把路由函数的输出翻译成"往哪些 <code>branch:to:*</code> 写"。多起点汇合边用 <code>NamedBarrierValue</code>（等齐才放行）。</div>
+                <div class="glossary"><b>至此前两周合流</b>：你写 StateGraph（Day 02-04）→ compile 把状态键翻译成通道（Day 07）、节点翻译成 PregelNode、边翻译成"写触发通道" → 得到 Pregel → 超步执行（Day 06/08）。<strong>"边"这个高层概念，底层就是"节点跑完按下游门铃"。理解了编译，你就打通了"用户 API"和"执行引擎"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>反查表</h1></div>
+            <div class="card">
+                <p>编译后 Pregel 初始化时用 <code>_trigger_to_nodes</code>（<code>main.py:4175</code>）建立"触发通道 → 订阅它的节点"索引（<code>main.py:947</code>）——供 Day 08 的增量调度优化用。</p>
+                <div class="baby"><span class="t">编译期建好、运行期高速用</span>
+                Day 08 讲的增量调度优化（只看被更新通道的订阅者）需要一张"通道 → 节点"反查表。<strong>这张表在编译时一次建好，运行期直接查——不用每步重算。</strong>这是"编译期做准备、运行期只管快跑"的又一体现（和 eino 的 compile、AutoGPT 的图编译一个思想）。<strong>编译不只是翻译，还顺便做了运行期优化的准备工作。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>编译干什么？（高层 StateGraph → 底层 Pregel 的翻译）</li>
+                    <li>状态键怎么变通道？</li>
+                    <li>PregelNode 的三要素（triggers/channels/writers）？</li>
+                    <li>触发通道（branch:to:*）是什么？边怎么翻译成"写触发通道"？</li>
+                    <li>writers 怎么把节点返回值变成通道写入？反查表干嘛？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/graph
+sed -n '1164,1220p' $P/state.py | head -40   # compile
+sed -n '1512,1561p' $P/state.py              # 节点编译 + 触发通道 + attach_edge
+grep -n '_trigger_to_nodes' ../pregel/main.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10（第2周收官）</strong>：<strong>节点执行与并行</strong>——同一超步多个节点怎么并行跑、Read/Write 怎么解耦、Send 动态并发（map-reduce）。收官 Pregel 引擎。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 super-step</a>
+                <a href="langgraph-day10.html" style="color:var(--accent-green);">Day 10 · 节点执行与并行 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

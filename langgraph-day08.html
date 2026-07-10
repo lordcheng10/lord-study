@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · super-step 执行循环 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">super-step 执行循环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 驱动循环</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · tick = Plan</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · prepare_next_tasks</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · runner 执行</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · after_tick = Update</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · apply_writes</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 增量调度优化</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 Channels</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 编译 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Pregel 引擎</span>
+            <h1 class="part-title">super-step 执行循环</h1>
+            <p class="part-desc">Day 06 的三阶段超步，代码里怎么实现？读 <code>pregel/_loop.py</code> + <code>_algo.py</code>：tick（Plan）→ runner（执行）→ after_tick（Update + 检查点）。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>驱动循环</h1></div>
+            <div class="card">
+                <p>核心驱动循环在 <code>main.py:2964</code>——三阶段清晰对应：</p>
+<pre><code class="language-python">while loop.tick():                    # Plan：选出本步任务（无任务→返回 False→退出）
+    for _ in runner.tick(tasks, ...): # Execution：并行跑任务
+        yield from _output(...)        # 流式输出
+    loop.after_tick()                  # Update：apply_writes + 存检查点</code></pre>
+                <div class="anno">读法：<b><code>while loop.tick()</code> 是超步循环——<code>tick()</code>=Plan（选节点）、<code>runner.tick()</code>=Execution（并行跑）、<code>after_tick()</code>=Update（写回+检查点）。</b>直到 <code>tick()</code> 返回 False（没节点可跑）循环结束（Day 06）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>tick = Plan 阶段</h1></div>
+            <div class="card">
+                <p><code>tick()</code>（<code>_loop.py:599</code>）：</p>
+<pre><code class="language-python"># 超步数超限 → status="out_of_steps" 返回 False（防无限循环）
+# 调 prepare_next_tasks（L03）选出本步任务
+# 没有任务 → status="done" 返回 False（图执行结束！）
+# 有任务 → 可选 interrupt_before 检查 → 返回 True 进入执行</code></pre>
+                <div class="anno">读法：<b>tick 负责"这步该跑哪些节点"。没任务了就返回 False 结束循环（Day 06 的"无节点可跑即停"）。</b>还有超步上限（recursion_limit）防死循环、interrupt_before（Day 14 的断点）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>prepare_next_tasks（选谁跑）</h1></div>
+            <div class="card">
+                <p><code>prepare_next_tasks</code>（<code>_algo.py:392</code>）计算下一超步要执行的任务集。两类：</p>
+                <ul>
+                    <li><strong>PUSH 任务</strong>：来自 TASKS 通道的 <code>Send</code>（动态并发，map-reduce）。</li>
+                    <li><strong>PULL 任务</strong>：被边触发的普通节点。</li>
+                </ul>
+                <p>每个候选节点经 <code>_triggers</code>（Day 06 的版本号触发）复核，通过则用 <code>_proc_input</code> 读输入、生成 <code>PregelExecutableTask</code>。</p>
+                <div class="anno">读法：<b>Plan 阶段选出"触发通道被更新过的节点"作为本步任务，读好它们的输入。</b>PULL（边触发的普通节点）+ PUSH（Send 动态派发的任务）两类。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>runner 执行（并行）</h1></div>
+            <div class="card">
+                <p><code>runner.tick(tasks, ...)</code> 用 <code>PregelRunner</code> 并行执行本步的所有任务。节点执行时通过注入的 write 函数把输出<strong>攒进 pending writes</strong>（<code>put_writes</code>，<code>_loop.py:415</code>），并不立即改通道（快照隔离，Day 06）。</p>
+                <div class="baby"><span class="t">"并行执行 + 攒写入"</span>
+                本步选中的多个节点<strong>并行跑</strong>（Day 10 详讲）。关键：它们的输出不直接写通道，而是<strong>攒进"待写入"（pending writes）</strong>——因为快照隔离要求"一步之内通道不变"。所有节点跑完，才在 after_tick 统一把 pending writes 应用到通道。<strong>"执行时只攒不写、步末统一提交"——这正是 BSP 让并行安全的机制（Day 06 的快照隔离在代码里的落地）。</strong>pending writes 还会被后台持久化，保证单步中途崩溃已完成的结果不丢。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>after_tick = Update 阶段</h1></div>
+            <div class="card">
+                <p><code>after_tick()</code>（<code>_loop.py:683</code>）：</p>
+<pre><code class="language-python">writes = [w for t in self.tasks.values() for w in t.writes]   # 收集所有节点的写入
+self.updated_channels = apply_writes(...)   # 应用写入，得到"本步更新了哪些通道"
+self.checkpoint_pending_writes.clear()
+self._put_checkpoint({"source": "loop"})    # ★ 步间存检查点</code></pre>
+                <div class="anno">读法：<b>Update 阶段：把所有节点攒的写入用 <code>apply_writes</code>（L06）统一应用到通道，得到 <code>updated_channels</code>（喂给下一步的 Plan），然后<strong>存一个检查点</strong>。</b><code>updated_channels</code> 传递了步与步之间的依赖。</div>
+                <div class="baby"><span class="t">"每个超步之间存检查点"（Day 11 的根基）</span>
+                <code>_put_checkpoint</code> 在<strong>每个超步之间</strong>存一次状态快照。<strong>这就是 LangGraph 持久执行、时间旅行、人在环的物理基础</strong>——因为超步边界是天然的"稳定点"（此刻状态一致、无半完成的写入）。Day 11-14 讲的检查点能力全建立在这一行上。<strong>Day 06 说"BSP 的超步边界给了天然的存档点"，这里就是那个存档动作。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>apply_writes（真正应用写入）</h1></div>
+            <div class="card">
+                <p><code>apply_writes</code>（<code>_algo.py:232</code>）——Update 的核心，返回"被更新的通道集合"：</p>
+<pre><code class="language-python"># 1. 排序任务保证确定性
+# 2. 更新 versions_seen（记录每个任务见过的触发通道版本，防重复触发）
+# 3. 按通道分组写入
+# 4. 逐通道调用 channels[chan].update(vals)  ← reducer 真正执行处（Day 07）
+#    返回 True 且通道 available → 加入 updated_channels、版本号 +1</code></pre>
+                <div class="anno">读法：<b>把这步所有写入按通道分组，逐个调 <code>channel.update()</code>（Day 07 的 reducer）合并。返回 True 的通道版本 +1、加入 <code>updated_channels</code>。</b><code>updated_channels</code> → 下一步 Plan 用它选节点（Day 06 的版本号触发）。<strong>闭环：本步写入 → apply_writes 合并 → updated_channels → 下步触发下游。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>增量调度优化</h1></div>
+            <div class="card">
+                <p><code>prepare_next_tasks</code>（<code>_algo.py:468</code>）有个性能优化：用"上一步更新了哪些通道（<code>updated_channels</code>）"+"通道→节点反查表（<code>trigger_to_nodes</code>）"，只检查这些通道对应的候选节点，不用遍历所有节点：</p>
+<pre><code class="language-python">if updated_channels and trigger_to_nodes:
+    for channel in updated_channels:
+        if node_ids := trigger_to_nodes.get(channel):
+            triggered_nodes.update(node_ids)   # 只看被更新通道的订阅者</code></pre>
+                <div class="baby"><span class="t">为什么要这个优化？</span>
+                朴素做法：每步遍历<strong>所有</strong>节点、逐个检查"你的触发通道被更新了吗"。图大时慢。<strong>优化：预先建"通道 → 订阅它的节点"反查表（<code>trigger_to_nodes</code>）。这步只有几个通道被更新（updated_channels），直接查表得到"哪些节点该被触发"，不扫全图。</strong>从"遍历所有节点"降到"只看被更新通道的订阅者"——大图上快很多。<strong>反查表在编译时建好（Day 09），是"增量调度"的关键。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>驱动循环的三阶段对应哪三个调用？</li>
+                    <li>tick 什么时候返回 False（结束）？</li>
+                    <li>runner 执行时为什么"只攒不写"？</li>
+                    <li>after_tick 做什么？为什么每步存检查点这么重要？</li>
+                    <li>apply_writes 怎么应用 reducer？增量调度优化是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
+sed -n '2964,2988p' main.py            # 驱动循环
+sed -n '599,681p' _loop.py | head -40  # tick
+sed -n '683,726p' _loop.py             # after_tick
+sed -n '232,345p' _algo.py | head -50  # apply_writes</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>编译：StateGraph → Pregel</strong>——你写的高层 StateGraph 怎么变成底层 Pregel：状态键变通道、节点变 PregelNode、边变"写触发通道"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 Channels</a>
+                <a href="langgraph-day09.html" style="color:var(--accent-green);">Day 09 · 编译 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

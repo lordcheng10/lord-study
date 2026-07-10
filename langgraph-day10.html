@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 节点执行与并行 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">节点执行与并行 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 同步屏障回顾</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · PregelRunner</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Read 读输入</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Write 攒输出</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 并行为何安全</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Send 动态并发</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 重试与错误</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 编译</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 检查点 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
+            <h1 class="part-title">节点执行与并行</h1>
+            <p class="part-desc">同一超步里多个节点怎么并行跑？为什么并行不会互相踩踏？Send 又怎么实现 map-reduce 动态并发？今天收官 Pregel 引擎。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>同步屏障回顾</h1></div>
+            <div class="card">
+                <p>Day 06 讲过：一个超步内被选中的节点<strong>并行执行</strong>，但都读同一份"步初快照"，写入攒到步末统一提交。今天看这在代码里怎么落地。</p>
+                <div class="baby"><span class="t">一句话回顾 BSP</span>
+                同一超步的节点像一排同时起跑的选手：<strong>都从同一起跑线（步初状态快照）出发，各跑各的，谁也看不到别人这一步的中途结果；全部到达终点（步末），才统一结算成绩（apply_writes）。</strong>这样并行才安全——没有"我读到你写一半的数据"这种竞态。今天看这个"同时起跑、统一结算"在 PregelRunner 里怎么实现。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>PregelRunner</h1></div>
+            <div class="card">
+                <p><code>PregelRunner</code>（<code>pregel/_runner.py</code>）负责并行跑本超步的所有任务。<code>tick()</code> 内部：为每个任务建一个可等待单元，用 asyncio（异步）或线程池（同步）并发执行，边完成边 yield 结果给外层流式输出（Day 08 的 <code>for _ in runner.tick(...)</code>）。</p>
+                <div class="anno">读法：<b>PregelRunner 是"这一超步的并行执行器"：拿到本步任务列表，并发跑，哪个先完成就先吐结果。</b>同步图用线程池、异步图用 asyncio——同一套调度逻辑两种后端。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Read 读输入</h1></div>
+            <div class="card">
+                <p>节点执行前，<code>PregelNode</code> 通过 <code>ChannelRead</code>（<code>pregel/_read.py</code>）从<strong>步初快照</strong>读取它订阅的通道值，组成输入。</p>
+                <div class="anno">读法：<b>节点不直接访问全局状态，而是通过 ChannelRead 从"步初快照"读它声明的 <code>channels</code>（Day 09 编译时定的）。</b>读的是快照 → 本步内别的节点写什么都影响不到我 → 快照隔离（Day 06）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Write 攒输出</h1></div>
+            <div class="card">
+                <p>节点跑完，<code>ChannelWrite</code> 不直接改通道，而是把写入交给注入的 write 函数 → 攒进 <code>task.writes</code>（pending writes，Day 08 的 <code>put_writes</code>）。</p>
+<pre><code class="language-python"># 节点返回 {"count": 5} → writers 拆成写入条目 → 交给 write 函数
+# write 函数把它 append 到 task.writes，不碰真正的通道
+# 超步末 after_tick → apply_writes 才统一提交（Day 08）</code></pre>
+                <div class="anno">读法：<b>写入被"缓冲"起来（task.writes），不立即生效。</b>Read（读步初快照）+ Write（攒到步末）配合，就实现了"读写解耦、快照隔离"。<strong>这就是 Day 06 说的"actor 只跟通道打交道、不互相直接调用"的物理实现。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>并行为何安全</h1></div>
+            <div class="card">
+                <p>把 L03/L04 合起来看，同一超步 A、B 两节点并行：</p>
+                <ul>
+                    <li>A、B 都从<strong>同一份步初快照</strong>读输入（互不影响）。</li>
+                    <li>A、B 的写入各自<strong>攒进自己的 pending writes</strong>（不直接改通道）。</li>
+                    <li>步末 <code>apply_writes</code> 按<strong>确定顺序</strong>合并所有写入（reducer 处理"两个都写了 messages"的情况）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么这样就不会出 bug？</span>
+                传统并行编程最怕"竞态"：A 读的时候 B 正在改，读到半拉子数据。<strong>Pregel 用两招根除竞态：①都读同一份不变的快照（读的时候没人在改）；②写入先攒着、步末按固定顺序统一提交（合并顺序确定 → 结果可复现）。</strong>于是你写并行节点时<strong>完全不用加锁、不用管线程安全</strong>——引擎的 BSP 模型替你保证了正确性。<strong>这是 LangGraph 相比"手写 async 编排"最大的安全红利。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Send 动态并发（map-reduce）</h1></div>
+            <div class="card">
+                <p><code>Send(node, arg)</code>（Day 04 见过）实现运行时动态并发：一个节点返回一批 Send，下一超步为<strong>每个 Send 各起一个任务</strong>并行跑同一节点（PUSH 任务，Day 08 L03）。</p>
+<pre><code class="language-python">def fan_out(state):
+    # 运行时才知道要拆几路 → 动态生成 N 个并行任务
+    return [Send("worker", {"item": x}) for x in state["items"]]</code></pre>
+                <div class="baby"><span class="t">Send = 运行时决定的"分身术"</span>
+                普通边在编译时就固定了（a→b）。<strong>但有时并发数量要运行时才知道</strong>——比如"把用户给的 N 个问题各查一遍"，N 是动态的。<code>Send</code> 让你在节点里<strong>返回一批 Send，引擎下一步就为每个 Send 起一个并行任务</strong>（都跑 worker 节点、各带各的数据）。这就是经典的 <strong>map（拆成 N 路并行）→ reduce（结果汇总进通道，用 reducer 合并）</strong>。<strong>Send 是 LangGraph 做"动态扇出"的唯一正道，比自己在节点里开线程干净得多。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>重试与错误</h1></div>
+            <div class="card">
+                <p>任务可配 <code>RetryPolicy</code>：节点抛异常时按策略重试（指数退避）。若最终失败，异常向上抛出中断整个执行——但因为<strong>上一超步的检查点已存</strong>（Day 08），修好后可从该检查点恢复，不用从头跑。</p>
+                <div class="anno">读法：<b>节点级重试（RetryPolicy）应对瞬时错误；超步级检查点应对彻底失败——从最近检查点恢复。</b>两层容错。<strong>这正是"持久执行"的价值：长流程中途挂了，不用推倒重来。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 2 周（Pregel 引擎）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 06</strong> Pregel/BSP 三阶段超步、快照隔离、版本号触发</li>
+                    <li><strong>Day 07</strong> Channels：LastValue/BinaryOperatorAggregate/Topic/NamedBarrierValue</li>
+                    <li><strong>Day 08</strong> 驱动循环：tick(Plan)→runner(Exec)→after_tick(Update+检查点)</li>
+                    <li><strong>Day 09</strong> 编译：状态键→通道、节点→PregelNode、边→写触发通道</li>
+                    <li><strong>Day 10</strong> 并行执行、Read/Write 解耦、Send 动态并发、两层容错</li>
+                </ul>
+                <p style="margin-top:10px;">你现在完全理解了 LangGraph 的执行引擎：<strong>为什么能并行且安全、为什么能存档恢复、边和状态底层到底是什么</strong>。第 3 周进入建立在"每步存检查点"之上的杀手级能力——持久化、时间旅行、人在环。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
+ls $P/                     # _runner.py _read.py _loop.py _algo.py ...
+grep -n 'class PregelRunner' $P/_runner.py
+grep -n 'class ChannelRead\|class ChannelWrite' $P/_read.py</code></pre>
+                <div class="tip"><strong>明天预告 · Day 11（第3周开始）</strong>：<strong>Checkpoint 检查点</strong>——Day 08 那行"每步存检查点"存的到底是什么？读 <code>libs/checkpoint/</code> 的 Checkpoint 数据结构：channel_values、versions_seen、pending_writes。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 编译</a>
+                <a href="langgraph-day11.html" style="color:var(--accent-green);">Day 11 · Checkpoint 检查点 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
