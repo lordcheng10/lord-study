@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · Envoy bootstrap 生成 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">Envoy bootstrap 生成 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · bootstrap 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 生成流程</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 模板路径优先级</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 模板参数</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · node metadata</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 必备 stats</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Higress 模板</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 pilot-agent</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day14.html" class="nav-link" style="color:#4a7fd6;">Day 14 mTLS/CA &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 sidecar 与安全</span>
+            <h1 class="part-title">Envoy bootstrap 生成</h1>
+            <p class="part-desc">还记得 Envoy 课 Day 02 那个"启动配置文件"吗？它就是 pilot-agent 在这里生成的。今天看 agent 怎么用 Go 模板渲染出 Envoy 的 bootstrap，直接连回你学过的 Envoy。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>bootstrap 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">bootstrap = "Envoy 的出生证明"</span>
+                Envoy 启动时需要一份初始配置（bootstrap），告诉它：我是谁（node id）、admin 端口在哪、去哪连控制面拿动态配置（xDS 的 gRPC 地址）、暴露哪些统计端口。<strong>xDS 是"运行时热更新"的动态配置，但 bootstrap 是"启动那一刻必须有"的静态配置——它是引导 Envoy 连上 xDS 的第一步。</strong>在 Istio 里，这份 bootstrap 由 pilot-agent 根据当前 Pod 的信息动态生成，而不是写死。<strong>回想 Envoy 课：Envoy 从 bootstrap 里的 ADS 地址连上控制面，之后一切配置走 xDS——那个 ADS 地址就指向本地 agent 的 xDS 代理（Day 12）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>生成流程</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/instance.go
+// :43 type Instance interface { WriteTo; CreateFile }
+// :111 CreateFile()：MkdirAll → GetEffectiveTemplatePath → os.Create → WriteTo
+// :62 WriteTo：newTemplate(templateFile) 用 Go text/template + sprig 解析
+//   → toTemplateParams() 算参数 → t.Execute 渲染</code></pre>
+                <div class="anno">读法：<b>生成 = "读模板 → 算参数 → 渲染 → 写文件"。用 Go 标准库 <code>text/template</code>（+ sprig 函数库）——模板里 <code>{{ .nodeID }}</code> 这样的占位符被参数填充。</b>Day 12 的 <code>initializeEnvoyAgent</code> 就是调 <code>bootstrap.New(...).CreateFile()</code> 触发这个流程。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>模板路径优先级</h1></div>
+            <div class="card">
+<pre><code class="language-go">// instance.go:94 GetEffectiveTemplatePath 优先级：
+//   CustomConfigFile > ProxyBootstrapTemplatePath > 默认 DefaultCfgDir
+//   （./var/lib/istio/envoy/envoy_bootstrap_tmpl.json）
+//   再被环境变量 ISTIO_BOOTSTRAP 覆盖</code></pre>
+                <div class="anno">读法：<b>模板可换——默认用内置模板，也可用户自定义。<strong>Higress 就是通过换模板来定制 Envoy 启动配置</strong>（L07）。</b>又是"约定默认 + 可覆盖"的分层。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>模板参数</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/bootstrap/config.go:89 toTemplateParams()
+//   拆 DiscoveryAddress 得 discovery host
+//   xdsType（:94）：默认 GRPC；features.DeltaXds 时 DELTA_GRPC；waypoint 强制 DELTA_GRPC
+//   用一串 option.Instance 逐项拼装参数（pkg/bootstrap/option/ 定义每个变量取值）</code></pre>
+                <div class="anno">读法：<b><code>toTemplateParams</code> 把当前环境（控制面地址、node 信息、代理类型）算成模板变量。每个变量的取值逻辑封装成一个 <code>option.Instance</code>——模块化、可测试。</b>算好的参数喂给模板渲染出最终 JSON。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>node metadata</h1></div>
+            <div class="card">
+                <p><code>agent.go:260</code> <code>generateNodeMetadata()</code> → <code>bootstrap.GetNodeMetaData</code>：把 <code>ServiceNode</code>/<code>Platform</code>/<code>InstanceIPs</code>/<code>ProxyConfig</code>/<code>EnvoyPrometheusPort</code>/<code>EnvoyStatusPort</code> 打包成 Envoy 的 <code>node.metadata</code>。</p>
+                <div class="baby"><span class="t">node metadata = "Envoy 的自我介绍"</span>
+                Envoy 连上控制面时，要报上自己的身份和属性——我在哪个命名空间、什么服务账号、什么标签、什么版本、代理类型（sidecar 还是 gateway）。<strong>这些信息打包进 <code>node.metadata</code>，随 xDS 请求发给 istiod。istiod 靠这些信息决定"该给这个 Envoy 下发什么配置"</strong>（回想 Envoy 课 xDS 的 <code>DiscoveryRequest.node</code> 字段）。<strong>所以 node metadata 是控制面"认识"每个数据面代理的名片——生成 bootstrap 时就把它填好。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>必备 stats</h1></div>
+            <div class="card">
+<pre><code class="language-go">// config.go:57 requiredEnvoyStatsMatcherInclusionPrefixes =
+//   "cluster_manager,listener_manager,server,cluster.xds-grpc,wasm"
+// 还有 RBAC 相关 stats、vhost\..*\.route\..* 正则等</code></pre>
+                <div class="baby"><span class="t">为什么 bootstrap 要指定"必备统计项"？</span>
+                Envoy 的 stats 极多，全开销大，所以可以用 matcher 筛选。<strong>但有些 stats 是"系统运行必需的"——比如 <code>cluster.xds-grpc</code>（xDS 连接状态）是 pilot-agent 判断"Envoy 是否连上控制面、是否 ready"的依据。</strong>bootstrap 里这个必备清单保证这些关键 stats 一定被采集，否则健康检查（Day 12 status server）就没数据判断。<strong>这把 Day 12 的 status server、今天的 bootstrap、以及后面遥测（Day 16）串起来了——它们共享同一套 stats 基础设施。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Higress 模板</h1></div>
+            <div class="card">
+                <p><code>tools/packaging/common/</code> 里能直接对比上游 vs Higress 模板：</p>
+                <ul>
+                    <li>上游：<code>envoy_bootstrap.json</code>、<code>envoy_bootstrap_v3_gateway.json</code></li>
+                    <li><strong>Higress：<code>higress_envoy_bootstrap.json</code>、<code>higress_envoy_bootstrap_lite.json</code></strong></li>
+                </ul>
+                <p>Higress 版含 <code>layered_runtime</code>、<code>deferred_stat_options.enable_deferred_creation_stats=true</code>、条件性 <code>bootstrap_extensions</code>（metadata_discovery）等定制。</p>
+                <div class="anno">读法：<b>Higress 通过提供自己的 bootstrap 模板来定制 Envoy 启动行为（延迟创建 stats 省内存、metadata 发现等）——不改 Envoy 代码，只换配置模板。</b>这呼应 Envoy 课 Day 19 讲的"Higress 靠配置/裁剪定制 Envoy 而非魔改源码"。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>bootstrap 和 xDS 的区别？bootstrap 里的 ADS 地址指向哪？</li>
+                    <li>生成流程四步？用什么模板引擎？</li>
+                    <li>模板路径优先级？Higress 怎么利用它定制？</li>
+                    <li>node metadata 起什么作用？</li>
+                    <li>为什么 bootstrap 要指定必备 stats？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func.*CreateFile\|GetEffectiveTemplatePath\|toTemplateParams' pkg/bootstrap/instance.go pkg/bootstrap/config.go
+ls tools/packaging/common/*bootstrap*.json
+head -30 tools/packaging/common/higress_envoy_bootstrap.json</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>mTLS 与 CA</strong>——服务间怎么自动双向 TLS 加密？istiod 内建的 CA 怎么签发证书、SPIFFE 身份怎么工作。安全是服务网格的核心价值之一。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 pilot-agent</a>
+                <a href="istio-day14.html" style="color:#4a7fd6;">Day 14 · mTLS 与 CA &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

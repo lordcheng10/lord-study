@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · SDS + 认证授权 — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">SDS + 认证授权 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · SDS 分发证书</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · toEnvoySecret</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · PeerAuthentication</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 模式合成</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · PERMISSIVE 双链</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · AuthorizationPolicy</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · → Envoy RBAC</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 mTLS/CA</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day16.html" class="nav-link" style="color:#66bb6a;">Day 16 遥测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">SDS + 认证授权</h1>
+            <p class="part-desc">Day 14 讲了证书怎么签发，今天讲证书怎么分发给 Envoy（SDS），以及两大安全策略：PeerAuthentication（控制 mTLS 模式）和 AuthorizationPolicy（谁能访问谁）。收官第 3 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>SDS 分发证书</h1></div>
+            <div class="card">
+<pre><code class="language-go">// security/pkg/nodeagent/sds/sdsservice.go
+// generate(resourceNames)（:129）：对每个资源名 st.GenerateSecret → toEnvoySecret（:143）
+// StreamSecrets（:271）：通过 xds.Stream 处理 Envoy 的订阅流
+// 证书更新时 Context.Push（:258）推送
+// 资源名：ROOTCA（根证）、default（工作负载证书）</code></pre>
+                <div class="baby"><span class="t">SDS = "证书的 xDS"</span>
+                还记得 Envoy 课的 xDS 吗（LDS/CDS/…）？<strong>SDS（Secret Discovery Service）就是"证书的 xDS"——Envoy 通过 SDS 协议向 agent 订阅证书，agent 通过同样的 gRPC 流式协议推送证书。</strong>Envoy 订阅两个资源：<code>ROOTCA</code>（根证书，用来验证对端）和 <code>default</code>（自己的工作负载证书）。<strong>证书轮转（Day 14）时，agent 主动 Push 新证书，Envoy 热加载——连接不断、无需重启。</strong>这就是为什么 mTLS 证书能"短命 + 自动轮转"却对业务无感。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>toEnvoySecret</h1></div>
+            <div class="card">
+<pre><code class="language-go">// sdsservice.go:292 toEnvoySecret
+//   ROOTCA → Secret_ValidationContext（:304，含 TrustedCa + 可选 CRL）
+//   工作负载证书 → Secret_TlsCertificate（:338，含证书链 + 私钥）
+//   证书以 InlineBytes 直接内联（:307/341），不落盘</code></pre>
+                <div class="anno">读法：<b>把内部证书格式转成 Envoy 的 <code>tls.Secret</code> proto。根证转成"验证上下文"（用于校验对端），工作负载证书转成"TLS 证书"（自己出示的）。<strong>私钥以 InlineBytes 内联进 SDS 响应——全程内存、不落盘</strong>（Day 12 的安全设计）。</b>还支持 cryptomb/qat 硬件加速私钥运算。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>PeerAuthentication</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/model/authentication.go
+// type MutualTLSMode（:32）：MTLSUnknown/MTLSDisable/MTLSPermissive/MTLSStrict
+// addPeerAuthentication（:126）：区分 mesh 级/namespace 级/workload 级
+//   mesh 级 UNSET 默认 PERMISSIVE（:154）；namespace UNSET 继承 mesh</code></pre>
+                <div class="baby"><span class="t">PeerAuthentication = "mTLS 开关的三档"</span>
+                PeerAuthentication 这个 CRD 控制服务"要不要求 mTLS"：<strong><code>STRICT</code>（严格）——只接受 mTLS 流量，明文拒绝；<code>PERMISSIVE</code>（宽容）——既接受 mTLS 也接受明文（迁移期用，逐步切换）；<code>DISABLE</code>——不用 mTLS。</strong>可以在 mesh 级（全网格默认）、namespace 级、workload 级分别设，<strong>越具体越优先</strong>（workload 覆盖 namespace 覆盖 mesh）。默认 PERMISSIVE——让你能平滑地从"无 mTLS"迁移到"全 mTLS"，不用一刀切。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>模式合成</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/security/authn/policy_applier.go:366 ComposePeerAuthentication
+//   mesh→namespace→workload→port 级优先级合成，默认 MTLSPermissive
+//   PortLevelMtls 建 PerPort 映射（:421）
+// pilot/pkg/security/authn/utils/utils.go:40 BuildInboundTLS
+//   算出端口生效模式 → 生成 Envoy DownstreamTlsContext</code></pre>
+                <div class="anno">读法：<b>istiod 把多层 PeerAuthentication 合成一个"最终生效模式"（甚至精确到端口级），再翻译成 Envoy 的入站 TLS 配置（<code>DownstreamTlsContext</code>，Envoy 课 Day 08 见过）。<code>MTLSDisable</code> → 返回 nil（不启用 TLS）。</b>这是"高层策略 → Envoy 配置"的又一个翻译（呼应 Day 07-08 的 xDS 生成）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>PERMISSIVE 双链</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">PERMISSIVE 怎么"既收明文又收 mTLS"？</span>
+                这是个精妙实现。<strong>PERMISSIVE 模式下，istiod 给 Envoy 的 listener 生成<strong>两条过滤器链</strong>（Envoy 课 Day 05 的 filter chain）：一条处理 mTLS 流量、一条处理明文流量，按 <code>istio</code> ALPN 标记自动匹配。</strong>mTLS 客户端的流量带特殊 ALPN → 走 mTLS 链；普通明文流量 → 走明文链。<strong>所以 PERMISSIVE 不是在单条链里"判断"，而是在 listener 层用两条链分流</strong>（<code>BuildInboundTLS</code> 的注释 <code>utils.go:60-70</code> 说明了这点）。这让迁移期新旧客户端能共存。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>AuthorizationPolicy</h1></div>
+            <div class="card">
+                <p>PeerAuthentication 管"加不加密"，<strong>AuthorizationPolicy 管"谁能访问谁"</strong>。<code>Action</code> 有 ALLOW/DENY/AUDIT/CUSTOM。</p>
+                <div class="baby"><span class="t">授权 = "访问控制清单"</span>
+                有了身份（Day 14 的 SPIFFE），就能做授权：<strong>"只允许 <code>frontend</code> 服务访问 <code>backend</code> 的 <code>/api</code> 路径"、"拒绝来自某命名空间的请求"。</strong>AuthorizationPolicy 用规则表达"什么身份、什么来源、什么路径/方法 → 允许还是拒绝"。<code>CUSTOM</code> action 还能把授权决策委托给外部服务（ext_authz）。<strong>身份认证（你是谁，mTLS）+ 授权（你能干什么，AuthzPolicy）= 完整的服务间访问控制。</strong>这全部在 Envoy 里执行——istiod 只负责把策略翻译下发。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>→ Envoy RBAC</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pilot/pkg/security/authz/builder/builder.go
+// New（:69）→ BuildHTTP（:95）/ BuildTCP（:100）
+// build（:170）：分离 enforce 与 dry-run 规则；逐条 authzmodel.New → Generate
+//   → 产出 rbacpb.Policy（Envoy RBAC filter 配置）</code></pre>
+                <div class="anno">读法：<b>AuthorizationPolicy 被翻译成 Envoy 的 <strong>RBAC filter</strong>（一个 L7 过滤器，Envoy 课 Day 08）。istiod 的 builder 把高层规则（principals/permissions）编译成 Envoy RBAC 的匹配器。</b>支持 dry-run（shadow，只记录不拦截，用于灰度验证策略）。CUSTOM 走 ext_authz filter。<strong>又一次"Istio 高层 CRD → Envoy filter 配置"的翻译——这正是控制面的核心工作。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 3 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周（sidecar 与安全）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 11</strong> Sidecar 注入：MutatingWebhook + 模板渲染 + iptables 劫持</li>
+                    <li><strong>Day 12</strong> pilot-agent：拉起 Envoy + 本地 SDS + xDS 代理 + 探针改写</li>
+                    <li><strong>Day 13</strong> Envoy bootstrap 生成：模板渲染 + node metadata + Higress 模板</li>
+                    <li><strong>Day 14</strong> mTLS/CA：SPIFFE 身份 + 内建 CA + JWT 认证 + 证书轮转 + 信任链</li>
+                    <li><strong>Day 15</strong> SDS 分发 + PeerAuthentication（mTLS 模式）+ AuthorizationPolicy（→RBAC）</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Istio 数据面的"落地机制"：sidecar 怎么进 Pod、agent 怎么托管 Envoy、mTLS 和授权怎么自动实现。第 4 周进入遥测、EnvoyFilter（Higress 重用）、istioctl、安装，并收官。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func toEnvoySecret\|func.*generate' security/pkg/nodeagent/sds/sdsservice.go
+grep -n 'ComposePeerAuthentication\|func BuildInboundTLS' pilot/pkg/security/authn/policy_applier.go pilot/pkg/security/authn/utils/utils.go
+grep -n 'func New\|func (b Builder) build' pilot/pkg/security/authz/builder/builder.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 16（第4周开始）</strong>：<strong>遥测</strong>——Istio 怎么采集 metrics/trace？Telemetry API 怎么翻译成 Envoy 的 stats filter，与 Prometheus 集成。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 mTLS/CA</a>
+                <a href="istio-day16.html" style="color:#66bb6a;">Day 16 · 遥测 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

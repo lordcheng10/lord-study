@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · mTLS 与 CA — Istio 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#00acc1,#66bb6a);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">mTLS 与 CA · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · mTLS 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · SPIFFE 身份</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 内建 CA</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 证书签发 RPC</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · JWT→身份认证</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 证书轮转</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 端到端信任链</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="istio-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 bootstrap</a></li>
+            <li><a href="istio-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="istio-day15.html" class="nav-link" style="color:#4a7fd6;">Day 15 SDS/授权 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 sidecar 与安全</span>
+            <h1 class="part-title">mTLS 与 CA</h1>
+            <p class="part-desc">服务网格最大的安全卖点：<strong>服务间自动双向 TLS（mTLS）</strong>——零改代码就让所有服务间通信加密 + 双向认证。今天看 istiod 内建的 CA 怎么给每个工作负载签发身份证书。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>mTLS 是什么</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">mTLS = "双向亮证件"</span>
+                普通 HTTPS（TLS）只有<strong>服务端</strong>出示证书（你访问银行网站，验证网站是真的）。<strong>mTLS（mutual TLS，双向 TLS）则要求<strong>双方</strong>都出示证书——客户端也要证明自己是谁。</strong>在服务网格里：服务 A 调服务 B，A 和 B 各自出示证书互相验证身份，通信全程加密。<strong>好处：①流量加密（防窃听）；②身份认证（防冒充——只有持有合法证书的服务才能通信）。而且这一切由 sidecar Envoy 自动完成，业务代码零改动。</strong>关键问题：证书从哪来？谁签发？谁保证证书对应的身份可信？这就是 CA 的活。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>SPIFFE 身份</h1></div>
+            <div class="card">
+<pre><code class="language-go">// pkg/spiffe/spiffe.go
+// type Identity struct{ TrustDomain; Namespace; ServiceAccount }（:56）
+// String()（:80）→ spiffe://&lt;trust-domain&gt;/ns/&lt;ns&gt;/sa/&lt;sa&gt;</code></pre>
+                <div class="baby"><span class="t">SPIFFE = "服务的身份证号规范"</span>
+                人有身份证号，服务也需要统一的身份标识。<strong>SPIFFE 是一个开放标准，规定服务身份写成 <code>spiffe://集群/ns/命名空间/sa/服务账号</code> 的格式。</strong>比如 <code>spiffe://cluster.local/ns/default/sa/reviews</code> 表示"default 命名空间里 reviews 服务账号的工作负载"。<strong>Istio 把这个 SPIFFE 身份写进证书的 SAN（主体备用名）字段——于是"验证证书"就等于"验证服务身份"。</strong>mTLS 时对端一看证书里的 SPIFFE URI，就知道"你是谁"，据此做授权（Day 15）。<code>PeerCertVerifier</code>（<code>:319</code>）就是校验对端证书 SAN 的。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>内建 CA</h1></div>
+            <div class="card">
+<pre><code class="language-go">// security/pkg/pki/ca/ca.go
+// NewSelfSignedIstioCAOptions（:127）：优先读 istio-ca-secret，否则 cacerts，
+//   都没有就自签根 CA 并写回 Secret
+// NewPluggedCertIstioCAOptions（:288）：加载运维提供的密钥/证书（cacerts）
+// IstioCA.sign（:478）：校验 CSR 签名 → 按 maxCertTTL 夹逼 TTL → GenCertFromCSR 签出</code></pre>
+                <div class="baby"><span class="t">CA = "签发身份证的机关"</span>
+                CA（Certificate Authority，证书颁发机构）是"信任的根"。<strong>istiod 内建了一个 CA——它要么自己生成一个根证书（自签，测试/默认），要么用运维提供的根证书（生产，接企业 PKI）。</strong>所有工作负载的证书都由这个 CA 签发。<strong>因为大家的证书都来自同一个 CA，所以能互相验证——"你的证书是我们共同信任的 CA 签的，那我信你"。</strong>这就是 PKI（公钥基础设施）的信任传递。根证轮转（<code>selfsignedcarootcertrotator.go</code>）保证根证快过期时平滑更换。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>证书签发 RPC</h1></div>
+            <div class="card">
+<pre><code class="language-go">// security/pkg/server/ca/server.go:75 CreateCertificate（每个工作负载调的 RPC）
+//   :79 security.Authenticate(ctx, s.Authenticators)  // 先认证调用者身份
+//   :113 组 ca.CertOpts（SAN = caller.Identities）
+//   :123 Sign / SignWithCertChain
+//   :142 返回 叶证书 + 证书链 + 根证</code></pre>
+                <div class="anno">读法：<b>工作负载（通过 pilot-agent，Day 12）向 istiod 的 CA 发 <code>CreateCertificate</code> gRPC，带一个 CSR（证书签名请求）。CA <strong>先认证调用者是谁</strong>（L05），再据此身份签发证书（SAN 填对应的 SPIFFE 身份）。</b>关键：SAN 不是调用者随便填的，而是 CA 根据认证结果决定的——防止冒充。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>JWT → 身份认证</h1></div>
+            <div class="card">
+<pre><code class="language-go">// security/pkg/server/ca/authenticate/kubeauth/kube_jwt.go:119 authenticate
+//   :126 tokenreview.ValidateK8sJwt(...)  // 用 K8s TokenReview 验证 JWT
+//   :136 返回 Caller{Identities: [spiffe.MustGenSpiffeURI(mesh, ns, sa)]}  // JWT→SPIFFE</code></pre>
+                <div class="baby"><span class="t">"谁能拿到 token，谁就是那个身份"</span>
+                工作负载怎么向 CA 证明"我就是 reviews 服务"？<strong>靠 Kubernetes 的 ServiceAccount Token（一个 JWT）。</strong>注入时（Day 11）给 Pod 挂载了 <code>istio-token</code>（该 Pod 的 SA JWT）。agent 用这个 JWT 作为凭证调 CA。<strong>CA 的 <code>KubeJWTAuthenticator</code> 用 K8s 的 TokenReview API 验证这个 JWT 真伪，验证通过就把"命名空间 + 服务账号"翻译成 SPIFFE 身份，作为证书 SAN 签发。</strong>于是信任链是：K8s 保证"只有 reviews Pod 能拿到 reviews 的 SA token" → 谁持有该 token 谁就拥有该 SPIFFE 身份。<strong>这是把 K8s 的身份体系"桥接"到 mTLS 证书体系的关键一步。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>证书轮转</h1></div>
+            <div class="card">
+                <p>证书有有效期（默认较短，如 24h）。<code>SecretManagerClient</code>（<code>security/pkg/nodeagent/cache/secretcache.go</code>）在 agent 侧管理：<code>generateNewSecret</code>（<code>:572</code>）生成 CSR 调 CA；<code>rotateTime</code>（<code>:652</code>）带 jitter 的宽限期；快过期就自动重签、通过 <code>OnSecretUpdate</code> 推给 Envoy 热更新（Day 12 SDS）。</p>
+                <div class="baby"><span class="t">为什么证书要"短命 + 自动轮转"？</span>
+                传统证书有效期几个月甚至几年——一旦泄露，攻击者能用很久。<strong>Istio 用"短命证书"（几小时到一天）+ 自动轮转：证书快过期，agent 自动重新申请、无缝替换。</strong>好处：即使某张证书泄露，很快失效，危害窗口极小；且全自动，运维零负担。<strong>这是"零信任安全"的实践——不信任任何长期凭证，持续重新验证身份。</strong>jitter（随机抖动）避免所有 Pod 同时轮转打爆 CA。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>端到端信任链</h1></div>
+            <div class="card">
+                <div class="glossary"><b>完整信任链（串起来）</b>：<br>
+                ① 注入时给 Pod 挂 <code>istio-token</code>（K8s SA JWT，Day 11）<br>
+                ② agent 用 JWT 调 istiod CA 的 <code>CreateCertificate</code>（Day 12）<br>
+                ③ CA 的 <code>KubeJWTAuthenticator</code> 用 TokenReview 验 JWT → 翻译成 SPIFFE 身份（今天）<br>
+                ④ CA 用根证签发工作负载证书（SAN = SPIFFE 身份）<br>
+                ⑤ agent 缓存证书、定时轮转，通过 SDS 推给 Envoy（Day 12/15）<br>
+                ⑥ 两个 Envoy 建 mTLS 连接，各自校验对端证书的 SPIFFE 身份<br>
+                <strong>K8s 的 SA 体系 → JWT → CA 认证 → SPIFFE 证书 → mTLS。每一环都可验证，没有长期明文密钥。这就是 Istio "零信任、自动 mTLS" 的完整实现。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>mTLS 和普通 TLS 的区别？服务网格 mTLS 的两大好处？</li>
+                    <li>SPIFFE 身份格式？它和证书什么关系？</li>
+                    <li>内建 CA 的作用？自签 vs 插件根证？</li>
+                    <li>CreateCertificate RPC 怎么防冒充？JWT 怎么变成 SPIFFE 身份？</li>
+                    <li>证书为什么要短命+轮转？端到端信任链的六步？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/istio
+grep -n 'func (i Identity) String\|type Identity struct' pkg/spiffe/spiffe.go
+grep -n 'func (s \*Server) CreateCertificate\|func (ca \*IstioCA) sign' security/pkg/server/ca/server.go security/pkg/pki/ca/ca.go
+grep -n 'func.*authenticate\|MustGenSpiffeURI' security/pkg/server/ca/authenticate/kubeauth/kube_jwt.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>SDS + 认证授权</strong>——SDS 怎么把证书分发给 Envoy、PeerAuthentication 怎么控制 mTLS 模式、AuthorizationPolicy 怎么翻译成 Envoy RBAC。安全策略的完整落地。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="istio-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 bootstrap</a>
+                <a href="istio-day15.html" style="color:#4a7fd6;">Day 15 · SDS + 认证授权 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
