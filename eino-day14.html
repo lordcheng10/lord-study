@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 中断与恢复 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .tl{display:flex;flex-direction:column;gap:0;margin:14px 0}
+        .tl .step{display:flex;gap:12px;align-items:flex-start;padding:8px 0}
+        .tl .dot{width:14px;height:14px;border-radius:50%;background:#8b5cf6;flex-shrink:0;margin-top:3px}
+        .tl .dot.p{background:#f59e0b} .tl .dot.r{background:var(--accent-green)}
+        .tl .step .b{font-size:13px} .tl .step .b b{color:#8b5cf6} .tl .step small{color:var(--text-muted);font-size:12px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">中断与恢复 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要中断</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一次中断恢复全流程</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 中断怎么触发</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · CheckPoint 存现场</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Store 存哪里</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Resume 从断点继续</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 典型场景：人工审批</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 多智能体</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 ReAct 精读 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 ADK 智能体开发</span>
+            <h1 class="part-title">中断与恢复 Interrupt / Resume</h1>
+            <p class="part-desc">Agent 跑到一半停下来等人类（比如审批一笔转账），批准后从断点继续——这就是 Human-in-the-loop。今天看它怎么和图执行结合，现场怎么存、怎么恢复。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么需要中断</h1></div>
+            <div class="card">
+                <p>很多真实场景里，Agent 不能自作主张，必须<strong>停下来等人</strong>：转账前要人工确认、删数据前要审批、拿不准时要向用户追问。这叫 <strong>Human-in-the-loop（人在环中）</strong>。</p>
+                <div class="baby"><span class="t">难点在哪？</span>
+                Agent 一次运行是个连续过程（模型→工具→模型……）。要"停下来等人"，意味着：① 得能在某一步<strong>暂停</strong>；② 把当前"跑到哪了、上下文是什么"这个<strong>现场完整存下来</strong>（可能人几小时后才来批）；③ 人给了答复后能<strong>从那个断点继续</strong>，而不是从头重跑（重跑会重复扣费、重复副作用）。Eino 的中断/恢复机制解决这三点。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一次中断恢复全流程</h1></div>
+            <div class="card">
+                <div class="tl">
+                    <div class="step"><div class="dot"></div><div class="b"><b>1. 正常跑</b> — Agent 推理，决定要执行"转账"工具 <small>模型输出 tool_call: transfer(1000元)</small></div></div>
+                    <div class="step"><div class="dot p"></div><div class="b"><b>2. 触发中断</b> — 该工具/节点标记为"需人工"，抛出中断 <small>InterruptError</small></div></div>
+                    <div class="step"><div class="dot p"></div><div class="b"><b>3. 存现场</b> — 把"跑到哪、消息历史、State"存进 CheckPoint <small>存到 Store（内存/Redis/DB）</small></div></div>
+                    <div class="step"><div class="dot p"></div><div class="b"><b>4. 返回中断事件</b> — 迭代器给你一个 Interrupt 事件，运行暂停 <small>你的程序去通知人类审批</small></div></div>
+                    <div class="step"><div class="dot r"></div><div class="b"><b>5. 人类批准</b> — 几分钟/几小时后，人点了"同意" <small>你调用 Resume，带上批准结果</small></div></div>
+                    <div class="step"><div class="dot r"></div><div class="b"><b>6. 恢复</b> — 从 CheckPoint 读回现场，从断点继续执行转账，Agent 接着往下跑 <small>不重跑前面的步骤</small></div></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>中断怎么触发</h1></div>
+            <div class="card">
+                <p>中断本质是一个特殊的 error——节点执行中返回 <code>InterruptError</code>（<code>compose/</code> 中断相关），图执行引擎识别到它就停止调度、进入"存现场"流程，而不是当普通错误抛出。</p>
+<pre><code class="language-go">// 概念：某个工具/节点里
+if 需要人工审批 {
+    return nil, compose.NewInterruptError(想让人看的信息)   // 触发中断
+}</code></pre>
+                <div class="anno">读法：<b>中断"伪装"成一种特殊 error 往上传，引擎特判它——不当失败处理，而是触发暂停+存档。</b>这样中断机制不用侵入每个节点的正常逻辑，复用了 Go 的 error 传播路径。很巧妙。</div>
+                <div class="glossary">在 ADK 层，对应 AgentAction 里的 <code>Interrupt</code> 动作（Day 11 的 AgentEvent.Action）。所以你在事件循环里能收到"这是个中断事件"，知道该去找人了。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>CheckPoint：存什么现场</h1></div>
+            <div class="card">
+                <p>CheckPoint（检查点）保存"恢复所需的一切"：跑到哪个节点了、各 channel 里的值、State（Day 09）、消息历史等——足够之后原样重建执行状态。</p>
+                <div class="baby"><span class="t">类比：游戏存档</span>
+                就像游戏打到一半存档：存下你的位置、血量、背包、任务进度。读档时不用重新打前面的关，直接从存档点继续。CheckPoint 就是 Agent 运行的"存档"。<strong>关键是存得够全——少存一样，恢复时就会出错或行为不一致。</strong></div>
+                <div class="glossary">编译图时要开启 checkpoint 支持并提供一个 <code>CheckPointStore</code>（L05），运行时用一个 <code>checkPointID</code> 标识这次会话的存档。恢复时用同一个 ID 找回存档。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Store：现场存哪里</h1></div>
+            <div class="card">
+                <p>CheckPoint 存到一个 <code>CheckPointStore</code>（接口）。你可以用：</p>
+                <ul>
+                    <li><strong>内存 Store</strong>：进程内 map，重启就没了——适合开发/测试。</li>
+                    <li><strong>Redis / 数据库 Store</strong>：持久化，跨进程、跨重启都在——生产环境用。你自己实现 Store 接口对接。</li>
+                </ul>
+                <div class="glossary"><b>为什么要可插拔的 Store？</b> 因为"人几小时后才审批"意味着你的服务可能已经重启、甚至换了台机器。存内存肯定丢。做成接口，让你按需接 Redis/MySQL/对象存储——又是 Day 01 的"依赖注入/面向接口"哲学：Eino 定义 Store 接口，你提供实现。生产环境务必用持久化 Store。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Resume：从断点继续</h1></div>
+            <div class="card">
+                <p>人类给了答复后，你带着 <code>checkPointID</code> 和"人给的输入"调用恢复。引擎从 Store 读回 CheckPoint，重建执行状态，把"人给的输入"作为那个中断节点的结果，继续往下跑：</p>
+<pre><code class="language-go">// 概念：恢复运行
+iter := runner.Resume(ctx, checkPointID,
+    adk.WithResumeInput("审批通过"))   // 把人的决定喂给中断点
+for { event, ok := iter.Next(); if !ok {break}; ... }   // 接着消费后续事件</code></pre>
+                <div class="anno">读法：<b>Resume 用 checkPointID 找回存档，把人的输入注入中断点，从那里继续。</b>前面已经跑过的步骤不会重跑——所以不会重复扣 token、不会重复执行副作用。这正是 L01 说的第三个难点的解法。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>典型场景：人工审批转账</h1></div>
+            <div class="card">
+<pre><code class="language-go">// 转账工具：金额大就中断等审批
+func transferTool(ctx, args) (string, error) {
+    if args.Amount > 10000 {
+        return "", compose.NewInterruptError("大额转账需人工审批: " + args.描述)
+    }
+    return 执行转账(args), nil
+}
+// 主流程
+iter := runner.Query(ctx, "给张三转 5 万")
+for { e,ok:=iter.Next(); if !ok{break}
+    if e.Action != nil && e.Action.Interrupt != nil {
+        存 checkPointID; 通知审批人; break   // 暂停，去走审批
+    }
+}
+// ……审批人批准后……
+iter2 := runner.Resume(ctx, checkPointID, adk.WithResumeInput("批准"))
+</code></pre>
+                <div class="baby"><span class="t">串起来看</span>
+                模型决定调转账工具 → 工具发现 5 万 > 阈值，抛中断 → 引擎存档、返回中断事件 → 你的程序发审批通知、暂停 → 审批人批准 → 你 Resume → 转账执行、Agent 告诉用户"已转账"。<strong>整个过程 Agent 的"思路"没断，人只是在关键一步插了个手。</strong>这就是安全可控的 AI 应用该有的样子。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要中断/恢复？三个难点是什么？</li>
+                    <li>中断怎么触发？（InterruptError 特殊 error）</li>
+                    <li>CheckPoint 存什么？为什么要可插拔 Store？</li>
+                    <li>Resume 怎么保证不重跑？</li>
+                    <li>人工审批场景怎么落地？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -rn 'Interrupt\|InterruptError' compose/ | head
+grep -rn 'CheckPoint\|checkpoint\|Resume' compose/ adk/ | head
+grep -rn 'CheckPointStore\|Store' compose/ | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15</strong>：第 3 周收官——<strong>ReAct Agent 精读</strong>。把 Day 11-14 的知识串起来，逐段读 flow/agent/react 的真实源码，看一个完整 ReAct Agent 从建到跑的全貌。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 多智能体</a>
+                <a href="eino-day15.html" style="color:var(--accent-green);">Day 15 · ReAct 精读 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

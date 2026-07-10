@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 多智能体 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
+        .vs .c.good{border-color:var(--accent-green);background:rgba(34,197,94,.05)} .vs .c.bad{border-color:#f59e0b;background:rgba(245,158,11,.05)}
+        .vs .c h4{margin:0 0 6px;font-size:14px} .vs .c.good h4{color:var(--accent-green)} .vs .c.bad h4{color:#f59e0b}
+        .vs .c li{font-size:12px;color:var(--text-secondary);margin:4px 0}
+        @media(max-width:768px){ .vs{grid-template-columns:1fr} }
+        .sup{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px}
+        .sup .boss{background:rgba(139,92,246,.12);border:1px solid #8b5cf6;color:#8b5cf6;border-radius:9px;padding:8px 16px;font-size:12.5px;font-weight:700}
+        .sup .subs{display:flex;gap:10px;flex-wrap:wrap;justify-content:center} .sup .sub{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:7px 12px;font-size:12px}
+        .sup .a{color:var(--text-muted)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">多智能体 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要多智能体</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 两种协作方式</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Agent-as-Tool（推荐）</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Transfer（不推荐）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 为什么推荐前者</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Supervisor 模式</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 子 Agent 的事件冒泡</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 ChatModelAgent</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 中断恢复 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 ADK 智能体开发</span>
+            <h1 class="part-title">多智能体协作</h1>
+            <p class="part-desc">一个 Agent 搞不定复杂任务时，让多个专精 Agent 协作。今天讲 Eino 的两种协作方式，以及官方为什么推荐 Agent-as-Tool 而不推荐 Transfer。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要多智能体</h1></div>
+            <div class="card">
+                <p>把一个"全能 Agent"拆成多个"专精 Agent"，各管一摊，好处：提示词更聚焦、工具集更小（模型不会在 50 个工具里选晕）、可独立测试和复用。</p>
+                <div class="baby"><span class="t">类比：一个人 vs 一个团队</span>
+                让一个人既当客服、又当程序员、又当会计，他啥都会一点但都不精，还容易忙中出错。拆成"客服 Agent + 编程 Agent + 财务 Agent"，各自提示词专业、工具精简，由一个"主管 Agent"根据问题分派。<strong>这就是多智能体——分工提升整体能力和可靠性。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>两种协作方式</h1></div>
+            <div class="card">
+                <p>Eino 提供两种让 Agent 之间协作的机制：</p>
+                <div class="vs">
+                    <div class="c good"><h4>✅ Agent-as-Tool（推荐）</h4>
+                        <ul><li>把子 Agent <b>包装成一个工具</b></li><li>主 Agent 像调普通工具一样"调"子 Agent</li><li>子 Agent 干完把结果<b>返回给主 Agent</b>，控制权回到主 Agent</li></ul>
+                    </div>
+                    <div class="c bad"><h4>⚠️ Transfer 转交（不推荐）</h4>
+                        <ul><li>当前 Agent 通过 Action <b>把控制权整个转交</b>给另一个 Agent</li><li>转交后<b>不再回来</b>，由新 Agent 接管</li><li>类似"踢皮球"式的接力</li></ul>
+                    </div>
+                </div>
+                <div class="glossary">对应代码：Agent-as-Tool 用 <code>adk.NewAgentTool</code>（把 Agent 包成 Tool）；Transfer 用 AgentAction 里的 <code>TransferToAgent</code>。<strong>官方文档明确标注 Transfer 为 NOT RECOMMENDED</strong>——L05 讲原因。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Agent-as-Tool（推荐）</h1></div>
+            <div class="card">
+                <p>把子 Agent 包成工具，加进主 Agent 的工具集（<code>adk/</code> 相关）：</p>
+<pre><code class="language-go">// 子 Agent（专精财务）
+financeAgent, _ := adk.NewChatModelAgent(ctx, &financeConfig)
+// 包装成工具
+financeTool := adk.NewAgentTool(ctx, financeAgent)
+// 主 Agent 把它当普通工具用
+mainAgent, _ := adk.NewChatModelAgent(ctx, &ChatModelAgentConfig{
+    Tools: []tool.BaseTool{financeTool, weatherTool, ...},   // 子Agent 和普通工具混在一起
+})</code></pre>
+                <div class="anno">读法：<b>子 Agent 被 <code>NewAgentTool</code> 变成一个 Tool，和普通工具平起平坐加进主 Agent。</b>主 Agent 的模型在需要时"调用"这个工具（其实是运行子 Agent），拿到结果继续自己的推理。子 Agent 有自己独立的对话上下文和工具集。</div>
+                <div class="baby"><span class="t">直觉</span>
+                主 Agent 是"项目经理"，子 Agent 是"专家顾问"。经理遇到财务问题，就"打电话咨询财务专家"（调工具），专家给出意见后，<strong>经理继续主导</strong>整个对话。控制权始终在经理手里——清晰、可控。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Transfer（不推荐）</h1></div>
+            <div class="card">
+                <p>Transfer 是子 Agent 通过发出 <code>AgentAction{TransferToAgent: "另一个Agent"}</code> 把控制权彻底交出去：</p>
+<pre><code class="language-go">// 概念：Agent 运行中产出一个转交动作
+event.Action = &AgentAction{TransferToAgent: &TransferToAgentAction{
+    DestAgentName: "specialistAgent",
+}}
+// Runner 收到后，切换到 specialistAgent 接管，原 Agent 退场</code></pre>
+                <div class="anno">读法：<b>转交后控制权归了新 Agent，原 Agent 不再参与。</b>像接力赛交棒——棒交出去就不回来了。多个 Agent 之间可能一路 transfer 下去。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>为什么推荐 Agent-as-Tool 而非 Transfer</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>控制流清晰</strong>：as-Tool 是"调用-返回"，控制权总回到主 Agent，行为可预测。Transfer 是"单向移交"，链路一长就难追踪"现在到底是谁在负责"。</li>
+                    <li><strong>上下文可控</strong>：as-Tool 时主 Agent 决定给子 Agent 看什么、拿回什么。Transfer 时上下文怎么传递更含糊。</li>
+                    <li><strong>可组合</strong>：工具能任意嵌套组合，主 Agent 能"综合多个子 Agent 的结果"再决策；Transfer 更像状态机跳转，难综合。</li>
+                    <li><strong>可测试</strong>：子 Agent 作为工具能单独测；Transfer 的整链行为更难隔离测试。</li>
+                </ul>
+                <div class="glossary"><b>一句话</b>：Agent-as-Tool 用"函数调用"的心智模型（调了会返回），符合程序员直觉、可控可组合；Transfer 用"控制权移交"心智模型，容易失控。所以 Eino 官方推荐前者。<strong>这也呼应 Day 01 的设计哲学——可控、可组合优先。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Supervisor 模式</h1></div>
+            <div class="card">
+                <p>基于 Agent-as-Tool 最常见的结构就是 <strong>Supervisor（主管）模式</strong>——一个主管 Agent 统筹，多个专精子 Agent 作为它的工具：</p>
+                <div class="sup">
+                    <div class="boss">Supervisor 主管 Agent（负责理解需求、分派、综合）</div>
+                    <div class="a">↓ 按需"调用"（Agent-as-Tool）↓</div>
+                    <div class="subs">
+                        <span class="sub">🔎 检索 Agent</span><span class="sub">💰 财务 Agent</span><span class="sub">💻 编程 Agent</span><span class="sub">✍️ 写作 Agent</span>
+                    </div>
+                </div>
+                <div class="baby"><span class="t">怎么搭</span>
+                每个子 Agent 用 <code>NewChatModelAgent</code> 建好（各自的 Instruction 和工具），再全部 <code>NewAgentTool</code> 包成工具，塞进 Supervisor 的工具集。Supervisor 的 Instruction 写"你是主管，根据用户需求选择合适的下属工具来完成任务"。<strong>用 Day 12 学的单 Agent 机制拼出多 Agent 系统——没有新魔法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>子 Agent 的事件冒泡</h1></div>
+            <div class="card">
+                <p>子 Agent 运行时也会产出自己的 AgentEvent。这些事件会带着 <code>AgentName</code>（是哪个子 Agent 发的）<strong>冒泡</strong>到最外层的迭代器，所以你能在 UI 上显示"财务 Agent 正在查账……"这种嵌套进度。</p>
+                <div class="glossary">因为每个 AgentEvent 都带 <code>AgentName</code>（Day 11），前端就能区分"这条是主管说的还是某个子 Agent 说的"，画出层级化的执行过程。<strong>事件流的设计让多 Agent 的可观测性天然成立</strong>——你能看到整个团队每个成员在干嘛。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么要多智能体？（分工、聚焦、可复用可测）</li>
+                    <li>两种协作方式？各自的控制流特点？</li>
+                    <li>为什么官方推荐 Agent-as-Tool 而不推荐 Transfer？</li>
+                    <li>Supervisor 模式怎么搭？</li>
+                    <li>子 Agent 的事件怎么冒泡到外层？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -rn 'NewAgentTool\|AgentTool' adk/ | head
+grep -rn 'TransferToAgent\|Transfer' adk/ | head
+grep -rn 'Supervisor\|supervisor' adk/ | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：Agent 跑到一半需要人工审批怎么办？<strong>中断与恢复（Interrupt/Resume）</strong>——Agent 暂停、把现场存下来、等人类批准后从断点继续。看它怎么和图执行结合。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 ChatModelAgent</a>
+                <a href="eino-day14.html" style="color:var(--accent-green);">Day 14 · 中断与恢复 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
