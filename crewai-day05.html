@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 一次 kickoff 的完整旅程 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .journey{display:flex;flex-direction:column;gap:0;margin:16px 0}
+        .journey .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-left:2px solid var(--border-color);padding-left:16px;margin-left:8px;position:relative}
+        .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#ef4444}
+        .journey .step .num{font-size:10px;font-weight:800;color:#ef4444;flex-shrink:0;margin-top:2px}
+        .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ef4444,#f97316);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">kickoff 完整旅程 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 一段完整代码</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① prepare 准备</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② 分发到流程</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ 任务循环执行</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④ Agent ReAct</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤ 上下文链传递</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ⑥ 汇总输出</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 Crew</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 Process &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
+            <h1 class="part-title">一次 kickoff 的完整旅程</h1>
+            <p class="part-desc">把 Agent + Task + Crew 串成一条完整故事线。今天跟着一次 <code>kickoff()</code>，看三个核心概念如何协同，数据如何在任务间流动。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>一段完整代码（我们要追踪它）</h1></div>
+            <div class="card">
+<pre><code class="language-python">from crewai import Agent, Task, Crew, Process
+
+researcher = Agent(role="研究员", goal="研究 {topic}", backstory="...")
+writer     = Agent(role="写手",   goal="写一篇关于 {topic} 的文章", backstory="...")
+
+research = Task(description="研究 {topic}", expected_output="资料要点", agent=researcher)
+write    = Task(description="写文章",       expected_output="800字文章",
+                agent=writer, context=[research])   # ★ 依赖 research 的输出
+
+crew = Crew(agents=[researcher, writer], tasks=[research, write],
+            process=Process.sequential)
+result = crew.kickoff(inputs={"topic": "多智能体"})   # ← 我们追踪这一行</code></pre>
+                <div class="anno">读法：<b>两个 Agent（研究员、写手）、两个 Task（研究、写作，写作依赖研究）、组成一个顺序执行的 Crew。</b>下面逐步追踪 <code>kickoff</code> 内部发生了什么。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>① prepare 准备阶段</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b"><code>prepare_kickoff</code>（<code>crews/utils.py</code>）：把 <code>{topic}</code> 用 inputs 插值成"多智能体"（Day 02 的 interpolate_inputs）。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b">若 <code>crew.planning=True</code>，先跑 <code>_handle_crew_planning</code>（Day 09）生成计划、追加进任务描述。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b">发 <code>CrewKickoffStartedEvent</code>（事件总线），设置 telemetry。</div></div>
+                </div>
+                <div class="anno">读法：<b>正式执行前的"备料"——填占位符、（可选）规划、发开工事件。</b>此刻 role/goal/description 里的 <code>{topic}</code> 都已变成实际内容。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>② 分发到流程</h1></div>
+            <div class="card">
+<pre><code class="language-python"># crew.py:1021（Day 04 见过）
+if self.process == Process.sequential:
+    result = self._run_sequential_process()   # 我们的例子走这条
+# _run_sequential_process (crew.py:1475) → self._execute_tasks(self.tasks)</code></pre>
+                <div class="anno">读法：<b>我们的 Crew 是 sequential，所以走 <code>_run_sequential_process</code> → <code>_execute_tasks(tasks)</code>——按顺序执行任务列表。</b>（层级模式会先创建一个经理 agent，Day 06 讲。）</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>③ 任务循环执行 _execute_tasks</h1></div>
+            <div class="card">
+                <p><code>_execute_tasks</code>（<code>crew.py:1519</code>）遍历任务，对每个任务：</p>
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b">判断要不要跳过（条件任务 ConditionalTask，Day 03）。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b"><code>_get_context(task, task_outputs)</code>（<code>crew.py:1826</code>）：把前序任务输出拼成本任务的上下文（L06）。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b"><code>task.execute_sync(...)</code>（Day 03 的 _execute_core）执行任务。异步任务则攒进 futures 并发。</div></div>
+                    <div class="step"><span class="num">4</span><div class="b">收集 TaskOutput，进入下一个任务。</div></div>
+                </div>
+                <div class="anno">读法：<b>这就是"流水线"——research 任务先跑，输出攒起来；write 任务跑时，把 research 的输出作为上下文喂进去。</b>顺序执行的精髓就在这个循环 + 上下文传递。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>④ 单个任务内：Agent 的 ReAct</h1></div>
+            <div class="card">
+                <p>每个 <code>task.execute_sync</code> 内部调 <code>agent.execute_task</code>（Day 02），Agent 进入 ReAct 循环（Day 07 精讲）：</p>
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b">Agent 把 role+goal+backstory+任务描述+上下文+记忆 拼成 prompt。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b">问 LLM → LLM 可能说"我要用搜索工具" → 执行工具 → 观察结果 → 再问 LLM。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b">循环直到 LLM 给出 Final Answer（或达到 max_iter）。</div></div>
+                </div>
+                <div class="anno">读法：<b>研究员 Agent 拿到 research 任务，反复"思考→用工具查资料→看结果→再思考"，直到产出资料要点。</b>这就是单个 Agent 执行任务时内部发生的事——Day 07 会逐行读 <code>crew_agent_executor.py</code>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 上下文链传递（关键时刻）</h1></div>
+            <div class="card">
+                <p>research 任务跑完，产出资料要点。轮到 write 任务时，因为它声明了 <code>context=[research]</code>：</p>
+<pre><code class="language-python"># crew.py:1826 _get_context — write.context=[research]，非 NOT_SPECIFIED
+# → aggregate_raw_outputs_from_tasks([research]) 把 research 的输出拼成字符串
+# → 作为 context 传给 writer.execute_task(write, context="研究员产出的资料要点...")</code></pre>
+                <div class="baby"><span class="t">这就是团队"协作"的实质</span>
+                写手 Agent 拿到任务时，prompt 里<strong>包含了研究员刚产出的资料要点</strong>。于是它能基于研究成果写文章，而不是凭空写。<strong>"一个 Agent 的产出成为另一个 Agent 的输入"——这就是多智能体协作在代码层的真身。</strong>没有魔法，就是把上一个任务的 TaskOutput 拼进下一个任务的 prompt（Day 03 的上下文链三态在这里落地）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>⑥ 汇总输出</h1></div>
+            <div class="card">
+                <div class="journey">
+                    <div class="step"><span class="num">1</span><div class="b">所有任务跑完，<code>_create_crew_output(task_outputs)</code>（<code>crew.py:1880</code>）取<strong>最后一个任务</strong>（write）的输出作为 crew 最终结果。</div></div>
+                    <div class="step"><span class="num">2</span><div class="b">排空记忆写入、flush 事件总线、发 <code>CrewKickoffCompletedEvent</code>。</div></div>
+                    <div class="step"><span class="num">3</span><div class="b">跑 after_kickoff 回调、算 token 用量，返回 <code>CrewOutput</code>。</div></div>
+                </div>
+                <div class="anno">读法：<b><code>result</code> 就是 write 任务的产出（那篇文章），中间的 research 输出保留在 <code>result.tasks_output</code> 里。</b><code>print(result)</code> 打印文章内容。旅程结束。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 1 周收官 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>第 1 周（Day 01-05）你已建立完整心智</h3>
+                <ul>
+                    <li><b>Day 01</b> 全景：CrewAI 是什么、Crew vs Flow、monorepo</li>
+                    <li><b>Day 02</b> Agent：角色扮演的员工</li>
+                    <li><b>Day 03</b> Task：工单、结构化输出、上下文链</li>
+                    <li><b>Day 04</b> Crew：指挥中心、kickoff、声明式校验</li>
+                    <li><b>Day 05</b> 完整旅程：三者如何协同运转</li>
+                </ul>
+                <p style="margin-top:8px">你现在理解了 CrewAI"组队干活"的全貌。下周（Day 06-10）深入 <strong>Crew 编排</strong>：两种 Process、Agent 执行循环、委派、规划、任务护栏。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：验证这条旅程</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '1519,1590p' $P/crew.py     # _execute_tasks 任务循环
+sed -n '1826,1840p' $P/crew.py     # _get_context 上下文链
+grep -n 'prepare_kickoff\|_handle_crew_planning' $P/crews/utils.py $P/crew.py | head</code></pre>
+                <div class="tip"><strong>下周预告 · Day 06</strong>：<strong>Process：顺序 vs 层级</strong>——sequential 是流水线，hierarchical 会自动创建一个"经理 Agent"来动态分派任务。看两种流程如何复用同一个执行引擎，只在"谁来执行"上不同。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 Crew</a>
+                <a href="crewai-day06.html" style="color:var(--accent-green);">Day 06 · Process &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

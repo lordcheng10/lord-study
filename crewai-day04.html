@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · Crew 把 Agent 和 Task 组队 — CrewAI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#ef4444}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#ef4444,#f97316);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">Crew 团队 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Crew 是指挥中心</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 关键属性表</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 声明式校验</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · kickoff 入口</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · kickoff 的变体</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · CrewOutput</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · copy 隔离执行</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 Task</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="crewai-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 kickoff 旅程 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 核心概念</span>
+            <h1 class="part-title">Crew：把 Agent 和 Task 组队</h1>
+            <p class="part-desc">第三个核心概念，也是"指挥中心"。Crew 把员工（Agent）和活儿（Task）组织起来、按流程调度。今天读 <code>crew.py</code>（2400 行）的骨架。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Crew 是指挥中心</h1></div>
+            <div class="card">
+                <p><code>Crew</code>（<code>crew.py:159</code>，继承 <code>FlowTrackable, BaseModel</code>）本身<strong>不干活</strong>——它是编排器/指挥中心，把 agents（干活的人）和 tasks（要干的活）组织起来，按 <code>process</code> 策略调度，调 <code>kickoff()</code> 开工。</p>
+                <div class="baby"><span class="t">Agent/Task/Crew 三者的关系（复习 + 深化）</span>
+                <strong>Agent 是员工，Task 是工单，Crew 是把人和活儿凑成一个项目组并负责调度的"项目"。</strong>Crew 决定：这些活儿按什么顺序做（Process，Day 06）、谁做哪个、要不要开记忆/规划、跑完怎么汇总结果。<strong>它是三个核心概念里的"总指挥"</strong>——前两天学的 Agent 和 Task 都在这里被组织起来运转。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>关键属性表</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>属性</th><th>作用</th><th>行号</th></tr>
+                    <tr><td><code>tasks</code></td><td>要完成的任务列表</td><td>crew.py:220</td></tr>
+                    <tr><td><code>agents</code></td><td>团队成员</td><td>crew.py:221</td></tr>
+                    <tr><td><code>process</code></td><td>执行策略（默认 sequential）Day 06</td><td>crew.py:225</td></tr>
+                    <tr><td><code>memory</code></td><td>是否启用记忆 Day 16</td><td>crew.py:227</td></tr>
+                    <tr><td><code>manager_llm</code>/<code>manager_agent</code></td><td>层级模式的"经理"Day 06</td><td>crew.py:249/254</td></tr>
+                    <tr><td><code>planning</code></td><td>执行前先规划 Day 09</td><td>crew.py:318</td></tr>
+                    <tr><td><code>knowledge_sources</code></td><td>知识库 Day 17</td><td>crew.py:340</td></tr>
+                    <tr><td><code>cache</code></td><td>缓存工具执行结果</td><td>crew.py:219</td></tr>
+                    <tr><td><code>max_rpm</code></td><td>每分钟最大请求数限流</td><td>crew.py:296</td></tr>
+                </table>
+                <div class="glossary">大多是后面几天的主题（process/memory/manager/planning/knowledge），今天先混脸熟。核心记住：<strong>agents + tasks + process 是 Crew 的三大件</strong>——谁、干什么、怎么调度。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>声明式校验：开工前就抓错</h1></div>
+            <div class="card">
+                <p>Crew 用 Pydantic 的 <code>model_validator</code> 做大量声明式校验，在 <code>kickoff</code> <strong>之前</strong>就把配置错误暴露出来：</p>
+                <ul>
+                    <li><code>check_manager_llm</code>（<code>crew.py:696</code>）：层级模式必须给 manager_llm 或 manager_agent，且经理不能出现在 agents 列表里。</li>
+                    <li><code>validate_tasks</code>（<code>crew.py:741</code>）：顺序模式下每个 task 必须有 agent。</li>
+                    <li><code>validate_context_no_future_tasks</code>（<code>crew.py:839</code>）：任务的 context 不能依赖<strong>后面</strong>的任务（防止"时间悖论"）。</li>
+                </ul>
+                <div class="baby"><span class="t">为什么"开工前校验"这么重要？</span>
+                想象你配错了（比如层级模式忘了给经理），如果不校验，可能<strong>跑到一半、烧了不少 token 才崩</strong>。声明式校验在你构造 Crew 对象的那一刻就检查所有规则，配置不对立刻报错——根本跑不起来。<strong>把错误"前移"到最早的时刻（fail-fast），省时间省钱省心。</strong>这和 eino 教程的"编译期类型检查"是同一哲学。<code>validate_context_no_future_tasks</code> 尤其巧妙——防止你让"任务 1 依赖任务 3 的输出"这种逻辑上不可能的配置。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>kickoff：开工入口</h1></div>
+            <div class="card">
+                <p>主入口 <code>kickoff()</code>（<code>crew.py:966</code>）。核心分发逻辑（<code>crew.py:1021</code>）：</p>
+<pre><code class="language-python">inputs = prepare_kickoff(self, inputs, input_files)   # 准备：插值、规划等
+if self.process == Process.sequential:
+    result = self._run_sequential_process()           # 顺序执行
+elif self.process == Process.hierarchical:
+    result = self._run_hierarchical_process()          # 层级执行
+# 之后：after_kickoff_callbacks、计算 token 用量、返回 CrewOutput</code></pre>
+                <div class="anno">读法：<b>kickoff 是"模板方法"——定义统一骨架：准备(prepare) → 按 process 分发执行 → 回调 → 输出。</b>具体怎么执行委托给 <code>_run_sequential_process</code> / <code>_run_hierarchical_process</code>（Day 06 精讲）。<code>finally</code> 块负责收尾：排空记忆写入、清理文件。</div>
+                <div class="glossary"><b>这是"策略模式"</b>：<code>process</code> 是策略标签，kickoff 据它选算法。两种流程可插拔，未来还能加（源码里注释了未实现的 <code>consensual</code> 共识制）。<strong>骨架固定、策略可换——扩展新流程不用改 kickoff。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>kickoff 的变体</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>方法</th><th>作用</th><th>行号</th></tr>
+                    <tr><td><code>kickoff()</code></td><td>跑一次</td><td>crew.py:966</td></tr>
+                    <tr><td><code>kickoff_for_each(inputs=[...])</code></td><td>对一批输入分别各跑一次</td><td>crew.py:1061</td></tr>
+                    <tr><td><code>kickoff_async(...)</code></td><td>"假异步"：线程池包装同步 kickoff</td><td>crew.py:1097</td></tr>
+                    <tr><td><code>akickoff(...)</code></td><td>"真异步"：全程 await（原生 async）</td><td>crew.py:1177</td></tr>
+                </table>
+                <div class="baby"><span class="t">两套异步的区别（有意思的对比）</span>
+                <code>kickoff_async</code> 是"<strong>假异步</strong>"——用 <code>asyncio.to_thread(self.kickoff)</code> 把同步代码丢到线程里跑（兼容性好，实现简单）。<code>akickoff</code> 是"<strong>真异步</strong>"——原生 async 贯穿任务执行、记忆、知识查询（性能更好）。<strong>假异步是"把同步的活扔给别的线程"，真异步是"从头到尾都不阻塞"。</strong><code>kickoff_for_each</code> 每次都 <code>self.copy()</code> 一个新 crew（L07），保证多次执行互不污染。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>CrewOutput：统一最终输出</h1></div>
+            <div class="card">
+                <p>整个 Crew 跑完，无论多少任务，归一为一个 <code>CrewOutput</code>（<code>crews/crew_output.py:13</code>）：</p>
+<pre><code class="language-python">raw: str              # 原始文本
+pydantic: BaseModel   # 结构化对象
+json_dict: dict
+tasks_output: list    # 每个任务的 TaskOutput（备查）
+token_usage           # token 用量</code></pre>
+                <div class="anno">读法：<b>由 <code>_create_crew_output</code>（<code>crew.py:1880</code>）构造，取<strong>最后一个有效任务的输出</strong>作为 crew 的最终结果。</b>符合流水线直觉——最后一道工序的成品就是交付物，中间产物保留在 <code>tasks_output</code> 里备查。<code>output["key"]</code> 能像字典一样取 pydantic/json 字段。</div>
+                <div class="glossary">构造 CrewOutput 时还顺便：排空记忆写入、flush 事件总线、发 <code>CrewKickoffCompletedEvent</code>（<code>crew.py:1895</code>）。<strong>和 Day 03 的 TaskOutput 一样是"统一输出容器"，只是层级更高（整个团队 vs 单个任务）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>copy：隔离执行</h1></div>
+            <div class="card">
+                <p><code>copy()</code>（<code>crew.py:2027</code>）深拷贝一个 Crew。用在 <code>kickoff_for_each</code>、<code>train</code>、<code>test</code> 等需要"多次独立执行"的场景。</p>
+                <div class="baby"><span class="t">为什么要拷贝？</span>
+                Crew 执行时会积累状态（记忆写入、任务输出、token 计数）。如果 <code>kickoff_for_each</code> 对 10 个输入复用<strong>同一个</strong> crew 对象，第 2 次执行就会被第 1 次的残留状态污染（比如记忆里混入了上一次的内容）。所以每次都 <code>copy()</code> 一个全新的 crew，<strong>各跑各的、互不干扰</strong>。这叫"原型模式"——用拷贝而非重新构造来快速得到干净的新实例。<strong>"隔离执行"是批量/并发场景的正确姿势。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Crew 的角色？三大件是什么？（agents/tasks/process）</li>
+                    <li>声明式校验为什么重要？举一个校验规则。</li>
+                    <li>kickoff 的模板方法骨架？策略模式体现在哪？</li>
+                    <li>假异步 vs 真异步的区别？</li>
+                    <li>CrewOutput 取哪个任务的输出作为最终结果？copy 为什么必要？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '218,386p' $P/crew.py | head -40      # 属性
+sed -n '966,1056p' $P/crew.py | head -50     # kickoff
+sed -n '696,760p' $P/crew.py                 # 声明式校验
+sed -n '1880,1910p' $P/crew.py               # CrewOutput</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05（第1周收官）</strong>：把 Agent+Task+Crew 串成一次完整运行——<strong>一次 kickoff 的完整旅程</strong>：从组队、准备、按流程调度、任务链式执行、到汇总 CrewOutput。看三个核心概念如何协同运转。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="crewai-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 Task</a>
+                <a href="crewai-day05.html" style="color:var(--accent-green);">Day 05 · kickoff 旅程 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
