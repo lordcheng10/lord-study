@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 原生应用 — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/swift.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/kotlin.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#0ea5e9}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#f97316);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">原生应用 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 五个原生目标</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · node 角色</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 线级协议</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 签名握手</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · macOS/iOS</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Android</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Swabble 唤醒词</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 安全</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day19.html" class="nav-link" style="color:#f97316;">Day 19 构建 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 运行时/安全/部署</span>
+            <h1 class="part-title">原生应用</h1>
+            <p class="part-desc">OpenClaw 不只是服务端——它有 macOS/iOS/Android 原生 App（Swift/Kotlin）。它们都是 Gateway 的<strong>客户端</strong>，以 "node" 角色连接，把设备的相机/定位/语音等能力暴露给助理。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>五个原生目标</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>目标</th><th>技术</th><th>角色</th></tr>
+                    <tr><td>macOS（apps/macos）</td><td>SwiftUI 菜单栏 App</td><td>托管本地运行时 + 连网关</td></tr>
+                    <tr><td>iOS（apps/ios）</td><td>SwiftUI + Watch/Share/Live Activity</td><td>node（暴露相机/定位/…）</td></tr>
+                    <tr><td>Android（apps/android，~113 Kotlin）</td><td>Jetpack Compose</td><td>node</td></tr>
+                    <tr><td>共享 OpenClawKit（apps/shared）</td><td>Swift 包</td><td>iOS+macOS 共用协议/客户端</td></tr>
+                    <tr><td>Swabble（/Swabble，Swift）</td><td>本地离线语音守护</td><td>唤醒词门（非网关客户端）</td></tr>
+                </table>
+                <div class="anno">读法：<b>601 个 Swift 文件 + 113 个 Kotlin 文件，实现三份保持"线级兼容"的网关客户端协议：Swift（iOS+macOS 共享 OpenClawKit）、Kotlin（Android）。</b>Swabble 是特例——本地语音守护，不连网关。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>node 角色</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">什么叫 "node 角色"？</span>
+                Gateway（控制平面，Day 3/14）是大脑，但它跑在你的服务器/电脑上，<strong>够不到你手机的相机、你的位置、你的麦克风</strong>。<strong>手机 App 以 "node"（节点）角色连上 Gateway，就相当于给大脑装了一只"手"——助理需要拍照/定位/读日历时，通过网关"调用"这个 node，node 在手机上执行并把结果传回。</strong>所以 App 不是"另一个聊天界面"，而是"助理伸到你各个设备上的感官和手脚"。还有 "operator" 角色（控制/配置用）。这就是为什么一个个人助理需要原生 App——纯服务端摸不到物理设备能力。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>线级协议</h1></div>
+            <div class="card">
+                <p>五个客户端共用一套 Gateway 线级协议：</p>
+                <ul>
+                    <li>传输：单条 WebSocket，<code>wss</code>（TLS）或 <code>ws</code>，URL = <code>scheme://host:port</code>。</li>
+                    <li>帧：JSON，<code>type</code> = <code>req</code>/<code>res</code>/<code>event</code>（请求/响应/事件）。</li>
+                    <li>分层认证：<code>token</code>/<code>bootstrapToken</code>/<code>password</code>/每设备 <code>deviceToken</code> + Ed25519 签名。</li>
+                </ul>
+                <div class="anno">读法：<b>就是一个基于 WebSocket 的 JSON-RPC：客户端发 req、服务端回 res、服务端主动推 event。<code>wss</code>（加密）用于非本地连接。</b>这套协议在 Swift 和 Kotlin 里各实现一遍，靠跨语言测试保持字节级一致（L08）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>签名握手</h1></div>
+            <div class="card">
+                <p>连接握手用 <strong>Ed25519 设备签名</strong>防冒充：</p>
+<pre><code class="language-typescript">// 1. 客户端连上 → gateway 发 connect.challenge 事件带 nonce（一次性随机数）
+// 2. 客户端回 connect 请求：client 信息 + 能力 + auth + 对 nonce 的 Ed25519 签名
+// 3. gateway 校验签名 → 回快照，可下发持久 deviceToken
+
+// 载荷规范化（Android: DeviceAuthPayload.kt:4 buildV3）用 | 拼：
+// v3|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce|platform|deviceFamily
+// 与 Swift GatewayDeviceAuthPayload.buildV3 字节一致</code></pre>
+                <div class="baby"><span class="t">为什么要"签名握手"？</span>
+                助理能访问你的设备能力（相机、位置），要是随便谁都能冒充你的手机连上网关，就危险了。<strong>Ed25519 签名握手：每个设备有一对密钥，网关发一个一次性随机数（nonce），设备用私钥签名回去，网关用公钥验证——证明"你确实是那台注册过的设备"，且这次连接不是重放的旧请求（nonce 一次性）。</strong>验证通过后网关发一个长期 deviceToken，下次免签快速连。<strong>这是设备身份认证的标准做法（类似 SSH 密钥、WebAuthn），比"共享一个密码"安全得多。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>macOS / iOS（Swift）</h1></div>
+            <div class="card">
+                <p>真正的传输在共享包 <code>apps/shared/OpenClawKit/GatewayChannel.swift</code>：</p>
+<pre><code class="language-swift">// public actor GatewayChannelActor（:165）用 URLSessionWebSocketTask
+// sendConnect（:372）等 challenge nonce（connect.challenge 于 :640/:665 识别）
+//   构 auth + 签名设备块（GatewayDeviceAuthPayload.buildV3, :444-462）
+//   发 connect 帧（:465-471）；含重连看门狗 + ping 保活</code></pre>
+                <ul>
+                    <li>macOS：SwiftUI <strong>菜单栏 App</strong>（<code>MenuBar.swift:10</code>），托管本地运行时；Sparkle 自动更新；SwiftPM 构建。</li>
+                    <li>iOS：<code>OpenClawApp.swift:499</code>，node 角色暴露相机/定位/通讯录/日历/运动/语音/推送；含 Watch App、Share Extension、Live Activity；<strong>XcodeGen</strong>（无提交 .xcodeproj，从 <code>project.yml</code> 生成）。</li>
+                </ul>
+                <div class="anno">读法：<b>iOS/macOS 共用 OpenClawKit（一份 Swift 协议实现），各自套自己的 UI。<code>actor</code> 保证 WebSocket 状态的并发安全（Swift 并发特性）。</b>非回环/.ts.net 地址强制 TLS（安全）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Android（Kotlin）</h1></div>
+            <div class="card">
+<pre><code class="language-kotlin">// gateway/GatewaySession.kt:82 —— OkHttp WebSocket 客户端
+val scheme = if (tls != null) "wss" else "ws"
+val url = "$scheme://${endpoint.host}:${endpoint.port}"
+socket = client.newWebSocket(Request.Builder().url(url).build(), Listener())
+// sendConnect(:389) → 签名 device 块（:513-521）→ 协议版本 minProtocol/maxProtocol
+// DeviceIdentityStore.kt: BouncyCastle Ed25519（signPayload:44）
+// SecurePrefs.kt:18: EncryptedSharedPreferences（AES256-GCM）存 deviceToken</code></pre>
+                <div class="anno">读法：<b>Android 用 OkHttp（WebSocket）+ BouncyCastle（Ed25519 签名）+ EncryptedSharedPreferences（加密存 token），实现和 Swift 完全一致的握手协议。</b>能力处理器 Camera/Location/Sms/Contacts/Calendar/Motion 各自处理网关下发的调用。Gradle Kotlin DSL 构建（minSdk 31）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Swabble 唤醒词</h1></div>
+            <div class="card">
+                <p><code>/Swabble</code>（~25 Swift 文件）<strong>不是</strong>网关客户端，而是 macOS 本地纯离线的<strong>唤醒词/语音守护</strong>——让 App 在把语音发出去前先过唤醒词门（默认 <code>clawd</code>，别名 <code>claude</code>）。</p>
+<pre><code class="language-swift">// SpeechPipeline.swift: AVAudioEngine → SpeechAnalyzer/SpeechTranscriber
+// WakeWordGate.swift: 唤醒词门（macOS App 依赖此 product）
+// 触发后运行 &lt;command&gt; &lt;args…&gt; "&lt;prefix&gt;&lt;text&gt;"，带 SWABBLE_TEXT/SWABBLE_PREFIX 环境变量</code></pre>
+                <div class="baby"><span class="t">为什么唤醒词要"本地离线"？</span>
+                你不希望麦克风一直把所有声音传上网——既费流量又侵犯隐私。<strong>Swabble 在本地监听，只有听到唤醒词"clawd"才激活，把后续语音转成文字。</strong>唤醒词检测、语音转录全在你的 Mac 上离线完成（用系统的 SpeechAnalyzer），零网络。<strong>这是"隐私优先"的设计——助理默认"不听"，你叫它才"醒"。</strong>它通过运行一个命令（hook）把识别的文字交给 OpenClaw，而非直连网关。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>五个原生目标各是什么？</li>
+                    <li>"node 角色"是什么意思？为什么个人助理需要原生 App？</li>
+                    <li>线级协议的传输/帧/认证？</li>
+                    <li>Ed25519 签名握手防什么？nonce 起什么作用？</li>
+                    <li>Swabble 为什么要本地离线？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+grep -n 'GatewayChannelActor\|sendConnect' apps/shared/OpenClawKit/Sources/OpenClawKit/GatewayChannel.swift | head
+grep -n 'newWebSocket\|buildV3' apps/android/app/src/main/java/ai/openclaw/app/gateway/*.kt 2>/dev/null | head
+sed -n '1,6p' Swabble/README.md</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>构建系统与插件 SDK</strong>——pnpm workspace、tsdown 多入口打包、插件 SDK 的 .d.ts 生成、以及分层测试策略（unit/channels/gateway/e2e/live）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 安全</a>
+                <a href="openclaw-day19.html" style="color:#f97316;">Day 19 · 构建系统与插件 SDK &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

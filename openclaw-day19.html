@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 构建系统与插件 SDK — OpenClaw 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#0ea5e9}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#f97316);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">构建系统与插件 SDK · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · pnpm workspace</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · tsdown 多入口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 插件 SDK 入口</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · .d.ts 类型声明</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 完整 build 链</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 质量门 check</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 分层测试</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="openclaw-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 原生应用</a></li>
+            <li><a href="openclaw-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="openclaw-day20.html" class="nav-link" style="color:#f97316;">Day 20 部署收官 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 第 4 周 运行时/安全/部署</span>
+            <h1 class="part-title">构建系统与插件 SDK</h1>
+            <p class="part-desc">6000+ TS 文件、几十个扩展、五个原生 App，怎么组织和构建？pnpm workspace + tsdown 多入口打包 + 插件 SDK 类型生成 + 分层测试。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>pnpm workspace</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># pnpm-workspace.yaml 成员
+.              # 主包
+ui             # Web UI
+packages/*     # clawdbot/moltbot 兼容别名
+extensions/*   # 41 个渠道/能力扩展</code></pre>
+                <div class="baby"><span class="t">workspace（工作区）是什么？</span>
+                一个大项目常拆成很多小包（主程序、UI、几十个扩展）。<strong>pnpm workspace 让这些小包住在一个仓库里、共享依赖、互相能直接引用——改一个包，依赖它的包立即用上新版，不用发布再安装。</strong>这就是"monorepo（单体仓库）"的做法：一个仓库管全部，统一构建、统一测试。<code>onlyBuiltDependencies</code> 白名单显式列出允许跑安装脚本的原生依赖（node-pty/sharp 等），防止随便哪个依赖在安装时执行代码（安全）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>tsdown 多入口</h1></div>
+            <div class="card">
+                <p><code>tsdown.config.ts</code> 导出多入口配置数组：</p>
+                <ul>
+                    <li>主入口 <code>src/index.ts</code>、<code>src/entry.ts</code>、<code>src/cli/daemon-cli.ts</code>（<code>:91-104</code>）。</li>
+                    <li>一组"懒运行时"渠道模块保持独立 dist 文件（<code>:106-118</code>，whatsapp-login/discord/signal 等）。</li>
+                    <li>插件 SDK 入口 <code>pluginSdkEntrypoints</code>（<code>:43-88</code>，约 60 个）。</li>
+                </ul>
+                <div class="anno">读法：<b>为什么"懒运行时"渠道要独立打包？因为不是每次都用到所有渠道——独立成文件，用到哪个才加载哪个（呼应 Day 15 的轻量 loader）。</b>tsdown 是基于 rolldown 的快速打包器，<code>platform:"node"</code> + 生产环境。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>插件 SDK 入口</h1></div>
+            <div class="card">
+                <p><code>pluginSdkEntrypoints</code>（约 60 个）：core/compat + 每个渠道（telegram/discord/slack…）+ memory-core/voice-call 等，各自 <code>src/plugin-sdk/&lt;entry&gt;.ts</code> → <code>dist/plugin-sdk/</code>。</p>
+                <p>插件作者写：<code>import ... from "openclaw/plugin-sdk/matrix"</code>。</p>
+                <div class="anno">读法：<b>Day 12 讲扩展能注入能力，靠的就是从 <code>openclaw/plugin-sdk/*</code> 导入类型和辅助函数。这一堆入口就是"给插件作者用的公开 API 表面"。</b>vitest 别名把 <code>openclaw/plugin-sdk/*</code> 映射回 <code>src/plugin-sdk/*.ts</code> 供测试（免打包）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>.d.ts 类型声明</h1></div>
+            <div class="card">
+                <p><code>build:plugin-sdk:dts</code> = <code>tsc -p tsconfig.plugin-sdk.dts.json</code>（<code>emitDeclarationOnly + noEmitOnError</code>），只为那 ~60 个 SDK 入口生成 <code>.d.ts</code> 到 <code>dist/plugin-sdk/</code>。</p>
+                <div class="baby"><span class="t">.d.ts 是什么？为什么单独生成？</span>
+                <code>.d.ts</code> 是 TypeScript 的"类型说明书"——只有类型、没有实现代码。<strong>插件作者 <code>import "openclaw/plugin-sdk/matrix"</code> 时，编辑器靠这些 .d.ts 提供自动补全和类型检查（"registerChannel 要传什么参数"）。</strong>单独生成是因为：主代码用 tsdown 打包（快，但类型信息会丢），所以另用 <code>tsc</code> 专门为公开 API 生成精确的类型声明。<code>noEmitOnError</code> 保证类型有错就不出包——插件作者拿到的类型一定是对的。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>完整 build 链</h1></div>
+            <div class="card">
+<pre><code class="language-bash"># package.json 的 build（也是 prepack 一部分）串联：
+canvas:a2ui:bundle       # bundle A2UI（Canvas 资源，Day 15）
+→ tsdown-build.mjs        # 主打包
+→ copy-plugin-sdk-root-alias.mjs
+→ build:plugin-sdk:dts    # 生成 SDK 类型（L04）
+→ 一系列 tsx 脚本          # 写 dts、拷 A2UI/hook 元数据/HTML 模板、写 build-info
+
+# build:docker = 去掉 A2UI bundle 的版本（Docker 里单独处理，容忍跨架构失败）
+# UI 单独：pnpm ui:build</code></pre>
+                <div class="anno">读法：<b>build 不是一条命令，而是一条流水线：打包主代码 → 生成插件类型 → 拷贝各种资源（Canvas/hook/模板）→ 写构建信息。</b>Docker 构建用不同变体（Day 20）是为了容忍 ARM/x86 跨架构差异。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>质量门 check</h1></div>
+            <div class="card">
+                <p><code>check</code> 串联多道质量门：</p>
+                <ul>
+                    <li><code>format:check</code>（oxfmt）+ <code>tsgo</code>（类型检查）+ <code>lint</code>（oxlint --type-aware）。</li>
+                    <li>自定义架构 lint：ingress-owner、channel-agnostic-boundaries、no-raw-channel-fetch、plugin 边界、webhook 鉴权顺序…</li>
+                    <li><code>deadcode</code>（knip/ts-prune）、<code>dup:check</code>（jscpd 查重复）、<code>check:loc</code>（单文件 ≤500 行）。</li>
+                    <li>原生：swiftformat/swiftlint + <code>check:host-env-policy:swift</code>（保证 Swift 版环境策略与 TS 一致）。</li>
+                </ul>
+                <div class="baby"><span class="t">"自定义架构 lint" 很值得学</span>
+                普通 lint 查代码风格。<strong>OpenClaw 还写了<strong>架构级</strong> lint——用规则强制"渠道代码不能直接 fetch（必须走抽象）""插件不能越过边界访问核心内部""webhook 必须先鉴权再处理"。</strong>这些规则把架构约定变成"违反就报错"的自动检查，防止代码腐化。<strong>还有 <code>check:host-env-policy:swift</code> 确保 Swift 和 TS 两处的安全策略永远一致（Day 17 那份环境策略有 Swift 版）——把"两处要同步"这种易错点用检查兜住。</strong>单文件 ≤500 行强制拆分——这也是为什么它有 6000+ 文件。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>分层测试</h1></div>
+            <div class="card">
+                <p>多个 <code>vitest.*.config.ts</code> 分层（都 extend 基座 <code>vitest.config.ts</code>）：</p>
+                <table class="k">
+                    <tr><th>配置</th><th>范围</th></tr>
+                    <tr><td>unit</td><td>纯单元，排除重集成目录（快、隔离）</td></tr>
+                    <tr><td>channels</td><td>telegram/discord/web/browser/line</td></tr>
+                    <tr><td>gateway</td><td>src/gateway/**</td></tr>
+                    <tr><td>extensions</td><td>extensions/**</td></tr>
+                    <tr><td>e2e</td><td>端到端（fork 隔离，worker 少）</td></tr>
+                    <tr><td>live</td><td>打真实 LLM/服务（串行 maxWorkers:1）</td></tr>
+                </table>
+                <div class="anno">读法：<b>分层是因为不同测试"代价"不同：单元测试快、可大并发；live 测试打真实 API，慢且要串行（省钱防限流）。</b>基座用 <code>pool:"forks"</code>（进程隔离，防 env/mock 跨文件泄漏）。还有 Docker e2e（<code>scripts/e2e/*.sh</code>）测真实容器场景。预提交钩子跑 detect-secrets/shellcheck/swiftlint 等。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>pnpm workspace / monorepo 解决什么？onlyBuiltDependencies 防什么？</li>
+                    <li>tsdown 为什么多入口？懒运行时渠道为什么独立打包？</li>
+                    <li>插件 SDK 入口 + .d.ts 各是给谁用的？</li>
+                    <li>自定义架构 lint 是什么、好在哪？</li>
+                    <li>为什么测试要分 unit/channels/gateway/e2e/live 这么多层？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/openclaw
+cat pnpm-workspace.yaml
+grep -n 'pluginSdkEntrypoints\|entry:' tsdown.config.ts | head
+ls vitest.*.config.ts
+grep -n '"build"\|"check"\|"test' package.json | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 20（结业）</strong>：<strong>部署与收官</strong>——多阶段 Dockerfile、docker-compose、fly.io/render、rootless podman 部署，外加全课回顾 + <strong>七大框架终极对比</strong>（eino/OpenHands/crewAI/AutoGPT/SuperAGI/LangGraph/OpenClaw）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="openclaw-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 原生应用</a>
+                <a href="openclaw-day20.html" style="color:#f97316;">Day 20 · 部署与收官 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
