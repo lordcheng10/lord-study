@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 精读几个真实 Block — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#a855f7);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">真实 Block 精读 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 四种范例概览</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · A 纯计算块</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · B I/O 边界块</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · C 状态复用块</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · D 带凭证 AI 块</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · test_mock 不花钱测</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 写块的通用套路</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 Block 基类</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 凭证系统 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 Block 系统</span>
+            <h1 class="part-title">精读几个真实 Block</h1>
+            <p class="part-desc">从最简纯计算块，到 I/O 边界块、状态复用块、带凭证的 AI 块——看真实的 Block 长什么样，掌握各种写法。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>四种范例概览</h1></div>
+            <div class="card">
+                <p>我们挑四个由简到繁的真实 Block，覆盖主要模式：</p>
+                <ul>
+                    <li><strong>A 纯计算</strong>：<code>WordCharacterCountBlock</code>——无副作用无凭证，最纯粹。</li>
+                    <li><strong>B I/O 边界</strong>：<code>AgentInputBlock</code>/<code>AgentOutputBlock</code>——图的对外接口。</li>
+                    <li><strong>C 状态复用</strong>：<code>StoreValueBlock</code>——static_output 缓存值。</li>
+                    <li><strong>D 带凭证 AI</strong>：<code>AIStructuredResponseGeneratorBlock</code>——调 LLM，最有代表性。</li>
+                </ul>
+                <div class="glossary">这四个覆盖了"计算/接口/状态/外部调用"四类典型 Block。看懂它们，你就能读懂 blocks/ 目录里绝大多数块，也能自己写块（Day 10）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>A · 纯计算块（Day 02 复习 + 深化）</h1></div>
+            <div class="card">
+                <p><code>WordCharacterCountBlock</code>（<code>blocks/count_words_and_char_block.py:11</code>）：内嵌 Input/Output → __init__ 声明元数据+测试 → run() yield 多个输出。无凭证、无副作用。</p>
+                <div class="baby"><span class="t">纯计算块的价值</span>
+                很多 Block 就是"接收数据、算一下、输出"——数单词、格式化文本、算数学、转换数据格式。这类块<strong>无副作用（不改外部世界）、无凭证（不调外部 API）、确定性强（同输入必同输出）</strong>——最容易写、最容易测。<strong>可视化编排里，这类"胶水块"用来在其他块之间转换/处理数据，非常常用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>B · I/O 边界块</h1></div>
+            <div class="card">
+                <p><code>AgentInputBlock</code>（<code>blocks/io.py:29</code>）——<code>block_type=BlockType.INPUT</code>，让整张 Agent 图对外暴露一个命名参数：</p>
+<pre><code class="language-python">class Input(BlockSchemaInput):
+    name: str = SchemaField(description="输入参数的名字")
+    value: Any = SchemaField(description="传入的值", default=None)
+async def run(self, input_data, *args, **kwargs) -> BlockOutput:
+    if input_data.value is not None:
+        yield "result", input_data.value</code></pre>
+                <div class="anno">读法：<b>INPUT 块是"图的入口"——它声明"这个 Agent 有一个叫 name 的输入参数"。Day 03 讲的"扫描 INPUT 节点自动推导 Agent 输入 schema"就靠它。</b>注意它的 <code>Output</code> 直接继承 <code>BlockSchema</code>（不是 BlockSchemaOutput），为了<strong>避免自动加 error 字段</strong>——因为它只是接口定义，不该有 error 口。</div>
+                <div class="baby"><span class="t">为什么需要专门的 I/O 块？</span>
+                一个 Agent 要能被外部调用（传参数、拿结果）。INPUT 块标记"外部数据从这进"、OUTPUT 块标记"结果从这出"。这样 Agent 就有了清晰的"函数签名"（输入参数、返回值）。<strong>没有 I/O 块，Agent 就是个封闭的图，没法接收外部输入——I/O 块是 Agent 对外的"插座"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>C · 状态复用块</h1></div>
+            <div class="card">
+                <p><code>StoreValueBlock</code>（<code>blocks/basic.py:70</code>）——用 <code>static_output=True</code> 把一个值"存住"供图内多次消费：</p>
+<pre><code class="language-python">async def run(self, input_data, **kwargs) -> BlockOutput:
+    yield "output", input_data.data or input_data.input</code></pre>
+                <div class="anno">读法：<b>它就是个"值的中转站"——存一个值，输出口是静态的（Day 03 的 is_static），所以下游能<strong>反复取</strong>这个值。</b>类的 docstring 直接被拿来当 description（<code>basic.py:97</code> 的 <code>inspect.cleandoc</code>）——写块时把说明写在 docstring 里即可。</div>
+                <div class="baby"><span class="t">静态输出块的用途</span>
+                比如你有个"配置值"（API 端点、阈值）要在图里多个地方用。用 StoreValueBlock 存一次，它的静态输出连到多个下游——每个下游都能取到这个值，不会"用一次就没了"。<strong>相当于图里的一个"常量/变量"。</strong>同文件的 <code>FileStoreBlock</code>（<code>basic.py:19</code>）则演示需要 <code>execution_context</code> 的块（下载/存文件——Day 06 讲的运行时上下文注入在这派上用场）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>D · 带凭证的 AI 块（最有代表性）</h1></div>
+            <div class="card">
+                <p><code>AIStructuredResponseGeneratorBlock</code>（<code>blocks/llm.py:1016</code>）——调 LLM，是"调外部付费 API"的典范：</p>
+<pre><code class="language-python">class Input(BlockSchemaInput):
+    prompt: str = SchemaField(...)
+    model: LlmModel = SchemaField(default=DEFAULT_LLM_MODEL, advanced=False)
+    credentials: AICredentials = AICredentialsField()   # ★ 凭证字段
+async def run(self, input_data, *, credentials: APIKeyCredentials, **kwargs):
+    ...   # credentials 是框架解析注入的真实凭证</code></pre>
+                <div class="anno">读法：<b>关键点：<code>run</code> 签名里 <code>credentials</code> 是<strong>框架解析后注入</strong>的真实凭证实体（Day 05 讲的执行时注入），不是用户填的引用。</b>Block 里用 <code>credentials.api_key.get_secret_value()</code> 拿到真实 key 去调 API。它属于 <code>BlockCategory.AI</code>。</div>
+                <div class="baby"><span class="t">这个模式覆盖了所有"调外部服务"的块</span>
+                无论调 OpenAI、Google 搜索、发 Discord 消息——套路都一样：① 声明一个 <code>credentials</code> 字段；② run 签名带 <code>credentials</code> 参数；③ 用注入的凭证调 API。<strong>凭证字段和运行时注入，是"让 Block 安全地调外部服务"的标准模式（Day 08 深入）。</strong>Block 代码里从不出现明文密钥。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>test_mock：不花钱测 AI 块</h1></div>
+            <div class="card">
+                <p>AI 块调真实 API 要花钱，怎么自动测试？<code>test_mock</code>（<code>llm.py:1111</code>）把真实的 <code>llm_call</code> 换成假响应：</p>
+<pre><code class="language-python"># test_mock 里把 llm_call 替换成返回预设假数据的函数
+# 测试时不真的调 API、不花钱，但能验证 Block 的逻辑对不对</code></pre>
+                <div class="baby"><span class="t">mock（模拟）是什么？为什么必要？</span>
+                如果测试真的调 OpenAI，① 花钱、② 慢、③ 结果不确定（模型每次回答不同，没法断言）、④ 需要真 API key（CI 环境可能没有）。<strong>mock = 用一个"假的"替换真实调用</strong>——测试时 <code>llm_call</code> 直接返回预设的假响应，于是能<strong>快速、免费、确定地</strong>验证"Block 拿到这个响应后处理得对不对"。<strong>这和 crewAI 的 fakeModel、eino 的 mock 一个道理——测编排/逻辑时，把慢/贵/不确定的外部依赖换成可控的假货。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>写块的通用套路</h1></div>
+            <div class="card">
+                <p>看完四个范例，写任何 Block 的套路都一样：</p>
+                <ol>
+                    <li>内嵌 <code>class Input(BlockSchemaInput)</code> 和 <code>class Output(BlockSchemaOutput)</code>，字段用 <code>SchemaField</code>。</li>
+                    <li>需要调外部服务？加一个 <code>credentials</code> 字段。</li>
+                    <li><code>__init__</code> 里 <code>super().__init__(id=唯一UUID, description, categories, input_schema, output_schema, test_input, test_output)</code>。</li>
+                    <li>写 <code>async def run(self, input_data, **kwargs)</code>，用 <code>yield "口名", 值</code> 产出（多个输出多次 yield）。</li>
+                    <li>调外部 API 的块加 <code>test_mock</code>。</li>
+                    <li>放进 <code>blocks/</code> 目录——自动被发现注册（Day 02）。</li>
+                </ol>
+                <div class="glossary">就这么固定。<strong>正因为套路统一，300+ 个 Block 才能保持一致的质量和可维护性，社区也能轻松贡献新块。</strong>Day 10 讲 SDK 会让写块更简单。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>四种范例块各代表什么模式？</li>
+                    <li>I/O 边界块为什么 Output 不继承 BlockSchemaOutput？</li>
+                    <li>static_output 块（StoreValue）有什么用？</li>
+                    <li>带凭证 AI 块的 run 签名有什么特点？</li>
+                    <li>test_mock 为什么必要？写块的通用套路？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend/blocks
+sed -n '11,40p' $P/count_words_and_char_block.py    # A 纯计算
+sed -n '29,110p' $P/io.py | head -50                # B I/O 边界
+sed -n '70,115p' $P/basic.py                        # C 状态复用
+sed -n '1016,1120p' $P/llm.py | head -50            # D 带凭证 AI + test_mock</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>Block 凭证系统</strong>——Block 怎么声明和获取 API Key/OAuth。引用 vs 实体两层结构、CredentialsField、discriminator 智能推断、命名强约束。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 Block 基类</a>
+                <a href="autogpt-day08.html" style="color:var(--accent-green);">Day 08 · 凭证系统 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

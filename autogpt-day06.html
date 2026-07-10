@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · Block 基类与执行生命周期 — AutoGPT 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .steps{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+        .steps .s{display:flex;gap:10px;align-items:center;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-secondary);font-size:12.5px}
+        .steps .s .n{width:22px;height:22px;border-radius:50%;background:#6366f1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#a855f7);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">Block 基类与生命周期 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Block 基类本体</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · __init__ 的关键参数</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · run 注入的上下文</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _execute 执行生命周期</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · BlockType 类型</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · BlockCategory 分类</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 同步到数据库</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="autogpt-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a></li>
+            <li><a href="autogpt-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="autogpt-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 真实 Block &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 Block 系统</span>
+            <h1 class="part-title">Block 基类与执行生命周期</h1>
+            <p class="part-desc">深入 Block 基类。今天读 <code>blocks/_base.py</code>：Block 基类的构造参数、run 被注入什么上下文、以及 run() 外面那层 <code>_execute()</code> 执行生命周期管理。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Block 基类本体</h1></div>
+            <div class="card">
+<pre><code class="language-python"># blocks/_base.py:550
+class Block(ABC, Generic[BlockSchemaInputType, BlockSchemaOutputType]):
+    execution_timeout_seconds = DEFAULT_BLOCK_EXECUTION_TIMEOUT_SECONDS  # 默认 30 分钟</code></pre>
+                <div class="anno">读法：<b>Block 是<strong>抽象类（ABC）+ 泛型（Generic）</strong>。</b>泛型参数是"输入 Schema 类型、输出 Schema 类型"——让类型检查器知道这个 Block 吃什么、吐什么。抽象类意味着不能直接实例化 Block，必须写子类实现 <code>run()</code>。有个默认 30 分钟的执行超时（防止某个块卡死）。</div>
+                <div class="baby"><span class="t">泛型 Block 有什么好处？</span>
+                <code>Block[MyInput, MyOutput]</code> 让 IDE 和类型检查器知道"这个块的 run 接收 MyInput、产出符合 MyOutput 的东西"。写错类型会飘红。<strong>类型安全——和 eino 的泛型 Runnable、CrewAI 的 Pydantic 一样，都是"让错误在写代码时就暴露"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>__init__ 的关键参数</h1></div>
+            <div class="card">
+                <p>子类在自己的 <code>__init__</code> 里 <code>super().__init__(...)</code> 传入（<code>_base.py:554</code>）：</p>
+                <table class="k">
+                    <tr><th>参数</th><th>含义</th></tr>
+                    <tr><td><code>id</code></td><td>唯一 UUID，持久化到 DB，<b>永不可变</b></td></tr>
+                    <tr><td><code>description</code>/<code>categories</code></td><td>描述、分类</td></tr>
+                    <tr><td><code>input_schema</code>/<code>output_schema</code></td><td>指向内嵌 Input/Output 类</td></tr>
+                    <tr><td><code>test_input</code>/<code>test_output</code>/<code>test_mock</code></td><td>内建测试样例（Day 02）</td></tr>
+                    <tr><td><code>block_type</code></td><td>类型（L05）</td></tr>
+                    <tr><td><code>disabled</code></td><td>是否停用</td></tr>
+                    <tr><td><code>is_sensitive_action</code></td><td>是否敏感操作（需人工审核）</td></tr>
+                    <tr><td><code>webhook_config</code></td><td>webhook 触发配置</td></tr>
+                </table>
+                <div class="glossary"><b>为什么 id 永不可变？</b> 因为 Graph 里的 Node 用 <code>block_id</code> 引用 Block（Day 03）。如果 id 变了，所有引用这个 Block 的 Graph 就断了。<strong>id 是 Block 的永久身份证——写死一个 UUID，之后无论怎么改代码，id 不能动。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>run 被注入的运行时上下文</h1></div>
+            <div class="card">
+                <p><code>run()</code>（<code>_base.py:653</code>）签名里，<code>input_data</code> 是校验好的输入对象，<code>**kwargs</code> 注入运行时上下文（<code>_base.py:660</code>）：</p>
+<pre><code class="language-python">async def run(self, input_data, **kwargs):
+    # kwargs 里有：graph_id / node_id / graph_exec_id / node_exec_id / user_id
+    #             credentials（凭证，Day 08）/ execution_context</code></pre>
+                <div class="anno">读法：<b>Block 执行时，框架把"我在哪个图、哪个节点、哪次执行、哪个用户、用什么凭证"这些上下文通过 kwargs 注入。</b>Block 需要时可以取用——比如上传文件的块需要 <code>execution_context</code> 知道存哪、调 API 的块需要 <code>credentials</code>。</div>
+                <div class="baby"><span class="t">为什么用 kwargs 注入而不是全局变量？</span>
+                因为同一个 Block 类可能<strong>同时被多个执行并发调用</strong>（不同用户、不同图）。如果用全局变量存"当前用户"，并发时就串了。<strong>通过参数注入，每次执行的上下文各自独立、互不干扰。</strong>这是并发安全的正确做法（和 eino 用 ctx、OpenHands 每请求独立上下文一致）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>_execute：run 外面的执行生命周期</h1></div>
+            <div class="card">
+                <p>外界不直接调 <code>run()</code>，而是走 <code>execute()</code> → <code>_execute()</code>（<code>_base.py:819</code>）。它在 run 前后做一堆事：</p>
+                <div class="steps">
+                    <div class="s"><span class="n">1</span>敏感操作拦截（is_sensitive_action + 安全模式 → 暂停等人工审核）</div>
+                    <div class="s"><span class="n">2</span>输入校验（按 input_schema 校验用户填的输入）</div>
+                    <div class="s"><span class="n">3</span>调 run()，对每条输出：error 口 → 抛异常；否则按 output_schema 校验</div>
+                    <div class="s"><span class="n">4</span>yield 校验通过的输出给下游</div>
+                </div>
+                <div class="anno">读法：<b><code>_execute()</code> 是 run 的"外壳"——负责"执行前校验、敏感操作人工审核、执行后输出校验"这些通用管理，让每个 Block 的 run() 只需专注自己的业务逻辑。</b>这是模板方法模式：外壳固定流程，run 是可变的具体逻辑。</div>
+                <div class="baby"><span class="t">敏感操作人工审核（Human-in-the-loop）</span>
+                标了 <code>is_sensitive_action</code> 的 Block（比如"删除文件""发推文""转账"），在安全模式下执行前会<strong>暂停、等人点头</strong>——又见 HITL（eino Day14、OpenHands Day17、CrewAI Day13 都有）。<strong>本系列第 N 次强调：能自主执行危险操作的 AI，关键动作必须能停下等人。</strong>AutoGPT 把它做成 Block 的一个标志位，执行引擎在 <code>_execute</code> 里统一处理。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>BlockType：类型枚举</h1></div>
+            <div class="card">
+                <p><code>BlockType</code>（<code>_base.py:58</code>）决定 Block 的 UI 表现和特殊处理：</p>
+                <table class="k">
+                    <tr><th>类型</th><th>含义</th></tr>
+                    <tr><td><code>STANDARD</code></td><td>普通功能块</td></tr>
+                    <tr><td><code>INPUT</code>/<code>OUTPUT</code></td><td>图的输入/输出口（Day 03 的 I/O 推导靠它）</td></tr>
+                    <tr><td><code>AGENT</code></td><td>子 Agent（Agent-as-Block，Day 03）</td></tr>
+                    <tr><td><code>WEBHOOK</code></td><td>外部 webhook 触发</td></tr>
+                    <tr><td><code>AI</code></td><td>AI 块（调 LLM）</td></tr>
+                    <tr><td><code>HUMAN_IN_THE_LOOP</code></td><td>需人工介入</td></tr>
+                    <tr><td><code>MCP_TOOL</code></td><td>MCP 工具</td></tr>
+                </table>
+                <div class="glossary">类型影响执行引擎和前端的特殊处理——比如 INPUT/OUTPUT 块用于推导 Agent 的对外接口（Day 03）、AGENT 块触发子图执行、WEBHOOK 块由外部事件触发而非上游连线。<strong>大部分块是 STANDARD，特殊类型各有专门用途。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>BlockCategory：分类</h1></div>
+            <div class="card">
+                <p><code>BlockCategory</code>（<code>_base.py:72</code>）纯粹用于<strong>归组</strong>（前端左侧积木清单按类别展示）：<code>AI</code>、<code>SOCIAL</code>（社交媒体）、<code>TEXT</code>、<code>BASIC</code>、<code>INPUT</code>/<code>OUTPUT</code>、<code>LOGIC</code>（逻辑/条件）、<code>DATA</code>……</p>
+                <div class="baby"><span class="t">Category vs Type 别混</span>
+                <strong>BlockType</strong> 影响"执行/UI 的行为"（这块怎么被处理）。<strong>BlockCategory</strong> 只影响"归到哪一组显示"（用户在画布左侧哪个分类里找到它）。一个块可以属于<strong>多个</strong> category（比如既是 AI 又是 TEXT）。<strong>Type 管行为、Category 管展示——一个功能性、一个组织性。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>同步到数据库</h1></div>
+            <div class="card">
+                <p><code>initialize_blocks()</code>（<code>data/block.py:21</code>）把内存里的每个 Block 同步到数据库 <code>AgentBlock</code> 表——比对 id/name/schema/description，有变化就 upsert（<code>block.py:28</code>）。还会加载 LLM 生成的"优化版描述" <code>optimizedDescription</code>（<code>block.py:87</code>）。</p>
+                <div class="baby"><span class="t">为什么 Block 要在 DB 里有一份？还有"优化描述"？</span>
+                ① <strong>前端要列出所有可用 Block</strong>（画布左侧清单），从 DB 读比每次扫代码快。② <strong>Graph 里的 Node 用 block_id 引用</strong>，DB 里有记录才能校验引用有效。③ <strong>optimizedDescription</strong>：Block 作者写的描述可能不够 LLM 友好，平台用 LLM 把它"优化"成更利于（copilot、搜索）理解的版本，存在 DB。<strong>"代码定义 → 同步到 DB → 前端/引擎使用"这条链让 Block 既是代码又是数据。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Block 基类为什么是 ABC + Generic？id 为什么永不可变？</li>
+                    <li>run 被注入哪些运行时上下文？为什么用 kwargs 注入？</li>
+                    <li>_execute() 在 run 外面做了哪些事？（校验/人审/输出校验）</li>
+                    <li>BlockType 和 BlockCategory 的区别？</li>
+                    <li>Block 为什么要同步到数据库？optimizedDescription 是什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=autogpt_platform/backend/backend
+sed -n '550,670p' $P/blocks/_base.py | head -60      # Block 基类 + run
+sed -n '819,940p' $P/blocks/_base.py | head -50      # _execute 生命周期
+sed -n '58,95p' $P/blocks/_base.py                    # BlockType/BlockCategory
+sed -n '21,64p' $P/data/block.py                      # initialize_blocks</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>精读几个真实 Block</strong>——从最简纯计算块，到 I/O 边界块、状态复用块、带凭证的 AI 块，看真实的 Block 长什么样、各种写法。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="autogpt-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a>
+                <a href="autogpt-day07.html" style="color:var(--accent-green);">Day 07 · 真实 Block &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
