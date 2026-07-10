@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 08 · Graph 图编排 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .gd{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:5px;padding:16px 4px}
+        .gd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:9px 12px;font-size:12px;text-align:center}
+        .gd .n.se{border-style:dashed;color:var(--text-muted)} .gd .n.br{border-color:var(--accent-orange);color:var(--accent-orange)}
+        .gd .a{color:#8b5cf6;font-weight:800} .gd .loop{color:var(--accent-green);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">08</div>
+            <h2>Day 08</h2>
+            <p class="version">Graph 图编排 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Graph 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 加节点 AddXxxNode</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 组件怎么变成节点</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 加边 AddEdge</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 控制流 vs 数据流</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 分支 Branch</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 循环怎么实现</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 Chain</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 编译与执行 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 编排引擎</span>
+            <h1 class="part-title">Graph 图编排</h1>
+            <p class="part-desc">Chain 是直线，Graph 是"节点 + 你手动连的边 + 分支"、且可循环——这是 Agent 的基础。今天讲节点、边、分支，以及循环怎么实现。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Graph 是什么</h1></div>
+            <div class="card">
+                <p>心智模型：<strong>一堆节点，你自己用边把它们连起来，可以有分支、有环（循环）</strong>。典型就是 Agent 的"模型 ↔ 工具"反复循环：</p>
+                <div class="gd">
+                    <span class="n se">START</span><span class="a">→</span>
+                    <span class="n">ChatModel</span><span class="a">→</span>
+                    <span class="n br">要调工具?</span>
+                    <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;margin-left:8px">
+                        <span><span class="a">是→</span> <span class="n">ToolsNode</span> <span class="loop">↺ 回到 ChatModel</span></span>
+                        <span><span class="a">否→</span> <span class="n se">END</span></span>
+                    </span>
+                </div>
+                <p>API 用 <code>NewGraph[I,O]()</code>（<code>generic_graph.go:72</code>）建图，然后手动 <code>AddXxxNode</code> 加节点、<code>AddEdge</code> 连边、<code>AddBranch</code> 加分支，最后 <code>Compile</code>。两个保留节点常量：<code>START="start"</code>、<code>END="end"</code>（<code>graph.go:37</code>）。</p>
+                <div class="baby"><span class="t">Chain 和 Graph 的核心区别</span>
+                Chain 帮你<strong>自动连边</strong>（你只 Append），Graph 要你<strong>手动 AddEdge</strong>（你自己指定谁连谁）。手动更麻烦，但换来了<strong>任意拓扑</strong>——尤其是<strong>环（循环）</strong>。Agent 那种"模型输出 → 调工具 → 结果回到模型 → 再输出"就是一个环，Chain 的直线做不了，必须 Graph。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>加节点：AddXxxNode（真实代码）</h1></div>
+            <div class="card">
+                <p>Graph 为每种组件提供一个 <code>AddXxxNode(key, 组件, opts...)</code>，每个节点一个字符串 <code>key</code>（<code>graph.go</code>）：</p>
+<pre><code class="language-go">g := compose.NewGraph[[]*schema.Message, *schema.Message]()
+g.AddChatModelNode("chat", chatModel)      // graph.go:350
+g.AddToolsNode("tools", toolsNode)         // graph.go:399
+g.AddLambdaNode("parse", myLambda)         // graph.go:433 自定义逻辑
+g.AddGraphNode("sub", subGraph)            // graph.go:441 把子图当一个节点嵌入</code></pre>
+                <div class="anno">读法：<b>每个节点有个字符串 key（如 "chat"），后面 AddEdge 用 key 指定连接。</b><code>AddLambdaNode</code> 让你插入任意自定义函数（Day 06 的 4 种 Lambda 签名）；<code>AddGraphNode</code> 能把整张子图当一个节点——支持图的嵌套复用。</div>
+                <div class="glossary"><b>加节点时的检查</b>（<code>graph.go:162</code> 的 <code>addNode</code>）：图已编译则拒绝、key 不能是 START/END、key 不能重复、用了 state 的节点图必须开了 state。<strong>这些检查在"建图时"就报错，而不是等运行时崩</strong>——Eino 把错误尽量前移（Day 09 类型检查也是这思路）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>组件怎么变成节点（真实代码）</h1></div>
+            <div class="card">
+                <p>你传给 <code>AddChatModelNode</code> 的是一个 ChatModel 组件，它怎么变成图能跑的节点？看 <code>component_to_graph_node.go:93</code>：</p>
+<pre><code class="language-go">func toChatModelNode(node model.BaseChatModel, ...) (*graphNode, ...) {
+    return toComponentNode(node, components.ComponentOfChatModel,
+        node.Generate,  // 作为 Invoke
+        node.Stream,    // 作为 Stream
+        nil, nil,       // 无 Collect / Transform → 由 Day 06 的机制自动补齐
+        opts...)
+}</code></pre>
+                <div class="anno">读法：<b>把组件的真实方法（<code>Generate</code>、<code>Stream</code>）当作 Runnable 的 Invoke/Stream 传进去，Collect/Transform 传 nil。</b>于是每个组件都被统一包成一个 Runnable（Day 06 那个"统一插头"），缺的范式自动补齐。</div>
+                <div class="glossary"><b>这就是 Day 06 和今天的衔接点</b>：<code>toComponentNode</code> 把"五花八门的组件方法"塌缩成"统一的 Runnable"。所以图执行时不用管节点里是模型还是工具还是 Lambda——全是 Runnable，调 4 个方法之一即可。<strong>Day 06 的统一抽象，在这里兑现价值。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>加边：AddEdge</h1></div>
+            <div class="card">
+                <p><code>g.AddEdge(from, to)</code>（<code>generic_graph.go:106</code>）——手动指定"from 节点的输出流向 to 节点"。用 key 指定，起点可以是 <code>START</code>、终点可以是 <code>END</code>：</p>
+<pre><code class="language-go">g.AddEdge(compose.START, "chat")   // 入口 → 模型
+g.AddEdge("tools", "chat")         // ★ 工具 → 模型：这条"回头边"形成了循环！
+// "chat" → END 由分支决定（见 L06）</code></pre>
+                <div class="baby"><span class="t">边就是"数据流向"</b>
+                <code>AddEdge("A", "B")</code> = "A 算完，把输出交给 B 当输入"。Chain 帮你自动加这些边，Graph 要你自己加——好处是你能加<strong>任意</strong>边，包括 <code>AddEdge("tools", "chat")</code> 这种"回头边"（工具跑完回到模型），从而形成循环。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>控制流 vs 数据流（一个高级但重要的区分）</h1></div>
+            <div class="card">
+                <p><code>AddEdge</code> 底层其实同时维护<strong>两套边</strong>（<code>graph.go:232</code> 的 <code>addEdgeWithMappings</code>）：</p>
+                <ul>
+                    <li><strong>控制边 controlEdges</strong>（<code>graph.go:270</code>）：决定"谁执行完才轮到我"（执行顺序）。</li>
+                    <li><strong>数据边 dataEdges</strong>（<code>graph.go:290</code>）：决定"我的数据从哪来"。</li>
+                </ul>
+                <p>普通 <code>AddEdge</code> 两者都建（既传数据又定顺序）。但 Workflow（Day 10）能把两者<strong>分开</strong>——"我等 A 执行完（控制），但数据从 B 来（数据）"。</p>
+                <div class="glossary"><b>为什么要分开控制流和数据流？</b> 大多数时候它们一致（A→B：A 算完把数据给 B）。但有时不一致——比如"B 要等 A 和 C 都完成才能跑（控制依赖 A、C），但它的输入数据只来自 C（数据依赖 C）"。分开声明能表达这种复杂依赖。这是 Workflow 高级用法的基础（Day 10），Graph 的普通 AddEdge 你先当"两者合一"理解即可。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>分支 Branch：运行时决定走哪</h1></div>
+            <div class="card">
+                <p>边是"固定"的连接，分支是"运行时根据条件决定往哪走"。<code>NewGraphBranch</code>（<code>branch.go:145</code>）：</p>
+<pre><code class="language-go">// 条件函数：看输入，返回"下一个节点的 key"
+condition := func(ctx, in T) (endNode string, err error) {
+    if 有工具调用 { return "tools", nil }   // 去工具节点
+    return compose.END, nil                 // 否则结束
+}
+g.AddBranch("chat", compose.NewGraphBranch(condition, map[string]bool{"tools": true, END: true}))</code></pre>
+                <div class="anno">读法：<b>分支挂在某个节点后（这里是 "chat"），一个条件函数看该节点的输出、返回"下一步去哪个 key"。</b><code>endNodes</code>（那个 map）列出所有可能去的节点，供编译期建"预测边"。</div>
+                <div class="glossary"><b>三种分支</b>：<code>NewGraphBranch</code>（选一个）、<code>NewGraphMultiBranch</code>（<code>branch.go:89</code>，一次选多个并发跑）、<code>NewStreamGraphBranch</code>（<code>branch.go:168</code>，<strong>流式分支</strong>——条件函数吃的是流，可以只看第一个 chunk 就决定路由，不用等模型全部生成完）。<strong>ReAct Agent 的"要不要调工具"判断就用流式分支</strong>（Day 12/15 看真实代码）——模型刚开口就能判断有没有 tool_use。分支条件本身也是个 Runnable，享受 Day 06 的 4 范式适配。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>循环怎么实现：回头边 + 分支</h1></div>
+            <div class="card">
+                <p>把 L04 的回头边 + L06 的分支拼起来，就是 Agent 的循环：</p>
+<pre><code class="language-go">g.AddEdge(START, "chat")                    // 入口 → 模型
+g.AddBranch("chat", 分支{有工具→"tools", 无→END})  // 模型后判断
+g.AddEdge("tools", "chat")                  // ★ 工具 → 模型（回头边 = 循环）</code></pre>
+                <div class="glossary"><b>循环就这么简单</b>：模型 → 分支（要工具就去 tools，不要就 END）→ tools 跑完 → 回头边把它连回模型 → 模型再判断…… 直到某轮模型不再要工具，分支走 END。<strong>这正是 Day 02 那个 react 循环动画的真实拓扑</strong>（Day 12/15 会看到 ChatModelAgent/ReAct 就是这么搭的）。<b>关键前提</b>：Graph 默认用 <strong>Pregel 引擎</strong>（Day 09），它允许有环；用触发模式 <code>AnyPredecessor</code>——只要任一前驱到达就触发节点，所以"回头边"能让模型节点被反复触发。而 Workflow 用 DAG 引擎，<strong>不允许环</strong>。</div>
+                <div class="baby"><span class="t">为什么不会无限循环？</b>
+                编译时可传 <code>WithMaxRunSteps</code> 设"最多转多少步"（Day 09），超了报错 <code>ErrExceedMaxSteps</code>。Agent 层还有 <code>MaxIterations</code>（Day 02 见过，默认 20）。<strong>双保险防死循环。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Graph 和 Chain 的核心区别？（手动连边、可循环 vs 自动连边、直线）</li>
+                    <li>组件怎么变成节点？（toComponentNode 包成 Runnable，接 Day 06）</li>
+                    <li>控制流 vs 数据流为什么要分开？</li>
+                    <li>三种分支？流式分支为什么对 Agent 重要？</li>
+                    <li>Agent 的循环怎么用"回头边 + 分支"实现？靠哪个引擎（Pregel）？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. 加节点 + START/END 常量（L02）
+sed -n '350,360p' compose/graph.go
+sed -n '37,40p' compose/graph.go
+
+# 2. 组件→节点（L03，接 Day 06）
+sed -n '93,102p' compose/component_to_graph_node.go
+
+# 3. 加边 + 控制/数据边（L04/L05）
+sed -n '232,295p' compose/graph.go | head -40
+
+# 4. 三种分支（L06）
+sed -n '89,168p' compose/branch.go | head -40</code></pre>
+                <div class="tip"><strong>明天预告 · Day 09</strong>：图搭好了怎么跑？Day 09 讲 <strong>编译与执行</strong>——compile 把图变成 runner、Pregel/DAG 两种执行引擎、节点间靠 channel 传值、拓扑调度，以及状态（State）管理。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 Chain</a>
+                <a href="eino-day09.html" style="color:var(--accent-green);">Day 09 · Graph 编译与执行 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

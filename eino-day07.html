@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · Chain 链式编排 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .chaind{display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;padding:16px 4px}
+        .chaind .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:9px 12px;font-size:12px;text-align:center}
+        .chaind .n.se{border-style:dashed;color:var(--text-muted)} .chaind .a{color:#8b5cf6;font-weight:800;font-size:15px}
+        .compare{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+        .cc{border-radius:9px;padding:13px;border:1px solid var(--border-color);background:var(--bg-secondary)}
+        .cc h4{font-size:13px;margin:0 0 5px} .cc.a h4{color:#00ADD8} .cc.b h4{color:#8b5cf6} .cc.c h4{color:#f59e0b} .cc p{font-size:11.5px;color:var(--text-secondary);margin:0}
+        @media(max-width:768px){ .compare{grid-template-columns:1fr} }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">Chain 链式编排 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三种编排一张图看懂</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Chain 是什么</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 一个真实例子</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 自动连边（真实代码）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 自动补 END</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 局部并行与分支</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Chain 只是 Graph 的封装</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 Runnable</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 Graph &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 编排引擎</span>
+            <h1 class="part-title">Chain 链式编排</h1>
+            <p class="part-desc">最简单的编排：组件一个接一个串成流水线。今天讲 Chain 的用法和"自动连边"的原理，并厘清 Chain/Graph/Workflow 三者关系。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三种编排，一张图看懂</h1></div>
+            <div class="card">
+                <p>compose 提供三种编排 API，它们其实是<strong>同一个内部结构 <code>graph</code> 的三层封装</strong>（<code>chain.go:72</code>、<code>workflow.go:45</code> 都持有内部 graph）。区别只在"你怎么描述节点的连接关系"：</p>
+                <div class="compare">
+                    <div class="cc a"><h4>Chain 链</h4><p>一条直线 A→B→C，<strong>自动连边</strong>，数据顺次流过。最简单。</p></div>
+                    <div class="cc b"><h4>Graph 图</h4><p>节点 + <strong>你手动连的边</strong> + 分支，<strong>可循环</strong>。最灵活（Agent 用它）。</p></div>
+                    <div class="cc c"><h4>Workflow 工作流</h4><p>按<strong>字段</strong>连线（A 的 output.x → B 的 input.y），DAG 不可循环。最精细。</p></div>
+                </div>
+                <div class="glossary"><b>一句话记住</b>：<b>Chain = 自动连线的直线</b>，<b>Graph = 手动连线、可循环的图</b>，<b>Workflow = 按字段连线的 DAG</b>。三者最终都变成内部 <code>graph</code> → 编译成 <code>runner</code> → 包成 Day 06 的 <code>Runnable</code>。今天先学最简单的 Chain。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Chain 是什么：一条流水线</h1></div>
+            <div class="card">
+                <p>心智模型就是<strong>流水线</strong>：<code>A → B → C</code>，前一个的输出就是后一个的输入。</p>
+                <div class="chaind">
+                    <span class="n se">START</span><span class="a">→</span>
+                    <span class="n">ChatTemplate</span><span class="a">→</span>
+                    <span class="n">ChatModel</span><span class="a">→</span>
+                    <span class="n">ToolsNode</span><span class="a">→</span>
+                    <span class="n se">END</span>
+                </div>
+                <div class="baby"><span class="t">什么时候用 Chain？</span>
+                <strong>固定顺序、没有循环</strong>的流程。典型："拼提示词 → 调模型 → 解析结果"。如果你需要循环（比如 Agent 那种"模型↔工具反复"）或复杂分支汇聚，就得用 Graph（Day 08）。<strong>先学 Chain 建立"节点+边+编译成 Runnable"的直觉，再升级到 Graph 就顺了。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>一个真实例子（源码注释里的用法）</h1></div>
+            <div class="card">
+                <p><code>chain.go:52</code> 注释里的真实用法——builder 链式调用：</p>
+<pre><code class="language-go">chain := compose.NewChain[inputType, outputType]()   // 输入/输出类型
+chain.AppendChatTemplate(tpl).           // 加提示词模板节点
+      AppendChatModel(model).            // 加模型节点
+      AppendToolsNode(tools)             // 加工具节点
+r, err := chain.Compile(ctx)             // 编译成 Runnable（Day 06）
+out, err := r.Invoke(ctx, input)         // 跑！</code></pre>
+                <div class="anno">读法：<b><code>NewChain</code> 开一条链 → <code>AppendXxx</code> 一个个加组件（返回 chain 本身，所以能 <code>.</code> 链式接着调）→ <code>Compile</code> 编译 → 拿到 Runnable 就能 Invoke/Stream。</b>注意你<strong>从来不用手写"把 template 的输出接到 model 的输入"</strong>——Append 时自动连了。</div>
+                <div class="glossary"><b>builder 模式</b>：每个 <code>AppendXxx</code> 返回 chain 自己，所以能一路 <code>.AppendA().AppendB().AppendC()</code> 串着写，很流畅。这在 Go 里叫"流式接口/链式调用"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>自动连边的原理（真实代码）</h1></div>
+            <div class="card">
+                <p>为什么不用手动连边？看 <code>chain.go:560</code> 的 <code>addNode</code>——每次 <code>Append</code> 都自动把"上一批节点"连到"当前节点"：</p>
+<pre><code class="language-go">// 简化自 chain.go:560-600
+func (c *Chain) addNode(node ...) {
+    key := 生成节点 key
+    c.gg.AddNode(key, node)              // 底层往内部 Graph 加节点
+    for _, preKey := range c.preNodeKeys {
+        c.gg.AddEdge(preKey, key)        // ★ 自动把上一批节点连到当前节点
+    }
+    c.preNodeKeys = []string{key}        // 记住"当前节点"，供下一次 Append 连
+}</code></pre>
+                <div class="anno">读法：<b>每加一个节点，就自动从"上一个节点"连一条边过来，并把"当前节点"记进 <code>preNodeKeys</code> 供下次用。</b>所以你 <code>AppendA().AppendB()</code>，框架自动连了 <code>A→B</code>。</div>
+                <div class="glossary"><b>为什么 preNodeKeys 是复数（一批）？</b> 因为 Chain 支持局部并行（L06）——<code>AppendParallel</code> 会让"上一批"是多个并行节点，下一个节点自动从它们全部连过来（多入一出的汇聚）。所以用"一批 key"而非"一个 key"。<strong>Chain 帮你把"连边"这件烦事全自动化了——这就是它比 Graph 简单的地方。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>自动补 END</h1></div>
+            <div class="card">
+                <p>编译时 Chain 还自动补一条到 <code>END</code> 的边（<code>chain.go:98</code> 的 <code>addEndIfNeeded</code>）——你最后一个 <code>Append</code> 的节点自动连到出口。所以你也不用手动写"连到 END"。</p>
+                <div class="glossary"><b>START 和 END 是什么？</b> 每张图有两个保留节点：<code>START</code>（入口，你的输入从这进）和 <code>END</code>（出口，最终结果从这出）。Chain 自动帮你连好 <code>START → 第一个节点</code> 和 <code>最后一个节点 → END</code>。Graph（Day 08）里这两条边要你自己连。<strong>Chain 的全部"魔法"就是：帮你自动连所有边（包括到 START/END），你只管 Append 组件。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>局部并行与分支</h1></div>
+            <div class="card">
+                <p>Chain 虽是直线，但支持两种"局部复杂结构"（整体仍是一条主线）：</p>
+                <ul>
+                    <li><code>AppendParallel</code>（<code>chain.go:459</code>）：一段<strong>并行</strong>——多个节点同时跑，结果汇聚给下一个。比如"同时调 3 个检索器"。</li>
+                    <li><code>AppendBranch</code>（<code>chain.go:342</code>）：一段<strong>分支</strong>——根据条件走不同节点。</li>
+                </ul>
+                <div class="baby"><span class="t">并行怎么理解？</span>
+                比如你要同时问三个知识库，等三个都返回再汇总。<code>AppendParallel</code> 让这三个检索节点<strong>并发执行</strong>（Go 的 goroutine，三个一起跑而非排队），全部完成后结果合并，再流向下一个节点。这比串行快 3 倍。<strong>但注意：Chain 的并行/分支是"局部"的，整体还是一条主线；真正复杂的拓扑（循环、任意汇聚）要用 Graph。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Chain 只是 Graph 的封装</h1></div>
+            <div class="card">
+                <p>最后点破：<strong>Chain 内部就持有一个 <code>*Graph</code></strong>（<code>chain.go:72</code> 的 <code>gg *Graph[I, O]</code>）。所有 <code>Append</code> 最终都调 Graph 的 <code>AddNode</code>/<code>AddEdge</code>。</p>
+                <div class="glossary"><b>所以三种编排的真相是</b>：<code>Chain</code> 和 <code>Workflow</code> 都是内部 <code>graph</code> 结构的"糖衣"——Chain 帮你自动连边，Workflow 帮你按字段连边，底层都是同一个 Graph 引擎（Day 08/09 讲）。<strong>学 Chain 的价值是"低门槛入门编排"；真正的引擎原理在 Graph。</strong>你写简单流水线用 Chain（省事），写 Agent 那种循环图用 Graph（灵活）。<code>Graph[I,O]</code> 本身也只是内部无类型 <code>graph</code> 的泛型包装（<code>generic_graph.go:93</code>）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Chain/Graph/Workflow 三者关系？（同一 graph 的三层封装）</li>
+                    <li>Chain 什么时候用？（固定顺序、无循环的流水线）</li>
+                    <li>为什么不用手动连边？（addNode 自动连上一批到当前 + 自动补 START/END）</li>
+                    <li>Chain 的局部并行/分支？</li>
+                    <li>Chain 和 Graph 的本质关系？（Chain 内部就是个 Graph）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手：对着真实代码读一遍</h3>
+<pre><code class="language-bash"># 1. Chain 用法注释（L03）
+sed -n '52,62p' compose/chain.go
+
+# 2. 自动连边（L04）
+sed -n '560,600p' compose/chain.go
+
+# 3. 自动补 END（L05）
+sed -n '98,121p' compose/chain.go
+
+# 4. Chain 内部持有 Graph（L07）
+sed -n '72,82p' compose/chain.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：Chain 是直线，<strong>Graph</strong> 是可循环的图——Agent 的基础。Day 08 讲 Graph 的节点、边、分支（Branch），以及它为什么能支持"模型↔工具"这种循环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 Runnable</a>
+                <a href="eino-day08.html" style="color:var(--accent-green);">Day 08 · Graph 图编排 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
