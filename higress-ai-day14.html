@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 实战插件 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#10b981);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">实战插件 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 限流插件</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Redis + Lua</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · leader 选举</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · transformer</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · request-block</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 跨阶段状态</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 单测 + 构建</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 写插件</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day15.html" class="nav-link" style="color:#10b981;">Day 15 golang-filter &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 Wasm 插件</span>
+            <h1 class="part-title">实战插件</h1>
+            <p class="part-desc">看更复杂的插件：Redis 分布式限流（leader 选举 + Lua 脚本）、transformer（改 header/body）、request-block（拦截）。这些展示插件的进阶能力——外部依赖、分布式协调、跨阶段状态。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>限流插件</h1></div>
+            <div class="card">
+                <p><code>extensions/cluster-key-rate-limit</code>——基于 Redis 的分布式限流。核心问题：多个 Envoy 实例怎么共享一个限流计数？</p>
+                <div class="baby"><span class="t">分布式限流的难点</span>
+                单实例限流简单（本地计数）。<strong>但网关有多个 Envoy 副本，每个副本本地计数会导致"总量超限"（比如限 100 QPS，3 个副本各放 100 就成了 300）。分布式限流要让所有副本<strong>共享一个计数器</strong>——放在 Redis 里。</strong>但又有并发问题：多个副本同时读-改-写 Redis 计数会竞态。<strong>解法：用 Redis + Lua 脚本（原子操作，L02）保证"读+判断+扣减"一气呵成。</strong>这就是为什么限流插件要用 Redis。AI 场景的 Token 限流（Day 17）也是这套。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Redis + Lua</h1></div>
+            <div class="card">
+<pre><code class="language-go">// SDK redis_wrapper.go 的 RedisClient.Eval(...) 执行 Lua 脚本
+// 固定窗口限流：一段 Lua 原子地"读当前计数 → 判断是否超限 → 未超则 +1"
+// 走底层 proxy_redis_call（Higress fork 加的 ABI，Envoy 课 Day 17）</code></pre>
+                <div class="baby"><span class="t">为什么用 Lua 脚本？</span>
+                限流要做三步：读计数、判断超没超、没超就加一。<strong>如果分三次 Redis 命令，中间会被别的请求插入（竞态）——两个请求同时读到 99，都以为没超，都放行，结果超了。Lua 脚本让这三步在 Redis 里<strong>原子执行</strong>（Redis 单线程跑完一个脚本才跑下一个），杜绝竞态。</strong>Higress 用 <code>proxy_redis_call</code>（Envoy 课 Day 17 讲的 Higress 定制 ABI）让 Wasm 插件能直接调 Redis。<strong>"原子操作解决并发竞态"是分布式限流的标准做法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>leader 选举</h1></div>
+            <div class="card">
+                <p>某些操作（定时清理、统计上报）只需一个 Envoy worker 干，用 <code>DoLeaderElection</code>（Day 12，SharedData + CAS + 60s 租约）选一个 leader。</p>
+                <div class="baby"><span class="t">leader 选举 = "推举一个代表干活"</span>
+                有些任务多个 worker 都做就重复了（比如"每分钟上报一次统计"——3 个 worker 就报 3 次）。<strong>leader 选举：多个 worker 通过 Redis/SharedData 竞争一个"租约"，抢到的当 leader，只有它做这类任务；租约 60s 过期要续，leader 挂了别的 worker 接管。</strong>用 CAS（Compare-And-Swap 原子操作）保证同时只有一个能抢到。<strong>这是分布式系统"单实例任务"的经典模式（和 OpenClaw 的会话串行、Istio 的 leaderelection 同思想）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>transformer</h1></div>
+            <div class="card">
+                <p><code>extensions/transformer</code>——改写请求/响应的 header 和 body（增删改）。展示插件怎么修改流经的数据。</p>
+                <div class="anno">读法：<b>transformer 用 SDK 的 <code>AddHttpRequestHeader</code>/<code>RemoveHttpRequestHeader</code>（改 header）和 body 缓冲能力（改 body）。<strong>改 body 要缓冲整个 body（<code>BufferRequestBody</code>）——所以要注册 <code>ProcessRequestBody</code> 回调，等 body 收齐再改。</strong></b>这是"数据改写类"插件的模板（AI 场景的 prompt 改写也是这套，Day 17）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>request-block</h1></div>
+            <div class="card">
+                <p><code>extensions/request-block</code>——最简单的拦截插件：按规则（URL/header/body 含某关键词）直接拒绝请求。</p>
+                <div class="anno">读法：<b>它就是"匹配到就 <code>SendHttpResponseWithDetail(403)</code>"——最小的"拦截"插件。适合作为"如何拦截请求"的入门样例（比 key-auth 更简单）。</b>拦截类插件（黑名单、WAF）都是这个套路：匹配 → 拒绝。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>跨阶段状态</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">请求头阶段 → 响应体阶段传值</span>
+                复杂插件常需要跨阶段传状态：比如限流插件在<strong>请求头阶段</strong>判断是否放行，在<strong>响应体阶段</strong>统计实际消耗（AI Token 限流，Day 17）。<strong>用 <code>HttpContext</code> 的 <code>SetContext(key, val)</code>/<code>GetContext(key)</code>（Day 12）在同一个请求的不同阶段间传值——因为 HttpContext 是每请求独立的，活在整个请求周期。</strong>比如请求头阶段存下"限流 key"，响应体阶段取出来扣减。<strong>这是插件处理"需要看到请求全过程"的逻辑的关键机制。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>单测 + 构建</h1></div>
+            <div class="card">
+                <p>插件有单测（<code>main_test.go</code> + proxytest 模拟 Envoy 环境），构建用官方 TinyGo builder 镜像（<code>wasm-go-builder</code>）编译成 <code>.wasm</code>，可推成 OCI 镜像（<code>hgctl plugin build</code>，Day 18）。</p>
+                <div class="anno">读法：<b>插件用 <code>proxytest</code>（proxy-wasm 的测试框架）模拟 Envoy 调回调，本地就能测。构建用 TinyGo（Go 的 Wasm 编译器）在容器里编译（保证环境一致）。<code>GOOS=wasip1 GOARCH=wasm</code> 是 Wasm 编译目标。</b>Day 18 讲 <code>hgctl plugin</code> 一键构建/测试/发布。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>分布式限流的难点？为什么要 Redis？</li>
+                    <li>为什么限流用 Lua 脚本（原子性）？</li>
+                    <li>leader 选举解决什么？</li>
+                    <li>transformer 怎么改 body？为什么要缓冲？</li>
+                    <li>跨阶段传值用什么？插件怎么测和构建？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/wasm-go/extensions
+ls | head -40   # 看有多少插件
+ls cluster-key-rate-limit/ transformer/ request-block/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15（第3周收官）</strong>：<strong>golang-filter</strong>——另一套扩展机制：原生 Go 扩展（非 Wasm），编译成 .so。用于 mcp-server/mcp-session（需要常驻 goroutine 维护 SSE 长连接的场景）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 写插件</a>
+                <a href="higress-ai-day15.html" style="color:#10b981;">Day 15 · golang-filter &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

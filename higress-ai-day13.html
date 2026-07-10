@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 写一个插件（key-auth） — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#10b981);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">写一个插件 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · key-auth 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 注册回调</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 配置结构 + 注解</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · parseGlobalConfig</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 覆盖配置继承</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · onHttpRequestHeaders</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三态鉴权语义</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 SDK</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day14.html" class="nav-link" style="color:#10b981;">Day 14 实战插件 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 Wasm 插件</span>
+            <h1 class="part-title">写一个插件（key-auth）</h1>
+            <p class="part-desc">把 SDK 用起来——逐行读一个真实的认证插件 <code>key-auth</code>（API Key 鉴权）。它是典型的 auth 插件，展示"配置解析 + 请求头处理 + 拦截"的完整套路。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>key-auth 是什么</h1></div>
+            <div class="card">
+                <p><code>extensions/key-auth/main.go</code>（404 行）——API Key 认证：检查请求带的 key 是否合法，合法放行并标记调用方身份，非法拦截返回 401/403。</p>
+                <div class="baby"><span class="t">API Key 鉴权 = "查通行证"</span>
+                很多 API 用 API Key 认证：客户端在 header（或 query）带一个 key，网关检查 key 是否有效。<strong>key-auth 插件就干这个：从请求里取 key → 查合法 key 列表 → 合法则加个 <code>X-Mse-Consumer</code> header 标记"这是谁"、放行；非法则直接返回 401（没带 key）/403（key 错）。</strong>这是网关最常见的能力之一。<strong>读它能学会"一个真实插件从配置到拦截的完整套路"——比 hello-world 实用得多。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>注册回调</h1></div>
+            <div class="card">
+<pre><code class="language-go">// key-auth/main.go:38 init 注册两个回调
+wrapper.SetCtx("key-auth",
+  wrapper.ParseOverrideConfigBy(parseGlobalConfig, parseOverrideRuleConfig),  // 全局+规则配置解析
+  wrapper.ProcessRequestHeadersBy(onHttpRequestHeaders),                       // 处理请求头
+)</code></pre>
+                <div class="anno">读法：<b>注册两样：①<code>ParseOverrideConfigBy</code>——两个函数（全局配置解析 + 规则级覆盖解析，配合 Day 12 的 RuleMatcher 多级配置）；②<code>ProcessRequestHeadersBy</code>——请求头到达时的处理逻辑。key-auth 只需处理请求头（鉴权在头阶段就能完成，不用看 body）。</b></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>配置结构 + 注解</h1></div>
+            <div class="card">
+<pre><code class="language-go">// key-auth/main.go:95 KeyAuthConfig（含大量 @Title/@Description/@Scope 注解）
+// :67 顶部：@Name key-auth / @Category authn / @Phase AUTHN / @Priority 321
+type KeyAuthConfig struct {
+  consumers []Consumer    // 合法的 key 及其身份
+  keys []string           // key 在哪个 header/query 名
+  inQuery, inHeader bool  // key 从 query 还是 header 取
+  // …
+}</code></pre>
+                <div class="baby"><span class="t">注解自动生成"配置表单"</span>
+                注意配置结构体上大量 <code>@Title</code>/<code>@Description</code>/<code>@Scope GLOBAL</code> 注解。<strong>Higress 用这些注解<strong>自动生成插件市场的配置表单和文档</strong>——用户在 Console（下一站）里看到的插件配置界面就是从这些注解生成的。</strong>顶部的 <code>@Phase AUTHN</code>/<code>@Priority 321</code> 声明"这是个认证阶段插件、优先级 321"（对应 Envoy 课 Day 17 的 WasmPhase/WasmPriority——认证插件在别的插件之前跑）。<strong>这是"代码即文档即 UI"的实践——注解一处定义，多处复用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>parseGlobalConfig</h1></div>
+            <div class="card">
+<pre><code class="language-go">// key-auth/main.go:140 parseGlobalConfig
+// 校验 keys、in_query/in_header、consumers
+// 构建 credential2Name 反查表（key → consumer 名字）</code></pre>
+                <div class="anno">读法：<b>解析全局配置：校验必填项，把"合法 key 列表"预处理成 <code>credential2Name</code> 反查表（key → 是谁）。<strong>预建反查表是性能优化</strong>——运行时鉴权直接查表 O(1)，不用遍历。</b>你的 <code>ParseConfig</code> 回调（Day 12）就长这样——把 JSON 配置转成运行时高效的结构。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>覆盖配置继承</h1></div>
+            <div class="card">
+<pre><code class="language-go">// key-auth/main.go:245 parseOverrideRuleConfig
+*config = global   // 先继承全局配置
+// 再解析路由级 allow 列表（这个路由允许哪些 consumer）</code></pre>
+                <div class="baby"><span class="t">规则级配置"继承"全局</span>
+                Day 12 讲了 RuleMatcher 的多级配置。<strong>这里体现"继承"：路由级配置先 <code>*config = global</code>（拷贝全局配置作基础），再叠加这个路由特有的设置（比如"这个路由只允许 consumer A、B 访问"）。</strong>于是全局定义"有哪些合法 key"，路由级定义"这个路由允许哪些 key"——分层且不重复。<strong>这就是 Day 12 的 <code>ParseOverrideConfig</code>（全局 + 规则两个函数）的实际用法。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>onHttpRequestHeaders</h1></div>
+            <div class="card">
+<pre><code class="language-go">// key-auth/main.go:278 onHttpRequestHeaders
+// 从 header/query 取 token（:299）
+// credential2Name 校验（:327）
+// 通过 → AddHttpRequestHeader("X-Mse-Consumer", name)（:333，标记身份）
+// 失败 → SendHttpResponseWithDetail 返回 401/403（:368，带 WWW-Authenticate 头）</code></pre>
+                <div class="anno">读法：<b>鉴权主流程：取 key → 查反查表 → 合法则加 <code>X-Mse-Consumer</code> header（告诉下游"这是谁"）并 <code>ActionContinue</code>（放行）；非法则 <code>SendHttpResponseWithDetail</code> 直接返回 401/403（<strong>拦截，不转发上游</strong>，对应 Envoy 课 Day 08 的 sendLocalReply）。</b>这就是网关"当场拦截非法请求"的实现。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三态鉴权语义</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">global_auth 的三态（真实工程细节）</span>
+                key-auth 有个 <code>global_auth</code> 配置的三态语义（<code>main.go:266-277</code> 注释是极好的教学材料）：<strong>①<code>true</code>——全局强制鉴权（所有路由都要 key）；②<code>false</code>——只有显式配了 allow 的路由才鉴权；③<strong>未设</strong>（nil）——兼容模式，按是否有 consumer 配置决定。</strong>为什么要三态？<strong>因为要平滑兼容"老配置"和"新配置"、"全局开"和"按路由开"多种使用习惯。用 Go 的指针（nil 表示"未设"）区分"设成 false"和"没设"。</strong>这种"三态布尔"是配置系统处理"默认 vs 显式"的常见手法（Istio 课 Day 19 的 BoolValue 也是）。读懂它，你就理解了真实插件如何处理配置的边界情况。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>key-auth 干什么？合法/非法各怎么处理？</li>
+                    <li>它注册了哪两个回调？</li>
+                    <li>配置结构的注解有什么用（自动表单）？</li>
+                    <li>parseGlobalConfig 为什么建反查表？规则级怎么继承全局？</li>
+                    <li>global_auth 三态各是什么？为什么用指针区分？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/wasm-go/extensions/key-auth
+sed -n '38,42p' main.go       # 注册
+sed -n '266,340p' main.go     # 三态语义 + 鉴权主流程
+sed -n '67,95p' main.go        # 注解 + 配置结构</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>实战插件</strong>——看更复杂的插件：Redis 分布式限流（cluster-key-rate-limit，用 leader 选举 + Redis）、transformer（改 header/body），以及插件的单测。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 SDK</a>
+                <a href="higress-ai-day14.html" style="color:#10b981;">Day 14 · 实战插件 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

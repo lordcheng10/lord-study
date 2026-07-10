@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 15 · golang-filter — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#10b981);">15</div>
+            <h2>Day 15</h2>
+            <p class="version">golang-filter · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要 golang-filter</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 注册与构建</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Filter API</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 请求/响应路径</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · SSE 长连接</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · MCP 网关</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Wasm vs golang</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第3周收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day14.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 14 实战插件</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day16.html" class="nav-link" style="color:#10b981;">Day 16 AI 网关 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 15 / 共 20 天 · 第 3 周收官</span>
+            <h1 class="part-title">golang-filter</h1>
+            <p class="part-desc">另一套扩展机制：原生 Go 扩展（非 Wasm），编译成 <code>.so</code> 由 Envoy Go filter 动态加载。用于需要常驻 goroutine 维护 SSE 长连接的场景——典型是 MCP 网关。收官第 3 周。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要 golang-filter</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">Wasm 的局限，golang-filter 来补</span>
+                Wasm 插件好（隔离、跨语言、热更），但有局限：<strong>①沙箱有性能开销；②能力受 proxy-wasm ABI 限制；③<strong>不能开常驻 goroutine</strong>——而有些场景需要（比如维护一条 SSE 长连接，持续往客户端推数据）。</strong>golang-filter 是补充：<strong>原生 Go 扩展，编译成 <code>.so</code>，由 Envoy 的 Go filter 动态库加载——无沙箱、性能高、能用完整 Go 生态（redis/gorm）、<strong>能开 goroutine 维护长连接</strong>。</strong>代价：无隔离（崩了影响 Envoy）、要重编进 Envoy 镜像。<strong>所以只有 mcp-server/mcp-session 这种"需要长连接"的用它，其他都用 Wasm。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>注册与构建</h1></div>
+            <div class="card">
+<pre><code class="language-go">// plugins/golang-filter/main.go init 注册两个插件
+envoyHttp.RegisterHttpFilterFactoryAndConfigParser(mcp_session.Name, mcp_session.FilterFactory, &Parser{})
+envoyHttp.RegisterHttpFilterFactoryAndConfigParser(mcp_server.Name, mcp_server.FilterFactory, &Parser{})
+// 依赖 Envoy 官方 Go filter SDK：github.com/envoyproxy/envoy/contrib/golang/...
+// 构建：Makefile docker build 产出 golang-filter.so；编进 Gateway 镜像</code></pre>
+                <div class="anno">读法：<b>多个 Go 插件共编到一个 <code>golang-filter.so</code>，Envoy 配置里用 <code>plugin_name</code> 选择哪个。依赖 Envoy 官方的 <code>contrib/golang</code> filter SDK（Higress fork 了 envoy）。</b>需 Higress ≥ 2.1.0。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Filter API</h1></div>
+            <div class="card">
+<pre><code class="language-go">// mcp-session/config.go Parser.Parse（:43）解析配置
+//   建共享的线程安全 MCPServer（NewMCPServer，:114）
+// FilterFactory（:134）：每请求造一个 *filter
+// mcp-session/filter.go filter struct（:24）内嵌 api.PassThroughStreamFilter
+//   → 拿默认实现，只覆盖需要的回调</code></pre>
+                <div class="baby"><span class="t">和 Wasm 的 API 不同</span>
+                golang-filter 用 Envoy 官方的 Go filter API（<code>api.StreamFilter</code>），和 Wasm 的 wrapper 不同。<strong>用"内嵌 <code>PassThroughStreamFilter</code>（透传基类）+ 只覆盖需要的回调"的方式——像 Envoy 课 Day 08 的 L7 过滤器接口的 Go 版。</strong>返回码是 <code>api.Continue/StopAndBuffer/LocalReply/Running</code>（比 Wasm 的 Action 多了 <code>Running</code>——表示"我要长期占用这个流"，用于 SSE）。<code>Parser</code> 解析配置、<code>FilterFactory</code> 每请求造一个 filter 实例（和 Wasm 的三级 Context 类似）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>请求/响应路径</h1></div>
+            <div class="card">
+<pre><code class="language-go">// mcp-session/filter.go
+// DecodeHeaders（:50）匹配 match_list → 按 upstream 类型分流
+// DecodeData（:163）处理 body（配置写入、JSON-RPC tools/call 限流）
+// EncodeHeaders（:208）SSE 场景改 text/event-stream、删 Content-Length
+// EncodeData（:236）按 upstream 类型分流</code></pre>
+                <div class="anno">读法：<b>和 Envoy 课 L7 过滤器一样有 Decode（请求方向）/Encode（响应方向）回调。golang-filter 处理 MCP 协议的会话——匹配路由、处理 JSON-RPC 请求、把 SSE 响应改成 <code>text/event-stream</code>。</b></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>SSE 长连接</h1></div>
+            <div class="card">
+<pre><code class="language-go">// filter.go encodeDataFromRestUpstream（:260）
+//   把响应发布到 Redis channel + 调 sseServer.HandleSSE(...) 返回 api.Running（:283）
+// OnDestroy（:511）：close(f.stopChan) 关闭 SSE goroutine</code></pre>
+                <div class="baby"><span class="t">这就是 golang-filter 相对 Wasm 的杀手锏</span>
+                MCP 网关需要维护 SSE（Server-Sent Events）长连接——持续往客户端推消息（AI 流式响应、工具调用结果）。<strong>Wasm 做不到（不能开常驻 goroutine）。golang-filter 能：返回 <code>api.Running</code> 表示"这个流我要长期持有"，然后开一个 goroutine 通过 Redis channel 订阅消息、持续推给客户端。<code>OnDestroy</code> 时 <code>close(stopChan)</code> 优雅关闭 goroutine。</strong>这就是为什么 MCP 网关用 golang-filter 而非 Wasm——<strong>长连接 + 常驻 goroutine 是 Wasm 沙箱给不了的能力。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>MCP 网关</h1></div>
+            <div class="card">
+                <p><code>mcp-server</code>（<code>filter.go</code>）：用 <code>httptest.NewRecorder()</code> 在进程内直接执行 MCP server 逻辑。子目录 <code>servers/</code>（gorm/rag/tool-search/higress-*）和 <code>registry/</code>（nacos）是各类内置 MCP 工具服务器——体现 Higress 作为 <strong>MCP 网关</strong>把 REST/数据库/RAG 转成 MCP 工具。</p>
+                <div class="baby"><span class="t">Higress 作为 "MCP 网关"</span>
+                MCP（Model Context Protocol）是 AI Agent 调用工具的协议。<strong>Higress 能当"MCP 网关"——把已有的 REST API、数据库（gorm）、RAG 检索、工具搜索等，<strong>包装成 MCP 工具服务器</strong>暴露给 AI Agent。</strong>比如你有个 REST API，Higress 能把它转成 MCP 协议，让 Claude/GPT 等 Agent 直接当工具调用。<strong>这是 Higress "AI 原生"的又一体现——不只代理 LLM（Day 16），还能把万物转成 AI 能用的 MCP 工具。</strong>用 golang-filter 实现（需要 MCP 会话的长连接）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Wasm vs golang（总结）</h1></div>
+            <div class="card">
+                <div class="glossary"><b>两套机制的最终对比</b>：<br>
+                • <strong>Wasm 插件</strong>：隔离、跨语言、热更、绝大多数场景。用 wasm-go SDK 写（Day 12-14）。<br>
+                • <strong>golang-filter</strong>：原生 Go、高性能、能开 goroutine 维护长连接、能用完整 Go 生态。用于 MCP 网关等特殊场景。<br>
+                <strong>选择标准：需要长连接/复杂 Go 库/极致性能 → golang-filter；其他一切 → Wasm。</strong>MCP 甚至两条路线都有（<code>pkg/mcp</code> 是 Wasm 版、<code>golang-filter/mcp-server</code> 是 Go 版）——按是否需要长连接选。<strong>这体现了 Higress"提供多种扩展手段、按场景选最合适的"的工程务实。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>第 3 周收官 🎓</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 第 3 周（Wasm 插件）你已掌握</h3>
+                <ul>
+                    <li><strong>Day 11</strong> 两套扩展机制、SDK 独立 module、proxy-wasm 绑定、连回 Envoy 课</li>
+                    <li><strong>Day 12</strong> wasm-go SDK：SetCtx/Option、三级 Context、请求生命周期、RuleMatcher</li>
+                    <li><strong>Day 13</strong> 写插件 key-auth：注册/配置/鉴权/三态语义</li>
+                    <li><strong>Day 14</strong> 实战：Redis+Lua 限流、leader 选举、transformer、跨阶段状态</li>
+                    <li><strong>Day 15</strong> golang-filter：原生 Go 扩展、SSE 长连接、MCP 网关、两套对比</li>
+                </ul>
+                <p style="margin-top:10px;">你现在理解了 Higress 的插件生态——它最活跃、最能体现"AI 原生"的部分。第 4 周聚焦 AI 网关能力（ai-proxy 模型路由、Token 治理）、hgctl、部署，并收官。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/golang-filter
+cat main.go
+grep -n 'func.*DecodeHeaders\|func.*EncodeData\|api.Running\|HandleSSE' mcp-session/filter.go | head
+ls mcp-server/servers/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 16（第4周开始）</strong>：<strong>AI 网关能力</strong>——Higress 的招牌 <code>ai-proxy</code> 插件：把 39 家 LLM 厂商统一成 OpenAI 协议、模型路由、协议自动转换。这是"AI 原生网关"的核心。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day14.html" style="color:var(--accent-cyan);">&larr; Day 14 实战插件</a>
+                <a href="higress-ai-day16.html" style="color:#10b981;">Day 16 · AI 网关能力 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
