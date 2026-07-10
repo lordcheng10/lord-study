@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 流式深水区 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .pipe{display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;padding:16px 4px}
+        .pipe .w{background:rgba(139,92,246,.1);border:1px solid #8b5cf6;color:#8b5cf6;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}
+        .pipe .r{background:rgba(6,182,212,.1);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}
+        .pipe .buf{display:flex;gap:3px}.pipe .buf span{width:22px;height:22px;border-radius:5px;background:var(--bg-secondary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;font-size:10px}
+        .pipe .a{color:var(--text-muted);font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">流式深水区 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 回顾与今日目标</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Pipe 内部（真实代码）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 背压：满了就等</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Copy 的引用计数</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 多路合并 merge</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 自动拼接 concat</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 关闭与资源释放</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 callbacks</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 类型安全 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 横切与生态</span>
+            <h1 class="part-title">流式深水区：StreamReader 内部</h1>
+            <p class="part-desc">Day 03 学了流的"用法"，今天潜入它的"实现"——Pipe 缓冲、背压、Copy 引用计数、多路合并、自动拼接。理解流式为什么能既快又安全。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>回顾与今日目标</h1></div>
+            <div class="card">
+                <p>Day 03 记住的：StreamReader 像一次性水管，<code>Recv()</code> 取一块、取完 <code>io.EOF</code>、只能读一次、Copy 能分叉。今天回答"它内部怎么做到的"，代码在 <code>schema/stream.go</code>。</p>
+                <div class="baby"><span class="t">为什么值得深入？</span>
+                流式是 Eino 的一等公民（Day 01），几乎所有 Agent 交互都靠它。搞懂内部机制，你才能：写出不阻塞的流式代码、正确处理 Copy、排查"流读不到/读重了/卡死"的诡异 bug。<strong>这是从"会用"到"精通"的一课。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Pipe 内部：一个带缓冲的管子</h1></div>
+            <div class="card">
+                <p><code>schema/stream.go:99</code> 的 <code>Pipe(cap)</code> 造出一对"写端 + 读端"，中间是一个容量为 cap 的缓冲队列：</p>
+                <div class="pipe">
+                    <span class="w">Writer<br>Send()</span><span class="a">→</span>
+                    <span class="buf"><span>块</span><span>块</span><span>块</span><span></span><span></span></span><span class="a">→</span>
+                    <span class="r">Reader<br>Recv()</span>
+                </div>
+<pre><code class="language-go">sr, sw := schema.Pipe[*Message](cap)   // 造一对读写端，缓冲容量 cap
+go func() {                            // 生产者（比如模型 SDK）在另一个 goroutine
+    sw.Send(chunk1, nil); sw.Send(chunk2, nil)
+    sw.Close()                         // 生产完，关闭写端 → 读端收到 EOF
+}()
+for { chunk, err := sr.Recv(); if err==io.EOF {break}; 用(chunk) }  // 消费者</code></pre>
+                <div class="anno">读法：<b>写端和读端通过中间缓冲解耦——生产者往里塞（Send），消费者从里取（Recv），两边各跑各的（不同 goroutine）。</b>模型一边生成 token 一边 Send，你一边 Recv 一边往前端推——真正的边生成边消费。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>背压：缓冲满了写端就等</h1></div>
+            <div class="card">
+                <p>缓冲容量有限。如果生产者飞快、消费者很慢，缓冲会<strong>满</strong>——这时 <code>Send</code> 会<strong>阻塞等待</strong>，直到消费者取走一些腾出空间。这叫 <strong>背压（back-pressure）</strong>。</p>
+                <div class="baby"><span class="t">背压保护了什么？</span>
+                想象没有背压：生产者疯狂生成，全堆在内存里，消费者来不及处理 → 内存爆炸。背压让"下游处理不过来时，自动让上游慢下来"，内存占用被缓冲容量限制住，稳定可控。<strong>这是流式系统不 OOM 的关键。</strong>底层用 Go 的 channel 天然实现了背压（channel 满则发送阻塞）。</div>
+                <div class="glossary">所以选 <code>cap</code> 是个权衡：太小 → 频繁阻塞、并发度低；太大 → 占内存、背压迟钝。Eino 内部按场景选合适的缓冲大小。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Copy 的引用计数（真实代码）</h1></div>
+            <div class="card">
+                <p>Day 03 说 <code>Copy(n)</code>（<code>stream.go:261</code>）把一个流分成 n 个独立流。它不是真的复制数据 n 份，而是用一个共享的底层 + 引用计数：</p>
+                <div class="glossary"><b>惰性链表 + sync.Once</b>：Copy 出的 n 个 reader 共享同一条"块链表"，每个 reader 有自己的读取位置指针。某个块被<strong>所有</strong> reader 都读过了，才会被释放。用 <code>sync.Once</code> 保证每个块只从底层拉取一次（不会因为 n 个 reader 各拉一次而重复消费源）。<strong>所以 Copy 很轻——不复制数据，只维护"谁读到哪了"。</strong></div>
+                <div class="baby"><span class="t">直觉</span>
+                像 n 个人共看一部连载：小说只印一份（底层块链表），每人一个书签记自己看到第几章（读取位置）。所有人都看过的章节可以从桌上收走（释放）。没人重复印书，但每个人进度独立。<strong>这就是 Day 16 流式回调能"回调读副本、业务读原本"的底层原理。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>多路合并 merge</h1></div>
+            <div class="card">
+                <p>Day 08 的并行分支会产生多个流，需要合并成一个。<code>stream.go</code> 的 merge 把 n 个 StreamReader 合成一个——从任意一个有数据的流里取，谁先来先出。</p>
+                <div class="glossary">实现上用 Go 的 <code>reflect.Select</code> 或多路监听，从 n 个源流里"谁准备好了就读谁"，汇成一个输出流。全部源流 EOF 了，合并流才 EOF。<strong>这让"并行调 3 个检索器、结果流式合并返回"成为可能</strong>——三个流的块交错着流出来，而不用等某一个全部完成。channel（Day 09）在有多个上游时就用它来合并流。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>自动拼接 concat</h1></div>
+            <div class="card">
+                <p>Day 06 讲过：一个只会 Invoke（要完整值）的节点，遇到上游给的流，框架自动把流<strong>收集拼接</strong>成完整值再喂它。拼接逻辑就是 Day 03 的 <code>ConcatMessages</code>（<code>message.go:1644</code>）等 concat 函数。</p>
+<pre><code class="language-go">// stream.go 里：把流全收下来，再按类型拼接成一个完整值
+func concatStreamReader[T](sr *StreamReader[T]) (T, error) {
+    var chunks []T
+    for { c, err := sr.Recv(); if err==io.EOF {break}; chunks=append(chunks,c) }
+    return concat(chunks)   // Message → ConcatMessages 拼成完整消息
+}</code></pre>
+                <div class="anno">读法：<b>把流里所有块收进 slice，再调对应类型的拼接函数合成一个完整值。</b>Message 的拼接会把内容片段接起来、合并 tool_calls 片段（Day 03 讲的模型分块吐 tool_call 参数，在这里拼完整）。类型→拼接函数的注册表在 <code>schema</code> 的 init（Day 03 提过）。</div>
+                <div class="baby"><span class="t">这解释了 Day 06 的"一个非流节点冻结全链"</span>
+                因为 concat 必须<strong>等流全部到齐</strong>才能拼成完整值。所以链路里只要有一个"只要完整值"的节点，流到它这里就被"蓄水成池"，前面的流式优势断了。设计流水线时，尽量让流能一路贯通到最后（前端）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>关闭与资源释放</h1></div>
+            <div class="card">
+                <p>流用完必须关。<strong>读端 <code>Close()</code></strong> 释放资源；<strong>写端 <code>Close()</code></strong> 通知读端 EOF。忘了关会泄漏 goroutine 和内存。</p>
+                <div class="glossary"><b>最佳实践</b>：拿到 StreamReader 后立刻 <code>defer sr.Close()</code>。即使你没读完就想提前退出（比如用户取消），Close 也会正确清理，让上游生产者的 goroutine 收到信号停止。<strong>Eino 内部各节点都严格 defer Close，你自己消费顶层流时也务必如此。</strong>这是流式代码不泄漏的铁律。</div>
+                <div class="baby"><span class="t">为什么不 Close 会泄漏？</span>
+                因为生产者可能是个在后台 goroutine 里跑的循环（不停 Send）。如果你不读也不 Close，它可能永远卡在"缓冲满了等人取"的 Send 上——goroutine 永远不退出，内存永远不释放。Close 就是给它一个"别发了，收工"的信号。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Pipe 内部是什么？（带缓冲的写端+读端，goroutine 解耦）</li>
+                    <li>背压是什么？保护了什么？</li>
+                    <li>Copy 为什么很轻？（共享底层 + 引用计数 + 读位置）</li>
+                    <li>merge 和 concat 各干什么？</li>
+                    <li>为什么必须 Close？不 Close 会怎样？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">sed -n '99,130p' schema/stream.go     # Pipe
+sed -n '195,320p' schema/stream.go | head -60   # Recv / Copy
+grep -n 'concat\|merge\|Close' schema/stream.go | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>类型安全与 Go 泛型</strong>——Eino 大量用泛型（<code>Runnable[I,O]</code>、<code>Graph[I,O]</code>）保证编译期类型检查。今天讲泛型怎么用、类型擦除在哪发生、编译期检查如何前移错误。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 callbacks</a>
+                <a href="eino-day18.html" style="color:var(--accent-green);">Day 18 · 类型安全 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

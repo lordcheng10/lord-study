@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · 类型安全与 Go 泛型 — Eino 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .layers{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+        .layers .ly{border-radius:9px;padding:11px 14px;font-size:12.5px;border:1px solid var(--border-color)}
+        .layers .ly.g{border-color:#00ADD8;background:rgba(6,182,212,.06)} .layers .ly.g b{color:#00ADD8}
+        .layers .ly.i{border-color:#8b5cf6;background:rgba(139,92,246,.06)} .layers .ly.i b{color:#8b5cf6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">类型安全与泛型 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么强调类型安全</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Go 泛型 30 秒扫盲</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Runnable[I,O]</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 泛型层 vs 无类型层</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 类型擦除在哪</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 编译期类型检查</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 权衡与代价</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="eino-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 流式深入</a></li>
+            <li><a href="eino-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="eino-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 生态 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 横切与生态</span>
+            <h1 class="part-title">类型安全与 Go 泛型</h1>
+            <p class="part-desc">Eino 到处是 <code>Runnable[I,O]</code>、<code>Graph[I,O]</code> 这样的泛型。今天讲 Go 泛型速成、Eino 为什么用它、类型擦除在哪发生、编译期检查怎么帮你提前抓 bug。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么 Eino 死磕类型安全</h1></div>
+            <div class="card">
+                <p>很多 Python 的 LLM 框架里，节点之间传的是 <code>dict</code>/<code>Any</code>——灵活但危险：字段名打错、类型不对，要<strong>运行到那一步才崩</strong>。Eino 是 Go，选择用泛型把类型信息带在编排里，让"接不上的管子"在<strong>编译期</strong>就报错。</p>
+                <div class="baby"><span class="t">编译期 vs 运行期报错，差别有多大？</span>
+                编译期报错 = 你敲完代码、还没运行，IDE 就飘红/编译失败，1 秒钟发现。运行期报错 = 部署上线、跑到那步、可能是半夜、可能已经扣了用户的钱，才崩。<strong>Eino 用类型系统把大量错误从"运行期"提前到"编译期"</strong>——这是它相比动态语言框架最大的工程优势之一，也是 Day 01"fail-closed"哲学的体现。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Go 泛型 30 秒扫盲</h1></div>
+            <div class="card">
+                <p>Go 1.18+ 支持泛型。<code>[T any]</code> 是"类型参数"——写一份代码，适配多种类型：</p>
+<pre><code class="language-go">// 不用泛型：每种类型写一遍，或用 interface{} 丢失类型
+func FirstInt(s []int) int { return s[0] }
+func FirstStr(s []string) string { return s[0] }
+
+// 用泛型：一份代码，类型安全
+func First[T any](s []T) T { return s[0] }
+First([]int{1,2,3})       // T 自动推断为 int，返回 int
+First([]string{"a","b"})  // T 推断为 string，返回 string</code></pre>
+                <div class="anno">读法：<b><code>[T any]</code> 声明一个类型占位符 T，调用时编译器按你传的实参推断出具体类型。</b>好处：既复用一份代码，又保留每种类型的编译期检查（<code>First([]int{...})</code> 返回的一定是 int，不是 <code>interface{}</code>，不用强转）。</div>
+                <div class="baby"><span class="t">一句话</span>
+                泛型 = "带类型占位符的模板代码"。编译器帮你把占位符替换成真实类型并检查。Eino 用它让"输入类型 I、输出类型 O"贯穿整个编排 API。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Runnable[I, O]：类型贯穿始终</h1></div>
+            <div class="card">
+                <p>回忆 Day 06 的 <code>Runnable[I, O]</code>——I 是输入类型、O 是输出类型。这两个类型参数从建图一路带到执行：</p>
+<pre><code class="language-go">// Day 06 的接口
+type Runnable[I, O any] interface {
+    Invoke(ctx, input I) (output O, err error)   // 输入 I，输出 O，编译器盯着
+    Stream(ctx, input I) (*StreamReader[O], error)
+    // ...
+}
+// 建图时定死 I/O
+g := compose.NewGraph[[]*schema.Message, *schema.Message]()  // I=[]Message, O=Message
+r, _ := g.Compile(ctx)   // r 是 Runnable[[]*Message, *Message]
+out, _ := r.Invoke(ctx, msgs)   // 传错类型？编译不过</code></pre>
+                <div class="anno">读法：<b>你 <code>Invoke</code> 时传的 input 必须是 I 类型、拿到的 output 一定是 O 类型——编译器强制。</b>传个 string 进要 []Message 的图？编译直接失败，根本跑不起来。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>泛型层 vs 无类型层（关键设计）</h1></div>
+            <div class="card">
+                <p>但引擎内部（Day 09 的调度、channel）没法对每种类型都写一遍——那要写无数份。Eino 的解法是<strong>两层</strong>：</p>
+                <div class="layers">
+                    <div class="ly g"><b>外层：泛型 API（面向你）</b> — <code>Graph[I,O]</code>、<code>Runnable[I,O]</code>。给你完整的编译期类型检查。<code>generic_graph.go</code>。</div>
+                    <div class="ly i"><b>内层：无类型引擎（面向实现）</b> — 内部 <code>graph</code>、channel 用 <code>any</code> 存值。一份代码跑所有类型。<code>graph.go</code>。</div>
+                </div>
+                <div class="glossary"><b>外层泛型包装内层无类型</b>：<code>Graph[I,O]</code>（<code>generic_graph.go:93</code>）内部持有一个无类型的 <code>graph</code>。你在外层享受类型检查；进入引擎时值被"装箱"成 <code>any</code> 跑通用逻辑；出引擎时再"拆箱"回 O 类型交还给你。<strong>Day 06 提过的 <code>composableRunnable</code>（无类型）和 <code>Runnable[I,O]</code>（泛型）的转换（toGenericRunnable），就是这两层的桥。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>类型擦除在哪发生</h1></div>
+            <div class="card">
+                <p>"类型擦除"= 把带类型的值变成 <code>any</code>（丢掉静态类型，靠运行时反射记住真实类型）。发生在<strong>泛型层 → 无类型层的边界</strong>：</p>
+<pre><code class="language-go">// 概念：进引擎时装箱，出引擎时用反射拆箱
+func toGenericRunnable[I,O any](cr *composableRunnable) Runnable[I,O] {
+    return &runnablePacker[I,O]{
+        i: func(ctx, in I) (O, error) {
+            out, err := cr.i(ctx, in)        // in 作为 any 传给无类型引擎
+            return out.(O), err              // 结果断言回 O（这里靠运行时类型信息）
+        },
+    }
+}</code></pre>
+                <div class="anno">读法：<b>值进引擎时当 <code>any</code>（擦除静态类型），出来时用类型断言 <code>.(O)</code> 恢复。</b>因为编译期已经保证了类型对齐（L06），这个断言几乎不会失败。擦除只是"引擎内部为了通用不看类型"，边界两头仍是强类型的。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>编译期 + 编译时双重类型检查</h1></div>
+            <div class="card">
+                <p>Eino 的类型检查其实分两个阶段：</p>
+                <ul>
+                    <li><strong>Go 编译期</strong>（你 <code>go build</code> 时）：泛型保证 <code>Invoke</code> 的输入输出类型对。这是编译器免费给的。</li>
+                    <li><strong>Compile 时</strong>（Day 09，运行时的建图阶段）：检查<strong>相邻节点</strong>的"上游 O → 下游 I"能否对上。因为引擎内部是无类型的，节点间连接的类型对齐得靠 Compile 时用反射逐边检查。</li>
+                </ul>
+                <div class="glossary"><b>为什么需要第二阶段？</b> 因为你 <code>AddNode</code>/<code>AddEdge</code> 时，编译器只知道每个节点各自的 I/O，但"A 的输出能不能喂给 B"这种<strong>跨节点</strong>的对齐，泛型表达不了（节点存进无类型引擎后类型信息在编译器眼里就模糊了）。所以 Compile 时再用节点登记的反射类型信息做一次逐边校验，对不上就 <code>Compile</code> 返回 error。<strong>两道关卡，尽最大可能在"跑第一个 token 之前"抓住类型 bug。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>权衡与代价</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>好处</strong>：大量错误编译期/编译时暴露、IDE 自动补全好用、重构安全、自文档化（看签名就知道吃什么吐什么）。</li>
+                    <li><strong>代价</strong>：泛型让类型签名变长（<code>Runnable[[]*schema.Message, *schema.Message]</code> 读着累）；两层架构 + 反射有一点复杂度和运行时开销；报错信息有时较长。</li>
+                </ul>
+                <div class="baby"><span class="t">Eino 的取舍</span>
+                它认为"生产级 Agent 框架，可靠性 > 一点点便利"。宁可类型写长点、内部复杂点，也要把错误挡在上线前。对于要长期维护、多人协作、跑真金白银业务的系统，这个取舍是对的。<strong>这也是为什么严肃后端团队偏爱 Go/强类型来做 Agent 基础设施。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Eino 死磕类型安全？编译期 vs 运行期报错差别？</li>
+                    <li>Go 泛型 <code>[T any]</code> 是什么？</li>
+                    <li>泛型层和无类型引擎层怎么分工？</li>
+                    <li>类型擦除发生在哪？怎么恢复类型？</li>
+                    <li>两个阶段的类型检查分别在什么时候？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">grep -n 'func New.*\[.*any\]\|Runnable\[' compose/runnable.go | head
+sed -n '93,120p' compose/generic_graph.go     # 泛型 Graph 包无类型 graph
+grep -rn 'reflect\.' compose/graph.go | head   # 逐边类型检查用的反射</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>eino-ext 生态</strong>——Eino 主仓只有接口和引擎，真正的模型/工具/向量库实现都在 <code>eino-ext</code>。今天看生态版图、怎么接入一个 OpenAI 模型、社区组件长啥样。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="eino-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 流式深入</a>
+                <a href="eino-day19.html" style="color:var(--accent-green);">Day 19 · eino-ext 生态 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
