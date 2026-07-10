@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · AI 增强插件 — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#06b6d4}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#06b6d4);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">AI 增强插件 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 22 个 AI 插件</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · tokenusage 单一真相</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Token 限流</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · AI 统计</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Prompt 管理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 语义缓存/安全</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 插件链编排</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 ai-proxy</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day18.html" class="nav-link" style="color:#06b6d4;">Day 18 hgctl &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 AI 网关/部署</span>
+            <h1 class="part-title">AI 增强插件</h1>
+            <p class="part-desc">AI 网关不只代理 LLM——还要治理：按 Token 数限流、统计可观测、语义缓存、内容安全、Prompt 管理。今天看这些 AI 增强插件，重点是"Token 治理闭环"。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>22 个 AI 插件</h1></div>
+            <div class="card">
+                <table class="k">
+                    <tr><th>类别</th><th>插件</th></tr>
+                    <tr><td>代理路由</td><td>ai-proxy / model-router / model-mapper</td></tr>
+                    <tr><td>治理</td><td>ai-token-ratelimit / ai-quota / ai-context-limit</td></tr>
+                    <tr><td>可观测</td><td>ai-statistics / ai-history</td></tr>
+                    <tr><td>Prompt</td><td>ai-prompt-template / ai-prompt-decorator</td></tr>
+                    <tr><td>性能</td><td>ai-cache（语义缓存）</td></tr>
+                    <tr><td>安全</td><td>ai-security-guard / ai-json-resp</td></tr>
+                    <tr><td>增强</td><td>ai-rag / ai-search / ai-intent / ai-agent / mcp-router</td></tr>
+                </table>
+                <div class="anno">读法：<b>22 个 AI 插件覆盖了 AI 网关的方方面面——不只是"转发到 LLM"，而是围绕 LLM 调用的全套治理（限流/统计/缓存/安全/Prompt/RAG）。<strong>它们都是 Wasm 插件（Day 12-14 的套路），组合起来构成完整的 AI 网关。</strong></b></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>tokenusage 单一真相</h1></div>
+            <div class="card">
+<pre><code class="language-go">// wasm-go/pkg/tokenusage/tokenusage.go GetTokenUsage(ctx, body)
+// 从多协议 SSE（OpenAI/Gemini/Anthropic 各自字段路径）抽 input/output token</code></pre>
+                <div class="baby"><span class="t">为什么需要"单一真相来源"？</span>
+                AI 场景很多治理都基于"这次请求消耗了多少 token"——限流按 token、计费按 token、统计按 token。<strong>但不同 LLM 厂商的响应里 token 数字段路径不同（OpenAI 在 <code>usage.total_tokens</code>、Gemini 在别处）。如果每个插件各自解析，重复且易错。所以抽成一个共享函数 <code>GetTokenUsage</code>——所有 AI 插件都用它取 token 数。</strong>这就是"Single Source of Truth（单一真相来源）"——一处实现，处处复用，改一处生效所有。<strong>限流、统计、计费插件都依赖它，保证 token 计数一致。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Token 限流</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ai-token-ratelimit/main.go
+// 请求阶段（main.go:52 Lua）：只读判断是否超限（还没消耗，先拦）
+// 响应阶段（main.go:71 Lua）：incrby 实际消耗的 token（事后扣减）
+// GetTokenUsage 从流式响应解析真实 token 数 → 超限返回 429</code></pre>
+                <div class="baby"><span class="t">为什么 Token 限流要"事后扣减"？</span>
+                普通 QPS 限流在请求时判断即可。<strong>但 Token 限流的难点：请求时<strong>还不知道</strong>这次会消耗多少 token（取决于 LLM 生成多长）！所以两段式：①请求阶段——先看"剩余配额够不够"，明显超了就拦（429）；②响应阶段——等 LLM 返回，用 <code>GetTokenUsage</code> 解析出<strong>实际</strong>消耗的 token，<code>incrby</code> 扣减配额。</strong>用 Redis + Lua 固定窗口（Day 14）。<strong>这是"按真实用量计费/限流"的 AI 特有模式——传统限流按次数，AI 限流按 token。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>AI 统计</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ai-statistics/main.go
+// 5 阶段回调，产出：
+//   Prometheus metric（route.x.upstream.y.model.z.consumer.w.metric.name）
+//   结构化 ai_log 日志
+//   ARMS trace span（gen_ai.usage.*）
+// Attribute 从 request/response/streaming body 用规则抽取字段</code></pre>
+                <div class="anno">读法：<b>ai-statistics 采集 AI 特有的可观测数据：按"路由/上游/模型/调用方"多维度打点（Prometheus）、结构化 AI 日志、分布式追踪 span。<strong>让你能监控"哪个模型/哪个用户消耗了多少 token、延迟多少"</strong>——AI 成本和性能治理的基础。</b>指标命名带 model/consumer 维度，能精确到"某用户用某模型"。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Prompt 管理</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>ai-prompt-template</strong>（<code>main.go:48</code>）：<code>{{key}}</code> 占位符按 properties 展开成完整 messages。</li>
+                    <li><strong>ai-prompt-decorator</strong>：Prepend/Append/Replace + <code>${geo-country}</code> 等变量注入。</li>
+                </ul>
+                <div class="baby"><span class="t">在网关层管理 Prompt</span>
+                <strong>Prompt 模板：让你在网关配置 Prompt 模板（如"你是{{role}}，请回答：{{question}}"），客户端只传变量，网关展开成完整 prompt 发给 LLM。ai-prompt-decorator：给 prompt 自动加前缀/后缀（如统一的系统提示、安全约束）、注入变量（用户地区等）。</strong>好处：<strong>Prompt 逻辑集中在网关，不散落在各应用；改 Prompt 不用改应用代码。</strong>这是"AI 治理下沉到网关"的又一体现——就像传统网关管路由/限流，AI 网关还管 Prompt。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>语义缓存 / 安全</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>ai-cache（语义缓存）</strong>：相似问题命中缓存，不用重复调 LLM（省钱省延迟）。</li>
+                    <li><strong>ai-security-guard</strong>：内容安全（敏感词/合规检测）。<strong>ai-json-resp</strong>：强制 JSON 格式输出。</li>
+                    <li><strong>ai-rag / ai-search</strong>：检索增强（调向量库/搜索补充上下文）。</li>
+                </ul>
+                <div class="baby"><span class="t">语义缓存 = "答过的相似问题不再问 LLM"</span>
+                LLM 调用贵又慢。<strong>ai-cache：把问题和答案缓存，下次<strong>语义相似</strong>的问题（不用完全一样，用向量相似度判断）直接返回缓存答案，不调 LLM。</strong>比如"北京天气"和"北京今天几度"语义相似，第二个可命中第一个的缓存。<strong>大幅省 token 成本 + 降延迟。</strong>ai-security-guard 做内容安全（防有害输入输出）。这些都是"生产级 AI 网关"必备的治理能力——Higress 用插件把它们模块化。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>插件链编排</h1></div>
+            <div class="card">
+                <div class="glossary"><b>一次 AI 请求的插件链</b>（<code>POST /v1/chat/completions</code>）：<br>
+                model-router（按 model 选上游）→ ai-prompt-template/decorator（改写 prompt）→ ai-token-ratelimit 请求阶段（查配额）→ ai-cache（查缓存，命中直接返回）→ ai-security-guard（内容安全）→ <strong>ai-proxy</strong>（协议转换 + 转发 LLM）→（响应）ai-statistics（统计 token）→ ai-token-ratelimit 响应阶段（扣减真实 token）。<br>
+                <strong>这些插件按 <code>Phase</code>/<code>Priority</code>（Envoy 课 Day 17 的 WasmPhase）有序编排在 Envoy 过滤器链上——组合出完整的 AI 网关。你可以只启用需要的插件。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>AI 插件覆盖哪些方面（不只代理）？</li>
+                    <li>tokenusage 为什么是"单一真相来源"？</li>
+                    <li>Token 限流为什么要两段式（请求判断+响应扣减）？</li>
+                    <li>ai-statistics 采集什么维度？Prompt 插件在网关层管什么？</li>
+                    <li>语义缓存怎么省钱？一次 AI 请求的插件链？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/wasm-go/extensions
+ls | grep ^ai-   # 看所有 AI 插件
+grep -n 'RequestPhase\|ResponsePhase\|GetTokenUsage' ai-token-ratelimit/main.go | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>hgctl CLI</strong>——Higress 的命令行工具：install（K8s/Docker 两条路径）、plugin build（容器编译 Wasm）、gateway-config（看 Envoy 配置）、agent/mcp（AI Agent 部署）。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 ai-proxy</a>
+                <a href="higress-ai-day18.html" style="color:#06b6d4;">Day 18 · hgctl CLI &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

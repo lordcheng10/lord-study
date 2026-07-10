@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 16 · AI 网关能力（ai-proxy） — Higress 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#10b981,#06b6d4);">16</div>
+            <h2>Day 16</h2>
+            <p class="version">AI 网关能力 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ai-proxy 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Provider 架构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 39 家厂商</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 可选接口组合</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 统一 OpenAI 协议</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 模型映射</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · model-router</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="higress-ai-day15.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 15 golang-filter</a></li>
+            <li><a href="higress-ai-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="higress-ai-day17.html" class="nav-link" style="color:#06b6d4;">Day 17 AI 增强 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 16 / 共 20 天 · 第 4 周 AI 网关/部署</span>
+            <h1 class="part-title">AI 网关能力（ai-proxy）</h1>
+            <p class="part-desc">Higress 叫"AI 原生网关"，招牌就是 <code>ai-proxy</code> 插件——把 39 家 LLM 厂商统一成 OpenAI 协议、模型路由、协议自动转换。今天看它的架构设计。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ai-proxy 是什么</h1></div>
+            <div class="card">
+                <p><code>extensions/ai-proxy/</code>（775 行 main + 60+ provider 文件）——把各家 LLM 统一成 OpenAI/Anthropic 协议的核心插件。</p>
+                <div class="baby"><span class="t">ai-proxy = "LLM 的万能适配器"</span>
+                你的应用想调 LLM，但市面上有几十家（OpenAI/通义千问/DeepSeek/Claude/Gemini…），<strong>每家的 API 协议、鉴权、模型名都不同。如果应用直接对接，换一家就要改代码。</strong><strong>ai-proxy 的价值：应用只用一种协议（OpenAI 格式）调 Higress，Higress 帮你翻译成目标厂商的真实协议、鉴权、格式。</strong>换厂商只改网关配置，应用零改动。<strong>好比一个万能电源适配器——你的设备用统一插头，适配器负责转成各国插座。</strong>这是"AI 网关"最核心的能力——屏蔽 LLM 厂商差异。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Provider 架构</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ai-proxy/provider/provider.go:265 —— 基接口极简
+type Provider interface { GetProviderType() string }
+// providerInitializer 接口（:211）：ValidateConfig + CreateProvider
+// providerInitializers 注册表（:224）：39 家厂商的 map
+// CreateProvider（:920）：按 typ 从注册表取 initializer 创建</code></pre>
+                <div class="anno">读法：<b>又是工厂 + 注册表模式（贯穿所有项目）：<code>providerInitializers</code> 是"厂商名 → 构造器"的 map，<code>CreateProvider</code> 按配置的 <code>type</code> 取对应厂商实现。基接口 <code>Provider</code> 极简（只有 <code>GetProviderType</code>），能力靠可选接口组合（L04）。</b>加一家新厂商 = 实现接口 + 注册进 map。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>39 家厂商</h1></div>
+            <div class="card">
+                <p><code>providerInitializers</code>（<code>provider.go:224</code>）注册 39 家：openai/azure/qwen(通义千问)/claude/gemini/deepseek/moonshot(月之暗面)/doubao(豆包)/hunyuan(混元)/spark(讯飞星火)/baidu(文心)/minimax/bedrock(AWS)/vertex(Google)/ollama/vllm…</p>
+                <div class="baby"><span class="t">为什么能支持这么多？</span>
+                因为架构好——每家厂商是一个 <code>provider/&lt;厂商&gt;.go</code> 文件，实现"把统一 OpenAI 请求翻译成本厂商格式"的接口。<strong>新增一家厂商，不用改核心代码，只写一个新文件 + 注册。所以社区能快速贡献新厂商支持——从最初几家到现在 39 家。</strong>国产大模型（通义/文心/星火/混元/豆包/月之暗面/DeepSeek）全覆盖——这是 Higress 在国内 AI 场景的巨大优势。<strong>"开闭原则"（对扩展开放）让 ai-proxy 能跟上 LLM 厂商爆发的速度。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>可选接口组合</h1></div>
+            <div class="card">
+<pre><code class="language-go">// provider.go 一组可选能力接口（Go 鸭子类型/类型断言）：
+RequestHeadersHandler（:269）、RequestBodyHandler（:273）
+StreamingResponseBodyHandler（:277）
+TransformRequestHeadersHandler（:289）、TransformRequestBodyHandler（:293）
+TransformResponseBodyHandler（:307）
+// 各 provider 按需实现哪几个（不用全实现）</code></pre>
+                <div class="baby"><span class="t">"能力接口"按需实现（优雅设计）</span>
+                不同厂商差异大——有的只需改 URL/鉴权（简单），有的需要大改请求体（复杂）。<strong>如果基接口塞满所有方法，每家厂商都得实现一堆用不上的空方法。ai-proxy 的做法：基接口只有 <code>GetProviderType</code>，其余能力拆成一组<strong>可选接口</strong>——厂商需要哪个就实现哪个。运行时用 Go 的<strong>类型断言</strong>判断"这个 provider 实现了 <code>TransformRequestBody</code> 吗"，实现了才调。</strong>（回想 Envoy 课 Day 13 的组合式 adapter——同一个思想！）<strong>这让简单厂商代码极少、复杂厂商能全定制——优雅的可扩展设计。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>统一 OpenAI 协议</h1></div>
+            <div class="card">
+<pre><code class="language-go">// ai-proxy/main.go 路径→ApiName 映射（:51）：
+// /v1/chat/completions → ApiNameChatCompletion（覆盖 OpenAI/Anthropic/Qwen 各风格）
+// onHttpRequestHeader（:217）取 activeProvider → 解析 apiName
+//   Claude↔OpenAI 协议自动转换（:251，needClaudeResponseConversion）
+// onHttpRequestBody（:314）→ provider.OnRequestBody 做模型映射 + 请求体改写</code></pre>
+                <div class="anno">读法：<b>对客户端永远暴露 OpenAI（或 Anthropic）协议。<code>ai-proxy</code> 识别请求路径（<code>/v1/chat/completions</code> 等）→ 找到目标 provider → 把统一请求翻译成厂商真实格式。<strong>甚至能自动转协议</strong>——客户端用 Claude 协议，后端是 OpenAI，自动转换（<code>needClaudeResponseConversion</code>）。</b>这就是"万能适配器"的翻译现场。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>模型映射</h1></div>
+            <div class="card">
+<pre><code class="language-go">// provider.go mapModel（:998）支持 前缀*/~正则/*
+// defaultTransformRequestBody（:1396）用 sjson 只替换 model 名
+//   避免整体反序列化以提性能</code></pre>
+                <div class="baby"><span class="t">模型映射 + sjson 性能优化</span>
+                <strong>模型映射：让你把客户端请求的模型名（如 <code>gpt-4</code>）映射到实际后端模型（如通义的 <code>qwen-max</code>），支持前缀/正则/通配。</strong>于是应用无感切换底层模型。<strong>性能细节：改请求体里的 model 名，用 <code>sjson</code>（只改 JSON 里那一个字段）而非"反序列化整个 body → 改 → 再序列化"——因为 LLM 请求体可能很大（长 prompt），整体反序列化慢。</strong>只动一个字段的 sjson 快得多。<strong>这是"热路径性能优化"的实战——大 body 场景避免不必要的全量解析。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>model-router</h1></div>
+            <div class="card">
+                <p><code>extensions/model-router</code>（<code>main.go:204</code>）：从 body 取 <code>model</code>，<code>higress/auto</code> 时按最后一条 user 消息正则命中目标模型，否则把 <code>provider/model</code> 拆进 header（<code>x-higress-llm-model</code>），交给 Envoy 按 header 选上游集群。</p>
+                <div class="baby"><span class="t">model-router = "按模型路由到不同后端"</span>
+                <strong>ai-proxy 管"协议转换"，model-router 管"路由决策"——根据请求的 model 字段，决定转发到哪个 LLM 后端集群。</strong>比如 <code>gpt-*</code> 走 OpenAI 集群、<code>qwen-*</code> 走通义集群。它把模型信息拆进 header，Envoy 按 header 匹配路由（回想 Istio 课 Day 08 的 header 路由）。<strong>甚至支持 <code>higress/auto</code>——按用户问题内容智能选模型（简单问题用便宜模型、复杂问题用强模型）。</strong>ai-proxy + model-router 配合：先路由选后端、再协议转换。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ai-proxy 解决什么？为什么叫"万能适配器"？</li>
+                    <li>Provider 架构用什么模式？基接口为什么极简？</li>
+                    <li>为什么能支持 39 家厂商？（开闭原则）</li>
+                    <li>可选接口组合怎么工作？和 Envoy adapter 什么关系？</li>
+                    <li>模型映射是什么？sjson 为什么是性能优化？model-router 干什么？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/higress-group/higress/plugins/wasm-go/extensions/ai-proxy
+grep -n 'providerInitializers\|type Provider interface\|func CreateProvider' provider/provider.go
+ls provider/ | head -40   # 看有多少厂商文件</code></pre>
+                <div class="tip"><strong>明天预告 · Day 17</strong>：<strong>AI 增强插件</strong>——AI 网关不只代理：Token 限流（按真实 token 数扣减）、AI 统计（可观测）、语义缓存、内容安全。以及 Token 治理闭环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="higress-ai-day15.html" style="color:var(--accent-cyan);">&larr; Day 15 golang-filter</a>
+                <a href="higress-ai-day17.html" style="color:#06b6d4;">Day 17 · AI 增强插件 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
