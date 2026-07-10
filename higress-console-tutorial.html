@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Higress Console 源码学习 · 20 天总目录（网关控制台）</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .content { max-width: 1180px; }
+        .arch-anim { position:relative; display:flex; flex-direction:column; gap:9px; padding:18px; margin:10px 0 4px;
+            background:radial-gradient(120% 120% at 50% 0%, rgba(20,184,166,.09), transparent 70%); border-radius:14px; }
+        .arch-row { position:relative; border:1px solid var(--lc,var(--border-color)); border-radius:11px; padding:12px 16px;
+            background:var(--bg-card); overflow:hidden; transition:transform .25s,box-shadow .25s; }
+        .arch-row:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(0,0,0,.35); }
+        .arch-row::before { content:''; position:absolute; inset:0;
+            background:linear-gradient(90deg,transparent,var(--glow,rgba(20,184,166,.12)),transparent);
+            transform:translateX(-100%); animation:sweep 4.5s linear infinite; animation-delay:var(--d,0s); }
+        @keyframes sweep { 0%{transform:translateX(-100%)} 60%,100%{transform:translateX(100%)} }
+        .arch-row .lbl { font-size:11px; font-weight:800; letter-spacing:.06em; color:var(--lc); margin-bottom:7px; position:relative; }
+        .arch-row .boxes { display:flex; gap:7px; flex-wrap:wrap; position:relative; }
+        .arch-row .b { flex:1; min-width:110px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color);
+            border-radius:7px; padding:8px 9px; font-size:12px; color:var(--text-secondary); }
+        .arch-row .b strong { display:block; color:var(--text-primary); font-size:12.5px; margin-bottom:2px; }
+        .L1{--lc:#14b8a6;--glow:rgba(20,184,166,.16)} .L2{--lc:#f59e0b;--glow:rgba(245,158,11,.14)}
+        .L3{--lc:#3b82f6;--glow:rgba(59,130,246,.13)} .L4{--lc:#ec4899;--glow:rgba(236,72,153,.12)}
+        .flow-dot { position:absolute; left:50%; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:#fff;
+            box-shadow:0 0 10px 3px rgba(20,184,166,.85); animation:fall 3.4s cubic-bezier(.6,0,.4,1) infinite; z-index:3; opacity:0; }
+        @keyframes fall { 0%{top:7%;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:93%;opacity:0} }
+        .loopd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 14px;font-size:12.5px;text-align:center}
+        .loopd .n b{display:block;color:#14b8a6;font-size:13px}.loopd .a{color:#f59e0b;font-weight:800;font-size:16px}
+        .week-bar { display:flex; align-items:center; gap:12px; margin:36px 0 14px; padding-left:2px; }
+        .week-bar .wk { width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+        .week-bar h2 { font-size:17px; font-weight:700; margin:0; } .week-bar span { font-size:12px; color:var(--text-muted); }
+        .day-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+        .day-card { display:flex; flex-direction:column; gap:8px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:18px; text-decoration:none; transition:transform .2s,border-color .2s,box-shadow .2s; }
+        .day-card:hover { transform:translateY(-4px); border-color:rgba(20,184,166,.45); box-shadow:0 12px 34px rgba(20,184,166,.10); }
+        .day-card .top { display:flex; align-items:center; gap:10px; }
+        .day-card .num { width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;font-family:'SF Mono',monospace; }
+        .day-card h3 { font-size:15px; font-weight:700; color:var(--text-primary); margin:0; line-height:1.35; }
+        .day-card p { font-size:12.5px; color:var(--text-secondary); margin:0; line-height:1.6; flex:1; }
+        .day-card .foot { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+        .day-card .mins { font-size:11px; color:var(--text-muted); }
+        .day-card .go { font-size:12px; font-weight:600; color:#14b8a6; }
+        .day-card.soon { opacity:.55; cursor:default; }
+        .day-card.soon:hover { transform:none; border-color:var(--border-color); box-shadow:none; }
+        .day-card.soon .go { color:var(--text-muted); }
+        .badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; background:rgba(34,197,94,.12); color:var(--accent-green); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">HC</div>
+            <h2>Higress Console</h2>
+            <p class="version">网关控制台 · 20 天源码学习</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">总目录</li>
+            <li><a href="#intro" class="nav-link active">开篇 · 这是个什么项目</a></li>
+            <li><a href="#arch" class="nav-link">架构全景（动图）</a></li>
+            <li><a href="#how" class="nav-link">怎么用这份教程</a></li>
+            <li class="nav-group-title">第 1 周 · 后端架构</li>
+            <li><a href="#week1" class="nav-link">Day 01 - 05</a></li>
+            <li class="nav-group-title">第 2 周 · SDK 与配置</li>
+            <li><a href="#week2" class="nav-link">Day 06 - 10</a></li>
+            <li class="nav-group-title">第 3 周 · AI/插件/消费者</li>
+            <li><a href="#week3" class="nav-link">Day 11 - 15</a></li>
+            <li class="nav-group-title">第 4 周 · 前端/部署</li>
+            <li><a href="#week4" class="nav-link">Day 16 - 20</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">源码深度学习 · 零基础友好 · higress-group 4/5</span>
+            <h1 class="part-title">Higress Console 源码学习</h1>
+            <p class="part-desc">20 天 · 每天 30 分钟 · 逐层读懂 Higress 的 Web 管理控制台——一个全栈应用（Java Spring Boot 后端 + React 前端）。它让你在界面上管理路由、服务、插件、AI 供应商，背后翻译成 Higress 配置（Ingress + 注解 + CRD）。</p>
+        </div>
+
+        <section id="intro" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>开篇 · 这是个什么项目</h1></div>
+            <div class="card">
+                <p><strong>Higress Console</strong> 是 Higress（上一站的 AI 网关）的<strong>Web 管理控制台</strong>——一个全栈应用：<strong>Java Spring Boot 后端 + React/TypeScript 前端</strong>。用户在浏览器界面上点点点管理路由、服务源、域名、证书、Wasm 插件、AI 供应商、消费者，控制台把这些操作翻译成 Higress 认识的配置（K8s Ingress + <code>higress.io/*</code> 注解 + CRD），写进 K8s。</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：Console = <strong>React 前端（管理界面）</strong> + <strong>Spring Boot 后端（REST API）</strong> + <strong>SDK（配置抽象）</strong> + <strong>K8s 客户端（读写 Ingress/CRD/ConfigMap/Secret）</strong>。你在界面操作 → 前端调后端 REST → Service 处理 → SDK 写 K8s CRD → Higress 控制器（上一站）读到并生效。</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-item"><div class="feature-icon">🖥️</div><h4>React 前端</h4><p>ice.js + antd 管理界面，动态渲染插件配置表单。</p></div>
+                    <div class="feature-item"><div class="feature-icon">☕</div><h4>Spring Boot 后端</h4><p>REST API + Service 分层，274 个 Java 文件。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🔌</div><h4>SDK + K8s 客户端</h4><p>配置抽象 + 读写 Ingress/CRD/ConfigMap。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🤖</div><h4>AI 供应商管理</h4><p>配置 LLM provider、插件、消费者。</p></div>
+                </div>
+                <div class="info-box"><strong>与上一站的关系（承上）</strong>：上一站 Higress 是"控制器/数据面"（读配置生效流量）；<strong>Console 是"给人用的管理界面"——它<strong>生成</strong>那些 Higress 配置（Ingress + 注解）</strong>。你在 Console 建一条路由，最终变成 Higress 控制器（上一站 Day 04）翻译的那个 Ingress。建议先学完 Higress。源码在 <code>higress-console/backend/</code>（Java）+ <code>frontend/</code>（React）。</div>
+            </div>
+        </section>
+
+        <section id="arch" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>架构全景（动起来看）</h1></div>
+            <div class="card">
+                <p>下图那颗<strong>发光小球</strong>是"用户在界面操作 → 变成 Higress 配置"的旅程。从上到下：前端 → 后端 API → SDK → K8s。</p>
+                <div class="arch-anim">
+                    <div class="flow-dot"></div>
+                    <div class="arch-row L4" style="--d:0s"><div class="lbl">L1 · React 前端（浏览器）</div><div class="boxes">
+                        <div class="b"><strong>页面</strong>路由/插件/AI</div>
+                        <div class="b"><strong>动态表单</strong>插件配置</div>
+                        <div class="b"><strong>API 层</strong>axios</div>
+                    </div></div>
+                    <div class="arch-row L2" style="--d:.6s"><div class="lbl">L2 · Spring Boot 后端</div><div class="boxes">
+                        <div class="b"><strong>Controller</strong>REST API</div>
+                        <div class="b"><strong>Service</strong>业务逻辑</div>
+                        <div class="b"><strong>Model</strong>领域实体</div>
+                    </div></div>
+                    <div class="arch-row L1" style="--d:1.2s"><div class="lbl">L3 · SDK（配置抽象）</div><div class="boxes">
+                        <div class="b"><strong>ConfigService</strong>配置管理</div>
+                        <div class="b"><strong>注解生成</strong>higress.io/*</div>
+                        <div class="b"><strong>存储抽象</strong>K8s/单机</div>
+                    </div></div>
+                    <div class="arch-row L3" style="--d:1.8s"><div class="lbl">L4 · Kubernetes（存储）</div><div class="boxes">
+                        <div class="b"><strong>Ingress</strong>路由</div>
+                        <div class="b"><strong>CRD</strong>McpBridge/WasmPlugin</div>
+                        <div class="b"><strong>ConfigMap/Secret</strong></div>
+                    </div></div>
+                </div>
+                <p>Console 的心智模型是"<strong>界面操作 → REST API → SDK → K8s 配置 →（Higress 控制器读到）</strong>"：</p>
+                <div class="loopd">
+                    <span class="n"><b>界面点击</b>建路由</span><span class="a">→</span>
+                    <span class="n"><b>后端 Service</b>处理</span><span class="a">→</span>
+                    <span class="n"><b>SDK</b>写 Ingress+注解</span><span class="a">→</span>
+                    <span class="n"><b>Higress 控制器</b>读到生效</span>
+                </div>
+                <div class="tip"><strong>Console 和 Higress 控制器怎么协作？</strong> Console <strong>不直接控制 Envoy</strong>——它只是把用户操作写成 K8s 里的 Ingress/CRD/ConfigMap。<strong>然后上一站的 Higress 控制器 watch 到这些资源，翻译成 Istio 配置喂 istiod、生成 xDS 给 Envoy。</strong>Console 是"人机接口"，Higress 控制器是"配置引擎"——通过 K8s 资源解耦。</div>
+            </div>
+        </section>
+
+        <section id="how" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>怎么用这份教程</h1></div>
+            <div class="feature-grid">
+                <div class="feature-item"><div class="feature-icon">⏱️</div><h4>每天 30 分钟</h4><p>一天一个独立页面，跟着"今日小结 + 动手"收尾。</p></div>
+                <div class="feature-item"><div class="feature-icon">👶</div><h4>零基础友好</h4><p>不假设你懂 Spring Boot/React/K8s，术语首次出现都有大白话解释。</p></div>
+                <div class="feature-item"><div class="feature-icon">📍</div><h4>精确到行号</h4><p>关键代码标 <code>文件:行号</code>，可在真源码里跳转对照。</p></div>
+            </div>
+            <div class="tip"><strong>一条主线</strong>：从"控制台是什么、后端怎么分层"，到"SDK 怎么把操作翻译成 K8s 配置"，到"AI/插件/消费者怎么管理"，最后是"前端怎么渲染、怎么部署"。<strong>建议先学完 Higress。</strong></div>
+        </section>
+
+        <!-- W1 -->
+        <div class="week-bar" id="week1"><div class="wk" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">W1</div><h2>第 1 周 · 后端架构</h2><span>全景、Spring Boot 启动、分层、REST API、Service</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">01</div><h3>项目全景（网关控制台）</h3></div><p>控制台是什么、全栈架构、和 Higress 的关系。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">02</div><h3>后端启动（Spring Boot）</h3></div><p>main 类、Maven 模块、配置加载。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">03</div><h3>后端分层</h3></div><p>Controller/Service/SDK 三层职责。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">04</div><h3>REST API 层</h3></div><p>@RestController 暴露的端点（路由/服务/插件…）。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#14b8a6,#f59e0b);">05</div><h3>Service 业务层</h3></div><p>@Service 怎么编排业务操作。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W2 -->
+        <div class="week-bar" id="week2"><div class="wk" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">W2</div><h2>第 2 周 · SDK 与配置存储</h2><span>SDK、配置存储、K8s 客户端、领域模型、操作流转</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">06</div><h3>SDK 抽象</h3></div><p>backend/sdk 提供的配置管理抽象。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">07</div><h3>配置存储（K8s vs 单机）</h3></div><p>ConfigService 抽象 + 两种实现。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">08</div><h3>K8s 客户端</h3></div><p>读写 Ingress/CRD/ConfigMap/Secret。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">09</div><h3>领域模型</h3></div><p>Route/Service/Domain/Certificate/Consumer 等实体。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#f59e0b,#3b82f6);">10</div><h3>一次操作的流转</h3></div><p>创建路由 → Ingress+注解，端到端追踪。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W3 -->
+        <div class="week-bar" id="week3"><div class="wk" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">W3</div><h2>第 3 周 · AI/插件/消费者</h2><span>AI 供应商、插件、消费者、路由/服务、MCP</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">11</div><h3>AI 供应商管理</h3></div><p>配置 LLM provider → ai-proxy 插件配置。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">12</div><h3>插件管理</h3></div><p>WasmPlugin 管理 + jsonschema 校验。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">13</div><h3>消费者/鉴权管理</h3></div><p>consumer（API key/JWT）配置。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">14</div><h3>路由/服务源管理</h3></div><p>route 和 service source（注册中心）管理。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#3b82f6,#ec4899);">15</div><h3>MCP 管理</h3></div><p>mcp-server 配置管理。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <!-- W4 -->
+        <div class="week-bar" id="week4"><div class="wk" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">W4</div><h2>第 4 周 · 前端/部署</h2><span>前端栈、页面、动态表单、部署、收官</span></div>
+        <div class="day-grid">
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">16</div><h3>前端技术栈</h3></div><p>ice.js/React、antd、i18n、构建配置。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">17</div><h3>前端结构与页面</h3></div><p>pages/components/services、关键页面拆解。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">18</div><h3>动态插件配置表单 + API 层</h3></div><p>从 jsonschema 渲染表单 + axios 调后端。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">19</div><h3>部署</h3></div><p>Dockerfile/helm，怎么和 Higress 一起部署。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+            <a class="day-card soon"><div class="top"><div class="num" style="background:linear-gradient(135deg,#ec4899,#14b8a6);">20</div><h3>收官串讲</h3></div><p>全栈回顾 + higress-group 四站串讲。</p><div class="foot"><span class="mins">≈30 min</span><span class="go">即将上线</span></div></a>
+        </div>
+
+        <div class="card" style="margin-top:26px;text-align:center;">
+            <p style="margin:0;">📅 <strong>higress-group 系列 4/5，日拱一卒陆续上线</strong>。建议先学 Higress 再学本课。</p>
+        </div>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+        });
+    </script>
+</body>
+</html>
