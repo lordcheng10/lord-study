@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · Agent 执行循环 — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .two .c{border:1px solid var(--border-color);border-radius:9px;padding:13px;background:var(--bg-secondary)}
+        .two .c h4{margin:0 0 6px;font-size:13px} .two .c.a h4{color:#10b981} .two .c.b h4{color:#0ea5e9} .two .c li{font-size:11.5px;color:var(--text-secondary);margin:3px 0}
+        @media(max-width:768px){.two{grid-template-columns:1fr}}
+        .react{max-width:440px;margin:14px auto}
+        .react .t2{border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;margin:6px 0;background:var(--bg-secondary);font-size:12.5px}
+        .react .t2 b{color:#10b981}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#3b82f6);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">Agent 执行循环 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两级 step</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 单步执行器</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 按类型分派 handler</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 迭代步的自治循环</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 执行工具与观察</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 循环从哪来</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 结束条件</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day05.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day07.html" class="nav-link" style="color:var(--accent-green);">Day 07 工作流 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 Agent 执行</span>
+            <h1 class="part-title">Agent 执行循环</h1>
+            <p class="part-desc">拆开智能体的"大脑"。SuperAGI 有<b>两级 step</b>（宏观工作流步 + 微观迭代步），经典的 think→选工具→执行→观察 就发生在迭代步里。读 <code>jobs/agent_executor.py</code> + <code>agent/</code>。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两级 step（一定要分清）</h1></div>
+            <div class="card">
+                <div class="two">
+                    <div class="c a"><h4>外层 AgentWorkflowStep（宏观流程节点）</h4>
+                        <ul><li>类型：TOOL / ITERATION_WORKFLOW / WAIT_STEP</li><li>是"整个流程的一个大步骤"</li><li>节点之间用 next_steps 连成有向图</li></ul>
+                    </div>
+                    <div class="c b"><h4>内层 IterationWorkflowStep（微观迭代步）</h4>
+                        <ul><li>当外层是 ITERATION_WORKFLOW 时，内部还有迭代小步</li><li>经典 think→选工具→执行→观察 在这里</li><li>常指回自己形成循环</li></ul>
+                    </div>
+                </div>
+                <div class="baby"><span class="t">为什么要两级？</span>
+                <strong>外层</strong>是"宏观编排"——整个任务分几个大阶段（比如：初始化任务 → 循环处理任务 → 汇总）。<strong>内层</strong>是"微观自治"——在"循环处理"这个大阶段里，智能体一轮轮 think-act-observe。<strong>两级解耦：外层用工作流图精确控制大流程（可分支、可循环、可等待），内层让 LLM 在某个阶段内自主发挥。</strong>这比"纯放飞的一个大循环"更结构化、更可控——呼应整个 Agent 行业"可控编排 + 局部自主"的觉悟。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>单步执行器</h1></div>
+            <div class="card">
+                <p><code>AgentExecutor.execute_next_step</code>（<code>jobs/agent_executor.py:39</code>）——注意名字是"下一步"，只跑一步：</p>
+<pre><code class="language-python"># 39-56: 取 AgentExecution，防呆检查（旧执行跳过、状态不对退出）
+# 59-61: _check_for_max_iterations 检查迭代上限（Day 02 熔断）
+# 83-87: 按 current_agent_step_id 取当前 workflow step，调 __execute_workflow_step 跑这一步</code></pre>
+                <div class="anno">读法：<b>每次调用只推进"一个 workflow step"，跑完就返回（然后自我重排续跑，Day 05 L05）。</b>OpenAI 模型还会初始化向量长期记忆（Day 13）。这个"单步执行器"是被 Celery 反复调用的——回忆"循环在队列里"（Day 02）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>按类型分派 handler（策略模式）</h1></div>
+            <div class="card">
+<pre><code class="language-python"># agent_executor.py:105
+if step.action_type == "TOOL":
+    AgentToolStepHandler(...).execute_step()              # 编排者钦定工具
+elif step.action_type == "ITERATION_WORKFLOW":
+    AgentIterationStepHandler(...).execute_step()         # LLM 自选工具（经典循环）
+elif step.action_type == "WAIT_STEP":
+    AgentWaitStepHandler(...).execute_step()              # 等待</code></pre>
+                <div class="anno">读法：<b>按外层 step 的类型选不同 handler——这是策略/工厂模式。</b>两种"选工具"模式很关键：<strong>TOOL 步</strong>（编排者预先指定用哪个工具，确定性）vs <strong>ITERATION_WORKFLOW 步</strong>（LLM 每轮自己选工具，像 ReAct）。Day 07 讲外层工作流，今天聚焦迭代步（L04）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>迭代步的自治循环（经典 think→act→observe）</h1></div>
+            <div class="card">
+                <p><code>AgentIterationStepHandler.execute_step</code>（<code>agent/agent_iteration_step_handler.py:46</code>）最贴近经典循环：</p>
+                <div class="react">
+                    <div class="t2"><b>build_tools</b> 组装可用工具列表（:62）</div>
+                    <div class="t2"><b>build_agent_prompt</b> 填提示词模板（:63，Day 08）</div>
+                    <div class="t2"><b>build_agent_messages</b> 拼提示+历史 Feed（:69，Day 08）</div>
+                    <div class="t2"><b>llm.chat_completion</b> 调 LLM → think + 选工具（:74）</div>
+                    <div class="t2"><b>output_handler.handle</b> 执行工具 + 观察结果（:96，Day 09）</div>
+                    <div class="t2"><b>决定去向</b> 完成/等待/前进到下一迭代步（:101）</div>
+                </div>
+                <div class="anno">读法：<b>一次迭代步 = 拼提示（含历史记忆）→ 调 LLM（think + 选工具，一次调用同时完成）→ 执行工具、观察结果 → 决定下一步。</b>think 和"选哪个工具"都在<strong>同一次 LLM 调用</strong>里完成（LLM 输出结构化 JSON，含 thoughts + tool，Day 09 解析）。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>执行工具与观察（闭环）</h1></div>
+            <div class="card">
+                <p><code>ToolOutputHandler.handle</code>（<code>agent/output_handler.py:33</code>）执行工具并形成观察闭环：</p>
+<pre><code class="language-python"># 45: handle_tool_response 真正执行工具（ToolExecutor.execute）
+# 48-61: 把 assistant 回复 + 工具结果都写进 AgentExecutionFeed（role=assistant/system）
+# 65: add_text_to_memory 额外写入向量库（长期记忆，Day 13）</code></pre>
+                <div class="baby"><span class="t">"观察"怎么喂回下一轮？</span>
+                工具执行的结果被写进 <strong>Feed</strong>（Day 02 的短期记忆）。<strong>下一轮迭代步 <code>build_agent_messages</code> 会把这些 Feed 读回来、拼进 LLM 的对话上下文</strong>——于是 LLM 看到"我上一步调了什么工具、得到什么结果"，据此想下一步。<strong>这就是 observe → 下一次 think 的闭环——通过 Feed 落库再读回实现，而非内存变量。</strong><code>ToolExecutor.execute</code>（<code>tool_executor.py:18</code>）里：工具名是 <code>finish</code> → 返回 COMPLETE（智能体自己宣布结束）；未知工具 → 返回错误让 LLM 改正（自我纠错）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>循环从哪来</h1></div>
+            <div class="card">
+                <p>迭代步执行完，决定"下一步去哪"（<code>agent_iteration_step_handler.py:101</code>）。关键：内层迭代步的 <code>next_step_id</code> 常常<strong>指回自己</strong>（如 <code>workflow_seed.py:188</code> 的 <code>add_next_workflow_step(step1.id, step1.id)</code>）。</p>
+                <div class="baby"><span class="t">"重复"就是这么来的</span>
+                迭代步跑完，把 <code>next_step_id</code> 设成自己 → Celery 重排后又进同一个迭代步 → 再 think-act-observe 一轮 → 又指回自己……<strong>形成 think→act→observe 的反复循环，直到 LLM 调用 <code>finish</code> 工具或超迭代上限。</strong>所以"循环"= 迭代步的 next_step 指向自身 + Celery 反复重排。<strong>这就是"循环在数据（next_step_id）和队列里"的具体体现（Day 02 的啊哈点）。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>结束条件</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>LLM 调 finish 工具</strong>：智能体判断目标达成，调用内置 <code>finish</code> → 返回 COMPLETE。</li>
+                    <li><strong>任务队列空</strong>：任务分解型工作流，所有任务处理完。</li>
+                    <li><strong>走到 COMPLETE 边</strong>：工作流走到 <code>step_id=-1</code>。</li>
+                    <li><strong>max_iterations 熔断</strong>：超上限强制停（Day 02）。</li>
+                    <li><strong>等待人工</strong>：遇到 WAITING_FOR_PERMISSION 挂起（Day 07/受限模式）。</li>
+                </ul>
+                <div class="glossary">多个出口保证智能体"能停下来"——正常靠 LLM 自己 finish，异常靠熔断兜底，敏感操作靠人工审批挂起。<strong>"能自主循环、也能可靠停下"是生产级智能体的必备。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>两级 step（外层工作流步 vs 内层迭代步）的区别？</li>
+                    <li>TOOL 步和 ITERATION_WORKFLOW 步的"选工具"方式区别？</li>
+                    <li>迭代步的 think→act→observe 具体几步？</li>
+                    <li>"观察"怎么通过 Feed 喂回下一轮？</li>
+                    <li>循环怎么来的？（next_step 指回自己 + Celery 重排）结束条件？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+sed -n '39,127p' $P/jobs/agent_executor.py | head -50   # 单步执行器 + 分派
+sed -n '46,121p' $P/agent/agent_iteration_step_handler.py | head -50  # 迭代步循环
+sed -n '33,66p' $P/agent/output_handler.py              # 执行工具+观察闭环
+sed -n '18,65p' $P/agent/tool_executor.py               # finish/未知工具</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：<strong>工作流 workflow 与 step</strong>——外层工作流是数据驱动的有向图，支持分支/循环/条件路由。看 <code>fetch_next_step</code> 怎么用"结果字符串"路由、TOOL 步怎么让 LLM 当路由器。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day05.html" style="color:var(--accent-cyan);">&larr; Day 05 旅程</a>
+                <a href="superagi-day07.html" style="color:var(--accent-green);">Day 07 · 工作流 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

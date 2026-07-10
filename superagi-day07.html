@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 07 · 工作流 workflow 与 step — SuperAGI 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .glossary b { color:var(--accent-cyan); }
+        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
+        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .gd{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
+        .gd .n{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);text-align:center}
+        .gd .n b{display:block;color:#0ea5e9;font-size:11px} .gd .a{color:#10b981;font-weight:800}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#0ea5e9,#3b82f6);">07</div>
+            <h2>Day 07</h2>
+            <p class="version">工作流 workflow 与 step · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 工作流是有向图</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · step 节点结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 条件路由 fetch_next_step</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · TOOL 步：LLM 当路由器</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 内置工作流示例</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 分支与循环</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 数据驱动流程的意义</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="superagi-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 执行循环</a></li>
+            <li><a href="superagi-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="superagi-day08.html" class="nav-link" style="color:var(--accent-green);">Day 08 提示词 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 07 / 共 20 天 · 第 2 周 Agent 执行</span>
+            <h1 class="part-title">工作流 workflow 与 step</h1>
+            <p class="part-desc">SuperAGI 智能体不是纯放飞循环——外层是<b>数据驱动的工作流有向图</b>，支持分支、循环、条件路由、等待。今天读工作流模型。</p>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>工作流是有向图</h1></div>
+            <div class="card">
+                <p><code>AgentWorkflow</code>（一个工作流）由多个 <code>AgentWorkflowStep</code>（节点）组成，节点之间用 <code>next_steps</code> 连成<strong>有向图</strong>。智能体绑定一个工作流（<code>Agent.agent_workflow_id</code>，Day 02）。</p>
+                <div class="gd">
+                    <span class="n"><b>TRIGGER</b>起点</span><span class="a">→</span>
+                    <span class="n"><b>Step A</b>初始化任务</span><span class="a">→</span>
+                    <span class="n"><b>Step B</b>迭代循环</span><span class="a">→</span>
+                    <span class="n" style="border-color:#22c55e"><b>COMPLETE</b>-1</span>
+                </div>
+                <div class="baby"><span class="t">"数据驱动的流程图"是什么意思？</span>
+                智能体"按什么流程干活"不是写死在代码里，而是<strong>存在数据库里的一张图</strong>（节点 = 步骤，边 = next_steps）。改流程 = 改数据库里的图，不用改代码。<strong>于是能有多种预置工作流（目标驱动、任务分解、SuperCoder…），还能在市场分享工作流。</strong>这和 CrewAI Flow、AutoGPT Graph 思路一致——把流程建模成数据/图，而非硬编码。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>step 节点结构</h1></div>
+            <div class="card">
+<pre><code class="language-python"># models/workflows/agent_workflow_step.py:13
+class AgentWorkflowStep(DBBaseModel):
+    agent_workflow_id = Column(Integer)
+    step_type = Column(String)        # TRIGGER / NORMAL
+    action_type = Column(String)      # TOOL / ITERATION_WORKFLOW / WAIT_STEP
+    action_reference_id = Column(Integer)  # 指向具体 tool / 迭代工作流 / wait
+    next_steps = Column(JSONB)        # ★ 带条件的出边：[{"step_response":"YES","step_id":"..."}]</code></pre>
+                <div class="anno">读法：<b>一个节点存"我是什么类型（action_type）、我引用哪个具体动作（action_reference_id）、我的出边（next_steps）"。</b><code>next_steps</code> 是 JSONB，形如"结果是 YES 就去 step5、NO 就去 step3"——这就是<strong>带条件的边</strong>，让流程能分支。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>条件路由 fetch_next_step</h1></div>
+            <div class="card">
+                <p>路由核心 <code>fetch_next_step</code>（<code>agent_workflow_step.py:252</code>）：拿"当前步的执行结果字符串"去 <code>next_steps</code> 里匹配对应 <code>step_id</code>：</p>
+<pre><code class="language-python"># 拿执行结果（如 "YES"）匹配 next_steps 里的 step_response
+# 匹配到 → 去对应 step_id
+# 匹配不到 → 走 "default" 边
+# step_id == "-1" → COMPLETE（工作流结束）</code></pre>
+                <div class="anno">读法：<b>每个步骤跑完产出一个"结果字符串"，用它决定走哪条边——这就是条件路由。</b>比如一个"检查是否完成"的步骤返回 YES/NO，YES 走完成分支、NO 回到处理步（循环）。<code>step_id="-1"</code> 是约定的"结束"标记。</div>
+                <div class="baby"><span class="t">"结果字符串决定走向"很像状态机</span>
+                这就是一个状态机：当前状态（step）+ 输入（结果字符串）→ 下一状态（next step）。<strong>用数据（next_steps 表里的映射）而非代码 if-else 来定义状态转移——所以能可视化编辑、能分享、能有多套工作流。</strong>Day 06 的"外层 step 循环"就是靠这个路由推进的。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>TOOL 步：LLM 当路由器</h1></div>
+            <div class="card">
+                <p><code>AgentToolStepHandler.execute_step</code>（<code>agent/agent_tool_step_handler.py:39</code>）——TOOL 步是"编排者钦定工具"的确定性步骤（对比迭代步 LLM 自选）：</p>
+<pre><code class="language-python"># 1. 取绑定的 tool（tool_name, input_instruction, output_instruction）
+# 2. _process_input_instruction：让 LLM 只为这个"指定工具"生成 args
+# 3. 执行工具
+# 4. 若配了 output_instruction：_process_output_instruction 再调 LLM，
+#    把工具输出"归类成一个枚举结果"（从 output_options 里选一个）
+#    → 这个字符串就是 step_response，喂给 fetch_next_step 决定走哪条边</code></pre>
+                <div class="baby"><span class="t">"LLM 当路由器"是精妙设计</span>
+                TOOL 步先用指定工具干活，然后（可选）<strong>再调一次 LLM 把结果"归类成一个枚举值"</strong>（比如把搜索结果判断成"找到了/没找到"）。这个枚举值就是 <code>step_response</code>，决定工作流走哪条边。<strong>于是 LLM 不只用来"选工具/填参"，还用来"判断结果、做流程路由决策"——LLM 当路由器。</strong>这让工作流能根据 AI 对结果的理解智能地分支，而不只是固定路径。<code>TASK_QUEUE</code>→QueueStepHandler、<code>WAIT_FOR_PERMISSION</code>→人工审批是特殊工具名的分流。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>内置工作流示例</h1></div>
+            <div class="card">
+                <p>内置工作流由 <code>workflow_seed.py</code> 播种（Day 04 的 seeding）：</p>
+                <ul>
+                    <li><strong>Goal Based Workflow</strong>（<code>:183</code>）：单个 ITERATION_WORKFLOW 步，边指回自己 + 一条 COMPLETE 边——<strong>最纯粹的"目标驱动自治循环"</strong>（就是经典 AutoGPT 式的放飞循环）。</li>
+                    <li><strong>Dynamic/Fixed Task Workflow</strong>（<code>:191</code>）：先 Initialize Tasks 生成任务队列，再 Task Queue 步循环消费——<strong>任务分解型</strong>。</li>
+                    <li>还有 Sales、Recruitment、SuperCoder 等领域工作流。</li>
+                </ul>
+                <div class="baby"><span class="t">"目标驱动"vs"任务分解"</span>
+                <strong>Goal Based</strong>：给个目标，智能体自由循环直到达成（灵活但可能跑偏）。<strong>Task 型</strong>：先把大目标拆成一个任务列表，再逐个完成（更有条理）。<strong>SuperAGI 提供多种预置工作流让你按任务性质选——开放探索用目标驱动、有明确子任务用任务分解。</strong>这体现了"工作流即模板"的价值：常见模式沉淀成可选工作流。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>分支与循环</h1></div>
+            <div class="card">
+                <p><code>add_next_workflow_step</code>（<code>agent_workflow_step.py:209</code>）建边。真实例子（<code>workflow_seed.py:99</code>）：</p>
+<pre><code class="language-python">AgentWorkflowStep.add_next_workflow_step(session, step6.id, step7.id, "YES")
+AgentWorkflowStep.add_next_workflow_step(session, step6.id, step5.id, "NO")  # NO 时回到 step5 → 循环</code></pre>
+                <div class="anno">读法：<b>step6 后面：结果 YES → 去 step7（前进）；NO → 回 step5（形成循环）。</b>这让工作流能表达"检查未通过就重来"的循环、"根据情况走不同路径"的分支——比线性流程强大得多。</div>
+                <div class="glossary"><b>起点与推进</b>：<code>AgentExecution.assign_next_step_id</code>（<code>models/agent_execution.py:153</code>）设置 <code>current_agent_step_id</code>；若下一步是 ITERATION_WORKFLOW，还会把内层迭代步设成该迭代工作流的 TRIGGER 步。<strong>两级 step 的衔接就在这里。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>数据驱动流程的意义</h1></div>
+            <div class="card">
+                <ul>
+                    <li><strong>可配置</strong>：改流程改数据库图，不改代码。</li>
+                    <li><strong>可分享</strong>:工作流能在市场分享（像分享一个"最佳实践流程"）。</li>
+                    <li><strong>可控 + 可自主</strong>：外层图精确控制大流程（分支/循环/等待/人工审批），内层迭代步让 LLM 自主发挥——两全。</li>
+                    <li><strong>可视化</strong>:图结构天然能画出来，GUI 可视化编辑。</li>
+                </ul>
+                <div class="glossary"><b>和其它框架对比</b>：SuperAGI 的"工作流图 + 迭代步"≈ CrewAI 的"Flow + Crew"、AutoGPT 的"Graph + Block 执行"——都是"外层确定性编排 + 内层 AI 自主"的组合。<strong>五个框架殊途同归地走向"可控编排 + 局部自主"——这是自主智能体工程化的共同答案。</strong></div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>工作流为什么是"数据驱动的有向图"？</li>
+                    <li>step 节点的 next_steps 怎么表达带条件的边？</li>
+                    <li>fetch_next_step 怎么用结果字符串路由？</li>
+                    <li>TOOL 步怎么"让 LLM 当路由器"？</li>
+                    <li>Goal Based vs Task 型工作流的区别？分支/循环怎么建？</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手</h3>
+<pre><code class="language-bash">P=superagi
+sed -n '13,47p' $P/models/workflows/agent_workflow_step.py    # step 结构
+grep -n 'def fetch_next_step\|def add_next_workflow_step' $P/models/workflows/agent_workflow_step.py
+sed -n '39,72p' $P/agent/agent_tool_step_handler.py           # TOOL 步 LLM 路由
+sed -n '183,215p' $P/agent/workflow_seed.py                   # 内置工作流</code></pre>
+                <div class="tip"><strong>明天预告 · Day 08</strong>：<strong>提示词构建</strong>——role/goal/instructions/工具/记忆怎么拼成 LLM 提示。模板文件 + 变量替换、工具渲染成 JSON schema、历史记忆的滚动摘要压缩。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="superagi-day06.html" style="color:var(--accent-cyan);">&larr; Day 06 执行循环</a>
+                <a href="superagi-day08.html" style="color:var(--accent-green);">Day 08 · 提示词构建 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
