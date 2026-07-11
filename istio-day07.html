@@ -15,6 +15,24 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa .t{font-weight:700;color:#c084fc;display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#7c4dff,#00acc1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -49,9 +67,29 @@
             <p class="part-desc">istiod 最核心的工作：把 CRD + 服务翻译成 Envoy xDS。今天看翻译层的骨架：<code>ConfigGenerator</code> 顶层接口、<code>XdsResourceGenerator</code> 生成器接口、以及 CDS 生成器怎么"薄封装 + 委托"。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在控制面 istiod 之旅的位置（专线通了，今天看总调度室怎么把工单"翻译"成保安听得懂的指令）</div>
+            <div class="steps">
+                <span class="st">D1 全景</span><span class="sep">·</span>
+                <span class="st">D2 启动</span><span class="sep">·</span>
+                <span class="st">D3 配置CRD</span><span class="sep">·</span>
+                <span class="st">D4 服务注册</span><span class="sep">·</span>
+                <span class="st">D5 快照</span><span class="sep">·</span>
+                <span class="st">D6 xDS服务</span><span class="sep">·</span>
+                <span class="st on">D7 生成</span><span class="sep">·</span>
+                <span class="st">D8 Builder</span><span class="sep">·</span>
+                <span class="st">D9 推送</span><span class="sep">·</span>
+                <span class="st">D10 连接</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>ConfigGenerator</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：你写的是 VirtualService，Envoy 只认自己的 xDS</span>
+                你递交的工单是 Istio 的 VirtualService/DestinationRule（人类友好），可 Envoy 只认 Listener/Route/Cluster 这套 xDS 结构。中间必须有个"翻译官"，把工单语言逐条译成 Envoy 语言——这就是配置生成层。</div>
+                <div class="essence"><span class="t">💡 本质：一支分工明确的翻译科</span>
+                配置生成层像总调度室的<strong>翻译科</strong>，按译文种类分窗口：<strong>BuildListeners 译"监听哪些端口"、BuildClusters 译"有哪些后端集群"、BuildHTTPRoutes 译"怎么路由"</strong>。上层的 xDS 生成器（Day 02 的 CdsGenerator 等）是<strong>前台接待</strong>——先判断"这单要不要重译"，要才把活派给对应翻译窗口（core 层 Build 方法）。前台薄、翻译科重，各司其职。</div>
 <pre><code class="language-go">// pilot/pkg/networking/core/configgen.go:29
 type ConfigGenerator interface {
   BuildListeners(node, req) []*listener.Listener        // :33 LDS
@@ -77,6 +115,28 @@ type XdsDeltaResourceGenerator interface {  // 支持增量
 }</code></pre>
                 <div class="baby"><span class="t">两层生成器：xDS 层 vs core 层</span>
                 有两组"生成器"，别混：<strong>①xDS 层的 <code>XdsResourceGenerator</code>（Day 02 注册的 CdsGenerator/LdsGenerator…）——每个 typeURL 一个，是"路由入口"；②core 层的 <code>ConfigGenerator</code>（<code>BuildClusters</code> 等）——真正的翻译逻辑。</strong>xDS 层生成器是<strong>薄封装</strong>，收到请求后判断要不要推、然后委托给 core 层的 Build 方法干活。<strong>这种"入口层 + 逻辑层"分离，让 xDS 协议处理和配置翻译逻辑解耦。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 180" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="20" y="20" fill="#c084fc" font-size="10.5">① xDS 层（前台/薄封装，按 typeURL 一个）</text>
+                        <rect x="20" y="28" width="120" height="38" rx="8" fill="#2a2f4a" stroke="#7c4dff"/><text x="80" y="51" fill="#fff" text-anchor="middle">CdsGenerator</text>
+                        <rect x="160" y="28" width="120" height="38" rx="8" fill="#2a2f4a" stroke="#7c4dff"/><text x="220" y="51" fill="#fff" text-anchor="middle">LdsGenerator</text>
+                        <rect x="300" y="28" width="120" height="38" rx="8" fill="#2a2f4a" stroke="#7c4dff"/><text x="360" y="51" fill="#fff" text-anchor="middle">RdsGenerator</text>
+                        <text x="20" y="112" fill="#34d399" font-size="10.5">② core 层（翻译科/真逻辑，ConfigGenerator）</text>
+                        <rect x="20" y="120" width="120" height="38" rx="8" fill="#1f3a34" stroke="#34d399"/><text x="80" y="143" fill="#fff" text-anchor="middle">BuildClusters</text>
+                        <rect x="160" y="120" width="120" height="38" rx="8" fill="#1f3a34" stroke="#34d399"/><text x="220" y="143" fill="#fff" text-anchor="middle">BuildListeners</text>
+                        <rect x="300" y="120" width="120" height="38" rx="8" fill="#1f3a34" stroke="#34d399"/><text x="360" y="143" fill="#fff" text-anchor="middle">BuildHTTPRoutes</text>
+                        <path d="M80 66 L80 120" stroke="#888" stroke-width="1.4" marker-end="url(#a7)"/><text x="88" y="96" fill="#999" font-size="9.5">needsPush?→委托</text>
+                        <path d="M220 66 L220 120" stroke="#888" stroke-width="1.4" marker-end="url(#a7)"/>
+                        <path d="M360 66 L360 120" stroke="#888" stroke-width="1.4" marker-end="url(#a7)"/>
+                        <rect x="460" y="70" width="160" height="46" rx="8" fill="#26323a" stroke="#00acc1"/><text x="540" y="90" fill="#fff" text-anchor="middle" font-size="10.5">Envoy xDS 资源</text><text x="540" y="106" fill="#bbb" text-anchor="middle" font-size="9.5">Cluster/Listener/Route</text>
+                        <path d="M420 139 Q470 139 500 116" stroke="#00acc1" stroke-width="1.4" fill="none" marker-end="url(#a7b)"/>
+                        <defs>
+                            <marker id="a7" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#888"/></marker>
+                            <marker id="a7b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#00acc1"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">前台（xDS 层）判断"要不要重译"，要才委托给翻译科（core 层 Build 方法），产出 Envoy 认的 xDS 资源。</div>
+                </div>
             </div>
         </section>
 
@@ -107,6 +167,9 @@ func (c CdsGenerator) Generate(proxy, w, req) (...) {
             <div class="card">
                 <p>支持增量的生成器实现 <code>GenerateDeltas</code>。CDS 的 <code>GenerateDeltas</code>（<code>cds.go:132</code>）调 <code>BuildDeltaClusters</code>——解析 cluster 名（<code>outbound|port|subset|hostname</code>），据 <code>ConfigsUpdated</code> 只算增删的集群。</p>
                 <div class="anno">读法：<b>Delta（增量）模式下，只生成/删除"变化的"资源，不重发全部。<code>BuildDeltaClusters</code> 根据"哪些 ServiceEntry/DestinationRule 变了"精确算出要增删哪些集群。</b>Envoy 课讲的 Delta xDS 就是消费这个。全量模式（SotW）则用 <code>Generate</code>。</div>
+                <div class="example"><span class="t">📝 举个例子：一个 cluster 名字里藏着什么</span>
+                istiod 生成的集群名形如 <code>outbound|9080|v2|reviews.default.svc.cluster.local</code>，四段分别是<strong>方向|端口|subset|host</strong>。<br>
+                当你新增一个 <code>DestinationRule</code> 给 reviews 加了 subset <code>v3</code> → <code>BuildDeltaClusters</code> 只需<strong>增</strong>一个 <code>outbound|9080|v3|reviews…</code> 集群，其余集群纹丝不动，也不用重发。这就是靠解析集群名做到的精准增量。</div>
             </div>
         </section>
 
@@ -120,6 +183,9 @@ func (c CdsGenerator) Generate(proxy, w, req) (...) {
 // EDSUpdate（:47）：端点变化直接触发 push，不重算 PushContext</code></pre>
                 <div class="baby"><span class="t">EDS 为什么"特殊对待"？</span>
                 回想 Day 01/05：端点是<strong>最高频</strong>变更资源（Pod 扩缩容随时发生）。<strong>如果每次端点变化都重建整张 PushContext（Day 05），开销巨大。所以 EDS 走独立优化路径：不经过 PushContext、不重算快照，而是直接用一个内存里的 <code>EndpointIndex</code>，端点变了就增量更新这个索引并推送。</strong>其他 xDS（CDS/LDS/RDS）依赖 PushContext，EDS 绕开它。<strong>这是"把最高频的操作抽出来单独优化"的工程智慧——针对热点做专门的快路径。</strong></div>
+                <div class="qa"><span class="t">💬 对话体</span>
+                👶 小白：既然 EDS 不走 PushContext，那它和 CDS 会不会对不上？比如 CDS 里的集群，EDS 里没端点？<br>
+                👨‍🏫 老师：好问题。它们最终一致：新集群通过 CDS 下发后，Envoy 会订阅它的 EDS，EdsGenerator 再从 EndpointIndex 现算端点补上。EDS 走快路径只是"端点变化不必惊动整张快照"，集群拓扑仍由 CDS/PushContext 主导。分工是：CDS 定"有哪些集群"（低频），EDS 填"每个集群此刻有哪些机器"（高频）。</div>
             </div>
         </section>
 

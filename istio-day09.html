@@ -19,6 +19,27 @@
         .flow .step{position:relative;padding:8px 10px 8px 36px;border:1px solid var(--border-color);border-radius:7px;margin:6px 0;font-size:12px;background:var(--bg-card)}
         .flow .step::before{counter-increment:s;content:counter(s);position:absolute;left:8px;top:8px;width:19px;height:19px;border-radius:50%;background:linear-gradient(135deg,#7c4dff,#00acc1);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px}
         .flow .step code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa .t{font-weight:700;color:#c084fc;display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#7c4dff,#00acc1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#22d3ee}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
     </style>
 </head>
 <body>
@@ -53,9 +74,29 @@
             <p class="part-desc">你改了一条 VirtualService，几秒后所有相关 Envoy 就更新了——中间发生了什么？今天追这条"神经反射弧"：<code>ConfigUpdate → debounce → Push → PushQueue → 各 proxy</code>。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在控制面 istiod 之旅的位置（配置会翻译了，今天看"配置一变，怎么自动送到 Envoy"）</div>
+            <div class="steps">
+                <span class="st">D1 全景</span><span class="sep">·</span>
+                <span class="st">D2 启动</span><span class="sep">·</span>
+                <span class="st">D3 配置CRD</span><span class="sep">·</span>
+                <span class="st">D4 服务注册</span><span class="sep">·</span>
+                <span class="st">D5 快照</span><span class="sep">·</span>
+                <span class="st">D6 xDS服务</span><span class="sep">·</span>
+                <span class="st">D7 生成</span><span class="sep">·</span>
+                <span class="st">D8 Builder</span><span class="sep">·</span>
+                <span class="st on">D9 推送</span><span class="sep">·</span>
+                <span class="st">D10 连接</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>完整链路</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：几千个 Envoy，配置一变全部无脑重推会怎样</span>
+                你 <code>kubectl apply</code> 改一条路由。若 istiod 立刻给全网 3000 个 Envoy 各自全量重算重推一遍——CPU 打满、网络风暴、Envoy 集体抖动。可你又希望"改完几秒就生效"。既要快，又要稳，中间必须有套精巧的机制。</div>
+                <div class="essence"><span class="t">💡 本质：一条"神经反射弧" + 三道减负闸门</span>
+                这套推送机制像人的<strong>神经反射</strong>：感知（K8s 事件）→ 传导（debounce 合并）→ 中枢处理（重建 PushContext）→ 指挥（PushQueue 分发）→ 动作（生成下发 xDS）。为了不被刺激淹没，路上设三道闸门——<strong>debounce（把连按的电梯合成一趟）、PushContext 增量（只重算变的）、proxy 级裁剪（只通知相关的保安）</strong>。快与稳，全靠这三道闸门平衡。</div>
                 <div class="flow">
                     <div class="step">registry/config 事件（K8s CRD/服务变化）</div>
                     <div class="step"><code>DiscoveryServer.ConfigUpdate</code>（discovery.go:318）投递到 <code>pushChannel</code></div>
@@ -105,6 +146,33 @@ type PushRequest struct {
 // 期间的事件用 req = req.Merge(r) 累积合并</code></pre>
                 <div class="baby"><span class="t">debounce（防抖）= "等一等再一起处理"</span>
                 想象你批量 <code>kubectl apply</code> 了 50 个 CRD——如果每个都立即触发一次全量推送，istiod 会被打爆、Envoy 收到 50 次抖动的配置。<strong>debounce 的策略：收到事件后<strong>不立即推</strong>，而是等一个"静默期"（100ms）。如果 100ms 内又来事件，合并（Merge）并重置计时；直到 100ms 内没有新事件（或累计等了 10s），才把合并后的一个 PushRequest 真正推出去。</strong>好比电梯——不是每按一次就走，而是等一会儿把同时按的人一起送。<strong>这把"50 次抖动"合并成"1 次推送"，是控制面稳定性的关键。</strong>Higress 还加了 <code>ShouldBlockPush</code> 全局节流。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 150" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <line x1="20" y1="70" x2="620" y2="70" stroke="#666" stroke-width="1.5"/>
+                        <text x="20" y="60" fill="#999" font-size="10">时间轴 →</text>
+                        <g fill="#f59e0b">
+                            <circle cx="80" cy="70" r="5"/><circle cx="120" cy="70" r="5"/><circle cx="175" cy="70" r="5"/><circle cx="205" cy="70" r="5"/>
+                        </g>
+                        <text x="70" y="95" fill="#fbbf24" font-size="9.5">事件密集到来（每来一次重置 100ms 计时）</text>
+                        <line x1="205" y1="70" x2="330" y2="70" stroke="#3b82f6" stroke-width="3"/>
+                        <text x="215" y="60" fill="#93c5fd" font-size="9.5">静默 100ms 无事件</text>
+                        <circle cx="330" cy="70" r="7" fill="#34d399"/>
+                        <text x="345" y="74" fill="#6ee7b7" font-size="11" font-weight="700">→ 一次推送（合并后的 PushRequest）</text>
+                        <text x="80" y="120" fill="#bbb" font-size="10">4 次抖动 + 静默期</text>
+                        <path d="M205 108 L330 108" stroke="#888" stroke-width="1" marker-end="url(#a9)"/>
+                        <text x="360" y="112" fill="#34d399" font-size="10">合并成 1 次</text>
+                        <defs><marker id="a9" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#888"/></marker></defs>
+                    </svg>
+                    <div class="cap">debounce 时间线：事件不断来就不断重置计时，直到静默 100ms（或累计满 10s），才把合并后的请求推一次。</div>
+                </div>
+                <div class="example"><span class="t">📝 单步走查：批量 apply 50 个 CRD</span>
+                <table class="k">
+                    <tr><th>时刻</th><th>发生什么</th><th>debounce 状态</th></tr>
+                    <tr><td>t=0ms</td><td>第 1 个 CRD 事件到</td><td>启动 100ms 计时，req = e1</td></tr>
+                    <tr><td>t=0~40ms</td><td>第 2~50 个陆续到</td><td>每来一个 Merge 并重置计时</td></tr>
+                    <tr><td>t=140ms</td><td>最后一个后静默满 100ms</td><td>触发！推 1 个合并后的 PushRequest</td></tr>
+                    <tr><td>结果</td><td>50 次事件</td><td>只产生 1 次全量推送</td></tr>
+                </table></div>
             </div>
         </section>
 
@@ -144,6 +212,11 @@ return req, len(req.ConfigsUpdated) > 0  // 过滤后无关联则跳过该代理
                 ② <strong>PushContext 增量复用</strong>（Day 05 <code>updateContext</code>）——即便全量推送也只重算变化的索引<br>
                 ③ <strong>proxy 级裁剪</strong>（本课，<code>ProxyNeedsPush</code>）——只推给依赖变更配置的 proxy，其余跳过<br>
                 <strong>层层收窄：从"哪些事件"→"重算哪些"→"推给谁"。这套优化让 istiod 能管理数千 Envoy 而不被推送风暴压垮。</strong></div>
+                <div class="qa"><span class="t">💬 对话体</span>
+                👶 小白：改一条 payment 服务的路由，为什么不是所有 Envoy 都要更新？<br>
+                👨‍🏫 老师：因为大部分 Envoy 根本不调用 payment（它们的 SidecarScope 不依赖 payment 的配置）。<code>ProxyNeedsPush</code> 用 <code>filterRelevantUpdates</code> 一过滤，发现这次变更和某个 proxy 无关（<code>ConfigsUpdated</code> 过滤后为空），就直接跳过它，连生成都省了。只有"会调 payment"的那批 Envoy 才真收到推送。<br>
+                👶 小白：那 EDS 端点变化也走这套吗？<br>
+                👨‍🏫 老师：不，端点高频变化走 <code>Full=false</code> 的独立快路径（Day 07），不重建 PushContext，直接增量推 EDS。</div>
             </div>
         </section>
 
