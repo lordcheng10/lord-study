@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 05 · core.ctx 与 api_ctx — Apache APISIX 源码学习</title>
+    <title>Day 05 · api_ctx 与惰性求值 — Apache APISIX 源码学习</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#14a085,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -28,11 +43,11 @@
             <li class="nav-group-title">本日 8 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · api_ctx 是什么</a></li>
             <li><a href="#l02" class="nav-link" data-section="l02">L02 · ngx.ctx vs api_ctx</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · api_ctx.var 元表</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 惰性求值 + 缓存</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · var 元表魔法</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 惰性求值+缓存（看图）</a></li>
             <li><a href="#l05" class="nav-link" data-section="l05">L05 · register_var</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · tablepool 复用</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · release 回收</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · tablepool 抗 GC</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · release 前必 clear</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -44,96 +59,116 @@
     <main class="content" id="content">
         <div class="part-header">
             <span class="part-label">Day 05 / 共 20 天 · 第 1 周 全景与请求生命周期</span>
-            <h1 class="part-title">core.ctx 与 api_ctx</h1>
-            <p class="part-desc">第 1 周收官。昨天贯穿全程的 <code>api_ctx</code> 到底是什么？今天拆 <code>core/ctx.lua</code>——尤其是 <code>api_ctx.var</code> 那个用 Lua 元表实现的"惰性求值 + 缓存"魔法，以及 tablepool 复用机制。这是理解 APISIX 性能的钥匙。</p>
+            <h1 class="part-title">core.ctx 与 api_ctx（性能的钥匙）</h1>
+            <p class="part-desc">第 1 周收官。昨天贯穿全程的 <code>api_ctx</code> 到底是什么？今天拆 <code>core/ctx.lua</code>——尤其 <code>api_ctx.var</code> 那个用 Lua 元表实现的"惰性求值+缓存"魔法，以及 tablepool 复用。这是理解 APISIX 性能的钥匙。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整条链的位置（第 1 周最后一块）</div>
+            <div class="steps">
+                <span class="st">请求生命周期 D4</span><span class="sep">→</span>
+                <span class="st on">api_ctx（贯穿全程的袋子）</span><span class="sep">→</span>
+                <span class="st">W2 路由/配置/上游</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>api_ctx 是什么</h1></div>
             <div class="card">
-                <p><code>api_ctx</code> 是"一个请求的上下文袋子"——从 access 阶段创建（<code>tablepool.fetch("api_ctx")</code>），贯穿 balancer/filter/log，装着这个请求的一切：匹配的路由、consumer、plugins、上游配置、各种变量。</p>
-                <div class="baby"><span class="t">为什么需要"上下文"？</span>
-                <strong>一个请求要经过多个 Nginx 阶段（access → balancer → filter → log），每个阶段是独立的 Lua 函数调用。它们怎么共享"这个请求的信息"（匹配了哪条路由、识别出哪个 consumer）？答案就是 api_ctx——存进 <code>ngx.ctx</code>，所有阶段都能取到同一个。</strong>好比一个请求随身带的"档案袋",各阶段往里放东西、取东西。这跟上一站 wasm-go 的 HttpContext 是同一个概念。</div>
+                <div class="ask"><span class="t">🤔 一个请求经过多个阶段，怎么共享信息？</span>
+                access、balancer、filter、log 是独立的 Lua 函数调用。它们怎么共享"这个请求匹配了哪条路由、识别出哪个 consumer"？</div>
+                <div class="essence"><span class="t">💡 api_ctx = 一个请求随身带的"档案袋"</span>
+                <strong>access 阶段创建（<code>tablepool.fetch("api_ctx")</code>），贯穿 balancer/filter/log，装着这个请求的一切：匹配的路由、consumer、plugins、上游配置、各种变量。各阶段开头 <code>local api_ctx = ngx.ctx.api_ctx</code> 取出来用。</strong>跟上一站 wasm-go 的 HttpContext 是同一概念。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>ngx.ctx vs api_ctx</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>ngx.ctx vs api_ctx：两层容器</h1></div>
             <div class="card">
                 <p><code>init.lua:608-610</code>：<code>ngx_ctx.api_ctx = api_ctx</code>。</p>
-                <div class="baby"><span class="t">两层容器</span>
-                <strong><code>ngx.ctx</code> 是 OpenResty 提供的"每请求 Lua 表"——同一请求的各阶段共享。APISIX 在 <code>ngx.ctx.api_ctx</code> 里放自己的上下文。</strong>为什么不直接用 ngx.ctx？因为 <code>ngx.ctx</code> 有些跨阶段的坑（子请求、内部跳转时行为微妙），而且 APISIX 想用 tablepool 精细管理自己的上下文对象。<strong>所以：<code>ngx.ctx</code> 是 OpenResty 的通用容器，<code>api_ctx</code> 是 APISIX 自己的、可池化复用的上下文。</strong>各阶段开头都 <code>local api_ctx = ngx.ctx.api_ctx</code> 取出来用。</div>
+                <div class="baby"><span class="t">OpenResty 的通用容器 + APISIX 的专用袋</span>
+                <strong><code>ngx.ctx</code> 是 OpenResty 提供的"每请求 Lua 表"（同一请求各阶段共享）。APISIX 在 <code>ngx.ctx.api_ctx</code> 里放自己的上下文。</strong>为什么不直接用 ngx.ctx？因为 ngx.ctx 有些跨阶段的坑（子请求、内部跳转），且 APISIX 想用 tablepool 精细管理自己的上下文。<strong>所以：ngx.ctx 是 OpenResty 的通用容器，api_ctx 是 APISIX 自己的、可池化复用的档案袋。</strong></div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>api_ctx.var 元表</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>api_ctx.var 的元表魔法</h1></div>
             <div class="card">
                 <p><code>core/ctx.lua:447-457</code> 的 <code>set_vars_meta</code> 给 api_ctx 装上一个特殊的 <code>var</code> 表：</p>
 <pre><code class="language-lua">function _M.set_vars_meta(ctx)
     local var = tablepool.fetch("ctx_var", 0, 32)
     if not var._cache then var._cache = {} end
-    var._request = get_request()
-    var._ctx = ctx
+    var._request = get_request(); var._ctx = ctx
     setmetatable(var, mt)     -- ★ 关键：装上元表 mt
     ctx.var = var
 end</code></pre>
-                <div class="baby"><span class="t">什么是"元表"（metatable）？</span>
-                <strong>Lua 的元表能"拦截"对一个表的操作。给 <code>var</code> 装上元表 <code>mt</code> 后，当你写 <code>api_ctx.var.uri</code>——如果 <code>var</code> 里没有 <code>uri</code> 这个键，Lua 会调用元表的 <code>__index</code> 函数来"临时计算"这个值。</strong>这就是下一节的"惰性求值"魔法的基础。<strong>元表是 Lua 实现"面向对象""动态属性"的核心机制。</strong></div>
+                <div class="essence"><span class="t">💡 什么是"元表"（metatable）</span>
+                <strong>Lua 的元表能"拦截"对一个表的操作。给 <code>var</code> 装元表后，当你写 <code>api_ctx.var.uri</code>——如果 var 里没有 uri 这个键，Lua 会调元表的 <code>__index</code> 函数来"临时计算"。</strong>这是下面"惰性求值"魔法的基础。元表是 Lua 实现"动态属性"的核心机制。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>惰性求值 + 缓存</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>惰性求值 + 缓存（性能核心）</h1></div>
             <div class="card">
                 <p><code>core/ctx.lua:277-300</code> 的 <code>__index</code>（读 <code>var.xxx</code> 时触发）：</p>
-<pre><code class="language-lua">__index = function(t, key)
-    local cached = t._cache[key]
-    if cached ~= nil then return cached end    -- ① 缓存命中直接返回
-    local val
-    local method = var_methods[key]
-    if method then val = method()               -- ② 自定义变量（如 cookie/graphql）
-    elseif has_prefix(key, "cookie_") then ...  -- ③ cookie_xxx
-    else val = get_var(key, t._request) end     -- ④ 兜底：问 Nginx 要（ngx.var.xxx）
-    if val ~= nil then t._cache[key] = val end   -- 存进缓存
-    return val
-end</code></pre>
-                <div class="baby"><span class="t">"惰性求值"省了什么？</span>
-                <strong>一个请求有几十个变量（uri/host/remote_addr/args/各种 header），但一次请求可能只用到其中几个。如果启动时全算出来就浪费。惰性求值 = "用到 <code>var.uri</code> 时才去算 uri，算完缓存起来，下次直接取缓存"。</strong>没用到的变量根本不计算。<strong>加上缓存，同一个变量在多个插件里被读也只算一次。</strong>这是"按需 + 缓存"的经典优化——对每秒几万请求的网关，省下的计算很可观。你在插件里写 <code>ctx.var.uri</code> 就享受了这套机制，无感。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 160" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <rect x="10" y="60" width="130" height="40" rx="7" fill="#26323a" stroke="#6366f1"/><text x="75" y="78" fill="#fff" text-anchor="middle" font-size="10.5">读 api_ctx.var.uri</text><text x="75" y="92" fill="#888" text-anchor="middle" font-size="9">触发 __index</text>
+                        <path d="M140 80 L185 80" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                        <rect x="190" y="60" width="120" height="40" rx="7" fill="#3a2a1a" stroke="#f59e0b"/><text x="250" y="78" fill="#fff" text-anchor="middle" font-size="10.5">① 查缓存</text><text x="250" y="92" fill="#888" text-anchor="middle" font-size="9">_cache 有吗？</text>
+                        <path d="M310 70 L360 60" stroke="#34d399" stroke-width="1.5" marker-end="url(#b)"/><text x="330" y="52" fill="#34d399" font-size="9">命中</text>
+                        <rect x="365" y="35" width="120" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="425" y="54" fill="#fff" text-anchor="middle" font-size="10">直接返回（快）</text>
+                        <path d="M310 90 L360 100" stroke="#a855f7" stroke-width="1.5" marker-end="url(#c)"/><text x="330" y="112" fill="#a855f7" font-size="9">未命中</text>
+                        <rect x="365" y="95" width="150" height="30" rx="6" fill="#3a2a4a" stroke="#a855f7"/><text x="440" y="114" fill="#fff" text-anchor="middle" font-size="10">② 现算（问 Nginx）</text>
+                        <path d="M515 110 L560 110" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                        <rect x="565" y="95" width="145" height="30" rx="6" fill="#3a2a1a" stroke="#f59e0b"/><text x="637" y="114" fill="#fff" text-anchor="middle" font-size="10">③ 存缓存 → 返回</text>
+                        <text x="10" y="145" fill="#888" font-size="10">下次再读 uri → 缓存命中，不重算。没用到的变量根本不计算。</text>
+                        <defs>
+                            <marker id="a" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#666"/></marker>
+                            <marker id="b" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#34d399"/></marker>
+                            <marker id="c" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#a855f7"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">读 var.xxx：先查缓存（命中直接返回）→ 未命中现算 → 存缓存。没用到的变量永不计算。</div>
+                </div>
+                <div class="baby"><span class="t">"按需 + 缓存"省了什么</span>
+                <strong>一个请求有几十个变量（uri/host/remote_addr/args/各种 header），但一次可能只用几个。惰性求值 = "用到 var.uri 才算 uri、算完缓存"，没用到的不算。加缓存，同一变量被多个插件读也只算一次。</strong>对每秒几万请求的网关，省下的计算很可观。你在插件里写 <code>ctx.var.uri</code> 就白享这套机制。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>register_var</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>register_var：插件注册自定义变量</h1></div>
             <div class="card">
-                <p><code>core/ctx.lua:433</code> 的 <code>register_var(name, getter, opts)</code>：让插件能注册"自定义变量"。</p>
-<pre><code class="language-lua">-- 例：注册 a6_labels_zone 变量
-core.ctx.register_var("a6_labels_zone", function(ctx)
+                <p><code>core/ctx.lua:433</code> 的 <code>register_var(name, getter, opts)</code>：让插件注册"自定义变量"。</p>
+                <div class="example"><span class="t">📝 插件暴露自己算的值</span>
+<pre style="margin:6px 0;font-size:11.5px"><code class="language-lua">core.ctx.register_var("a6_labels_zone", function(ctx)
     return ctx.route and ctx.route.value.labels and ctx.route.value.labels.zone
 end)
--- 之后就能在配置里用 $a6_labels_zone（比如日志格式）</code></pre>
-                <div class="anno">读法：<b>APISIX 把 Nginx 变量系统扩展了——<strong>插件能注册新变量，之后在路由/日志配置里像内置变量一样用。</strong>getter 在变量被读时惰性调用。这让插件能优雅地"暴露自己算出的值"给配置系统。</b></div>
+-- 之后能在配置/日志格式里用 $a6_labels_zone（像内置变量一样）</code></pre></div>
+                <div class="anno">读法：<b>APISIX 把 Nginx 变量系统扩展了——<strong>插件能注册新变量，之后在路由/日志配置里像内置变量一样用（getter 在被读时惰性调用）。</strong>让插件优雅地"暴露自己算出的值"给配置系统。</b></div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>tablepool 复用</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>tablepool：GC 是性能隐形杀手</h1></div>
             <div class="card">
-                <p>回顾 Day 04：<code>api_ctx</code> 和 <code>var</code> 都从 tablepool <code>fetch</code>。tablepool 是"table 对象池"——预先攒一批空 table，用完还回去复用，而不是丢给 GC。</p>
-                <div class="baby"><span class="t">GC 是性能的隐形杀手</span>
-                <strong>Lua 每创建一个 table 都要分配内存，用完了 GC 要回收。每秒几万请求 × 每请求几个 table = 海量分配/回收，GC 会周期性"停顿"拖慢延迟。</strong>tablepool 让这些 table "循环使用"——请求 A 用完的 api_ctx 清空后给请求 B 用，几乎不产生新分配。<strong>这是 APISIX（和很多高性能 Lua 程序）压榨性能的关键手段。</strong>代价是要小心"用完必须清空归还",否则会串数据（下一节）。</div>
+                <div class="ask"><span class="t">🤔 每秒几万请求，每个 new 几个 table，会怎样？</span>
+                Lua 每创建一个 table 都分配内存，用完 GC 回收。海量分配/回收 → GC 周期性"停顿"，拖慢延迟。</div>
+                <div class="essence"><span class="t">💡 tablepool 让 table 循环复用</span>
+                <strong>预先攒一批空 table，用完还回去复用，而不是丢给 GC。请求 A 用完的 api_ctx 清空后给请求 B 用，几乎不产生新分配。</strong>这是 APISIX（和很多高性能 Lua 程序）压榨性能的关键手段。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>release 回收</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>release 前必须 clear</h1></div>
             <div class="card">
                 <p>请求结束（log 阶段，<code>init.lua:981-990</code>）回收：</p>
 <pre><code class="language-lua">core.ctx.release_vars(api_ctx)                     -- 清空 var 并归还 ctx_var 池
-if api_ctx.plugins then core.tablepool.release("plugins", api_ctx.plugins) end
+core.tablepool.release("plugins", api_ctx.plugins) -- 归还 plugins 池
 core.tablepool.release("api_ctx", api_ctx)         -- 归还 api_ctx 池</code></pre>
-                <p><code>release_vars</code>（<code>ctx.lua:459-467</code>）：<code>core_tab.clear(ctx.var._cache)</code> 清空缓存 → 归还 table 池。</p>
-                <div class="anno">读法：<b><strong>归还前必须 <code>clear</code>（清空内容）——否则下个请求 fetch 到这个 table，会看到上个请求的残留数据（严重 bug/安全问题）。</strong>log 阶段是请求的最后一站，负责把所有池化对象清空归还。<strong>"fetch → 用 → clear → release"这个循环是 tablepool 正确性的核心。</strong></b></div>
+                <p><code>release_vars</code>（<code>ctx.lua:459-467</code>）：<code>core_tab.clear(ctx.var._cache)</code> 清空缓存 → 归还池。</p>
+                <div class="baby"><span class="t">归还前必须清空——否则串数据（严重 bug）</span>
+                <strong>归还前必 <code>clear</code>（清空内容）——否则下个请求 fetch 到这个 table，会看到上个请求的残留数据（数据串了，是严重的 bug/安全问题）。</strong>log 阶段是请求最后一站，负责把所有池化对象清空归还。<strong>"fetch → 用 → clear → release"这个循环是 tablepool 正确性的核心。</strong></div>
             </div>
         </section>
 
@@ -143,7 +178,7 @@ core.tablepool.release("api_ctx", api_ctx)         -- 归还 api_ctx 池</code><
                 <h3>🧠 第 1 周你应该能回答</h3>
                 <ul>
                     <li>api_ctx 是什么？和 ngx.ctx 的关系？</li>
-                    <li>元表 <code>__index</code> 怎么实现变量的惰性求值 + 缓存？</li>
+                    <li>元表 <code>__index</code> 怎么实现变量的惰性求值 + 缓存？省了什么？</li>
                     <li>tablepool 为什么能提性能？和 GC 什么关系？</li>
                     <li>release 前为什么必须 clear？不 clear 会怎样？</li>
                 </ul>
@@ -152,9 +187,8 @@ core.tablepool.release("api_ctx", api_ctx)         -- 归还 api_ctx 池</code><
                 <h3>✋ 动手</h3>
 <pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
 sed -n '277,320p' apisix/core/ctx.lua
-sed -n '447,467p' apisix/core/ctx.lua
-grep -n "tablepool" apisix/init.lua | head</code></pre>
-                <div class="tip"><strong>下周预告 · 第 2 周</strong>：<strong>路由/配置/数据面</strong>——radixtree 路由怎么高效匹配、config_etcd 怎么 watch 实现热更新、六大抽象对象的数据结构、schema 校验、upstream 与负载均衡。</div>
+sed -n '447,467p' apisix/core/ctx.lua</code></pre>
+                <div class="tip"><strong>下周预告 · 第 2 周</strong>：进入数据面细节——<strong>radixtree 路由</strong>怎么高效匹配、<strong>config_etcd</strong> 怎么 watch 实现热更新、六大抽象对象、schema 校验、<strong>upstream 与负载均衡</strong>。Day 06 从路由讲起。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="apisix-day04.html" style="color:var(--accent-cyan);">&larr; Day 04</a>

@@ -16,9 +16,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        .phase{display:flex;flex-direction:column;gap:6px;margin:10px 0}
-        .phase .p{border:1px solid var(--border-color);border-left:3px solid #14a085;border-radius:0 8px 8px 0;padding:8px 12px;background:var(--bg-secondary);font-size:12.5px}
-        .phase .p b{color:#14a085}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#14a085,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -30,13 +42,13 @@
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要懂阶段</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 请求处理的阶段序</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · init 与 init_worker</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · access 阶段</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · balancer 阶段</a></li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要懂"阶段"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 请求处理的流水线（看图）</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · init vs init_worker</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · access 阶段（重头戏）</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · balancer 为何单独</a></li>
             <li><a href="#l06" class="nav-link" data-section="l06">L06 · filter 与 log</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · _M 与阶段绑定</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · _M 怎么绑到阶段</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="apisix-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -49,103 +61,125 @@
         <div class="part-header">
             <span class="part-label">Day 02 / 共 20 天 · 第 1 周 全景与请求生命周期</span>
             <h1 class="part-title">OpenResty 与 Nginx 阶段</h1>
-            <p class="part-desc">读懂 APISIX 的前提是理解"Nginx 处理请求的阶段"。APISIX 的所有逻辑，本质就是"在 Nginx 的某个阶段挂一段 Lua"。今天把这套阶段模型讲清，你就有了阅读 <code>init.lua</code> 的地图。</p>
+            <p class="part-desc">昨天说"APISIX = 用 Lua 在 OpenResty 各阶段编程"。今天讲清这个"阶段"到底是什么——它是读懂 <code>init.lua</code> 的地图。理解了阶段，APISIX 的骨架就清晰了。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整条链的位置</div>
+            <div class="steps">
+                <span class="st">Day1 全景</span><span class="sep">→</span>
+                <span class="st on">Day2 Nginx 阶段（地图）</span><span class="sep">→</span>
+                <span class="st">启动 D3</span><span class="sep">→</span>
+                <span class="st">请求生命周期 D4</span><span class="sep">→</span>
+                <span class="st">api_ctx D5</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>为什么要懂阶段</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要懂"阶段"</h1></div>
             <div class="card">
-                <div class="baby"><span class="t">Nginx 把处理一个请求切成"阶段"</span>
-                <strong>Nginx 处理一个 HTTP 请求不是"一口气跑完",而是分成有序的"阶段"（phase）：先读请求、再决定权限（access）、再选后端（balancer）、再改响应头（header filter）、再改响应体（body filter）、最后记日志（log）。</strong>OpenResty 让你<strong>在每个阶段挂一段 Lua 代码</strong>（<code>access_by_lua</code>、<code>header_filter_by_lua</code>、<code>log_by_lua</code>…）。<strong>APISIX 就是把它的网关逻辑分派到这些阶段的 Lua 里——所以 <code>init.lua</code> 里那一堆 <code>http_xxx_phase</code> 函数，就是各阶段的入口。</strong>懂了阶段，就懂了 APISIX 的骨架。</div>
+                <div class="ask"><span class="t">🤔 一个请求进 Nginx，是"一口气跑完"吗？</span>
+                不是。Nginx 处理一个请求，像工厂流水线——切成有序的几个"工位"（阶段）：先读请求、再决定权限、再选后端、再改响应头、再改响应体、最后记日志。</div>
+                <div class="essence"><span class="t">💡 OpenResty 让你在每个"工位"挂一段 Lua</span>
+                <strong>OpenResty 提供 <code>access_by_lua</code>、<code>header_filter_by_lua</code>、<code>log_by_lua</code> 等钩子——在 Nginx 的每个阶段插入你的 Lua 代码。APISIX 就是把它的网关逻辑分派到这些阶段的 Lua 里。</strong>所以 <code>init.lua</code> 里那一堆 <code>http_xxx_phase</code> 函数，就是各阶段的入口。<strong>懂了阶段，就懂了 APISIX 的骨架。</strong></div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>请求处理的阶段序</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>请求处理的流水线</h1></div>
             <div class="card">
-                <div class="phase">
-                    <div class="p"><b>init</b>（master 启动一次）+ <b>init_worker</b>（每 worker 启动一次）— 加载配置、起后台任务</div>
-                    <div class="p"><b>ssl</b>（握手时）— 动态选证书</div>
-                    <div class="p"><b>access / rewrite</b>（每请求）— 路由匹配、鉴权、限流，决定"放不放行、怎么改"</div>
-                    <div class="p"><b>balancer</b>（选后端）— 负载均衡挑一个上游实例，失败可重试</div>
-                    <div class="p"><b>header_filter</b> — 改响应头</div>
-                    <div class="p"><b>body_filter</b> — 改响应体（可能多次，流式）</div>
-                    <div class="p"><b>log</b> — 记录日志、上报指标、清理资源</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 860 180" width="100%" style="max-width:860px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="10" y="18" fill="#888" font-size="10.5">启动时（每 worker 一次）</text>
+                        <rect x="10" y="25" width="150" height="30" rx="6" fill="#3a2a1a" stroke="#f59e0b"/><text x="85" y="44" fill="#eee" text-anchor="middle" font-size="10">init / init_worker</text>
+                        <text x="10" y="80" fill="#888" font-size="10.5">每个请求（从左到右依次经过各工位）</text>
+                        <g font-size="10">
+                            <rect x="10" y="90" width="120" height="42" rx="7" fill="#1e3a34" stroke="#14a085"/><text x="70" y="109" fill="#fff" text-anchor="middle">access/rewrite</text><text x="70" y="123" fill="#888" text-anchor="middle" font-size="9">路由+鉴权+限流（最重）</text>
+                            <rect x="160" y="90" width="120" height="42" rx="7" fill="#26323a" stroke="#6366f1"/><text x="220" y="109" fill="#fff" text-anchor="middle">balancer</text><text x="220" y="123" fill="#888" text-anchor="middle" font-size="9">选上游实例(可重试)</text>
+                            <rect x="310" y="90" width="120" height="42" rx="7" fill="#3a2a4a" stroke="#a855f7"/><text x="370" y="109" fill="#fff" text-anchor="middle">header_filter</text><text x="370" y="123" fill="#888" text-anchor="middle" font-size="9">改响应头</text>
+                            <rect x="460" y="90" width="120" height="42" rx="7" fill="#3a2a4a" stroke="#a855f7"/><text x="520" y="109" fill="#fff" text-anchor="middle">body_filter</text><text x="520" y="123" fill="#888" text-anchor="middle" font-size="9">改响应体(可多次)</text>
+                            <rect x="610" y="90" width="120" height="42" rx="7" fill="#264a3a" stroke="#34d399"/><text x="670" y="109" fill="#fff" text-anchor="middle">log</text><text x="670" y="123" fill="#888" text-anchor="middle" font-size="9">记日志+清理</text>
+                            <path d="M130 111 L160 111" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                            <path d="M280 111 L310 111" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                            <path d="M430 111 L460 111" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                            <path d="M580 111 L610 111" stroke="#666" stroke-width="1.5" marker-end="url(#a)"/>
+                        </g>
+                        <text x="760" y="115" fill="#888" font-size="10">还有 ssl<tspan x="760" dy="13">握手阶段</tspan></text>
+                        <defs><marker id="a" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#666"/></marker></defs>
+                    </svg>
+                    <div class="cap">Nginx 请求处理流水线：access（决策，最重）→ balancer（选后端）→ filter（改响应）→ log（收尾）。APISIX 顺着它编排。</div>
                 </div>
-                <div class="anno">读法：<b>对照 Day 01 的数据流：access 阶段干了最多活（路由+插件），balancer 选上游，filter 改响应，log 收尾。<strong>这个顺序是 Nginx 定死的，APISIX 顺着它编排。</strong>和上一站 wasm-go 的"六阶段钩子"异曲同工——都是"请求生命周期分段处理"。</b></div>
+                <div class="baby"><span class="t">对照昨天的"请求旅程"</span>
+                <strong>Day1 的请求旅程图（路由→选插件→跑插件→负载均衡→上游）就发生在这些阶段里：路由+选插件+跑插件在 access 阶段，负载均衡在 balancer 阶段。</strong>和上一站 wasm-go 的"六阶段钩子"异曲同工——都是"请求生命周期分段处理"。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>init 与 init_worker</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>init vs init_worker（master vs worker）</h1></div>
             <div class="card">
-                <p><code>init.lua</code> 里对应两个函数（Day 03 细讲）：</p>
+                <p><code>init.lua</code> 里两个启动函数（Day 03 细讲）：</p>
                 <ul>
-                    <li><code>_M.http_init(args)</code>（<code>:85</code>）：master 进程启动时跑一次——初始化 resolver、id、env、配置。</li>
-                    <li><code>_M.http_init_worker()</code>（<code>:107</code>）：每个 worker 进程启动跑一次——起服务发现、balancer、admin、router、plugin、consumer 等的 worker 初始化。</li>
+                    <li><code>_M.http_init(args)</code>（<code>:85</code>）：<strong>master 进程</strong>启动跑一次——全局一次性初始化（DNS、id、配置中心连接）。</li>
+                    <li><code>_M.http_init_worker()</code>（<code>:107</code>）：<strong>每个 worker 进程</strong>启动跑一次——起服务发现、balancer、admin、router、plugin、consumer 的 worker 初始化。</li>
                 </ul>
-                <div class="baby"><span class="t">master vs worker</span>
-                <strong>Nginx 是"1 个 master + N 个 worker"进程模型：master 管理、worker 真正处理请求（对应 CPU 核数）。</strong><code>http_init</code> 在 master 跑（全局一次性初始化），<code>http_init_worker</code> 在每个 worker 跑（每个 worker 要自己的 etcd 连接、自己的定时器）。<strong>这和 Envoy 的"1 主 + N worker"线程模型很像——高性能服务器的通用套路。</strong></div>
+                <div class="essence"><span class="t">💡 Nginx = 1 主 + N worker 进程</span>
+                <strong>master 管理、worker 真正处理请求（对应 CPU 核数）。<code>http_init</code> 在 master 跑（全局初始化），<code>http_init_worker</code> 在每个 worker 跑（每个 worker 要自己的 etcd 连接、定时器）。</strong>和 Envoy "1 主 + N worker" 线程模型如出一辙——高性能服务器的通用套路。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>access 阶段（重头戏）</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>access 阶段：90% 的活在这</h1></div>
             <div class="card">
-                <p><code>_M.http_access_phase()</code>（<code>init.lua:602</code>）是每个请求的主处理入口，Day 04 会逐行读。它干的事：创建 <code>api_ctx</code> → 校验 TLS → 匹配路由 → 合并 service/consumer 配置 → 选插件 → 跑 rewrite/access 阶段插件 → 交给 <code>handle_upstream</code>。</p>
-                <div class="anno">读法：<b>为什么最重的逻辑在 access 阶段？因为 access 是"请求已读完、还没转发上游"的时机——正好在这里做所有"决策"（能不能过、走哪个后端、要不要改）。<strong>APISIX 90% 的请求处理逻辑集中在这一个阶段函数里。</strong></b></div>
+                <p><code>_M.http_access_phase()</code>（<code>init.lua:602</code>）是每个请求的主处理入口（Day 04 逐行读）。它干的：创建 <code>api_ctx</code> → 校验 TLS → 匹配路由 → 合并 service/consumer 配置 → 选插件 → 跑 rewrite/access 阶段插件 → 交给上游。</p>
+                <div class="ask"><span class="t">🤔 为什么最重的逻辑都堆在 access 阶段？</span>
+                <strong>因为 access 是"请求已读完、还没转发上游"的时机——正好在这里做所有"决策"：能不能过（鉴权）、走哪个后端（路由）、要不要改（改写）、限不限流。</strong>决策做完才转发。所以 APISIX 90% 的请求处理逻辑集中在这一个阶段函数里——它是全课最该精读的（Day 04）。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>balancer 阶段</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>balancer 为何单独一个阶段</h1></div>
             <div class="card">
                 <p><code>_M.http_balancer_phase()</code>（<code>init.lua:993</code>）：</p>
 <pre><code class="language-lua">function _M.http_balancer_phase()
     local api_ctx = ngx.ctx.api_ctx
-    if not api_ctx then
-        return core.response.exit(500)
-    end
-    load_balancer.run(api_ctx.matched_route, api_ctx, common_phase)
+    if not api_ctx then return core.response.exit(500) end
+    load_balancer.run(api_ctx.matched_route, api_ctx, common_phase)  -- 选上游实例
 end</code></pre>
-                <div class="baby"><span class="t">balancer 为什么是单独阶段？</span>
-                <strong>Nginx 的 balancer 阶段特殊：它可能被调用多次——第一次选的上游实例连不上，Nginx 会重试，再次进入 balancer 选下一个实例。</strong>所以负载均衡（挑哪个后端）+ 失败重试的逻辑放这里。<code>load_balancer.run</code> 用 <code>api_ctx.matched_route</code>（access 阶段匹配好的路由）里的上游配置来选实例。Day 10 详讲负载均衡算法。</div>
+                <div class="essence"><span class="t">💡 balancer 阶段特殊：可能被调用多次</span>
+                <strong>第一次选的上游实例连不上，Nginx 会自动重试，再次进入 balancer 选下一个实例。所以"选哪个后端 + 失败重试"的逻辑放在这个单独阶段。</strong>负载均衡不只是"挑一个"，还含"挑失败了换一个"的容错（Day 10 详讲）。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>filter 与 log</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>filter 与 log：改响应 + 收尾</h1></div>
             <div class="card">
                 <p>响应阶段和收尾（都通过 <code>common_phase</code> 统一跑插件，<code>init.lua:470</code>）：</p>
 <pre><code class="language-lua">function _M.http_header_filter_phase()   -- :810 改响应头
     core.response.set_header("Server", ver_header)
     common_phase("header_filter")
 end
-function _M.http_body_filter_phase()     -- :836 改响应体
-    common_phase("body_filter")
-    common_phase("delayed_body_filter")
-end
 function _M.http_log_phase()             -- :959 收尾
     local api_ctx = common_phase("log")
-    healthcheck_passive(api_ctx)         -- 被动健康检查
-    core.ctx.release_vars(api_ctx)       -- 释放上下文（回收 table）
+    healthcheck_passive(api_ctx)         -- 被动健康检查（据本次成败标记上游）
+    core.ctx.release_vars(api_ctx)       -- ★ 释放上下文（回收 table，Day 05）
     core.tablepool.release("api_ctx", api_ctx)
 end</code></pre>
-                <div class="anno">读法：<b><code>common_phase(name)</code> 是各阶段的通用套路——跑全局规则 + 跑该阶段的插件。<strong>log 阶段还负责"释放 api_ctx 到 table 池"——这是 APISIX 性能优化的关键（复用 table 减少 GC，Day 05 讲）。</strong>被动健康检查也在 log 阶段（根据这次请求的成败标记上游健康度）。</b></div>
+                <div class="baby"><span class="t">log 阶段的隐藏任务：回收内存</span>
+                <strong><code>common_phase(name)</code> 是各阶段的通用套路——跑全局规则 + 跑该阶段插件。而 log 阶段还负责"把 api_ctx 归还 table 池"——这是 APISIX 性能优化的关键（复用 table 减少 GC，Day 05 讲）。被动健康检查也在这（据这次请求 5xx 与否标记上游健康度）。</strong></div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>_M 与阶段绑定</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>_M 怎么绑到 Nginx 阶段</h1></div>
             <div class="card">
-                <p><code>init.lua</code> 里的 <code>_M.http_xxx_phase</code> 函数怎么和 Nginx 阶段绑定？答案在生成的 nginx.conf（Day 03 讲）里，类似：</p>
+                <p><code>init.lua</code> 的 <code>_M.http_xxx_phase</code> 怎么和 Nginx 阶段挂上？答案在生成的 nginx.conf（Day 03）里：</p>
 <pre><code class="language-nginx">access_by_lua_block { apisix.http_access_phase() }
 header_filter_by_lua_block { apisix.http_header_filter_phase() }
 body_filter_by_lua_block { apisix.http_body_filter_phase() }
 log_by_lua_block { apisix.http_log_phase() }
 balancer_by_lua_block { apisix.http_balancer_phase() }</code></pre>
-                <div class="baby"><span class="t">Lua 里的 _M 是什么？</span>
-                <strong>Lua 的模块惯例：<code>local _M = {}</code> 是模块的"导出表",最后 <code>return _M</code>。<code>_M.http_access_phase</code> 就是这个模块对外提供的一个函数。</strong>nginx.conf 里的 <code>access_by_lua_block</code> 调用它——这就是"Lua 函数挂到 Nginx 阶段"的绑定。<strong>所以读 APISIX，就是读这些 <code>_M.http_xxx_phase</code> 函数在各阶段做了什么。</strong></div>
+                <div class="baby"><span class="t">Lua 的 _M 是什么？</span>
+                <strong>Lua 模块惯例：<code>local _M = {}</code> 是模块的"导出表"，最后 <code>return _M</code>。<code>_M.http_access_phase</code> 就是这个模块对外的一个函数。</strong>nginx.conf 里 <code>access_by_lua_block</code> 调用它——这就是"Lua 函数挂到 Nginx 阶段"的绑定。<strong>所以读 APISIX = 读这些 <code>_M.http_xxx_phase</code> 在各阶段做了什么。</strong></div>
             </div>
         </section>
 
@@ -154,10 +188,10 @@ balancer_by_lua_block { apisix.http_balancer_phase() }</code></pre>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>Nginx 处理请求的主要阶段序？各阶段大致干什么？</li>
+                    <li>Nginx 处理请求为什么分"阶段"？OpenResty 怎么让你在阶段挂 Lua？</li>
                     <li>init vs init_worker（master vs worker）的区别？</li>
-                    <li>为什么最重的逻辑在 access 阶段？balancer 为什么单独？</li>
-                    <li>Lua 的 <code>_M</code> 是什么？阶段函数怎么和 nginx.conf 绑定？</li>
+                    <li>为什么最重的逻辑在 access 阶段？balancer 为什么单独（可重试）？</li>
+                    <li>log 阶段的隐藏任务（回收 api_ctx）？Lua 的 _M 怎么绑到 nginx.conf？</li>
                 </ul>
             </div>
             <div class="card">
@@ -165,8 +199,8 @@ balancer_by_lua_block { apisix.http_balancer_phase() }</code></pre>
 <pre><code class="language-bash">cd /Users/bitmart/work/codes/github/apisix
 grep -n "^function _M\." apisix/init.lua | grep phase
 sed -n '993,999p' apisix/init.lua
-grep -rn "_by_lua_block" apisix/cli/ngx_tpl.lua | head</code></pre>
-                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>启动流程</strong>——从 <code>bin/apisix</code> 命令行到生成 nginx.conf、再到 <code>http_init/http_init_worker</code> 初始化各子系统的完整开机过程。</div>
+grep -n "_by_lua_block" apisix/cli/ngx_tpl.lua | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 03</strong>：<strong>启动流程</strong>——从 <code>apisix start</code> 命令，到根据 config.yaml 生成 nginx.conf、再到 <code>http_init/http_init_worker</code> 初始化各子系统的完整开机过程。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="apisix-day01.html" style="color:var(--accent-cyan);">&larr; Day 01</a>
