@@ -18,6 +18,24 @@
         .step{display:flex;gap:12px;align-items:flex-start;margin:9px 0}
         .step .n{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#7c4dff,#f59e0b);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0}
         .step .c{flex:1;font-size:13px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00add8,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -51,12 +69,55 @@
             <p class="part-desc">第 2 周收官。前面拆了配置解析和规则匹配，今天把它们串进插件"开机时序"：<code>OnPluginStart</code> 从头到尾干了什么。这是插件从"被加载"到"就绪接客"的完整过程。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在 wasm-go 前 10 天的位置（W1 入门与生命周期 · W2 配置与匹配；W3-4 见 D11-20）</div>
+            <div class="steps">
+                <span class="st">D01 全景</span><span class="sep">·</span>
+                <span class="st">D02 request-block</span><span class="sep">·</span>
+                <span class="st">D03 ABI</span><span class="sep">·</span>
+                <span class="st">D04 三级Context</span><span class="sep">·</span>
+                <span class="st">D05 SetCtx/选项</span><span class="sep">→</span>
+                <span class="st">D06 配置解析</span><span class="sep">·</span>
+                <span class="st">D07 RuleMatcher</span><span class="sep">·</span>
+                <span class="st">D08 运行时匹配</span><span class="sep">·</span>
+                <span class="st">D09 全局vs规则</span><span class="sep">·</span>
+                <span class="st on">D10 生命周期</span><span class="sep">→</span>
+                <span class="st">W3-4 请求处理/高级</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 8px"><span class="t">💡 第 2 周收官：把前几天全串成"芯片开机自检序列"</span>
+        延续机场类比：<code>OnPluginStart</code> 就是安检芯片<strong>开班前的自检启动序列</strong>——按固定顺序：<strong>①先做点前置准备（prePluginStart）→②设好全局限流参数→③读今天的规章（配置）并认领工号（pluginID）→④把规章拆成规则表（ParseRuleConfig，D06-09 全在这里跑起来）→⑤挂上定时任务（tick）</strong>，全部通过才亮绿灯"就绪接客"。任何一步失败就返回 <code>Failed</code>、拒绝上岗（保护网关不带着坏配置运行）。今天把散落 9 天的零件拼成一条启动流水线。</div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>OnPluginStart 全景</h1></div>
             <div class="card">
                 <p><code>plugin_wrapper.go:637-727</code> 的 <code>OnPluginStart</code>（Plugin 级上下文的方法）是插件"开机"的总控。它返回 <code>OnPluginStartStatusOK</code>/<code>Failed</code> 告诉网关"启动成功没"。</p>
                 <div class="baby"><span class="t">什么时候被调用？</span>
                 <strong>网关加载插件 wasm、创建 PluginContext 后，就调 <code>OnPluginStart</code>——每次配置变更（Higress 下发新配置）也会重新走一遍。</strong>它是"配置生效"的入口：读进配置、解析、注册定时任务、设参数。<strong>返回 Failed 会让插件启动失败（配置不合法时保护网关）。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 150" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">OnPluginStart 开机自检序列（任一步 Fail 即拒绝上岗）</text>
+                        <g>
+                        <rect x="14" y="46" width="96" height="44" rx="7" fill="rgba(124,77,255,.10)" stroke="#7c4dff"/><text x="62" y="66" fill="#c4b5fd" text-anchor="middle">①prePluginStart</text><text x="62" y="82" fill="#94a3b8" text-anchor="middle">前置准备</text>
+                        <rect x="128" y="46" width="96" height="44" rx="7" fill="rgba(124,77,255,.10)" stroke="#7c4dff"/><text x="176" y="66" fill="#c4b5fd" text-anchor="middle">②IO 限制</text><text x="176" y="82" fill="#94a3b8" text-anchor="middle">全局参数</text>
+                        <rect x="242" y="46" width="110" height="44" rx="7" fill="rgba(0,173,216,.10)" stroke="#00add8"/><text x="297" y="66" fill="#67e8f9" text-anchor="middle">③读配置+pluginID</text><text x="297" y="82" fill="#94a3b8" text-anchor="middle">校验JSON/认工号</text>
+                        <rect x="370" y="46" width="120" height="44" rx="7" fill="rgba(0,173,216,.10)" stroke="#00add8"/><text x="430" y="66" fill="#67e8f9" text-anchor="middle">④ParseRuleConfig</text><text x="430" y="82" fill="#94a3b8" text-anchor="middle">D06-09 全跑起来</text>
+                        <rect x="508" y="46" width="86" height="44" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/><text x="551" y="66" fill="#fbbf24" text-anchor="middle">⑤挂 tick</text><text x="551" y="82" fill="#94a3b8" text-anchor="middle">定时任务</text>
+                        <path d="M110 68 L126 68" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a10)"/>
+                        <path d="M224 68 L240 68" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a10)"/>
+                        <path d="M352 68 L368 68" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a10)"/>
+                        <path d="M490 68 L506 68" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a10)"/>
+                        </g>
+                        <rect x="240" y="108" width="160" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/><text x="320" y="127" fill="#34d399" text-anchor="middle" font-weight="700">✓ StatusOK：就绪接客</text>
+                        <path d="M551 90 Q551 123 402 123" stroke="#22c55e" stroke-width="1.3" fill="none" marker-end="url(#a10)"/>
+                        <defs><marker id="a10" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：五步顺序执行，全绿才返回 StatusOK。配置重载（Higress 下发新配置）会把这条序列整条重跑一遍。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：一份带 _plugin_id_ 的配置进来会怎样</span>
+                收到 <code>{"_plugin_id_":"req-block-7","block_urls":["x"],"_rules_":[…]}</code>：<br>
+                ③ 校验是合法 JSON ✓ → 取出 <code>_plugin_id_="req-block-7"</code> 设为日志 ID（此后该实例日志都带这个 ID）→ 用 sjson 把 <code>_plugin_id_</code> 从配置里删掉（不污染业务字段）→ ④ 剩下的 <code>block_urls</code>+<code>_rules_</code> 交给 ParseRuleConfig 拆成"全局+规则表"。</div>
             </div>
         </section>
 
@@ -129,6 +190,12 @@ if err != nil { return types.OnPluginStartStatusFailed }</code></pre>
                 <p><code>OnTick</code>（<code>:730-737</code>）遍历注册的 tick 函数，到点就执行（各自的 <code>tickPeriod</code> 必须是 100 的倍数）。</p>
                 <div class="baby"><span class="t">tick 能干什么？</span>
                 <strong>定时任务——比如每秒刷新一次令牌桶（限流）、每 5 秒上报一次指标、定期续租 Leader（Day 17）。</strong>你在 parseConfig 里 <code>wrapper.RegisterTickFunc(1000, func(){...})</code> 注册"每秒执行"。<strong>底层 tick 固定 100ms 一跳，SDK 按你设的周期判断该不该执行你的函数——所以周期必须是 100 的倍数。</strong>这是插件里做"周期性后台工作"的唯一途径（Wasm 不能自己开线程）。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：我 <code>RegisterTickFunc(1500, fn)</code> 想每 1.5 秒执行一次，行不行？</p>
+                    <p class="a">👨‍🏫 老师：行——1500 是 100 的倍数。底层每 100ms 跳一次表(<code>OnTick</code>)，SDK 拿"当前时间 − 上次执行时间 ≥ 你设的周期"来判断该不该跑你的函数。所以周期<strong>必须是 100 的倍数</strong>；写 <code>1550</code> 就对不齐 100ms 的跳点、不精确。想要精准就用 100 的整数倍。</p>
+                    <p class="q">👶 小白：配置重载时，上次注册的 tick 会不会残留、变成注册了两份？</p>
+                    <p class="a">👨‍🏫 老师：不会。看 L04 那句 <code>globalOnTickFuncs = nil</code>——每次 OnPluginStart 开头先清空旧的，再重新收集本次注册的。这正是它存在的意义：防止重载后定时任务越堆越多。</p>
+                </div>
             </div>
         </section>
 
