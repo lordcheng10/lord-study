@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#38bdf8,#34d399);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -27,12 +42,12 @@
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 后处理的位置</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseNodePostprocessor</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 统一接口</a></li>
             <li><a href="#l03" class="nav-link" data-section="l03">L03 · 相似度过滤</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · rerank 重排</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · rerank 两阶段（看图）</a></li>
             <li><a href="#l05" class="nav-link" data-section="l05">L05 · 上下文窗口</a></li>
             <li><a href="#l06" class="nav-link" data-section="l06">L06 · prompts 模板</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · PromptMixin</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 换提示词一行搞定</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="llama-index-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -44,68 +59,105 @@
     <main class="content" id="content">
         <div class="part-header">
             <span class="part-label">Day 14 / 共 20 天 · 第 3 周 检索与查询</span>
-            <h1 class="part-title">后处理与提示词</h1>
-            <p class="part-desc">检索到的 Node 在喂给 LLM 前，常要"精修"——过滤噪声、重排、补充上下文。今天看 postprocessor（后处理器）和 prompts（提示词模板系统）。它们是提升 RAG 质量的两个关键杠杆。</p>
+            <h1 class="part-title">后处理与提示词（精修检索结果）</h1>
+            <p class="part-desc">检索回来的 Node 在喂 LLM 前，常要"精修"——过滤噪声、重排、补上下文。今天讲后处理器（尤其 rerank，提升 RAG 准确率最有效的技巧之一）和提示词模板。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整条链的位置</div>
+            <div class="steps">
+                <span class="st">⑤ 检索（粗筛）</span><span class="sep">→</span>
+                <span class="st on">后处理（精排/过滤）</span><span class="sep">→</span>
+                <span class="st">⑥ 合成 D13</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>后处理的位置</h1></div>
             <div class="card">
-                <p>回想 Day 12：QueryEngine 的 <code>retrieve</code> = 检索器检索 + <code>_apply_node_postprocessors</code>。后处理夹在"检索"和"合成"之间。</p>
-                <div class="baby"><span class="t">"检索给一堆候选，后处理精挑细选"</span>
-                <strong>检索器返回 top-k（比如 10 个），但这 10 个未必都好——可能有些相关度低、有些重复、有些需要补上下文。后处理器在合成前"精修"这批 Node：过滤掉差的、重新排序、补充相邻块。</strong>好比初筛出 10 份简历，HR 再精挑 3 份。<strong>后处理是"两阶段检索"（粗检索 + 精排）的精排阶段——对 RAG 质量提升显著。</strong></div>
+                <div class="ask"><span class="t">🤔 检索回来的 top-k 都好吗？</span>
+                检索器返回 top-k（比如 10 个），但这 10 个未必都好——有些相关度低、有些重复、有些需要补上下文。直接全喂 LLM 会引入噪声。</div>
+                <div class="essence"><span class="t">💡 后处理夹在"检索"和"合成"之间，负责"精挑细选"</span>
+                回想 Day 12：QueryEngine 的 <code>retrieve</code> = 检索 + <code>_apply_node_postprocessors</code>。<strong>好比初筛出 10 份简历，HR 再精挑 3 份。后处理是"两阶段检索"的精排阶段——对 RAG 质量提升显著。</strong></div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>BaseNodePostprocessor</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>统一接口，可串成链</h1></div>
             <div class="card">
-                <p><code>postprocessor/</code> 的 <code>BaseNodePostprocessor</code>：核心方法 <code>postprocess_nodes(nodes, query_bundle) -> List[NodeWithScore]</code>——输入一批带分数的 Node，输出精修后的。</p>
-                <div class="anno">读法：<b>又是"输入 Node 列表、输出 Node 列表"的统一接口——所以多个后处理器能串成链（QueryEngine 的 <code>node_postprocessors</code> 列表，依次应用）。<strong>可以先过滤、再重排、再取窗口——像流水线。</strong></b></div>
+                <p><code>postprocessor/</code> 的 <code>BaseNodePostprocessor</code>：核心 <code>postprocess_nodes(nodes, query_bundle) -> List[NodeWithScore]</code>——输入一批带分数的 Node，输出精修后的。</p>
+                <div class="anno">读法：<b>又是"输入 Node、输出 Node"的统一接口——多个后处理器能串成链（先过滤 → 再重排 → 再取窗口）。<strong>像流水线，一步步精修。</strong></b></div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>相似度过滤</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>相似度过滤：宁缺毋滥</h1></div>
             <div class="card">
-                <p><code>postprocessor/</code> 的 <code>SimilarityPostprocessor</code>：按 <code>similarity_cutoff</code> 过滤——只保留相似度分数高于阈值的 Node。</p>
-                <div class="baby"><span class="t">"宁缺毋滥"，扔掉弱相关</span>
-                <strong>检索的 top-k 是"最相似的 k 个",但如果库里根本没有相关内容，这 k 个可能都是"矮子里拔将军"（分数很低）。把它们喂给 LLM 反而误导（让它基于无关内容瞎答）。</strong>SimilarityPostprocessor 设个阈值（如 0.7），低于的直接扔——<strong>宁可少给几个，也不给无关的。这能减少幻觉。</strong>如果全被过滤掉，说明"知识库里没答案",比硬答强。</div>
+                <p><code>SimilarityPostprocessor</code>：按 <code>similarity_cutoff</code> 过滤——只留分数高于阈值的。</p>
+                <div class="example"><span class="t">📝 减少幻觉</span>
+                库里根本没相关内容时，top-k 可能都是"矮子里拔将军"（score 都很低，如 0.3）。<br>
+                设 <code>similarity_cutoff=0.7</code> → 低于 0.7 的全扔 → 如果全被扔光，说明"知识库里没答案"（比硬喂无关内容让 LLM 瞎编强）。</div>
+                <div class="baby"><span class="t">宁可少给，也不给无关的</span>
+                <strong>给 LLM 无关内容 = 诱导它基于错误信息瞎答（幻觉）。相似度过滤守住这道门。</strong></div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>rerank 重排</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>rerank 重排：RAG 提效神器</h1></div>
             <div class="card">
-                <p>重排类后处理器（如 <code>LLMRerank</code>、integration 里的 <code>CohereRerank</code>/<code>SentenceTransformerRerank</code>）：用一个更强的模型重新给候选打分排序。</p>
-                <div class="baby"><span class="t">"两阶段检索"的精排（RAG 提效神器）</span>
-                <strong>向量检索快但不够准（只看向量相似）。rerank 用专门的"重排模型"（cross-encoder）或 LLM，把"查询 + 每个候选"一起看、给出更准的相关度分，重新排序。</strong>流程：向量粗检索取 top-20（快、召回全）→ rerank 精排取 top-5（准）。<strong>这是提升 RAG 准确率最有效的技巧之一——粗检索保召回、rerank 保精度。</strong>代价是 rerank 要额外调模型（慢/花钱），但值得。</div>
+                <div class="ask"><span class="t">🤔 向量检索快，但够准吗？</span>
+                向量检索只看"向量相似"，有时排序不够精。有没有办法既保召回、又保精度？</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 140" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <rect x="10" y="45" width="150" height="44" rx="8" fill="#26323a" stroke="#38bdf8"/><text x="85" y="63" fill="#fff" text-anchor="middle">① 向量粗检索</text><text x="85" y="80" fill="#888" text-anchor="middle" font-size="9.5">快，取 top-20（保召回）</text>
+                        <rect x="280" y="45" width="160" height="44" rx="8" fill="#3a2a4a" stroke="#a855f7"/><text x="360" y="63" fill="#fff" text-anchor="middle">② rerank 精排</text><text x="360" y="80" fill="#888" text-anchor="middle" font-size="9.5">重排模型逐对精算相关度</text>
+                        <rect x="560" y="45" width="150" height="44" rx="8" fill="#264a3a" stroke="#34d399"/><text x="635" y="63" fill="#fff" text-anchor="middle">③ 取 top-5</text><text x="635" y="80" fill="#888" text-anchor="middle" font-size="9.5">准（喂给 LLM）</text>
+                        <path d="M160 67 L280 67" stroke="#888" stroke-width="2" marker-end="url(#a)"/><text x="220" y="60" fill="#888" font-size="10">20 个</text>
+                        <path d="M440 67 L560 67" stroke="#888" stroke-width="2" marker-end="url(#a)"/><text x="500" y="60" fill="#888" font-size="10">5 个</text>
+                        <text x="10" y="25" fill="#a855f7" font-size="12">两阶段检索：粗检索保召回（多拿点），精排保精度（选最好的）</text>
+                        <text x="10" y="120" fill="#888" font-size="10.5">LLMRerank / CohereRerank / SentenceTransformerRerank（cross-encoder，比向量更准但慢）</text>
+                        <defs><marker id="a" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#888"/></marker></defs>
+                    </svg>
+                    <div class="cap">两阶段检索：向量粗检索取 top-20（快、召回全）→ rerank 精排取 top-5（准）。</div>
+                </div>
+                <div class="baby"><span class="t">为什么这是"提效神器"</span>
+                <strong>向量检索一步到位不够准；rerank 用专门的重排模型（cross-encoder）把"查询+每个候选"一起看、给出更准的相关度分。粗检索保召回、rerank 保精度——这是提升 RAG 准确率最有效的技巧之一。</strong>代价是 rerank 要额外调模型（慢/花钱），但值得。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>上下文窗口</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>上下文窗口（回收 Day 02/04）</h1></div>
             <div class="card">
-                <p><code>MetadataReplacementPostProcessor</code> / <code>PrevNextNodePostprocessor</code>：配合 Day 04 的 SentenceWindow / Day 02 的 PREV/NEXT 关系，把命中的小块"扩展"成带上下文的内容。</p>
-                <div class="baby"><span class="t">"命中一句，给出一段"</span>
-                <strong>SentenceWindow 检索（Day 04）：用单句嵌入检索（精准命中），但单句给 LLM 上下文不够。<code>MetadataReplacementPostProcessor</code> 在检索命中后，把 Node 内容<strong>替换</strong>成它 metadata 里存的"前后窗口"（周围几句）——检索用小粒度（准），给 LLM 用大粒度（全）。</strong><code>PrevNextNodePostprocessor</code> 则用 PREV/NEXT 关系取相邻块。<strong>这解决了"检索精度"和"上下文完整"的矛盾——回收 Day 02/04 的伏笔。</strong></div>
+                <p><code>MetadataReplacementPostProcessor</code> / <code>PrevNextNodePostprocessor</code>：配合 Day 04 的 SentenceWindow、Day 02 的 PREV/NEXT 关系，把命中的小块"扩展"成带上下文的内容。</p>
+                <div class="essence"><span class="t">💡 "命中一句，给出一段"——解决精度与上下文的矛盾</span>
+                SentenceWindow 检索（Day04）：用单句嵌入检索（精准命中），但单句上下文不够。<code>MetadataReplacementPostProcessor</code> 检索命中后，把内容<strong>替换</strong>成 metadata 里存的"前后窗口"（周围几句）——检索用小粒度（准），给 LLM 用大粒度（全）。</div>
+                <div class="anno">读法：<b>回收 Day 02/04 埋的关系伏笔——PREV/NEXT 在这里派上用场。<code>PrevNextNodePostprocessor</code> 用关系取相邻块。<strong>这解决了"检索精度 vs 上下文完整"的经典矛盾。</strong></b></div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>prompts 模板</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>prompts：RAG 的"说明书"</h1></div>
             <div class="card">
-                <p><code>prompts/</code>：<code>PromptTemplate</code>（字符串模板 + 变量）、<code>ChatPromptTemplate</code>（多轮消息模板）。RAG 的核心提示词如 <code>DEFAULT_TEXT_QA_PROMPT_TMPL</code>（"根据以下上下文回答问题：{context_str}\n问题：{query_str}"）。</p>
-                <div class="baby"><span class="t">提示词是 RAG 的"说明书"</span>
-                <strong>LLM 怎么用检索到的内容答题，全看提示词怎么写。默认的 QA 提示词类似"这是相关资料：{context}。请只根据资料回答：{question}"——引导 LLM"基于资料、别乱编"。</strong><code>PromptTemplate</code> 用 <code>{变量}</code> 占位，运行时填入检索内容和问题。<strong>调 RAG 效果时，改提示词（比如加"如果资料里没有就说不知道"）常有奇效——比换模型便宜。</strong>refine 模式（Day 13）还有专门的"精炼提示词"。</div>
+                <p><code>prompts/</code>：<code>PromptTemplate</code>（字符串模板+变量）、<code>ChatPromptTemplate</code>（多轮消息模板）。默认 QA 提示词类似：</p>
+                <div class="example"><span class="t">📝 默认 QA 提示词（简化）</span>
+                <code>以下是相关资料：\n{context_str}\n\n请只根据以上资料回答问题：{query_str}</code><br>
+                运行时 <code>{context_str}</code> 填检索到的 Node 文本、<code>{query_str}</code> 填用户问题。</div>
+                <div class="baby"><span class="t">改提示词常有奇效（且便宜）</span>
+                <strong>LLM 怎么用检索内容答题，全看提示词怎么写。加一句"如果资料里没有就说不知道，别编"，能大幅减少幻觉。</strong>调 RAG 效果时，改提示词比换模型便宜得多、见效快。refine 模式（Day 13）还有专门的"精炼提示词"。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>PromptMixin</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>PromptMixin：一行换掉深层提示词</h1></div>
             <div class="card">
-                <p><code>prompts/mixin.py</code> 的 <code>PromptMixin</code>：让组件（检索器/合成器/查询引擎）能"暴露和替换"自己用的提示词——<code>get_prompts()</code> / <code>update_prompts()</code>。</p>
-                <div class="anno">读法：<b>回想 Day 11 <code>BaseRetriever(PromptMixin, ...)</code>——很多组件都 mix 了它。<strong>好处：你能一行 <code>query_engine.update_prompts({...})</code> 换掉深层组件的提示词，不用改源码。</strong>比如把默认英文提示词换成中文、加约束。<strong>这让"提示词工程"可以在应用层灵活做，不必动框架。</strong>提示词是 RAG 最易调、最见效的地方。</b></div>
+                <p><code>prompts/mixin.py</code> 的 <code>PromptMixin</code>：让组件（检索器/合成器/查询引擎）能暴露和替换自己用的提示词——<code>get_prompts()</code> / <code>update_prompts()</code>。</p>
+                <div class="example"><span class="t">📝 把默认英文提示换成中文约束</span>
+<pre style="margin:6px 0;font-size:11.5px"><code class="language-python">query_engine.update_prompts({
+    "response_synthesizer:text_qa_template":
+        PromptTemplate("资料：{context_str}\n只依据资料用中文回答，没有就说'资料中未提及'：{query_str}")
+})</code></pre>
+                → 一行改掉深层合成器的提示词，不用动源码。</div>
+                <div class="anno">读法：<b>回收 Day 11 <code>BaseRetriever(PromptMixin,...)</code>——很多组件都 mix 了它。<strong>提示词工程在应用层灵活做，不必改框架。提示词是 RAG 最易调、最见效的杠杆。</strong></b></div>
             </div>
         </section>
 
@@ -116,9 +168,8 @@
                 <ul>
                     <li>后处理在检索和合成之间做什么？为什么是"精排"？</li>
                     <li>相似度过滤为什么能减少幻觉？</li>
-                    <li>rerank（两阶段检索）为什么是提效神器？</li>
-                    <li>上下文窗口后处理怎么解决"命中精度 vs 上下文完整"的矛盾？</li>
-                    <li>提示词为什么是 RAG 最易调的杠杆？</li>
+                    <li>rerank（两阶段检索）为什么是提效神器？粗检索保什么、精排保什么？</li>
+                    <li>上下文窗口怎么解决"命中精度 vs 上下文完整"？提示词为什么最易调？</li>
                 </ul>
             </div>
             <div class="card">
@@ -126,9 +177,8 @@
 <pre><code class="language-bash">cd /Users/bitmart/work/codes/github/llama_index/llama-index-core/llama_index/core
 ls postprocessor/
 grep -n "class SimilarityPostprocessor\|similarity_cutoff\|def postprocess_nodes" postprocessor/node.py | head
-ls prompts/
 grep -n "DEFAULT_TEXT_QA_PROMPT\|class PromptTemplate" prompts/default_prompts.py prompts/base.py 2>/dev/null | head</code></pre>
-                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：<strong>LLM 抽象</strong>——最后一块拼图。LLM 怎么被统一封装（chat/complete/流式）、ChatMessage/Role、以及 LlamaIndex 怎么让 OpenAI/Claude/本地模型互换。</div>
+                <div class="tip"><strong>明天预告 · Day 15（第 3 周收官）</strong>：最后一块拼图——<strong>LLM 抽象</strong>。各家 LLM 怎么被统一封装（chat/complete/流式）、ChatMessage/角色、全局 Settings，以及工具调用（Agent 的基础）。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="llama-index-day13.html" style="color:var(--accent-cyan);">&larr; Day 13</a>
