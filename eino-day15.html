@@ -36,6 +36,8 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
     </style>
 </head>
 <body>
@@ -195,6 +197,13 @@ r, _ := g.Compile(ctx, compose.WithMaxRunSteps(config.MaxStep))</code></pre>
             <div class="card">
                 <p>ReAct 每轮都要把"之前所有消息 + 新产生的消息"一起喂给模型，否则模型失忆。这个累积靠 State（Day 09）或节点前置处理完成：工具结果（Tool 消息）通过回头边追加进消息列表，模型节点每次拿到的是<strong>完整历史</strong>。</p>
                 <div class="glossary">具体实现里，模型节点前有个"整理输入"的步骤，把 State 里累积的消息 + system 提示拼成本轮的模型输入。工具节点执行后把 Tool 消息 append 进 State。<strong>所以"回头边"传的不只是这一步的结果，而是让消息历史不断增长——模型每轮看到的上下文越来越全。</strong>这也是为什么长对话会越来越贵（token 累积，呼应 Day 01 成本经济学）。</div>
+                <div class="essence"><span class="t">💡 生活类比：messages 就像看病的病历本</span>
+                大模型是"金鱼记忆"——每次调用它<strong>只看你这次递进去的材料</strong>，上一轮说过什么它自己一点不记得。所以 ReAct 每轮都得把"到目前为止的全部对话"重新递一遍，就像<strong>看病的病历本</strong>：每查一次就往本子里夹一张新化验单（assistant/tool 消息），医生（模型）每次都要翻<strong>整本</strong>才能判断下一步。本子越夹越厚（L02 里从 1 条涨到 6 条），翻一次也越来越费劲（token 越来越贵）——这就是"回头边让历史增长"在生活里的样子。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：模型不是刚查过北京气温吗？为什么下一轮还要把"北京 32℃"连同前面所有消息再喂它一遍，它自己不记得？</p>
+                    <p class="a">👨‍🏫 老师：它真不记得。每次 <code>Generate</code>/<code>Stream</code> 调用对模型来说都是<strong>全新的一次</strong>，模型本身<strong>没有记忆</strong>，只能看到你这次 input 里的消息。所谓"多轮对话"的记忆，其实是<strong>框架在外面替它记</strong>的——就是这节讲的：把历史累积在 State 里，每轮拼成完整 <code>messages</code> 再递进去。</p>
+                    <p class="a">👨‍🏫 所以"回头边"不是把模型的记忆接回去，而是把<strong>工具结果追加进那本病历</strong>，让下一轮的完整历史里多一条。理解这点你就懂了两件事：① 为什么长对话越聊越慢越贵（病历本越翻越厚）；② 为什么要做"上下文裁剪/摘要"——本子太厚了得定期精简，否则迟早超出模型能读的上限。</p>
+                </div>
             </div>
         </section>
 
@@ -208,6 +217,8 @@ r, _ := g.Compile(ctx, compose.WithMaxRunSteps(config.MaxStep))</code></pre>
                 </ul>
                 <div class="baby"><span class="t">谁决定"够了"？</span>
                 主要是<strong>模型自己</strong>——当它觉得收集的信息足够回答时，就不再产出 tool_call，自然走向 END。MaxSteps 只是安全网，正常情况用不到。所以模型的判断力（和提示词质量）直接决定 Agent 好不好用。</div>
+                <div class="essence"><span class="t">💡 生活类比：两个出口 = 自助餐怎么收场</span>
+                循环停不停，<strong>就像自助餐</strong>：正常情况是<strong>你自己吃饱了主动放下筷子</strong>（模型觉得信息够了、不再要工具，走正常 END）；而 <code>MaxRunSteps</code> 是餐厅贴的"每桌最多 2 小时"告示（强制结束 <code>ErrExceedMaxSteps</code>），只在你没完没了、赖着不走时才启用。健康的 Agent 应该"自己吃饱主动走"，天天靠告示轰出去说明它陷在死循环里——那多半是工具老是不给模型想要的结果、它只好反复重试。</div>
             </div>
         </section>
 
