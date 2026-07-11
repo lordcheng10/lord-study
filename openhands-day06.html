@@ -19,6 +19,22 @@
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
         table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -50,7 +66,18 @@
         <div class="part-header">
             <span class="part-label">Day 06 / 共 20 天 · 第 2 周 app_server 编排层</span>
             <h1 class="part-title">app_server 架构总览</h1>
-            <p class="part-desc">进入本仓真正的核心。今天先看"管家"的模块地图、FastAPI 应用怎么装配，以及贯穿全代码库的灵魂——Injector 依赖注入机制。</p>
+            <p class="part-desc">上周（Day 01-05）我们从外部视角看懂了"一个任务如何被自主完成"；本周开始钻进"管家"app_server 的源码里看它到底怎么实现。今天先建整体地图：模块划分、FastAPI 应用怎么装配、以及贯穿全代码库的灵魂——Injector 依赖注入。有了这张地图，Day 07-10 逐个模块深入时才不会迷路。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 第 2 周 后端编排层 · 你在这里</div>
+            <div class="steps">
+                <span class="st on">Day6 app_server总览</span><span class="sep">→</span>
+                <span class="st">Day7 会话生命周期</span><span class="sep">→</span>
+                <span class="st">Day8 事件系统</span><span class="sep">→</span>
+                <span class="st">Day9 Sandbox</span><span class="sep">→</span>
+                <span class="st">Day10 server装配</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
@@ -63,6 +90,7 @@
                     <li>持久化事件、鉴权</li>
                     <li>对沙箱里的 agent-server 做代理转发（浏览器连不上沙箱时）</li>
                 </ul>
+                <div class="essence"><span class="t">💡 本质：app_server 就像一家公司的"总部 + 前台调度台"</span><strong>把整套系统想象成一家软件公司</strong>：真正写代码的是各个项目组的实习生（沙箱里的 agent-server），而 app_server 是总部——前台负责接待来访（收 HTTP 请求）、调度台负责派活和安排工位（管会话/沙箱）、档案室负责归档（存事件）、保安负责验证身份（鉴权）。<strong>总部本身不写一行业务代码</strong>，它只做"接待、调度、记录、把关"。本周就是逐个参观总部的这几个部门。</div>
                 <div class="glossary"><b>一个重要事实</b>：<code>openhands/server/*.py</code> 现在全是"向后兼容的转发壳"（deprecated）——<code>server/app.py</code> 只有一行 re-export <code>app_server.app</code>。真正的实现<strong>全部</strong>在 <code>openhands/app_server/</code>。所以这一周我们只看 app_server。</div>
             </div>
         </section>
@@ -130,6 +158,8 @@ app.add_middleware(RateLimitMiddleware, ...)</code></pre>
         <section id="l05" class="section">
             <div class="section-header"><span class="section-number">L05</span><h1>依赖注入 Injector（本周最重要的设计）</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个"沙箱服务"要在两种完全不同的场景里用</span>处理 HTTP 请求时，希望 FastAPI 自动把它塞进路由参数；可有些活（比如 Day 05 那个"启动会话后台继续跑")在后台任务里，没有 FastAPI 帮忙，得自己手动创建、用完手动关。同一个服务，两种取用姿势——难道要写两套构造/清理逻辑？</div>
+                <div class="essence"><span class="t">💡 本质：Injector = "统一的领用窗口"</span>就像公司里不管你是走正式流程借设备、还是临时急用去仓库自取，最终都走同一个"领用窗口"登记发放。<code>Injector</code> 用一个 <code>inject()</code> 方法当这个窗口，对外包出 <code>depends()</code>（给 FastAPI 用）和 <code>context()</code>（给后台任务 <code>async with</code> 用）两个门面——底层只写一遍。</div>
                 <p><code>services/injector.py:12</code> 定义了统一的 <code>Injector</code> 抽象，一份实现同时服务两种使用场景：</p>
 <pre><code class="language-python">class Injector(Generic[T], ABC):
     @abstractmethod
@@ -149,6 +179,7 @@ app.add_middleware(RateLimitMiddleware, ...)</code></pre>
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>"改环境变量就换实现"的魔法</h1></div>
             <div class="card">
+                <div class="example"><span class="t">📝 如果让你自己写，你大概会这样</span>最朴素的写法是哪要用就直接 <code>sandbox = DockerSandbox()</code> new 一个。<strong>问题</strong>：写死了 Docker。哪天要换远程沙箱，就得满代码库搜出每一处 <code>DockerSandbox()</code> 逐个改，漏一个就出 bug。真实版把"选哪个实现"收敛到一个地方，用 <code>RUNTIME</code> 开关决定 ↓</div>
                 <p>看 <code>config_from_env()</code> 里选沙箱实现的真实代码（<code>config.py:332</code>）：</p>
 <pre><code class="language-python">if os.getenv('RUNTIME') == 'remote':
     config.sandbox = RemoteSandboxServiceInjector(...)   # 远程沙箱
@@ -156,9 +187,30 @@ elif os.getenv('RUNTIME') in ('local', 'process'):
     config.sandbox = ProcessSandboxServiceInjector()     # 本地进程
 else:
     config.sandbox = DockerSandboxServiceInjector(...)   # 默认 Docker</code></pre>
+                <div class="svgbox"><svg viewBox="0 0 480 150" width="100%" style="max-width:480px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                    <defs><marker id="d6a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#888"/></marker></defs>
+                    <rect x="160" y="10" width="160" height="40" rx="8" fill="none" stroke="#f97316"/>
+                    <text x="240" y="28" fill="#eee" text-anchor="middle">环境变量 RUNTIME</text>
+                    <text x="240" y="43" fill="#bbb" text-anchor="middle" font-size="10">业务代码只认 SandboxService 接口</text>
+                    <rect x="20" y="100" width="130" height="40" rx="8" fill="none" stroke="#8b5cf6"/>
+                    <text x="85" y="118" fill="#eee" text-anchor="middle" font-size="10">docker（默认）</text>
+                    <text x="85" y="132" fill="#bbb" text-anchor="middle" font-size="9">DockerSandbox</text>
+                    <rect x="175" y="100" width="130" height="40" rx="8" fill="none" stroke="#8b5cf6"/>
+                    <text x="240" y="118" fill="#eee" text-anchor="middle" font-size="10">local/process</text>
+                    <text x="240" y="132" fill="#bbb" text-anchor="middle" font-size="9">ProcessSandbox</text>
+                    <rect x="330" y="100" width="130" height="40" rx="8" fill="none" stroke="#8b5cf6"/>
+                    <text x="395" y="118" fill="#eee" text-anchor="middle" font-size="10">remote</text>
+                    <text x="395" y="132" fill="#bbb" text-anchor="middle" font-size="9">RemoteSandbox</text>
+                    <path d="M200 50 L100 98" stroke="#888" marker-end="url(#d6a)"/>
+                    <path d="M240 52 L240 98" stroke="#888" marker-end="url(#d6a)"/>
+                    <path d="M280 50 L380 98" stroke="#888" marker-end="url(#d6a)"/>
+                </svg><div class="cap">图注：一个环境变量决定往"沙箱插槽"插哪种实现，业务代码不用动</div></div>
                 <div class="anno">读法：<b>一个 <code>RUNTIME</code> 环境变量，决定往"沙箱插槽"插入哪种实现。</b>业务代码里所有"要沙箱"的地方都用同一个接口 <code>SandboxService</code>，完全不知道背后是 Docker 还是远程还是本地进程——换实现只需改环境变量，业务代码一行不动。</div>
                 <div class="baby"><span class="t">这个模式为什么强大？</span>
-                同一份代码，本地开发用 <code>RUNTIME=local</code>（快、不用 Docker），生产用 <code>RUNTIME=docker</code>（隔离），大规模用 <code>RUNTIME=remote</code>（远程集群）。事件存储同理：本地用文件、云上用 AWS S3/GCP。<strong>"面向接口编程 + 依赖注入"让一套代码适配所有部署形态</strong>——这和 eino 教程里反复强调的"接口与实现分离"是同一个道理，是所有大型系统的通用功夫。底层还用了 <code>DiscriminatedUnion</code>，能直接从环境变量/JSON 反序列化出正确的实现子类。</div>
+                同一份代码，本地开发用 <code>RUNTIME=local</code>（快、不用 Docker），生产用 <code>RUNTIME=docker</code>（隔离），大规模用 <code>RUNTIME=remote</code>（远程集群）。事件存储同理：本地用文件、云上用 AWS S3/GCP。<strong>"面向接口编程 + 依赖注入"让一套代码适配所有部署形态</strong>——这和 eino 教程里反复强调的"接口与实现分离"是同一个道理，是所有大型系统的通用功夫。<br>
+                <strong>沿用公司的比喻</strong>：依赖注入就像人事招聘——岗位说明书只写"要一名沙箱运维"（接口 <code>SandboxService</code>），至于招正式工（docker）、临时工（local）还是外包（remote），由 HR 按当前预算/规模（环境变量）决定；用人的部门只管"我要个运维"，不关心他的编制。<br>
+                <b style="color:var(--accent-orange)">💥 不这么做会出什么事故：</b>如果到处 <code>new DockerSandbox()</code> 写死，某天要上远程集群，你得改几十处、且很容易漏改，测试环境和生产环境行为悄悄不一致——半夜排查这种"某处忘改"的 bug 最折磨人。<br>
+                底层还用了 <code>DiscriminatedUnion</code>，能直接从环境变量/JSON 反序列化出正确的实现子类。</div>
             </div>
         </section>
 

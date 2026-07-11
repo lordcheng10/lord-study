@@ -20,6 +20,22 @@
         .loop2 .mgr{background:rgba(139,92,246,.1);border:1px solid #8b5cf6} .loop2 .mgr b{color:#8b5cf6}
         .loop2 .wk{background:rgba(245,158,11,.1);border:1px solid #f59e0b} .loop2 .wk b{color:#f59e0b}
         .loop2 .a{color:var(--text-muted);font-weight:800;font-size:12px;text-align:center}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -51,13 +67,19 @@
         <div class="part-header">
             <span class="part-label">Day 09 / 共 20 天 · 第 2 周 app_server 编排层</span>
             <h1 class="part-title">Sandbox 沙箱管理</h1>
-            <p class="part-desc">沙箱是 AI 的"隔离工作间"——安全的地基。今天读它怎么用 Docker 供给/暂停/回收，双容器回调闭环怎么建立，密钥如何"按需下发"永不进镜像。</p>
+            <p class="part-desc">沙箱是 AI 的"隔离工作间"——安全的地基。今天读它怎么用 Docker 供给/暂停/回收，双容器回调闭环怎么建立，密钥如何"按需下发"永不进镜像。<strong>昨天（Day 08）我们看清了"事件如何被存下、被 webhook 推回"；今天补上那个"发出 webhook 的沙箱"到底是怎么被拉起来的；这也为明天（Day 10）收官 app_server 装配打好最后一块地基。</strong></p>
+        </div>
+        <div class="journey">
+            <div class="jt">📍 第 2 周 后端编排层 · 你在这里</div>
+            <div class="steps"><span class="st">Day6 app_server总览</span><span class="sep">→</span><span class="st">Day7 会话生命周期</span><span class="sep">→</span><span class="st">Day8 事件系统</span><span class="sep">→</span><span class="st on">Day9 Sandbox</span><span class="sep">→</span><span class="st">Day10 server装配</span></div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>沙箱是什么（再强调一次）</h1></div>
             <div class="card">
                 <p>沙箱（sandbox）= 一个隔离的执行环境（通常是 Docker 容器），里面跑着 agent-server，AI 在其中敲命令、改文件。它和你的宿主机隔离——AI 在里面折腾坏了，删容器重建即可。</p>
+                <div class="essence"><span class="t">💡 本质：沙箱就像一间"隔离实验室"（或你租来做实验的独立厨房）。</span>实验员（AI）在里面尽情操作——打翻试剂、烧糊锅子都行，因为实验室和你家客厅（宿主机）是物理隔离的；出了事故，把这间实验室整个拆掉重建一间就好，绝不会波及你家。本篇后面所有概念，都在这个"租来的实验室"世界观里展开。</div>
+                <div class="ask"><span class="t">🤔 错误驱动：如果没有这层隔离，会出什么事故？</span>假设让 AI 直接在你的宿主机上跑命令。它某一步"自作聪明"执行了 <code>rm -rf /</code> 或 <code>pip install</code> 覆盖了系统库——你的开发机就报废了。真实世界里 AI 的命令并不总是对的，<strong>没有隔离 = 拿生产环境给 AI 练手</strong>。沙箱就是那道"炸了也不心疼"的隔离墙。</div>
                 <div class="loop2">
                     <div class="box mgr"><b>app_server（宿主）</b><br>供给/暂停/删除沙箱<br>记录沙箱身份</div>
                     <div class="a">— 拉起 / 注入密钥+回调地址 →<br>← webhook 回推事件 —</div>
@@ -70,6 +92,8 @@
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>服务抽象与状态</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：为什么不直接在代码里写 <code>docker run</code>，非要抽象一层"服务"？</span>因为 OpenHands 的沙箱不止 Docker 一种——还有 remote（远程集群）、process（本地进程）。如果哪里要用沙箱就现写 docker 命令，那想换成远程执行时得改几十处。</div>
+                <div class="essence"><span class="t">💡 本质：<code>SandboxService</code> 是"沙箱操作的统一遥控器"。</span>它把 search/get/start/resume/pause/delete 这套动作定义成抽象接口（ABC），谁用沙箱只对着这个遥控器按键，不管背后是 Docker 还是远程机器。这和 Day 06 的依赖注入是一套思路——面向接口编程，换实现只换注入的那一个类。</div>
                 <p><code>SandboxService</code>（<code>sandbox_service.py:30</code>）抽象了沙箱的全部操作：<code>search / get / start / resume / pause / delete</code>。基类还实现两个通用能力：</p>
 <pre><code class="language-python"># sandbox_service.py
 async def wait_for_sandbox_running(self, ...):   # :93 轮询直到 RUNNING，可选校验 /alive
@@ -91,6 +115,7 @@ async def pause_old_sandboxes(self, ...):          # :223 超上限时按创建�
                 </ul>
                 <div class="baby"><span class="t">为什么要拆成两个？</span>
                 源码注释点明：<strong>鉴权时只需要"这个沙箱属于谁"——用轻量的 Record 就够，不必去调 Docker API 查完整状态（慢）</strong>。比如 webhook 进来要验"这个 session_key 对应的沙箱属主是谁"，查 Record 即可，毫秒级。只有真要用沙箱（连它、显示状态）时才去查 Docker 拼出 Info。<strong>把"轻量身份"和"重量状态"分开，让高频的鉴权路径不被慢的 Docker 查询拖累。</strong>这和 Day 07 的 Info/实时 分离是同一种思路。</div>
+                <div class="anno">⚠️ <b>小白常误以为</b>：一个沙箱就该用一个大对象装所有信息，拆两个是"过度设计"。<b>其实</b>：高频的鉴权路径每秒可能被调很多次，若每次都去问 Docker 要完整状态（可能几十上百毫秒），系统会被拖垮；只查轻量 Record（毫秒级、走数据库）才扛得住。拆开不是炫技，是被性能逼出来的。</div>
             </div>
         </section>
 
@@ -110,7 +135,16 @@ async def pause_old_sandboxes(self, ...):          # :223 超上限时按创建�
         <section id="l05" class="section">
             <div class="section-header"><span class="section-number">L05</span><h1>Docker 供给全流程 start_sandbox</h1></div>
             <div class="card">
-                <p><code>docker_sandbox_service.py:385</code> 的 <code>start_sandbox</code> 是供给核心：</p>
+                <div class="essence"><span class="t">💡 简化版 → 真实版对照</span>如果让你写"起一个沙箱"，你大概会写：<code>docker run 镜像</code> 拿到容器就完事。真实的 <code>start_sandbox</code> 比这多了好几步——每一步都在补一个"朴素做法会踩的坑"。</div>
+<pre><code class="language-python"># 如果让你自己写（朴素版）：
+def start_sandbox_naive(spec):
+    c = docker.run(spec.image)      # 起个容器
+    return c                        # 完事
+# 问题：① 没限配额，容器越起越多把机器占满
+#      ② docker.run 一返回就用，但里面 agent-server 还没就绪 → 报错
+#      ③ 没身份/回调 → 沙箱产生的事件寄不回来（Day08）
+#      ④ 容器里 1 号进程不回收僵尸子进程 → 进程泄漏</code></pre>
+                <p>真实版 <code>docker_sandbox_service.py:385</code> 的 <code>start_sandbox</code> 把上面这些坑逐一补上：</p>
 <pre><code class="language-python"># start_sandbox 概念流程
 # 1. pause_old_sandboxes 先腾配额
 # 2. resolve_sandbox_spec 定镜像
@@ -133,6 +167,21 @@ env_vars[WEBHOOK_CALLBACK_VARIABLE] = (                # 'OH_WEBHOOKS_0_BASE_URL
     f'http://host.docker.internal:{self.host_port}/api/v1/webhooks')</code></pre>
                 <div class="baby"><span class="t">这两行是整个双进程架构的"脐带"</span>
                 启动容器时，app_server 往容器环境里塞了：① <strong>一把钥匙</strong>（session_api_key）——沙箱以后回来汇报事件时用它证明"我是合法的那个沙箱"；② <strong>一个回家地址</strong>（webhook URL，用 <code>host.docker.internal</code> 让容器能访问到宿主机的 app_server）。于是沙箱里的 agent-server 每产生一个事件，就拿钥匙、按这个地址把事件 POST 回 app_server（Day 08 的 <code>on_event</code> 接收）。<strong>没有这两行，管家和工人就失联了。</strong>这就是 Day 05 说的"回推闭环"的建立瞬间。</div>
+                <div class="example"><span class="t">📝 举个例子</span>app_server 监听在宿主机 <code>3000</code> 端口。启动容器时注入 <code>OH_WEBHOOKS_0_BASE_URL=http://host.docker.internal:3000/api/v1/webhooks</code> 和一把随机钥匙 <code>OH_SESSION_API_KEYS_0=x9f2…</code>。之后沙箱里每产生一个事件，就 <code>POST http://host.docker.internal:3000/api/v1/webhooks</code> 并带上 <code>X-Session-API-Key: x9f2…</code> 头 → app_server 一看钥匙对得上，就收下这个事件。</div>
+                <div class="svgbox"><svg viewBox="0 0 560 200" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                    <defs><marker id="d9a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#f97316"/></marker></defs>
+                    <rect x="20" y="60" width="180" height="80" rx="10" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+                    <text x="110" y="90" text-anchor="middle" fill="#eee" font-weight="700">app_server（宿主机）</text>
+                    <text x="110" y="112" text-anchor="middle" fill="#bbb">监听 :3000 /api/v1/webhooks</text>
+                    <rect x="360" y="60" width="180" height="80" rx="10" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+                    <text x="450" y="90" text-anchor="middle" fill="#eee" font-weight="700">sandbox 容器</text>
+                    <text x="450" y="112" text-anchor="middle" fill="#bbb">agent-server 干活</text>
+                    <line x1="200" y1="82" x2="358" y2="82" stroke="#f97316" stroke-width="1.5" marker-end="url(#d9a)"/>
+                    <text x="279" y="74" text-anchor="middle" fill="#bbb">① 注入 钥匙 + 回家地址</text>
+                    <line x1="360" y1="120" x2="202" y2="120" stroke="#f97316" stroke-width="1.5" marker-end="url(#d9a)"/>
+                    <text x="279" y="138" text-anchor="middle" fill="#bbb">② 带钥匙 POST 回推事件</text>
+                    <text x="279" y="176" text-anchor="middle" fill="#bbb">host.docker.internal = 容器眼里的"宿主机地址"</text>
+                </svg><div class="cap">图：双进程回调闭环——注入"钥匙+回家地址"，沙箱凭钥匙把事件寄回宿主机</div></div>
                 <div class="glossary"><code>host.docker.internal</code> 是 Docker 提供的特殊域名，让容器内部能访问到宿主机——因为 app_server 跑在宿主机上，容器要靠它找到回家的路。</div>
             </div>
         </section>
@@ -145,7 +194,7 @@ env_vars[WEBHOOK_CALLBACK_VARIABLE] = (                # 'OH_WEBHOOKS_0_BASE_URL
 GET /sandboxes/{id}/settings/secrets/{name}
 # app_server 校验 session_key 与该 sandbox 匹配（_valid_sandbox_from_session_key），才返回密钥值</code></pre>
                 <div class="baby"><span class="t">为什么密钥要"按需下发"而不是一次性给全？</span>
-                安全最小化。如果启动时把所有密钥一股脑塞进容器环境变量，那么：① 密钥会出现在容器的 <code>env</code> 里、可能被日志/子进程看到；② 万一镜像被导出，密钥就泄漏了。<strong>"按需下发"= 沙箱真正要用某个密钥时，才凭钥匙来管家单独领取那一个</strong>。密钥永远不落在镜像里，容器里也只有当下用到的那个。<strong>最小暴露面 = 最小泄漏风险。</strong>这是处理机密信息的黄金准则。</div>
+                安全最小化。如果启动时把所有密钥一股脑塞进容器环境变量，那么：① 密钥会出现在容器的 <code>env</code> 里、可能被日志/子进程看到；② 万一镜像被导出，密钥就泄漏了。<strong>"按需下发"= 沙箱真正要用某个密钥时，才凭钥匙来管家单独领取那一个</strong>。密钥永远不落在镜像里，容器里也只有当下用到的那个。<strong>最小暴露面 = 最小泄漏风险。</strong>这就像我们那间隔离实验室的"剧毒试剂"锁在中心库房：实验员要用哪一瓶，才刷卡去领哪一瓶，绝不把整柜钥匙一次塞给每个人。这是处理机密信息的黄金准则。</div>
             </div>
         </section>
 

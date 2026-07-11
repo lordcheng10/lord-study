@@ -20,6 +20,16 @@
         .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#6366f1}
         .journey .step .num{font-size:10px;font-weight:800;color:#6366f1;flex-shrink:0;margin-top:2px}
         .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+        /* —— 改进版新增组件（.journey 已由上方本页竖向步骤条占用，故不再定义） —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -101,12 +111,20 @@ publish_message(routing_key="graph_execution.run", ...)  # 发到 RabbitMQ
 # 起始节点（Day 03 的 starting_nodes）在 create_graph_execution 时已建为 QUEUED
 # 主调度循环：从队列取节点 → 预扣费 → 异步执行 → 取输出 → 入队下游</code></pre>
                 <div class="anno">读法：<b>executor 先获取一把分布式锁（保证同一执行全集群只在一个进程上跑），然后进入调度循环——从"起始节点"开始，取一个节点执行，产出的输出决定下游哪些节点能入队。</b>起始节点就是 Day 03 讲的"没有入边的节点 + INPUT 节点"。</div>
+                <div class="example"><span class="t">📝 举个例子：一个节点的状态一路怎么变（ExecutionStatus）</span>
+                状态机定义在 <code>data/execution.py:137-164</code>，一个正常跑通的"读网页"节点会经历：<br>
+                <code>QUEUED</code>（已入队等 executor 取）→ <code>RUNNING</code>（executor 取到、正在跑 run()）→ <code>COMPLETED</code>（成功，输出已产出）。<br>
+                若中途出错（比如网页 404 触发 <code>yield "error"</code>）：<code>RUNNING → FAILED</code>。整张图（graph execution）也有同一套状态，全部节点跑完才 COMPLETED。这套转移表限制了"合法的下一个状态"，防止乱跳。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
             <div class="section-header"><span class="section-number">L05</span><h1>④ 数据流向下游（拓扑执行的核心）</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个"汇总"块有两个上游，我怎么知道该等还是该跑？</span>
+                如果只是"谁的输出到了就立刻跑下游"，那"汇总"块在第一个上游到达时就会仓促执行——可另一个上游的数据还没来，结果全错。<strong>图里有分叉、汇聚、并行，执行顺序到底怎么保证正确？</strong></div>
+                <div class="essence"><span class="t">💡 本质：攒输入 + "所有必需输入齐了才入队" = 拓扑执行</span>
+                引擎不按"写好的顺序"跑，而是数据驱动：每个上游输出到达就<strong>写进下游节点的输入槽（攒着）</strong>，每次都用 <code>validate_exec</code> 检查"这个下游的必填输入齐了没"——不齐就只落库等待，齐了才标 QUEUED 入队。这样无论图多复杂，节点永远在输入完整时才执行。</div>
                 <p>一个节点跑完，它的输出怎么触发下游？<code>_enqueue_next_nodes</code>（<code>manager.py:389</code>）：</p>
 <pre><code class="language-python"># 对当前节点每条 output_link：
 # 1. 输出值匹配连线的 source_name 才继续
@@ -115,6 +133,35 @@ publish_message(routing_key="graph_execution.run", ...)  # 发到 RabbitMQ
 #    - 不齐 → 只落库，不入队（等其它输入到）
 #    - 齐了 → 标 QUEUED，入执行队列</code></pre>
                 <div class="anno">读法：<b>关键规则：<strong>一个节点只有当它所有必需输入口都到齐时，才会被入队执行。</strong></b>因为一个节点可能有多个上游（比如"汇总"块等"研究"和"分析"都完成）。框架用"攒输入 + 齐了才入队"优雅处理了汇聚（fan-in）和分叉（fan-out）。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 680 220" width="100%" style="max-width:680px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="20" y="24" fill="#ddd" font-size="12" font-weight="700">汇聚（fan-in）：汇总块等两个上游都到齐才入队</text>
+                        <rect x="30" y="50" width="120" height="40" rx="8" fill="#264a3a" stroke="#34d399" stroke-width="2"/>
+                        <text x="90" y="68" fill="#fff" text-anchor="middle">研究块</text>
+                        <text x="90" y="82" fill="#34d399" text-anchor="middle" font-size="9">✔ 已完成</text>
+                        <rect x="30" y="140" width="120" height="40" rx="8" fill="#3a3326" stroke="#f59e0b" stroke-width="2"/>
+                        <text x="90" y="158" fill="#fff" text-anchor="middle">分析块</text>
+                        <text x="90" y="172" fill="#f59e0b" text-anchor="middle" font-size="9">⏳ 还在跑</text>
+                        <rect x="330" y="95" width="140" height="46" rx="8" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
+                        <text x="400" y="115" fill="#fff" text-anchor="middle" font-weight="700">汇总块</text>
+                        <text x="400" y="131" fill="#bbb" text-anchor="middle" font-size="9">输入槽：1/2 到齐 → 等待</text>
+                        <path d="M150 70 L328 108" stroke="#34d399" stroke-width="2" marker-end="url(#d5g)"/>
+                        <text x="205" y="78" fill="#34d399" font-size="9">值已写入</text>
+                        <path d="M150 160 L328 128" stroke="#f59e0b" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#d5o)"/>
+                        <text x="205" y="158" fill="#f59e0b" font-size="9">还没来</text>
+                        <rect x="520" y="95" width="140" height="46" rx="8" fill="#2a2a3a" stroke="#8b5cf6" stroke-width="2"/>
+                        <text x="590" y="115" fill="#fff" text-anchor="middle" font-weight="700">汇总块</text>
+                        <text x="590" y="131" fill="#a78bfa" text-anchor="middle" font-size="9">2/2 齐 → QUEUED 入队</text>
+                        <path d="M470 118 L518 118" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5p)"/>
+                        <text x="472" y="112" fill="#a78bfa" font-size="9">等分析也完成后</text>
+                        <defs>
+                            <marker id="d5g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
+                            <marker id="d5o" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                            <marker id="d5p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#8b5cf6"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">汇总块有两个上游：研究块先完成、值写进它的输入槽，但分析块还没跑完——此时汇总块只落库不入队（1/2 不齐）；等分析块也完成、2/2 到齐，才标 QUEUED 入执行队列。这就是 <code>validate_exec</code> "齐了才跑"的规则。</div>
+                </div>
                 <div class="baby"><span class="t">这就是"拓扑执行"</span>
                 数据像水一样从起始节点往下流。每个节点<strong>等自己所有输入口都有水了才启动</strong>，启动后把结果注入下游的输入口。有多个上游的节点，会耐心"攒齐"所有输入才跑。<strong>这保证了执行顺序正确——不会有节点在输入没齐时就仓促执行。</strong>静态连线（Day 03）的值还会回填给等待中的节点。这套机制让任意复杂的图（分支、汇聚、并行）都能正确执行。</div>
             </div>

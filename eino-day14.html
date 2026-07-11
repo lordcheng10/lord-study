@@ -20,6 +20,22 @@
         .tl .dot{width:14px;height:14px;border-radius:50%;background:#8b5cf6;flex-shrink:0;margin-top:3px}
         .tl .dot.p{background:#f59e0b} .tl .dot.r{background:var(--accent-green)}
         .tl .step .b{font-size:13px} .tl .step .b b{color:#8b5cf6} .tl .step small{color:var(--text-muted);font-size:12px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00ADD8,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -54,10 +70,26 @@
             <p class="part-desc">Agent 跑到一半停下来等人类（比如审批一笔转账），批准后从断点继续——这就是 Human-in-the-loop。今天看它怎么和图执行结合，现场怎么存、怎么恢复。</p>
         </div>
 
+        <!-- 全程进度定位条 -->
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 Agent 套件（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D11 ADK 抽象</span><span class="sep">→</span>
+                <span class="st">D12 ChatModelAgent</span><span class="sep">→</span>
+                <span class="st">D13 多智能体</span><span class="sep">→</span>
+                <span class="st on">D14 中断恢复</span><span class="sep">→</span>
+                <span class="st">D15 ReAct 精读</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么需要中断</h1></div>
             <div class="card">
                 <p>很多真实场景里，Agent 不能自作主张，必须<strong>停下来等人</strong>：转账前要人工确认、删数据前要审批、拿不准时要向用户追问。这叫 <strong>Human-in-the-loop（人在环中）</strong>。</p>
+                <div class="ask"><span class="t">🧯 没有中断/恢复机制，会出什么事故？</span>
+                场景：Agent 帮用户操作账户，模型一冲动就调了"清空购物车""删除全部邮件""转账 5 万"。没有"停下等人批"这一环，<strong>等你发现时钱已经出去、数据已经没了</strong>——大模型有概率犯错，把不可逆操作全权交给它就是定时炸弹。中断/恢复就是给危险动作装一道"人工闸门"。</div>
+                <div class="essence"><span class="t">💡 本质：Human-in-the-loop = 跑一半存 checkpoint、等人输入、从断点续跑</span>
+                这就像生活中打游戏存档：打到 Boss 前先存盘（checkpoint），去吃个饭（等人），回来读档从原地继续（resume），而不是从头再打一遍。Eino 把这套做成三件套：中断触发（<code>compose/interrupt.go</code>）→ 存档 <code>WithCheckPointStore</code>（<code>compose/checkpoint.go:60</code>）+ <code>WithCheckPointID</code>（<code>checkpoint.go:74</code>）→ 恢复 <code>compose.Resume</code>（<code>compose/resume.go:94</code>）。ADK 层则封装成 <code>ChatModelAgentInterruptInfo</code>（<code>adk/chatmodel.go:724</code>）和 <code>ChatModelAgentResumeData</code>（<code>chatmodel.go:773</code>）。</div>
                 <div class="baby"><span class="t">难点在哪？</span>
                 Agent 一次运行是个连续过程（模型→工具→模型……）。要"停下来等人"，意味着：① 得能在某一步<strong>暂停</strong>；② 把当前"跑到哪了、上下文是什么"这个<strong>现场完整存下来</strong>（可能人几小时后才来批）；③ 人给了答复后能<strong>从那个断点继续</strong>，而不是从头重跑（重跑会重复扣费、重复副作用）。Eino 的中断/恢复机制解决这三点。</div>
             </div>
@@ -74,6 +106,29 @@
                     <div class="step"><div class="dot r"></div><div class="b"><b>5. 人类批准</b> — 几分钟/几小时后，人点了"同意" <small>你调用 Resume，带上批准结果</small></div></div>
                     <div class="step"><div class="dot r"></div><div class="b"><b>6. 恢复</b> — 从 CheckPoint 读回现场，从断点继续执行转账，Agent 接着往下跑 <small>不重跑前面的步骤</small></div></div>
                 </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 240" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <defs><marker id="a14" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#8b5cf6"/></marker></defs>
+                        <line x1="60" y1="40" x2="60" y2="210" stroke="#00ADD8" stroke-width="2"/><text x="60" y="28" fill="#00ADD8" text-anchor="middle" font-size="11">Agent 引擎</text>
+                        <line x1="360" y1="40" x2="360" y2="210" stroke="#f59e0b" stroke-width="2"/><text x="360" y="28" fill="#f59e0b" text-anchor="middle" font-size="11">CheckPoint Store</text>
+                        <line x1="660" y1="40" x2="660" y2="210" stroke="#34d399" stroke-width="2"/><text x="660" y="28" fill="#34d399" text-anchor="middle" font-size="11">人类审批</text>
+                        <text x="70" y="60" fill="#cfe" font-size="11">① 正常跑到"转账"这步</text>
+                        <text x="70" y="88" fill="#f6d190" font-size="11">② 触发中断（InterruptError）</text>
+                        <path d="M62 100 L358 100" stroke="#8b5cf6" stroke-width="1.8" marker-end="url(#a14)"/><text x="205" y="94" fill="#c9b6f5" text-anchor="middle" font-size="10.5">③ 存现场（跑到哪+消息+State）</text>
+                        <path d="M62 130 L658 130" stroke="#8b5cf6" stroke-width="1.8" marker-end="url(#a14)"/><text x="330" y="124" fill="#c9b6f5" text-anchor="middle" font-size="10.5">④ 返回中断事件 → 通知人去批</text>
+                        <text x="655" y="152" fill="#a7e8cd" text-anchor="end" font-size="11">⑤（几小时后）点"同意" ⏳</text>
+                        <path d="M658 168 L62 168" stroke="#8b5cf6" stroke-width="1.8" marker-end="url(#a14)"/><text x="360" y="162" fill="#c9b6f5" text-anchor="middle" font-size="10.5">⑥ Resume(带审批结果)</text>
+                        <path d="M62 196 L358 196" stroke="#8b5cf6" stroke-width="1.8" marker-end="url(#a14)"/><text x="205" y="190" fill="#c9b6f5" text-anchor="middle" font-size="10.5">⑦ 读回存档，从断点续跑</text>
+                    </svg>
+                    <div class="cap">中断恢复时序：引擎跑到危险步 → 存档到 Store → 暂停等人 → 人批准后 Resume → 读档从断点继续（前面的步骤不重跑）。</div>
+                </div>
+                <div class="ask"><span class="t">🧑‍💻 第一人称·你就是那笔"转账 5 万"的请求，走一遍</span>
+                <b>「我」</b>被用户发起：给张三转 5 万。<br>
+                → 我进了模型节点，模型说"该调 transfer 工具了"，我带着 tool_call 往下走。<br>
+                → 到了转账工具，它一看 <code>5万 &gt; 阈值</code>，"啪"地把我按下暂停，抛出中断。<br>
+                → 引擎把"我现在在哪、消息历史、State"打包塞进 Store，给我贴了张 <code>checkPointID</code> 便签，然后把外面的迭代器停在一个 Interrupt 事件上。<br>
+                → 我在存档里睡了两小时。审批人点了"同意"。<br>
+                → 程序拿着我的 <code>checkPointID</code> 调 <code>Resume</code>，把我从 Store 里捞出来，"同意"作为转账那步的结果注入，我<strong>接着上次的地方</strong>往下跑，最后回一句"已转账"。<strong>我从没从头重来过——这就是不重复扣费、不重复副作用的关键。</strong></div>
             </div>
         </section>
 
@@ -94,9 +149,10 @@ if 需要人工审批 {
             <div class="section-header"><span class="section-number">L04</span><h1>CheckPoint：存什么现场</h1></div>
             <div class="card">
                 <p>CheckPoint（检查点）保存"恢复所需的一切"：跑到哪个节点了、各 channel 里的值、State（Day 09）、消息历史等——足够之后原样重建执行状态。</p>
-                <div class="baby"><span class="t">类比：游戏存档</span>
-                就像游戏打到一半存档：存下你的位置、血量、背包、任务进度。读档时不用重新打前面的关，直接从存档点继续。CheckPoint 就是 Agent 运行的"存档"。<strong>关键是存得够全——少存一样，恢复时就会出错或行为不一致。</strong></div>
-                <div class="glossary">编译图时要开启 checkpoint 支持并提供一个 <code>CheckPointStore</code>（L05），运行时用一个 <code>checkPointID</code> 标识这次会话的存档。恢复时用同一个 ID 找回存档。</div>
+                <div class="baby"><span class="t">类比：就像生活中的游戏存档</span>
+                CheckPoint 就像生活中的游戏存档：存下你的位置、血量、背包、任务进度。读档时不用重新打前面的关，直接从存档点继续。它就是 Agent 运行的"存档"。<strong>关键是存得够全——少存一样，恢复时就会出错或行为不一致。</strong></div>
+                <div class="anno">⚠️ <b>小白常误以为</b>：中断就是"把 Agent 对象一直挂在内存里等人回来"。<b>其实</b>：那样服务一重启就全没了、还占着内存。真实做法是把现场<strong>序列化存进 Store</strong>（可以是 Redis/DB），Agent 进程该干嘛干嘛甚至可以下线；人回来时再从 Store 里重建——所以人隔几小时、换台机器都能续上。</div>
+                <div class="glossary">编译图时要开启 checkpoint 支持并提供一个 <code>CheckPointStore</code>（<code>compose/checkpoint.go:52</code>，用 <code>WithCheckPointStore</code> 注入，L05），运行时用一个 <code>checkPointID</code>（<code>WithCheckPointID</code>）标识这次会话的存档。恢复时用同一个 ID 找回存档。</div>
             </div>
         </section>
 
@@ -144,8 +200,10 @@ for { e,ok:=iter.Next(); if !ok{break}
 // ……审批人批准后……
 iter2 := runner.Resume(ctx, checkPointID, adk.WithResumeInput("批准"))
 </code></pre>
-                <div class="baby"><span class="t">串起来看</span>
-                模型决定调转账工具 → 工具发现 5 万 > 阈值，抛中断 → 引擎存档、返回中断事件 → 你的程序发审批通知、暂停 → 审批人批准 → 你 Resume → 转账执行、Agent 告诉用户"已转账"。<strong>整个过程 Agent 的"思路"没断，人只是在关键一步插了个手。</strong>这就是安全可控的 AI 应用该有的样子。</div>
+                <div class="example"><span class="t">📝 举例：小额直接过、大额才拦——同一段代码两种命运</span>
+                同样这个工具：用户说"转 <code>5000</code> 元"时，<code>5000 &lt; 10000</code>，工具直接执行、Agent 秒回"已转账"，<strong>人根本不用出现</strong>；用户说"转 <code>50000</code> 元"时，<code>50000 &gt; 10000</code>，同一行 <code>if</code> 命中，触发中断、存档、等审批。<strong>阈值一个数字，就把"顺滑体验"和"安全闸门"两种需求同时满足了</strong>——这正是把控制逻辑写进工具的好处。</div>
+                <div class="baby"><span class="t">串起来看（一句话复述）</span>
+                模型决定调转账工具 → 工具发现 5 万 > 阈值，抛中断 → 引擎存档、返回中断事件 → 你的程序发审批通知、暂停 → 审批人批准 → 你 Resume → 转账执行、Agent 告诉用户"已转账"。<strong>一句话：危险动作先存档暂停，人点头后从原地续跑——思路没断，人只在关键一步插了个手。</strong></div>
             </div>
         </section>
 

@@ -18,6 +18,22 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,6 +68,16 @@
             <p class="part-desc">概念够了，让它跑起来。AutoGPT Platform 是个生产级 SaaS，由一堆进程和中间件组成。今天用 docker compose 启动它，看这套多进程架构。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 1 周 核心概念</div>
+            <div class="steps">
+                <span class="st">D3 Graph 图</span><span class="sep">→</span>
+                <span class="st on">D4 运行平台</span><span class="sep">→</span>
+                <span class="st">D5 执行旅程</span><span class="sep">→</span>
+                <span class="st">D6 Block 基类</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>docker compose 启动</h1></div>
             <div class="card">
@@ -74,6 +100,10 @@ make run-frontend     # 前端</code></pre>
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>多进程编排</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：为什么不把后端写成"一个程序"就好，非要拆成一堆进程？</span>
+                一个进程最省事。但想象：1000 个用户同时点"运行 Agent"，执行引擎被塞爆、CPU 打满——如果 REST 接口和执行引擎挤在同一个进程里，那连"查看我的图"这种轻请求都会被卡死，整站瘫痪。<strong>怎么让"重活"不拖垮"轻活"？</strong></div>
+                <div class="essence"><span class="t">💡 本质：按职责拆进程 + 用队列/事件解耦，各自独立伸缩与隔离</span>
+                把后端切成 REST、执行引擎、WebSocket、调度器等独立进程，它们之间不直接调用，而是通过 RabbitMQ（派活）和 Redis（广播进度）通信。谁忙就单独给谁多开实例，谁崩了也不连累别人——这就是生产级 SaaS 的架构底座。</div>
                 <p>后端不是单个进程，而是一群。<code>app.py:34</code> 的 <code>main()</code> 用 <code>run_processes()</code> 一次拉起所有子进程（<code>app.py:49</code>）：</p>
 <pre><code class="language-python"># app.py:49 —— 一次启动所有后端进程
 run_processes(
@@ -118,6 +148,11 @@ run_processes(
                     <li><strong>职责单一</strong>：每个进程干一件事，代码清晰、易维护。</li>
                     <li><strong>异步解耦</strong>：REST 收到"执行请求"后不自己跑，而是丢进队列（RabbitMQ），executor 进程去消费——REST 立刻返回，执行在后台进行。</li>
                 </ul>
+                <div class="example"><span class="t">📝 举个例子：100 个用户同时点"运行"会发生什么</span>
+                • REST 进程收到 100 个 <code>POST .../execute</code> → 每个都<strong>只做"建记录+扔进 RabbitMQ"</strong>，几毫秒返回执行 id，100 个请求瞬间接完；<br>
+                • RabbitMQ 里排了 100 个任务；假设开了 4 个 executor 实例，每个一次处理 5 个 → 并发跑 20 个，其余在队列排队；<br>
+                • 某个 executor 因为 OOM 崩了 → 它没 ack 的任务<strong>自动重回队列</strong>被别的 executor 接走，REST 和其他用户毫无感知。<br>
+                这就是"接单/干活分离 + 队列削峰"带来的高并发与容错。</div>
                 <div class="baby"><span class="t">"接单"和"干活"分开</span>
                 想象一个餐厅：<strong>服务员（REST）</strong>接单后不亲自做菜，把订单贴到<strong>出单口（RabbitMQ 队列）</strong>，<strong>厨师（executor）</strong>取单做菜。这样服务员能快速接很多单（不被做菜阻塞），厨师忙不过来就多雇几个。<strong>"请求"和"执行"通过队列解耦——这是高并发 SaaS 的标准架构。</strong>你在前端点"运行"，REST 秒回"已排队"，executor 在后台慢慢跑，进度通过 WebSocket 实时推给你。</div>
             </div>
@@ -143,6 +178,38 @@ run_processes(
                     <li><strong>RabbitMQ（任务队列）</strong>：REST 把"图执行请求"发到队列，executor 进程消费。保证任务不丢（executor 挂了消息重回队列）、不超载（一个 executor 只取它能跑的量）。</li>
                     <li><strong>Redis（缓存 + 事件总线）</strong>：① 缓存（如 Block 清单）；② <strong>事件总线</strong>——executor 每次节点状态变化就 publish 事件到 Redis，WebSocket 进程订阅后转发给前端（Day 15）；③ 分布式锁（保证同一执行不被两个进程重复跑）。</li>
                 </ul>
+                <div class="svgbox">
+                    <svg viewBox="0 0 700 230" width="100%" style="max-width:700px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <rect x="20" y="95" width="90" height="42" rx="8" fill="#26323a" stroke="#6366f1" stroke-width="2"/>
+                        <text x="65" y="120" fill="#fff" text-anchor="middle">前端</text>
+                        <rect x="160" y="95" width="100" height="42" rx="8" fill="#26323a" stroke="#6366f1" stroke-width="2"/>
+                        <text x="210" y="115" fill="#fff" text-anchor="middle">REST</text>
+                        <text x="210" y="129" fill="#bbb" text-anchor="middle" font-size="9">接单/秒回</text>
+                        <rect x="320" y="95" width="110" height="42" rx="8" fill="#3a2f26" stroke="#f59e0b" stroke-width="2"/>
+                        <text x="375" y="115" fill="#fff" text-anchor="middle">RabbitMQ</text>
+                        <text x="375" y="129" fill="#f59e0b" text-anchor="middle" font-size="9">任务队列·派活</text>
+                        <rect x="490" y="95" width="110" height="42" rx="8" fill="#264a3a" stroke="#34d399" stroke-width="2"/>
+                        <text x="545" y="115" fill="#fff" text-anchor="middle">executor</text>
+                        <text x="545" y="129" fill="#bbb" text-anchor="middle" font-size="9">干活/跑图</text>
+                        <path d="M110 116 L158 116" stroke="#6366f1" stroke-width="2" marker-end="url(#d4)"/>
+                        <path d="M260 116 L318 116" stroke="#f59e0b" stroke-width="2" marker-end="url(#d4o)"/>
+                        <path d="M430 116 L488 116" stroke="#34d399" stroke-width="2" marker-end="url(#d4g)"/>
+                        <rect x="320" y="185" width="110" height="36" rx="8" fill="#3a2636" stroke="#e879f9" stroke-width="2"/>
+                        <text x="375" y="207" fill="#fff" text-anchor="middle">Redis 事件总线</text>
+                        <path d="M545 137 L545 175 L432 202" stroke="#e879f9" stroke-width="2" fill="none" marker-end="url(#d4p)"/>
+                        <text x="600" y="175" fill="#e879f9" font-size="9">publish 进度</text>
+                        <path d="M318 202 L120 202 L110 140" stroke="#e879f9" stroke-width="2" fill="none" marker-end="url(#d4p)"/>
+                        <text x="150" y="196" fill="#e879f9" font-size="9">WebSocket 推给前端</text>
+                        <text x="20" y="40" fill="#ddd" font-size="12" font-weight="700">"接单/干活分离" + "广播进度"</text>
+                        <defs>
+                            <marker id="d4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#6366f1"/></marker>
+                            <marker id="d4o" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                            <marker id="d4g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
+                            <marker id="d4p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#e879f9"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">上排：前端→REST→RabbitMQ→executor，REST 接单即返回，executor 从队列取活跑图（一对一派活）。下方：executor 把进度 publish 到 Redis，WebSocket 广播给所有在看的前端（一对多广播）。</div>
+                </div>
                 <div class="baby"><span class="t">队列 vs 事件总线，别混</span>
                 <strong>RabbitMQ 队列</strong>："任务分发"——一个任务只被一个 worker 消费（谁抢到谁干）。<strong>Redis 事件总线（Pub/Sub）</strong>："消息广播"——一个事件被所有订阅者收到（进度推给所有看这个执行的前端）。<strong>队列用于"派活"（一对一），事件总线用于"广播进度"（一对多）——两种不同的通信模式，各司其职。</strong>这和 OpenHands、CrewAI 的事件系统思路一致。</div>
             </div>

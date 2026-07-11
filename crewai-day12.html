@@ -86,7 +86,7 @@
                 <div class="ask"><span class="t">🤔 痛点：多个步骤、还有条件分支，怎么把它们"连起来"？</span>
                 一个真实流程可能是：入口拉数据 → 分析 → <strong>如果分数高走 A、低走 B</strong> → 某步要<strong>等两个前置都完成</strong>才能开始。如果用手写 if/else 和函数调用去串，代码很快就绕成一团、难改难读。<strong>有没有一种"声明式"的方式，一眼看清谁触发谁、什么条件走哪条边？</strong></div>
                 <div class="essence"><span class="t">💡 一句话本质：装饰器 = 声明式的"连线便利贴"</span>
-                <code>@start/@listen/@router/and_/or_</code> 不含执行逻辑，只在方法上贴一张"关系便利贴"（我是入口 / A 完成叫我 / 我按返回值分流 / 等全部 / 任一即可）。<strong>引擎启动时把便利贴收集起来，画出"谁触发谁"的图再执行。连线用声明表达，比手写控制流清晰得多。</strong></div>
+                <strong>把 Flow 想象成一块电路板</strong>：<code>@start</code> 是<strong>电源开关</strong>（一合闸就通电起跑）、<code>@listen(A)</code> 是<strong>把 B 的输入端接到 A 的输出端</strong>（一根导线）、<code>@router</code> 是<strong>分岔道闸</strong>（按信号把电流导向不同支路）、<code>and_/or_</code> 是"串联/并联"的接法。<strong>装饰器只负责'贴标签、画接线图'，不含执行逻辑</strong>；引擎启动时把这些便利贴收集起来、画出"谁触发谁"的图再通电执行。声明连线，比手写控制流清晰得多。</div>
                 <p>最重要的认知：<strong>这些装饰器不改变方法的运行时行为，只是在方法上盖一个"元数据章"</strong>。真正的"接线"发生在引擎启动时读取这些元数据。</p>
                 <p>每个装饰器把原函数包进一个 <code>FlowMethod</code> 子类（<code>flow_wrappers.py:48</code>）：<code>StartMethod</code>、<code>ListenMethod</code>、<code>RouterMethod</code>。它实现了描述符协议 <code>__get__</code>，所以包装后仍能像普通方法 <code>self.xxx()</code> 调用，同时携带 <code>__flow_method_definition__</code> 元数据。</p>
                 <div class="baby"><span class="t">"贴元数据"是什么意思？</span>
@@ -147,6 +147,17 @@ def try_again(self): ...</code></pre>
                 <strong>同一个 router，靠返回值把流程导向不同分支——这就是工作流的 if/else 岔路口。</strong></div>
                 <div class="baby"><span class="t">router = 工作流的 if/else 岔路口</span>
                 普通 <code>@listen</code> 是"固定的边"（A 完成一定触发 B）。<code>@router</code> 是"<strong>运行时决定走哪条边</strong>"——看结果返回不同事件名，把流程导向不同分支。就像流程图里的菱形判断框。<strong>有了 router，Flow 就能表达"根据结果走不同路径"的复杂工作流。</strong></div>
+                <p style="margin-top:12px">🔬 <strong>Trace Table：手动走查一遍触发顺序</strong>（假设 <code>analyze</code> 得分 0.9）——像 CPU 单步调试一样，一行行看引擎在干什么：</p>
+                <table class="k">
+                    <thead><tr><th>步</th><th>引擎为什么跑它</th><th>执行的方法</th><th>返回值 / 发射的事件</th><th>引擎接下来找谁</th></tr></thead>
+                    <tbody>
+                        <tr><td>1</td><td>kickoff：找所有 <code>@start</code></td><td><code>ingest</code></td><td>返回 "raw"，广播"ingest 完成"</td><td>谁 <code>@listen(ingest)</code>？→ analyze</td></tr>
+                        <tr><td>2</td><td>ingest 完成事件</td><td><code>analyze</code>(raw)</td><td>返回 result(score=0.9)，广播"analyze 完成"</td><td>谁 listen analyze？→ router: decide</td></tr>
+                        <tr><td>3</td><td>analyze 完成事件</td><td><code>@router decide</code></td><td>0.9&gt;0.8 → 发射事件名 <b>"SUCCESS"</b></td><td>谁 <code>@listen("SUCCESS")</code>？→ celebrate</td></tr>
+                        <tr><td>4</td><td>"SUCCESS" 事件</td><td><code>celebrate</code></td><td>返回结果，无人再监听</td><td>没有监听器 → FlowFinished，结束</td></tr>
+                    </tbody>
+                </table>
+                <div class="anno">读法：<b>注意第 3 步——<code>@router</code> 和普通方法的唯一区别就是"它的返回值被当成事件名发射"。</b>如果 score 是 0.5，第 3 步就发射 "RETRY"，第 4 步换成 <code>try_again</code> 被触发。<strong>整张表你能自己填一遍，就真懂"事件驱动"了。</strong></div>
             </div>
         </section>
 
@@ -202,6 +213,21 @@ def and_(*triggers): return _condition_tree(AND_CONDITION, triggers)  # 全部�
                 <p>接线的时机很讲究：<strong>类定义时装饰器只贴元数据；首次访问 <code>Flow.flow_definition()</code> 时才扫描所有方法、构建成 <code>FlowDefinition</code></strong>（<code>runtime/__init__.py:469</code> → <code>build_flow_definition</code>）。</p>
                 <div class="baby"><span class="t">为什么"懒加载"（用到时才构建）？</span>
                 如果每次 import 这个 Flow 类都立刻解析所有装饰器、构建图，会拖慢导入速度（尤其你只是 import 但还没运行）。<strong>懒加载 = "第一次真要用（kickoff）时才构建图"，之后缓存。</strong>import 快、运行时才付出构建成本、且只付一次。<strong>"延迟到必要时才做重活"是常见的性能优化——和 crewAI 的 litellm 懒加载、很多框架的思路一致。</strong></div>
+                <div class="baby"><span class="t">③ 简化版 → 真实版：装饰器背后其实就是"填一张触发表"</span>
+                <strong>简化版（如果让你自己实现，你八成会手写一张字典）：</strong>
+<pre style="margin:6px 0"><code class="language-python"># 手动维护"事件 → 该触发哪些方法"
+TRIGGERS = {
+    "__start__": [ingest],
+    "ingest":    [analyze],
+    "analyze":   [decide],
+    "SUCCESS":   [celebrate],
+}
+# 再手写一个循环：某方法完成→查表→调用对应方法…（还得自己处理并行/and_/or_/防循环）</code></pre>
+                <strong>真实版（CrewAI 用装饰器替你填这张表）：</strong>
+<pre style="margin:6px 0"><code class="language-python">@start()            # 等价于往表里塞 "__start__": [ingest]
+@listen(ingest)     # 等价于 "ingest": [analyze]
+@router(analyze)    # 特殊：返回值当事件名，动态决定塞哪个 key</code></pre>
+                <strong>装饰器不是魔法——它只是把你会手写的那张"触发表"，改成贴在方法上的便利贴，引擎启动时自动收集成 <code>FlowDefinition</code>（就是上面那个字典的正式版）。</strong>懂了这点，装饰器就一点都不神秘了。</div>
                 <div class="glossary">构建时 <code>_iter_flow_methods</code>（<code>dsl/_utils.py:385</code>）扫描类上所有带 <code>__flow_method_definition__</code> 的 wrapper，<code>_build_method_definition</code> 汇总成 <code>FlowDefinition</code>（Day 11 的"中间表示"）。这张纯数据的图，就是引擎执行的依据，也是能从 YAML 加载 Flow 的原因。</div>
             </div>
         </section>

@@ -18,6 +18,21 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#f59e0b}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#10b981,#0ea5e9);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,6 +67,17 @@
             <p class="part-desc">SuperAGI 有多种部署形态（普通/GPU/本地 LLM）。今天详解 <code>config.yaml</code> 的关键配置，以及各种 docker 变体和生产考量。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 4 周 平台/异步/生态</div>
+            <div class="steps">
+                <span class="st">D16 API</span><span class="sep">→</span>
+                <span class="st">D17 Celery</span><span class="sep">→</span>
+                <span class="st">D18 GUI</span><span class="sep">→</span>
+                <span class="st on">D19 部署与配置（跑到生产）</span><span class="sep">→</span>
+                <span class="st">D20 收官串讲</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>config.yaml 全景</h1></div>
             <div class="card">
@@ -65,6 +91,10 @@
                     <tr><td>安全</td><td>JWT_SECRET_KEY / 加密 key</td></tr>
                     <tr><td>工具凭据</td><td>GOOGLE_API_KEY / 邮件 / GitHub / Jira / Slack …</td></tr>
                 </table>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong>config.yaml = 整个平台的"总控制面板"</strong>。同一份代码，靠这一个文件切换：用哪家 LLM、文件存本地还是 S3、向量库用谁、接哪些工具。<strong>配置与代码分离</strong>——换环境只改配置，不动一行代码。<br>
+                <strong>就像新房装修完的配电箱</strong>：房子结构（代码）不动，但每一路开关贴着标签——"照明"（LLM key）、"厨房"（存储）、"空调"（向量库）。想换供电方式不用砸墙重新布线，<strong>到配电箱拨一下开关就行</strong>。今天全程用"装修/水电"来理解部署配置。</div>
+                <div class="anno">⚠️ <b>小白常误以为</b>：改完 <code>config.yaml</code> 保存就立即生效。<b>其实</b>：配置是容器<strong>启动时</strong>读进内存的——改完必须 <code>docker compose restart</code>，就像配电箱换了保险丝要重新合闸才通电。</div>
                 <div class="baby"><span class="t">"配置集中化"的好处</span>
                 所有可调旋钮在一个文件——换模型改 MODEL_NAME、换存储改 STORAGE_TYPE、接工具填对应凭据。<strong>不用翻代码找配置、不用改多处。</strong>一份 config.yaml 决定整个平台的行为。这是 12-factor app 的"配置与代码分离"原则。</div>
             </div>
@@ -84,10 +114,34 @@ MAX_MODEL_TOKEN_LIMIT: 8000     # 上下文上限
         <section id="l03" class="section">
             <div class="section-header"><span class="section-number">L03</span><h1>存储配置</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 错误驱动：单机跑好好的，一上多容器/生产为什么文件就"丢"了？</span>
+                真实事故现场：智能体明明生成了报告，GUI 下载却 404。原因：backend 和 celery 是<strong>两个独立容器</strong>，各自有各自的本地磁盘。celery worker 把文件写到<strong>它自己</strong>容器的磁盘，backend 去<strong>它自己</strong>的磁盘找——当然找不到。这是新手部署最常踩的坑，解法就是下面这一行配置。</div>
 <pre><code class="language-yaml">STORAGE_TYPE: "FILE"   # 或 "S3"
 # S3 时：BUCKET_NAME / AWS key 等</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 700 240" width="100%" style="max-width:700px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="175" y="20" fill="#f87171" text-anchor="middle" font-weight="700">FILE（多容器时出错）</text>
+                        <rect x="30" y="40" width="130" height="60" rx="9" fill="#3a1f22" stroke="#f87171"/><text x="95" y="66" fill="#ddd" text-anchor="middle">celery 容器</text><text x="95" y="84" fill="#888" text-anchor="middle" font-size="9.5">写→本地磁盘A</text>
+                        <rect x="200" y="40" width="130" height="60" rx="9" fill="#3a1f22" stroke="#f87171"/><text x="265" y="66" fill="#ddd" text-anchor="middle">backend 容器</text><text x="265" y="84" fill="#888" text-anchor="middle" font-size="9.5">读→本地磁盘B</text>
+                        <path d="M160 115 L200 115" stroke="#f87171" stroke-width="2" stroke-dasharray="4 3"/>
+                        <text x="180" y="135" fill="#f87171" text-anchor="middle" font-size="18">✗</text>
+                        <text x="180" y="160" fill="#888" text-anchor="middle" font-size="10">两块磁盘互不相通，读不到</text>
+                        <text x="530" y="20" fill="#34d399" text-anchor="middle" font-weight="700">S3（共享存储 ✓）</text>
+                        <rect x="400" y="40" width="120" height="52" rx="9" fill="#1e3a34" stroke="#34d399"/><text x="460" y="70" fill="#ddd" text-anchor="middle" font-size="10.5">celery 容器</text>
+                        <rect x="580" y="40" width="120" height="52" rx="9" fill="#1e3a34" stroke="#34d399"/><text x="640" y="70" fill="#ddd" text-anchor="middle" font-size="10.5">backend 容器</text>
+                        <rect x="490" y="150" width="120" height="52" rx="9" fill="#22303a" stroke="#0ea5e9"/><text x="550" y="180" fill="#0ea5e9" text-anchor="middle" font-weight="700">S3 共享桶</text>
+                        <path d="M460 92 L540 148" stroke="#34d399" stroke-width="1.6" marker-end="url(#a)"/><text x="475" y="128" fill="#888" font-size="9">写</text>
+                        <path d="M600 148 L648 94" stroke="#34d399" stroke-width="1.6" marker-end="url(#a)"/><text x="640" y="128" fill="#888" font-size="9">读</text>
+                        <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker></defs>
+                    </svg>
+                    <div class="cap">同一份代码，STORAGE_TYPE 从 FILE 改成 S3——就把"各写各的磁盘"变成"共用一个桶"，多容器才能互通。</div>
+                </div>
+                <div class="example"><span class="t">📝 就改一行，行为全变</span>
+                单机开发：<code>STORAGE_TYPE: "FILE"</code>——够用、零依赖。<br>
+                上生产/多 worker：改成 <code>STORAGE_TYPE: "S3"</code> + 填 BUCKET/AWS key，重启容器——celery 写的文件 backend 立刻能读到。<strong>业务代码一行没动</strong>（这就是 Day 14 可插拔存储的价值）。</div>
                 <div class="baby"><span class="t">FILE vs S3 怎么选（Day 14 复习）</span>
-                <strong>FILE</strong>（本地）：单机开发够用。<strong>S3</strong>（云）：生产/多实例必须——因为 backend 和 celery 是不同容器，本地磁盘各容器不通，只有 S3 这种共享存储才能让"celery 写的文件、backend 能读到"。<strong>单机用 FILE，多容器/生产用 S3——改一行配置切换（Day 14 的可插拔存储）。</strong></div>
+                <strong>FILE</strong>（本地）：单机开发够用。<strong>S3</strong>（云）：生产/多实例必须——因为 backend 和 celery 是不同容器，本地磁盘各容器不通，只有 S3 这种共享存储才能让"celery 写的文件、backend 能读到"。<strong>单机用 FILE，多容器/生产用 S3——改一行配置切换（Day 14 的可插拔存储）。</strong><br>
+                <strong>用装修类比</strong>：FILE 是"各房间自己的抽屉"——一个人住随手放没问题；S3 是"楼下的公共快递柜"——多个住户（容器）要传东西，必须放进大家都有钥匙的柜子里。</div>
             </div>
         </section>
 
@@ -95,6 +149,11 @@ MAX_MODEL_TOKEN_LIMIT: 8000     # 上下文上限
             <div class="section-header"><span class="section-number">L04</span><h1>向量库配置</h1></div>
             <div class="card">
                 <p>配置向量库类型（Day 13）：可选 Pinecone/Weaviate/Qdrant/Redis。默认 Redis（<code>super__redis</code> 用的 redis-stack-server 自带向量能力，Day 04）。资源文件 RAG 用 <code>RESOURCE_VECTOR_STORE</code>（默认 Redis）。</p>
+                <div class="ask"><span class="t">👶🏫 对话：Redis 不是消息队列吗，怎么又当向量库？</span>
+                <strong>👶 小白</strong>：Day 17 说 Redis 是 Celery 的小票夹，怎么这里又拿它存向量？<br>
+                <strong>👨‍🏫 老师</strong>：SuperAGI 用的是 <code>redis-stack-server</code>——带"扩展包"的 Redis，自带向量检索模块。一个组件干两份活。<br>
+                <strong>👶 小白</strong>：那为什么不直接上更专业的 Pinecone？<br>
+                <strong>👨‍🏫 老师</strong>：Pinecone 要注册账号、填 key、多一个外部依赖——新手起步的门槛就高了。<strong>装修时优先用房子里已有的线路，不够用再单独拉专线</strong>。默认 Redis 就是"先用已有的"，量大了再换。</div>
                 <div class="glossary"><b>为什么默认 Redis？</b> 因为平台本来就有 Redis（Celery broker），用 redis-stack-server 顺便当向量库——<strong>少一个外部依赖（不用额外部署 Pinecone）。</strong>要更强的向量检索能力（大规模、高级过滤）再换 Pinecone/Qdrant。<strong>默认用已有组件、可选升级——降低起步门槛。</strong></div>
             </div>
         </section>

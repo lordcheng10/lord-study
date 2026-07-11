@@ -18,6 +18,22 @@
         .mw{display:flex;flex-direction:column;gap:6px;margin:12px 0}
         .mw .m{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);font-size:12.5px}
         .mw .m b{color:#f97316}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -49,7 +65,11 @@
         <div class="part-header">
             <span class="part-label">Day 10 / 共 20 天 · 第 2 周 app_server 编排层（收官）</span>
             <h1 class="part-title">server 服务装配</h1>
-            <p class="part-desc">第2周收官。看 FastAPI 应用怎么被中间件（CORS/缓存/限流）武装、生命周期钩子怎么自动跑数据库迁移、路由怎么汇总、鉴权加在哪。</p>
+            <p class="part-desc">第2周收官。看 FastAPI 应用怎么被中间件（CORS/缓存/限流）武装、生命周期钩子怎么自动跑数据库迁移、路由怎么汇总、鉴权加在哪。<strong>昨天（Day 09）我们看清了沙箱这块地基；今天把整个 app_server 的"外壳装配"补齐——中间件、迁移、路由、鉴权；装完这一层，下周（Day 11 起）就能安心离开"管家"，进入"工人的大脑"了。</strong></p>
+        </div>
+        <div class="journey">
+            <div class="jt">📍 第 2 周 后端编排层 · 你在这里</div>
+            <div class="steps"><span class="st">Day6 app_server总览</span><span class="sep">→</span><span class="st">Day7 会话生命周期</span><span class="sep">→</span><span class="st">Day8 事件系统</span><span class="sep">→</span><span class="st">Day9 Sandbox</span><span class="sep">→</span><span class="st on">Day10 server装配</span></div>
         </div>
 
         <section id="l01" class="section">
@@ -61,12 +81,15 @@ from openhands.app_server.app import app   # 只是 re-export
 # openhands/server/__main__.py 注释建议：直接用 uvicorn openhands.app_server.app:app</code></pre>
                 <div class="anno">读法：<b><code>openhands/server/</code> 是历史遗留的"兼容壳"——老代码/文档可能还 import <code>openhands.server</code>，为了不破坏它们，保留这些转发文件，实际全指向 <code>app_server</code>。</b>启动入口 <code>main()</code> 默认端口 3000。<strong>看到 server 目录别停留，真东西在 app_server。</strong></div>
                 <div class="glossary"><b>为什么保留废弃壳而不直接删？</b> 向后兼容。可能有部署脚本、外部集成还在引用旧路径。保留薄薄的转发层，让老引用继续能用、同时引导大家迁到新路径（注释里写明建议）。<strong>这是成熟项目重构时的常见做法——渐进迁移，不搞破坏性大爆炸。</strong></div>
+                <div class="anno">⚠️ <b>小白常误以为</b>：既然 <code>openhands/server/</code> 全是转发、没有真逻辑，那就是"死代码"，删掉更干净。<b>其实</b>：可能还有部署脚本、外部集成、老文档在 <code>import openhands.server</code>，一删就把它们全弄崩。留着这层薄壳的成本几乎为零，删掉的风险却不可控——这正是"兼容壳"存在的意义。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>中间件三件套</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：跨域检查、缓存头、限流……这些逻辑每个接口都要，难道每个函数里都写一遍？</span>如果让你自己实现，最朴素的做法是在每个路由函数开头都 copy 一段"检查一下"。几十个接口就是几十份重复代码，改一处要改几十处。</div>
+                <div class="essence"><span class="t">💡 本质：中间件就像商场开业前统一装好的"入口设施"。</span>商场不会让每个铺位自己装安检门和闸机，而是在大门口统一装一套——所有顾客进出都先过这道关。中间件也一样：请求进来先统一过一遍"关卡"，通用逻辑写一份，所有接口自动享用。</div>
                 <p>回忆 Day 06，<code>app.py</code> 给应用装了三个中间件（<code>app.py:81</code>，实现在 <code>middleware.py</code>）：</p>
                 <div class="mw">
                     <div class="m"><b>LocalhostCORSMiddleware</b> — 跨域控制（+ 本地开发放行）</div>
@@ -75,6 +98,20 @@ from openhands.app_server.app import app   # 只是 re-export
                 </div>
                 <div class="baby"><span class="t">中间件（middleware）是什么？</span>
                 中间件是"每个请求进出都会经过的关卡"。请求到达路由处理函数<strong>之前</strong>、响应返回<strong>之后</strong>，中间件都能插一脚做统一处理——比如"所有请求都检查跨域""所有响应都加缓存头""所有请求都算一下限流"。这样这些通用逻辑不用在每个接口里重复写。<strong>中间件 = 请求处理的流水线上的通用工序。</strong></div>
+                <div class="example"><span class="t">📝 举个例子</span>浏览器发来 <code>GET /api/v1/sandboxes</code>。它先穿过 CORS 关卡（来源是不是被允许？）→ 再过限流关卡（这个 IP 这一秒是不是已经超 10 次？）→ 才到真正的路由函数；函数返回后，响应又反向穿过缓存关卡（该不该加 <code>Cache-Control</code> 头？）才回到浏览器。三道工序，业务代码一行都没写。</div>
+                <div class="svgbox"><svg viewBox="0 0 600 150" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                    <defs><marker id="d10a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#f97316"/></marker></defs>
+                    <text x="45" y="55" text-anchor="middle" fill="#bbb">请求</text>
+                    <rect x="90" y="35" width="90" height="40" rx="8" fill="none" stroke="#f59e0b" stroke-width="1.5"/><text x="135" y="59" text-anchor="middle" fill="#eee">CORS</text>
+                    <rect x="205" y="35" width="90" height="40" rx="8" fill="none" stroke="#f59e0b" stroke-width="1.5"/><text x="250" y="59" text-anchor="middle" fill="#eee">限流</text>
+                    <rect x="320" y="35" width="110" height="40" rx="8" fill="none" stroke="#22c55e" stroke-width="1.5"/><text x="375" y="59" text-anchor="middle" fill="#eee">路由函数</text>
+                    <rect x="455" y="35" width="90" height="40" rx="8" fill="none" stroke="#f59e0b" stroke-width="1.5"/><text x="500" y="59" text-anchor="middle" fill="#eee">缓存头</text>
+                    <line x1="60" y1="55" x2="88" y2="55" stroke="#f97316" stroke-width="1.5" marker-end="url(#d10a)"/>
+                    <line x1="180" y1="55" x2="203" y2="55" stroke="#f97316" stroke-width="1.5" marker-end="url(#d10a)"/>
+                    <line x1="295" y1="55" x2="318" y2="55" stroke="#f97316" stroke-width="1.5" marker-end="url(#d10a)"/>
+                    <line x1="430" y1="55" x2="453" y2="55" stroke="#f97316" stroke-width="1.5" marker-end="url(#d10a)"/>
+                    <text x="300" y="115" text-anchor="middle" fill="#bbb">进来一路过关卡 → 干活 → 出去再过关卡（商场大门的安检 / 闸机 / 导览）</text>
+                </svg><div class="cap">图：一个请求依次穿过中间件流水线，业务函数只管干自己的活</div></div>
             </div>
         </section>
 
@@ -99,6 +136,7 @@ from openhands.app_server.app import app   # 只是 re-export
 # RateLimitMiddleware + InMemoryRateLimiter (middleware.py:78)
 #   按 client host 内存滑动窗口限流（app.py 配 10 req/s）
 #   /assets 和 sandbox resume 请求豁免</code></pre>
+                <div class="ask"><span class="t">🤔 错误驱动：如果没有限流，会出什么事故？</span>假设某个客户端（或脚本 bug）每秒往接口打几千次请求。没有限流的话，服务器 CPU 被瞬间打满、内存耗尽，<strong>正常用户全部卡死甚至整个服务崩溃</strong>——一个人的失控请求拖垮所有人。限流就是商场入口的"限流闸机"：客流太猛时先挡在门外排队，保护里面不被挤爆。</div>
                 <div class="anno">读法：<b>缓存策略"看人下菜"——带指纹的静态资源（文件名含 hash，内容变文件名就变）可以放心长期强缓存；动态接口一律 no-store（防止拿到过期数据）。</b>限流按来源 IP 滑动窗口算，保护服务不被打爆。</div>
                 <div class="baby"><span class="t">为什么 sandbox resume 请求要豁免限流？</span>
                 因为"恢复一个暂停的沙箱"可能很慢（要 unpause 容器、等 agent-server 就绪，可能几秒到几十秒）。如果这种慢请求也被 10 req/s 的限流误伤，用户想恢复会话却被限流挡住，体验很差。所以特意豁免。<strong>限流是好事，但要给"合理的慢请求"开绿灯——一刀切的限流会误伤正常操作。</strong>这种对边界情况的照顾，是打磨产品的功夫。</div>
@@ -113,7 +151,7 @@ from openhands.app_server.app import app   # 只是 re-export
     # alembic upgrade head —— 自动把数据库结构升级到最新版本
     # 迁移脚本在 app_lifespan/alembic/versions/001.py … 014.py</code></pre>
                 <div class="baby"><span class="t">数据库迁移（migration）是什么？为什么要自动跑？</span>
-                随着项目演进，数据库表结构会变（加字段、加表）。"迁移脚本"就是"如何把旧结构升级到新结构"的一步步说明（001→002→…→014）。<code>alembic upgrade head</code> = "把数据库升级到最新版本"。<strong>启动时自动跑</strong>意味着：你拉个新版本、一启动，表结构就自动升级好了，不用手动执行 SQL。对开源用户（OSS 模式）超友好——开箱即用。<strong>SaaS 模式则用不同的 lifespan 实现</strong>（初始化 PostHog 埋点等），由 <code>config.py</code> 根据部署模式选择。</div>
+                数据库迁移就像商场开业/翻新前的"装修改造"：新版本要给某张表加个字段，就像某个铺位要加个隔断墙，而"迁移脚本"就是一张张按顺序的施工图纸（001→002→…→014），<code>alembic upgrade head</code> 就是"按图纸一路施工到最新的样子"。随着项目演进，数据库表结构会变（加字段、加表）。"迁移脚本"就是"如何把旧结构升级到新结构"的一步步说明（001→002→…→014）。<code>alembic upgrade head</code> = "把数据库升级到最新版本"。<strong>启动时自动跑</strong>意味着：你拉个新版本、一启动，表结构就自动升级好了，不用手动执行 SQL。对开源用户（OSS 模式）超友好——开箱即用。<strong>SaaS 模式则用不同的 lifespan 实现</strong>（初始化 PostHog 埋点等），由 <code>config.py</code> 根据部署模式选择。</div>
                 <div class="glossary"><code>AppLifespanService</code> 本身是个 async 上下文管理器抽象——启动时进入、关闭时退出。Day 06 的 <code>combine_lifespans</code> 把它和 MCP 子应用的 lifespan 合并成一个，交给 FastAPI。</div>
             </div>
         </section>
@@ -137,6 +175,13 @@ router.include_router(settings_router, secrets_router, user_router, git_router, 
             <div class="section-header"><span class="section-number">L07</span><h1>鉴权加在哪</h1></div>
             <div class="card">
                 <p>各业务路由用 <code>dependencies=get_dependencies()</code> 标记"受保护"（比如 <code>event_router.py:16</code>）。但源码注释多次强调：<strong>真正的保护由 <code>SetAuthCookieMiddleware</code> 提供</strong>——那个 <code>dependencies</code> 主要是给 OpenAPI 文档打"需要认证"的标记。</p>
+                <div class="ask"><span class="t">🤔 对话体：鉴权到底加在哪？</span>
+                👶 小白：既然每个路由都写了 <code>dependencies=get_dependencies()</code>，那鉴权不就是这句做的吗？<br>
+                👨‍🏫 老师：不是。那句主要是"贴标签"——让自动生成的 API 文档标注这个接口"需要登录"。<br>
+                👶 小白：那真正拦住未登录请求的是谁？<br>
+                👨‍🏫 老师：是中间件 <code>SetAuthCookieMiddleware</code>。它在商场大门口统一验票（cookie），没票的根本进不来，压根到不了铺位（路由函数）。<br>
+                👶 小白：那沙箱回调（机器）也要登录吗？<br>
+                👨‍🏫 老师：不，机器走另一道门——凭 <code>X-Session-API-Key</code> 头验证，就像供货商走商场的"货运通道"刷工作证，不走顾客大门。</div>
                 <div class="glossary"><b>两套鉴权，看对象</b>：① <strong>用户请求</strong>（前端→app_server）走 cookie/中间件鉴权（证明"你是登录用户"）；② <strong>沙箱回调</strong>（agent-server→app_server 的 webhook、沙箱来取密钥）走 <code>X-Session-API-Key</code> 头鉴权（证明"我是那个合法沙箱"，Day 08/09 见过）。<strong>不同来源用不同的鉴权方式——用户用 cookie，机器用 API key，各得其所。</strong></div>
             </div>
         </section>

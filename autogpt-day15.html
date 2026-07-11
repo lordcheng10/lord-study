@@ -18,6 +18,22 @@
         .flow2{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
         .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
         .flow2 .n b{display:block;color:#06b6d4;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#06b6d4,#3b82f6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -50,6 +66,16 @@
             <span class="part-label">Day 15 / 共 20 天 · 第 3 周 执行引擎（收官）</span>
             <h1 class="part-title">WebSocket 实时更新</h1>
             <p class="part-desc">第3周收官。执行过程如何实时推送到前端画布——你看到节点一个个亮起、数据流动的原理。读 <code>api/ws_api.py</code> + <code>conn_manager.py</code>。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 执行引擎（收官）</div>
+            <div class="steps">
+                <span class="st">D14 Scheduler</span><span class="sep">→</span>
+                <span class="st on">D15 WebSocket</span><span class="sep">→</span>
+                <span class="st">D16 Credits 计费</span><span class="sep">→</span>
+                <span class="st">D17 OAuth</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
@@ -89,6 +115,11 @@
                     <li><code>SUBSCRIBE_GRAPH_EXECS</code>：订阅<strong>某个图的所有</strong>执行。</li>
                     <li><code>UNSUBSCRIBE</code>：取消订阅。</li>
                 </ul>
+                <div class="example"><span class="t">📝 举个例子：前端订阅一次执行发的消息长什么样</span>
+                你点"运行"拿到 <code>graph_exec_id = abc123</code> 后，前端通过 WS 发：<br>
+                <code>{"method": "subscribe_graph_execution", "data": {"graph_exec_id": "abc123"}}</code><br>
+                → <code>_MSG_HANDLERS</code>（<code>ws_api.py:219</code>）按 method 分发到 <code>handle_subscribe</code>（<code>ws_api.py:109</code>）→ 调 <code>connection_manager.subscribe_graph_exec</code>（<code>ws_api.py:142</code>）登记订阅。<br>
+                此后 <code>abc123</code> 的每条进度事件都会自动推到这个连接，直到你发 <code>unsubscribe</code>。</div>
                 <div class="baby"><span class="t">"订阅"是什么模式？</span>
                 前端说"我要看执行 xxx 的进度"（SUBSCRIBE），服务器就把这个执行的所有事件推给它，直到它 UNSUBSCRIBE。<strong>这是发布-订阅：客户端订阅感兴趣的"话题"（某次执行/某个图），服务器只推它订阅的。</strong>心跳（HEARTBEAT）则是长连接的保活机制——定期 ping-pong，确认连接还活着（否则网络中断了双方都不知道）。</div>
             </div>
@@ -97,10 +128,50 @@
         <section id="l05" class="section">
             <div class="section-header"><span class="section-number">L05</span><h1>Redis → WebSocket 转发链</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：跑图的进程和连着你浏览器的进程根本不是同一个，事件怎么送到你眼前？</span>
+                executor 进程（Day 12）在某台机器上跑图、产生进度事件；你的浏览器连的是另一台机器上的 WS 进程。executor 压根不知道"你"连在哪个 WS 进程上——它怎么把"节点 3 完成了"这条消息，精确送到正看着这张图的那个人的屏幕？</div>
+                <div class="essence"><span class="t">💡 本质：Redis 当"中间人广播"，WS 进程只转发自己订阅的那些执行</span>
+                <code>ConnectionManager</code>（<code>conn_manager.py:219</code>）管理所有 WS 连接：用户连上走 <code>connect_socket</code>（<code>:229</code>）；订阅某次执行走 <code>subscribe_graph_exec</code>（<code>:249</code>）——它去 <strong>Redis Pub/Sub</strong> 订阅那条频道；后台 <code>_pump()</code> 一直 <code>listen()</code>，收到 Redis 事件就 <code>_forward_exec_event</code>（<code>:315</code>）挑出订阅了它的 WebSocket 发出去。<strong>executor 只管"发到 Redis 频道"，谁听、谁转发它不管——彻底解耦。</strong></div>
                 <p>推送机制在 <code>api/conn_manager.py</code> 的 <code>ConnectionManager</code>。订阅时 <code>subscribe_graph_exec</code>（<code>:249</code>）打开一个 <strong>Redis Pub/Sub 订阅</strong>；<code>_pump()</code>（<code>:115</code>）<code>listen()</code> 收到 Redis 事件后 <code>_forward_exec_event</code>（<code>:315</code>）转发给对应 WebSocket 客户端。</p>
                 <div class="anno">读法：<b>关键链条：executor 进程 publish 事件到 Redis（Day 12 的事件总线）→ WS 进程订阅 Redis → 收到后转发给前端 WebSocket。</b>Redis 是 executor 和 WS 两个进程之间的"中间人"。</div>
                 <div class="baby"><span class="t">为什么要经过 Redis 中转？</span>
                 因为 executor（跑图的）和 WS 进程（连着前端的）是<strong>两个不同的进程，甚至不同机器</strong>。executor 产生的事件怎么送到"连着你浏览器的那个 WS 进程"？<strong>用 Redis Pub/Sub 做中转：executor 发到 Redis 频道，所有 WS 进程都订阅，谁连着相关用户谁就转发。</strong>这解耦了"产生事件"和"推送事件"——executor 不用知道用户连在哪个 WS 进程上，只管发到 Redis。<strong>Redis 事件总线是跨进程通信的桥。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 220" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <text x="10" y="20" fill="#06b6d4" font-size="13" font-weight="700">两个进程 + Redis 中间人</text>
+                        <!-- executor -->
+                        <rect x="20" y="55" width="150" height="70" rx="10" fill="#173a26" stroke="#34d399" stroke-width="2"/>
+                        <text x="95" y="82" fill="#a7f3d0" text-anchor="middle" font-weight="700">executor 进程</text>
+                        <text x="95" y="100" fill="#9fb3c8" text-anchor="middle" font-size="10">跑图，产生进度</text>
+                        <text x="95" y="116" fill="#9fb3c8" text-anchor="middle" font-size="10">publish 事件</text>
+                        <!-- redis -->
+                        <rect x="285" y="55" width="150" height="70" rx="10" fill="#3a1e2a" stroke="#f472b6" stroke-width="2"/>
+                        <text x="360" y="82" fill="#f9a8d4" text-anchor="middle" font-weight="700">Redis Pub/Sub</text>
+                        <text x="360" y="100" fill="#9fb3c8" text-anchor="middle" font-size="10">频道 exec/{id}</text>
+                        <text x="360" y="116" fill="#9fb3c8" text-anchor="middle" font-size="10">广播给订阅者</text>
+                        <!-- ws process -->
+                        <rect x="550" y="45" width="150" height="90" rx="10" fill="#1e2a44" stroke="#3b82f6" stroke-width="2"/>
+                        <text x="625" y="70" fill="#93c5fd" text-anchor="middle" font-weight="700">WS 进程</text>
+                        <text x="625" y="88" fill="#9fb3c8" text-anchor="middle" font-size="10">ConnectionManager :219</text>
+                        <text x="625" y="104" fill="#9fb3c8" text-anchor="middle" font-size="10">_pump listen() :115</text>
+                        <text x="625" y="120" fill="#9fb3c8" text-anchor="middle" font-size="10">_forward_exec_event :315</text>
+                        <!-- browser -->
+                        <rect x="550" y="165" width="150" height="40" rx="8" fill="#26323a" stroke="#22c55e"/>
+                        <text x="625" y="190" fill="#86efac" text-anchor="middle" font-size="11">前端画布：节点亮起</text>
+                        <path d="M170 90 L283 90" stroke="#34d399" stroke-width="2" marker-end="url(#w1)"/>
+                        <text x="227" y="80" fill="#6ee7b7" font-size="9" text-anchor="middle">publish</text>
+                        <path d="M435 90 L548 90" stroke="#f472b6" stroke-width="2" marker-end="url(#w2)"/>
+                        <text x="492" y="80" fill="#f9a8d4" font-size="9" text-anchor="middle">订阅收到</text>
+                        <path d="M625 135 L625 163" stroke="#3b82f6" stroke-width="2" marker-end="url(#w3)"/>
+                        <text x="670" y="152" fill="#93c5fd" font-size="9">WS 转发</text>
+                        <defs>
+                          <marker id="w1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#34d399"/></marker>
+                          <marker id="w2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#f472b6"/></marker>
+                          <marker id="w3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#3b82f6"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">executor 只 publish 到 Redis 频道；每个 WS 进程订阅并只转发自己连着的用户所订阅的执行——Redis 让"产生事件"和"推送事件"彻底解耦。</div>
+                </div>
             </div>
         </section>
 

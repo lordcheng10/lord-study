@@ -18,6 +18,22 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#14b8a6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,6 +68,9 @@
             <p class="part-desc">第一个核心概念。读 <code>graph/state.py</code>：StateGraph 的三件套（State/Node/Edge）、add_node/add_edge、Builder 模式、compile 产出什么。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置（第 1 周主线）</div>
+        <div class="steps"><span class="st">全景</span><span class="sep">→</span><span class="st on">StateGraph</span><span class="sep">→</span><span class="st">State+reducer</span><span class="sep">→</span><span class="st">条件边</span><span class="sep">→</span><span class="st">invoke旅程</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>三件套（源码 docstring 说得最清楚）</h1></div>
             <div class="card">
@@ -61,6 +80,10 @@
                     <li><strong>Node（节点）= 一个函数</strong>：签名 <code>State → Partial&lt;State&gt;</code>——读状态、返回"要更新哪些字段"的<strong>局部字典</strong>。</li>
                     <li><strong>Edge（边）= 控制流</strong>：只决定"下一个轮到谁"，本身不搬运数据（数据都在共享 State 里）。</li>
                 </ul>
+                <div class="ask"><span class="t">🤔 痛点：不用图，控制流长什么样？</span>
+                不用 StateGraph，你就得在一个函数里手写：<code>if 该调工具: ... elif 该回答: ... while 没结束: ...</code>——控制流（谁先谁后）和业务逻辑（每步干啥）搅在一起，中间状态散落在一堆局部变量里。想"跑到第 3 步存个档、明天接着跑"？几乎没法做。</div>
+                <div class="essence"><span class="t">💡 本质：三件套 = 把"数据"和"顺序"拆成两样东西</span>
+                StateGraph 只做一件事——<strong>把"数据放哪"（State）和"按什么顺序执行"（Node + Edge）彻底分开</strong>。数据集中在一个可序列化的 dict 里，顺序是一张显式的图。因为拆开了，框架才能对数据做快照（checkpoint）、对顺序做调度（并发/中断/重放）。<strong>记住这把钥匙：数据在 State，边只管顺序。</strong></div>
                 <div class="baby"><span class="t">状态与控制流分离（核心设计）</span>
                 传统写 Agent 是一堆 if/else + 手工传参，难中断、难重放、难可视化。<strong>LangGraph 把"状态"和"控制流"分开——状态集中在一个可序列化的 dict，控制流是显式的图。</strong>于是天然支持 checkpoint（存档）、断点续跑、并发、可视化。<strong>这个"数据在共享状态、边只管顺序"的分离是理解 LangGraph 的钥匙。</strong></div>
             </div>
@@ -73,6 +96,10 @@
 def my_node(state: State, config: RunnableConfig) -> State:
     return {"x": state["x"] + 1}      # 只返回要改的键，不是完整状态</code></pre>
                 <div class="anno">读法：<b>节点读 <code>state</code>、返回 <code>{"x": ...}</code>——<strong>只更新 x 这一个键</strong>（partial state update），框架负责合并进完整状态（Day 03 的 reducer）。</b>节点除了 state，还能按需接收 config/writer/store/runtime 等参数（<code>_node.py:16</code> 用 Protocol 穷举定义可选签名）。</div>
+                <div class="example"><span class="t">📝 例子：局部更新是"报差异"，不是"交全量"</span>
+                假设当前 State 是 <code>{"x": 5, "name": "小明", "logs": [...]}</code>。节点 <code>my_node</code> 只想把 x 加 1，于是 <code>return {"x": 6}</code>。<br>
+                注意它<strong>没有</strong>返回 name 和 logs——框架自动理解为"这两个不变"。合并后 State = <code>{"x": 6, "name": "小明", "logs": [...]}</code>。<br>
+                这就像改文档时你只说"第 3 行改成 6"，而不是把整篇文档重抄一遍。<strong>节点越聚焦越好写，怎么合并交给 reducer（Day 03）。</strong></div>
                 <div class="baby"><span class="t">"只返回局部更新"为什么好？</span>
                 节点只关心"我要改什么"，不用管整个状态怎么组装。比如聊天节点只返回 <code>{"messages": [新回复]}</code>，不用重建整段对话历史。<strong>框架用 reducer 把局部更新合并进全局状态（Day 03）。</strong>这让节点函数简单、聚焦、可复用——只做自己的事，合并交给框架。</div>
             </div>
@@ -136,6 +163,27 @@ builder.set_finish_point("z") # = add_edge("z", END)</code></pre>
                 </ol>
 <pre><code class="language-python"># state.py:1391 —— 关键类型关系
 class CompiledStateGraph(Pregel[...], ...):   # ★ 编译产物就是一个 Pregel！</code></pre>
+                <div class="svgbox">
+                <svg viewBox="0 0 660 170" width="100%" font-family="sans-serif">
+                    <defs><marker id="d2a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#8b5cf6"/></marker></defs>
+                    <rect x="20" y="55" width="180" height="66" rx="10" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
+                    <text x="110" y="82" fill="#e5e5e5" font-size="13" font-weight="bold" text-anchor="middle">StateGraph（图纸）</text>
+                    <text x="110" y="102" fill="#bbb" font-size="10.5" text-anchor="middle">可变 · 往上加节点/边</text>
+                    <text x="110" y="45" fill="#14b8a6" font-size="10.5" text-anchor="middle">add_node / add_edge ↺</text>
+                    <line x1="200" y1="88" x2="255" y2="88" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d2a)"/>
+                    <text x="227" y="78" fill="#8b5cf6" font-size="10.5" text-anchor="middle">.compile()</text>
+                    <rect x="258" y="45" width="200" height="86" rx="10" fill="#2a2a3a" stroke="#14b8a6" stroke-width="2"/>
+                    <text x="358" y="72" fill="#e5e5e5" font-size="13" font-weight="bold" text-anchor="middle">CompiledStateGraph</text>
+                    <text x="358" y="92" fill="#bbb" font-size="10.5" text-anchor="middle">不可变 · 继承 Pregel 引擎</text>
+                    <text x="358" y="110" fill="#bbb" font-size="10.5" text-anchor="middle">state.py:1391 → pregel</text>
+                    <line x1="458" y1="88" x2="513" y2="88" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d2a)"/>
+                    <text x="485" y="78" fill="#8b5cf6" font-size="10.5" text-anchor="middle">.invoke()</text>
+                    <rect x="516" y="55" width="124" height="66" rx="10" fill="#2a2a3a" stroke="#8b5cf6" stroke-width="2"/>
+                    <text x="578" y="88" fill="#e5e5e5" font-size="13" font-weight="bold" text-anchor="middle">运行 → 结果</text>
+                    <text x="578" y="106" fill="#bbb" font-size="10.5" text-anchor="middle">超步执行(Day 06)</text>
+                </svg>
+                <div class="cap">定义期（图纸可随便改）→ compile 定型 → 运行期（不可变、高速反复跑）</div>
+                </div>
                 <div class="anno">读法：<b><code>CompiledStateGraph</code> <strong>继承自 Pregel</strong>——LangGraph 的执行引擎（Day 06）。</b>Pregel 实现了 LangChain 的 <code>Runnable</code> 接口，所以编译后的图能 <code>.invoke()</code>/<code>.stream()</code>/<code>.ainvoke()</code>。<strong>你写的高层 StateGraph，编译后变成通用的底层 Pregel——一套引擎支撑多种上层 API。</strong>Day 09 会详看这个编译过程。</div>
             </div>
         </section>

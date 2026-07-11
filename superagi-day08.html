@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#10b981,#0ea5e9);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -49,16 +64,32 @@
             <p class="part-desc">智能体每一步都要把 role/goal/工具/记忆拼成一段 LLM 提示。今天读提示词构建的两级流程，尤其是"滚动记忆压缩"这个应对长对话的关键机制。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 2 周「Agent 执行」</div>
+            <div class="steps">
+                <span class="st">D1-5 核心概念</span><span class="sep">→</span>
+                <span class="st">D6 执行循环</span><span class="sep">→</span>
+                <span class="st">D7 工作流</span><span class="sep">→</span>
+                <span class="st on">D8 提示词（给LLM的输入）</span><span class="sep">→</span>
+                <span class="st">D9 输出解析</span><span class="sep">→</span>
+                <span class="st">D10 LLM抽象</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>两级构建</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 每轮都要把 role/goal/工具/几十轮历史全拼进提示，循环几十轮后历史越来越长，不会撑爆 LLM 的上下文吗？</span>
+                会。LLM 有硬性 token 上限（比如 8K/32K）。如果只会"把所有历史无脑拼进去"，跑不了几轮就报"context length exceeded"。</div>
+                <div class="essence"><span class="t">💡 一句话本质：提示 = 固定的"系统提示" + 增长的"对话消息"，超长时把旧历史压成摘要</span>
+                <strong>系统提示</strong>（人设 + 工具 + 规则）相对固定，填一次模板；<strong>对话消息</strong>（历史 Feed）每轮增长，每轮重拼。历史超 token 预算时，把更早的旧历史用 LLM <strong>压成一段"长期记忆摘要"（滚动记忆压缩，L06）</strong>——于是上下文永远塞得下：摘要（浓缩远期）+ 详细近期。这是 Day 06 迭代步里 <code>build_agent_prompt</code> + <code>build_agent_messages</code> 两步的展开。</div>
                 <p>提示词构建分两级：<strong>先填模板变量，再拼对话消息</strong>。</p>
                 <ul>
                     <li><strong>① 填模板</strong>（<code>AgentPromptBuilder</code>）：把 goals/instructions/工具塞进系统提示模板。</li>
                     <li><strong>② 拼消息</strong>（<code>AgentLlmMessageBuilder</code>）：系统提示 + 历史 Feed → LLM 的 messages 数组。</li>
                 </ul>
                 <div class="baby"><span class="t">为什么分两级？</span>
-                <strong>系统提示</strong>（定义智能体是谁、有什么工具、行为规则）相对固定，每轮基本一样——填一次模板。<strong>对话消息</strong>（历史往来）每轮增长——每轮重新拼。分开处理：模板管"人设与能力"，消息管"对话上下文"。<strong>最终喂给 LLM 的是 <code>[{role:system, 系统提示}, {role:user/assistant, 历史...}]</code> 这个消息数组。</strong></div>
+                <strong>系统提示</strong>（定义智能体是谁、有什么工具、行为规则）相对固定，每轮基本一样——填一次模板。<strong>对话消息</strong>（历史往来）每轮增长——每轮重新拼。分开处理：模板管"人设与能力"，消息管"对话上下文"。<strong>最终喂给 LLM 的是 <code>[{role:system, 系统提示}, {role:user/assistant, 历史...}]</code> 这个消息数组。</strong><br><br>📋 <strong>生活类比（贯穿今天）</strong>：<strong>系统提示</strong>像入职时发的<strong>员工手册</strong>——规定"你是谁、能用哪些工具、要守哪些规矩"，发一次基本不变；<strong>对话消息</strong>像<strong>每日工作日志</strong>——越写越厚，记着"我今天干了啥、结果如何"。每轮上工，都是"手册 + 到目前为止的日志"一起摆在 LLM 面前。</div>
             </div>
         </section>
 
@@ -79,8 +110,15 @@
             <div class="card">
                 <p><code>AgentPromptBuilder.replace_main_variables</code>（<code>agent/agent_prompt_builder.py:65</code>）把 goals/instructions/constraints 转成编号列表塞进模板。</p>
                 <div class="anno">读法：<b>把"目标""指令""约束"渲染成 <code>1. xxx / 2. yyy</code> 的编号列表填进模板占位符。</b>任务队列型工作流还会填 <code>{current_task}</code>/<code>{pending_tasks}</code>/<code>{task_history}</code>（<code>replace_task_based_variables</code>，<code>:95</code>），并按 token 预算截断历史。</div>
+                <div class="example"><span class="t">📝 变量填充（输入 → 输出）</span>
+                <strong>模板片段</strong>（<code>superagi.txt</code>）：<code>GOALS:\n{goals}\n\nCONSTRAINTS:\n{constraints}</code><br>
+                <strong>输入变量</strong>：<code>goals=["订最便宜的机票","预算不超过1000元"]</code>、<code>constraints=["不要重复调用同一工具"]</code><br>
+                <strong>→ replace_main_variables 渲染后</strong>：<br>
+                <code>GOALS:</code><br><code>1. 订最便宜的机票</code><br><code>2. 预算不超过1000元</code><br><br>
+                <code>CONSTRAINTS:</code><br><code>1. 不要重复调用同一工具</code><br>
+                每条独立编号，LLM 更容易逐条对照遵守。</div>
                 <div class="baby"><span class="t">为什么用编号列表？</span>
-                给 LLM 的目标/约束如果是一大段文字，它容易忽略某条。<strong>渲染成编号列表（1. 2. 3.）让每条清晰、独立、易被 LLM 逐条对照。</strong>这是提示词工程的小技巧——结构化的输入让 LLM 更好地遵守。</div>
+                给 LLM 的目标/约束如果是一大段文字，它容易忽略某条。<strong>渲染成编号列表（1. 2. 3.）让每条清晰、独立、易被 LLM 逐条对照。</strong>这是提示词工程的小技巧——结构化的输入让 LLM 更好地遵守。<br>✅ <b>生活类比</b>：就像给人交代活儿，与其写一大段话，不如列一张<b>清单（checklist）</b>：1. 做 A　2. 做 B　3. 别忘了 C。每条独立、可逐项对照打勾，不容易漏。</div>
             </div>
         </section>
 
@@ -101,7 +139,41 @@
 <pre><code class="language-python"># :38  system 消息 = 上面填好的系统提示
 # :39-53  若 history_enabled，加当前时间，把历史 agent_feeds（Day 02 的 Feed）转成消息
 # 超 token 预算的旧历史 → _split_history 切出去 → 压缩成摘要（L06）</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 250" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <text x="20" y="22" fill="#0ea5e9" font-weight="700" font-size="13">提示词组装流水线（两级构建）</text>
+                        <!-- level 1 -->
+                        <rect x="20" y="40" width="120" height="46" rx="8" fill="#1e293b" stroke="#a78bfa"/><text x="80" y="60" fill="#ddd" text-anchor="middle" font-size="11">模板 .txt</text><text x="80" y="76" fill="#888" text-anchor="middle" font-size="10">{goals}{tools}…</text>
+                        <rect x="20" y="104" width="120" height="46" rx="8" fill="#1e293b" stroke="#f59e0b"/><text x="80" y="124" fill="#ddd" text-anchor="middle" font-size="11">变量</text><text x="80" y="140" fill="#888" text-anchor="middle" font-size="10">goals/工具/约束</text>
+                        <path d="M140 63 L185 85" stroke="#bbb" stroke-width="1.5" marker-end="url(#a8)"/>
+                        <path d="M140 127 L185 100" stroke="#bbb" stroke-width="1.5" marker-end="url(#a8)"/>
+                        <rect x="190" y="70" width="140" height="46" rx="8" fill="#0f2a24" stroke="#10b981"/><text x="260" y="90" fill="#ddd" text-anchor="middle" font-size="11">系统提示</text><text x="260" y="106" fill="#888" text-anchor="middle" font-size="10">system message</text>
+                        <!-- feeds -->
+                        <rect x="190" y="150" width="140" height="46" rx="8" fill="#1e293b" stroke="#34d399"/><text x="260" y="170" fill="#ddd" text-anchor="middle" font-size="11">历史 Feed</text><text x="260" y="186" fill="#888" text-anchor="middle" font-size="10">Day02 短期记忆</text>
+                        <!-- split -->
+                        <rect x="380" y="150" width="130" height="46" rx="8" fill="#3a1e1e" stroke="#f43f5e"/><text x="445" y="170" fill="#ddd" text-anchor="middle" font-size="11">超 token 预算?</text><text x="445" y="186" fill="#888" text-anchor="middle" font-size="10">_split_history</text>
+                        <path d="M330 173 L378 173" stroke="#bbb" stroke-width="1.5" marker-end="url(#a8)"/>
+                        <rect x="380" y="70" width="130" height="46" rx="8" fill="#1e293b" stroke="#60a5fa"/><text x="445" y="90" fill="#ddd" text-anchor="middle" font-size="11">LLM 压成摘要</text><text x="445" y="106" fill="#888" text-anchor="middle" font-size="10">_build_ltm_summary</text>
+                        <path d="M445 150 L445 118" stroke="#f43f5e" stroke-width="1.5" marker-end="url(#b8)"/><text x="452" y="138" fill="#f43f5e" font-size="10">旧的→压缩</text>
+                        <!-- final -->
+                        <rect x="560" y="95" width="140" height="70" rx="8" fill="#14331f" stroke="#22c55e"/><text x="630" y="120" fill="#ddd" text-anchor="middle" font-size="11">messages 数组</text><text x="630" y="137" fill="#888" text-anchor="middle" font-size="10">[system, 摘要,</text><text x="630" y="151" fill="#888" text-anchor="middle" font-size="10">近期历史…]</text>
+                        <path d="M330 93 L558 120" stroke="#22c55e" stroke-width="1.5" marker-end="url(#c8)"/>
+                        <path d="M510 100 L558 122" stroke="#22c55e" stroke-width="1.5" marker-end="url(#c8)"/>
+                        <path d="M510 173 L558 150" stroke="#22c55e" stroke-width="1.5" marker-end="url(#c8)"/>
+                        <defs>
+                            <marker id="a8" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#bbb"/></marker>
+                            <marker id="b8" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f43f5e"/></marker>
+                            <marker id="c8" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">①模板+变量→系统提示；②系统提示+历史 Feed→messages；超预算的旧历史先被 LLM 压成摘要再拼入——上下文永远塞得下。</div>
+                </div>
                 <div class="anno">读法：<b>最终 messages = system 提示 + 历史 Feed 转成的对话消息。</b>这就是把 Day 02 的 Feed（短期记忆）读回来、拼进 LLM 上下文的地方——让 LLM"记得之前干了什么"。首次执行时还会把初始 messages 落库成 Feed，保证后续能回读。</div>
+                <div class="essence"><span class="t">🛠️ 如果让你自己拼消息（简化版 → 真实版对照）</span>
+                <strong>朴素做法</strong>：
+<pre style="margin:6px 0;font-size:11.5px"><code class="language-python">prompt = system_prompt + "\n" + "\n".join(all_feeds)   # 全塞进去</code></pre>
+                <strong>问题</strong>：历史无限增长，循环几十轮后必然超 token 上限。<br>
+                <strong>真实版</strong>：<code>build_agent_messages</code> 把 system 与历史分开，且 <code>_split_history</code> 把<strong>超预算的旧历史</strong>切出去交 <code>_build_ltm_summary</code> 压成摘要（L06）。真实版多出来的"切 + 压"两步，就是为了解决朴素版"迟早爆上下文"的硬伤。</div>
             </div>
         </section>
 
@@ -110,7 +182,9 @@
             <div class="card">
                 <p>历史越来越长会超 token 上限。<code>_split_history</code>（<code>agent_message_builder.py:59</code>）把超预算的旧历史切出去，交给 <code>_build_ltm_summary</code>（<code>:91</code>）<strong>调 LLM 压缩成"长期记忆摘要"</strong>作为一条 assistant 消息。</p>
                 <div class="baby"><span class="t">滚动摘要压缩解决什么？</span>
-                智能体循环几十轮后，历史 Feed 可能几万 token，塞不进 LLM 上下文。<strong>做法：保留最近的详细历史，把更早的旧历史用 LLM 压缩成一段"摘要"（"前面我做了 A、B、C，结论是 D"）。</strong>于是上下文 = 摘要（浓缩的远期）+ 详细的近期。既不超限，又保留关键信息。<strong>这和 CrewAI/OpenHands 的历史压缩（CondensationEvent）完全同理——长任务智能体必备的"记忆管理"。</strong>"滚动"= 随着对话增长，不断把新变旧的部分卷进摘要。</div>
+                智能体循环几十轮后，历史 Feed 可能几万 token，塞不进 LLM 上下文。<strong>做法：保留最近的详细历史，把更早的旧历史用 LLM 压缩成一段"摘要"（"前面我做了 A、B、C，结论是 D"）。</strong>于是上下文 = 摘要（浓缩的远期）+ 详细的近期。既不超限，又保留关键信息。<strong>这和 CrewAI/OpenHands 的历史压缩（CondensationEvent）完全同理——长任务智能体必备的"记忆管理"。</strong>"滚动"= 随着对话增长，不断把新变旧的部分卷进摘要。<br>📝 <b>生活类比</b>：就像长会议的<b>会议纪要</b>——早上讨论的细节没人全记，但会浓缩成一句"上午决定了 A、B、C"；最近半小时的讨论还保留原话。摘要（浓缩远期）+ 原话（详细近期），既不啰嗦又不丢重点。</div>
+                <div class="baby"><span class="t">💥 不压缩会出什么事故？（数字具象）</span>
+                假设每轮迭代往 Feed 里写 ~1500 token，循环 30 轮就是 <strong>~4.5 万 token</strong>；而不少模型上下文上限只有 <strong>4K～16K token</strong>。<strong>不压缩 → 第十几轮就报 <code>context_length_exceeded</code>，智能体直接崩在半路。</strong>压缩后：旧历史摘要 ~500 token + 最近 5 轮 ~7500 token ≈ 8K，稳稳塞下、还接着能跑几十轮。就为了这条命，滚动压缩必不可少。</div>
             </div>
         </section>
 

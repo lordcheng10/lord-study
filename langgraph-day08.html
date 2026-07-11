@@ -15,6 +15,22 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -49,15 +65,56 @@
             <p class="part-desc">Day 06 的三阶段超步，代码里怎么实现？读 <code>pregel/_loop.py</code> + <code>_algo.py</code>：tick（Plan）→ runner（执行）→ after_tick（Update + 检查点）。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
+        <div class="steps"><span class="st">Channels</span><span class="sep">→</span><span class="st on">super-step</span><span class="sep">→</span><span class="st">编译图</span><span class="sep">→</span><span class="st">节点·并行</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>驱动循环</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Day 06 讲了 BSP 的"三阶段超步"是个漂亮的模型，但模型是纸上的。<strong>引擎到底靠哪几行代码，一圈圈地把"选节点→跑节点→提交写入"转起来的？循环什么时候停？</strong>不看代码，"超步"永远是个抽象词。</div>
+                <div class="essence"><span class="t">💡 本质</span>整个引擎就是一个 <code>while loop.tick():</code> 循环，一圈就是一个超步，三阶段精确对应三个调用：<code>tick()</code>=Plan（选出本步任务，没任务就返回 False 结束）、<code>runner.tick()</code>=Execution（并行跑）、<code>after_tick()</code>=Update（<code>apply_writes</code> 提交 + 存检查点）。<strong>"超步"不再抽象——它就是这个 while 的一次迭代。</strong></div>
                 <p>核心驱动循环在 <code>main.py:2964</code>——三阶段清晰对应：</p>
 <pre><code class="language-python">while loop.tick():                    # Plan：选出本步任务（无任务→返回 False→退出）
     for _ in runner.tick(tasks, ...): # Execution：并行跑任务
         yield from _output(...)        # 流式输出
     loop.after_tick()                  # Update：apply_writes + 存检查点</code></pre>
+                <div class="example"><span class="t">🛠️ 如果让你自己实现：极简版 → 真实版</span>
+                你大概会先写出这样的朴素版：
+<pre><code class="language-python"># 极简版：自己手写图执行
+active = 起始节点集合
+while active:
+    outputs = [run(n) for n in active]   # 跑
+    state.update(outputs)                # 直接改状态
+    active = 找出下游节点(outputs)         # 找下一批</code></pre>
+                能跑，但真实 <code>_loop.tick()</code> 在这基础上多做了几件事，每件都解决一个真问题：<br>
+                · <strong>不直接 <code>state.update</code>，而是攒 writes 到步末统一 <code>apply_writes</code></strong> → 解决并行竞态（快照隔离）；<br>
+                · <strong>用版本号判断"下游是否真被更新"</strong> → 解决重复触发；<br>
+                · <strong>每圈存一次检查点</strong> → 解决"中途崩溃要能恢复"；<br>
+                · <strong>超步计数上限 <code>recursion_limit</code></strong> → 解决死循环。<br>
+                <strong>真实版 = 你的极简版 + 这四层"生产级"补丁。</strong></div>
+                <div class="baby"><span class="t">🙋 第一人称：我是一次"状态更新"，走完一个超步</span>
+                「我是节点算出的一条写入。① Plan 阶段还没我的事，引擎先选出这步要跑的节点；② 我的节点跑完，把我<strong>交给 write 函数攒进 pending writes</strong>，我先待着不动；③ 全部节点跑完，<code>after_tick</code> 调 <code>apply_writes</code>，我才被<strong>真正合并进通道</strong>，让通道版本 +1；④ 我让通道版本涨了，于是<strong>下一超步 Plan 会把订阅这条通道的节点选出来</strong>——我完成了我的使命，顺便被存进检查点。」</div>
                 <div class="anno">读法：<b><code>while loop.tick()</code> 是超步循环——<code>tick()</code>=Plan（选节点）、<code>runner.tick()</code>=Execution（并行跑）、<code>after_tick()</code>=Update（写回+检查点）。</b>直到 <code>tick()</code> 返回 False（没节点可跑）循环结束（Day 06）。</div>
+                <div class="svgbox">
+                <svg viewBox="0 0 660 220" width="100%" role="img" aria-label="一个超步的执行流程">
+                    <text x="330" y="22" text-anchor="middle" fill="#e5e5e5" font-size="13" font-weight="bold">一个超步 = while 的一圈</text>
+                    <rect x="20" y="70" width="130" height="46" rx="8" fill="#2a2a3a" stroke="#6366f1"/><text x="85" y="90" text-anchor="middle" fill="#e5e5e5" font-size="11">prepare_next_tasks</text><text x="85" y="106" text-anchor="middle" fill="#bbb" font-size="10">Plan 选任务</text>
+                    <rect x="190" y="70" width="130" height="46" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/><text x="255" y="90" text-anchor="middle" fill="#e5e5e5" font-size="11">runner 并行跑</text><text x="255" y="106" text-anchor="middle" fill="#bbb" font-size="10">Exec 攒 writes</text>
+                    <rect x="360" y="70" width="130" height="46" rx="8" fill="#2a2a3a" stroke="#38bdf8"/><text x="425" y="90" text-anchor="middle" fill="#e5e5e5" font-size="11">apply_writes</text><text x="425" y="106" text-anchor="middle" fill="#bbb" font-size="10">Update 提交</text>
+                    <rect x="530" y="70" width="110" height="46" rx="8" fill="#2a2a3a" stroke="#f59e0b"/><text x="585" y="90" text-anchor="middle" fill="#e5e5e5" font-size="11">还有活跃节点?</text><text x="585" y="106" text-anchor="middle" fill="#bbb" font-size="10">存检查点</text>
+                    <line x1="150" y1="93" x2="188" y2="93" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a08)"/>
+                    <line x1="320" y1="93" x2="358" y2="93" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#a08)"/>
+                    <line x1="490" y1="93" x2="528" y2="93" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a08)"/>
+                    <!-- loop back -->
+                    <path d="M585,116 L585,180 L85,180 L85,118" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a08b)"/>
+                    <text x="335" y="196" text-anchor="middle" fill="#6366f1" font-size="11">有 → 下一超步；无 → status=done 退出</text>
+                    <defs>
+                      <marker id="a08" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b5cf6"/></marker>
+                      <marker id="a08b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6366f1"/></marker>
+                    </defs>
+                </svg>
+                <div class="cap">prepare_next_tasks → 并行执行 → apply_writes 提交到通道 → 判断是否还有活跃节点</div>
+                </div>
             </div>
         </section>
 
@@ -91,7 +148,7 @@
             <div class="card">
                 <p><code>runner.tick(tasks, ...)</code> 用 <code>PregelRunner</code> 并行执行本步的所有任务。节点执行时通过注入的 write 函数把输出<strong>攒进 pending writes</strong>（<code>put_writes</code>，<code>_loop.py:415</code>），并不立即改通道（快照隔离，Day 06）。</p>
                 <div class="baby"><span class="t">"并行执行 + 攒写入"</span>
-                本步选中的多个节点<strong>并行跑</strong>（Day 10 详讲）。关键：它们的输出不直接写通道，而是<strong>攒进"待写入"（pending writes）</strong>——因为快照隔离要求"一步之内通道不变"。所有节点跑完，才在 after_tick 统一把 pending writes 应用到通道。<strong>"执行时只攒不写、步末统一提交"——这正是 BSP 让并行安全的机制（Day 06 的快照隔离在代码里的落地）。</strong>pending writes 还会被后台持久化，保证单步中途崩溃已完成的结果不丢。</div>
+                本步选中的多个节点<strong>并行跑</strong>（Day 10 详讲）。关键：它们的输出不直接写通道，而是<strong>攒进"待写入"（pending writes）</strong>——因为快照隔离要求"一步之内通道不变"。所有节点跑完，才在 after_tick 统一把 pending writes 应用到通道。<strong>"执行时只攒不写、步末统一提交"——这正是 BSP 让并行安全的机制（Day 06 的快照隔离在代码里的落地）。</strong>pending writes 还会被后台持久化，保证单步中途崩溃已完成的结果不丢。<br><strong>这就像开例会发言：</strong>大家发言时先把要点记在各自本子上（pending writes），等全员说完，才统一誊写到公共白板（apply_writes）——要是你一句我一句同时抢着往白板写，白板早乱成一团了。</div>
             </div>
         </section>
 
@@ -105,7 +162,7 @@ self.checkpoint_pending_writes.clear()
 self._put_checkpoint({"source": "loop"})    # ★ 步间存检查点</code></pre>
                 <div class="anno">读法：<b>Update 阶段：把所有节点攒的写入用 <code>apply_writes</code>（L06）统一应用到通道，得到 <code>updated_channels</code>（喂给下一步的 Plan），然后<strong>存一个检查点</strong>。</b><code>updated_channels</code> 传递了步与步之间的依赖。</div>
                 <div class="baby"><span class="t">"每个超步之间存检查点"（Day 11 的根基）</span>
-                <code>_put_checkpoint</code> 在<strong>每个超步之间</strong>存一次状态快照。<strong>这就是 LangGraph 持久执行、时间旅行、人在环的物理基础</strong>——因为超步边界是天然的"稳定点"（此刻状态一致、无半完成的写入）。Day 11-14 讲的检查点能力全建立在这一行上。<strong>Day 06 说"BSP 的超步边界给了天然的存档点"，这里就是那个存档动作。</strong></div>
+                <code>_put_checkpoint</code> 在<strong>每个超步之间</strong>存一次状态快照。<strong>这就是 LangGraph 持久执行、时间旅行、人在环的物理基础</strong>——因为超步边界是天然的"稳定点"（此刻状态一致、无半完成的写入）。Day 11-14 讲的检查点能力全建立在这一行上。<strong>Day 06 说"BSP 的超步边界给了天然的存档点"，这里就是那个存档动作。</strong><br><strong>就像玩游戏每过一关自动存档：</strong>中途挂了，从最近的存档点复活重来即可，不必从第一关从头打。超步边界就是这门课后面所有"存档/读档"能力的那个自动存档点。</div>
             </div>
         </section>
 
@@ -118,6 +175,12 @@ self._put_checkpoint({"source": "loop"})    # ★ 步间存检查点</code></pre
 # 3. 按通道分组写入
 # 4. 逐通道调用 channels[chan].update(vals)  ← reducer 真正执行处（Day 07）
 #    返回 True 且通道 available → 加入 updated_channels、版本号 +1</code></pre>
+                <div class="example"><span class="t">📝 例子：apply_writes 走一遍</span>
+                这步节点 A 写了 <code>messages=[m1]</code>、节点 B 写了 <code>messages=[m2]</code>、节点 A 还写了 <code>count=5</code>。<code>apply_writes</code>（<code>_algo.py:232</code>）：<br>
+                ① 按通道分组：<code>messages←[m1,m2]</code>、<code>count←[5]</code>；<br>
+                ② 调 <code>messages 通道.update([m1,m2])</code> → 追加成 <code>[...,m1,m2]</code>、返回 True → 版本 +1；<br>
+                ③ 调 <code>count 通道.update([5])</code> → 覆盖成 <code>5</code>、返回 True → 版本 +1；<br>
+                ④ <code>updated_channels = {messages, count}</code> → 交给下一步 Plan 找订阅者。</div>
                 <div class="anno">读法：<b>把这步所有写入按通道分组，逐个调 <code>channel.update()</code>（Day 07 的 reducer）合并。返回 True 的通道版本 +1、加入 <code>updated_channels</code>。</b><code>updated_channels</code> → 下一步 Plan 用它选节点（Day 06 的版本号触发）。<strong>闭环：本步写入 → apply_writes 合并 → updated_channels → 下步触发下游。</strong></div>
             </div>
         </section>

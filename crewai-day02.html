@@ -194,6 +194,19 @@ if not self.agent_executor:
                 <div class="anno">读法：<b>你传字符串 "gpt-4o"，<code>create_llm</code> 自动把它解析成一个真正的 LLM 对象。</b>这是"配置即代码"——用户写最简洁的声明式配置，框架负责把它实例化成可用对象。<code>memory=True</code> 也是同理自动建 <code>Memory()</code>。</div>
                 <div class="baby"><span class="t">这种"自动解析"体验为什么好？</span>
                 对比：如果框架要求你写 <code>Agent(llm=LiteLLM(model="gpt-4o", api_key=..., ...))</code>，很啰嗦。CrewAI 让你写 <code>llm="gpt-4o"</code> 就行，剩下的解析、配置、实例化全自动。<strong>把复杂留给框架，把简单留给用户——好 API 的标志。</strong></div>
+                <div class="essence"><span class="t">🔧 简化版 → 真实版（这个"钩子"到底做了啥）</span>
+                <strong>先看你脑补的极简版</strong>（如果自己写）：
+<pre style="margin:6px 0"><code class="language-python"># 朴素想法：用户传啥我就存啥
+class Agent:
+    def __init__(self, role, llm):
+        self.role = role
+        self.llm  = llm          # ← 存了个字符串 "gpt-4o"，根本没法调用！</code></pre>
+                <strong>再看 CrewAI 真实版</strong>（多出来的每步都在补窟窿）：
+<pre style="margin:6px 0"><code class="language-python"># core.py:356-363 —— 构造完成后 Pydantic 自动触发
+self.llm = create_llm(self.llm)   # ← 多出①：把字符串解析成真能调用的 LLM 对象
+if not self.agent_executor:
+    self._setup_agent_executor()  # ← 多出②：顺手把"执行器/缓存"也建好</code></pre>
+                <strong>多出来的两步各解决一个问题</strong>：① 让"用户写字符串、内部拿到可用对象"成立；② 省得你手动再装配执行器。这就是"招人时 HR 只填个岗位名，入职当天电脑/工位/权限全配好"——你只给最少信息，剩下框架补齐。</div>
             </div>
         </section>
 
@@ -212,6 +225,8 @@ invoke_result = self.agent_executor.invoke({
 })</code></pre>
                 <div class="anno">读法：<b>准备提示词（拼角色+任务+上下文+记忆）→ 补充知识 → 交给执行器跑 ReAct 循环。</b>执行器（<code>AgentExecutor</code>，Day 07 精读）才是真正反复"思考→用工具→观察"的地方。<code>execute_task</code> 只负责把料备齐、交出去、拿回结果。</div>
                 <div class="glossary"><b>超时与重试</b>：设了 <code>max_execution_time</code> 就用线程池 + <code>future.result(timeout=...)</code>（<code>core.py:826</code>）跑，超时抛错；异步版用 <code>asyncio.wait_for</code>。出错走 <code>_handle_execution_error</code>（<code>core.py:673</code>）递归重试到 <code>max_retry_limit</code>。<strong>同步靠线程、异步靠事件循环——这是很好的并发对比教学点。</strong>ReAct 循环细节留到 Day 07。</div>
+                <div class="baby"><span class="t">🗣️ 一句话复述（大白话）</span>
+                用招人的话说：<strong>execute_task 就是"把活儿交给这位员工"——先帮他把资料备齐（角色+任务+上文+记忆+知识），再让他自己去反复琢磨、动手（执行器跑 ReAct），最后收他的成果。Agent 本人只管把料备好、交出去、拿回来，"怎么反复思考"是执行器的事（Day 07）。</strong></div>
             </div>
         </section>
 

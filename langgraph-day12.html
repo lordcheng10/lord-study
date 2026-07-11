@@ -18,6 +18,22 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,14 +68,20 @@
             <p class="part-desc">检查点存哪里、怎么存？读 <code>BaseCheckpointSaver</code> 抽象接口和它的三种实现，理解 <code>thread_id</code> 怎么把多个独立会话隔离开。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
+        <div class="steps"><span class="st">Checkpoint</span><span class="sep">→</span><span class="st on">Saver·threads</span><span class="sep">→</span><span class="st">时间旅行</span><span class="sep">→</span><span class="st">人在环</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>Saver 是什么</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个服务同时服务上千用户，状态怎么分开存？</span>光有"存档"还不够——存到哪？内存还是数据库？更棘手的是：小明的对话和小红的对话都在同一个进程里跑，<strong>凭什么不会串台？</strong>难道要我自己维护一个 <code>{用户: 状态}</code> 的大字典？</div>
+                <div class="essence"><span class="t">💡 本质：Saver 管"存哪种后端"，thread_id 管"存哪个槽位"</span>两个正交的维度：<strong>Saver（后端）决定检查点落在内存/SQLite/Postgres；thread_id（槽位）决定这份检查点属于哪个会话</strong>。你只要给每个用户一个 thread_id，隔离和持久化引擎全自动搞定，不用手写任何会话管理。</div>
                 <p>Day 11 讲了检查点<em>是什么</em>，今天讲它<em>存哪儿</em>。<code>CheckpointSaver</code>（检查点存储器）负责把检查点写入/读出某种后端（内存、SQLite、Postgres……）。编译时传入：</p>
 <pre><code class="language-python">from langgraph.checkpoint.memory import InMemorySaver
 graph = builder.compile(checkpointer=InMemorySaver())   # 插上"存档器"
 graph.invoke(input, {"configurable": {"thread_id": "user-42"}})  # 指定存档槽位</code></pre>
                 <div class="anno">读法：<b>compile 时插上 checkpointer，图就获得了"存档能力"；invoke 时用 <code>thread_id</code> 指定"存到哪个会话"。</b>不传 checkpointer → 图无记忆，每次从头（Day 01-10 的默认）。</div>
+                <div class="anno">⚠️ <b>错误驱动：不传 checkpointer 会出什么事故？</b>做一个客服机器人却忘了插 checkpointer——用户说"我叫小明"，下一句问"我叫啥"，它<b>一脸懵</b>：每次 invoke 都是全新一局、毫无记忆。更糟的是聊到一半进程重启，整段对话直接蒸发。加上 checkpointer 才有"记性"。</div>
             </div>
         </section>
 
@@ -69,10 +91,10 @@ graph.invoke(input, {"configurable": {"thread_id": "user-42"}})  # 指定存档�
                 <p><code>BaseCheckpointSaver</code>（<code>checkpoint/base/__init__.py</code>）定义了统一接口，所有后端实现它：</p>
                 <table class="k">
                     <tr><th>方法</th><th>作用</th></tr>
-                    <tr><td><code>put</code></td><td>存一个检查点（Day 08 after_tick 调）</td></tr>
-                    <tr><td><code>put_writes</code></td><td>存 pending writes（Day 11 半完成保护）</td></tr>
-                    <tr><td><code>get_tuple</code></td><td>读某检查点（恢复用）</td></tr>
-                    <tr><td><code>list</code></td><td>列出某 thread 的所有检查点（时间旅行用，Day 13）</td></tr>
+                    <tr><td><code>put</code></td><td>存一个检查点（Day 08 after_tick 调）· <code>base/__init__.py</code> L277</td></tr>
+                    <tr><td><code>put_writes</code></td><td>存 pending writes（Day 11 半完成保护）· L300</td></tr>
+                    <tr><td><code>get_tuple</code></td><td>读某检查点（恢复用）· L239</td></tr>
+                    <tr><td><code>list</code></td><td>列出某 thread 的所有检查点（时间旅行用，Day 13）· L253</td></tr>
                 </table>
                 <div class="baby"><span class="t">又是"接口/实现分离"（老朋友了）</span>
                 和 eino 的 ChatModel、AutoGPT 的 Block、crewAI 的 LLM 一样：<strong>Pregel 引擎只依赖 <code>BaseCheckpointSaver</code> 这个抽象接口（put/get/list），完全不关心底层是内存还是数据库。</strong>换存储后端 = 换一个实现类，引擎代码一行不改。<strong>开发时用 InMemory、生产用 Postgres，图逻辑完全一样——这就是抽象接口的价值。</strong>贯穿所有框架的同一设计哲学。</div>
@@ -83,6 +105,44 @@ graph.invoke(input, {"configurable": {"thread_id": "user-42"}})  # 指定存档�
             <div class="section-header"><span class="section-number">L03</span><h1>thread_id 隔离</h1></div>
             <div class="card">
                 <p>检查点按 <code>thread_id</code> 分组存储。每个 thread_id 是一条<strong>独立的检查点时间线</strong>——互不干扰。</p>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 190" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+                    <text x="10" y="18" fill="#bbb" font-size="12">同一个 Saver 里，不同 thread_id 各是一条独立的检查点链，互不可见</text>
+                    <!-- thread A -->
+                    <rect x="14" y="40" width="120" height="30" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
+                    <text x="74" y="60" fill="#e5e5e5" font-size="12" text-anchor="middle">thread_id = "A"</text>
+                    <rect x="170" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="200" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A0</text>
+                    <rect x="270" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="300" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A1</text>
+                    <rect x="370" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="400" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A2</text>
+                    <line x1="230" y1="55" x2="270" y2="55" stroke="#6366f1" stroke-width="1.5"/>
+                    <line x1="330" y1="55" x2="370" y2="55" stroke="#6366f1" stroke-width="1.5"/>
+                    <!-- 隔离线 -->
+                    <line x1="14" y1="95" x2="586" y2="95" stroke="#444" stroke-width="1" stroke-dasharray="5 4"/>
+                    <text x="500" y="90" fill="#f59e0b" font-size="10">🔒 相互隔离</text>
+                    <!-- thread B -->
+                    <rect x="14" y="120" width="120" height="30" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
+                    <text x="74" y="140" fill="#e5e5e5" font-size="12" text-anchor="middle">thread_id = "B"</text>
+                    <rect x="170" y="120" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="200" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt B0</text>
+                    <rect x="270" y="120" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="300" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt B1</text>
+                    <line x1="230" y1="135" x2="270" y2="135" stroke="#6366f1" stroke-width="1.5"/>
+                    <text x="10" y="178" fill="#bbb" font-size="11">invoke 时的 config 带哪个 thread_id，引擎就加载/追加哪条链</text>
+                </svg>
+                <div class="cap">thread_id 把一个 Saver 切成互不干扰的多条时间线</div>
+                </div>
+                <div class="example"><span class="t">📝 例子：用 config 指定会话，状态自动累积</span>
+<pre><code class="language-python">config = {"configurable": {"thread_id": "user-42"}}
+graph.invoke({"messages":[HumanMessage("记住：我喜欢猫")]}, config)
+graph.invoke({"messages":[HumanMessage("我喜欢啥?")]}, config)
+# 第二次同一个 thread_id → 引擎自动加载上一份检查点 → 能答"猫"
+# 换成 thread_id="user-99" → 全新时间线，完全不知道"猫"</code></pre></div>
+                <div class="ask"><span class="t">💬 小白 vs 老师：上千用户为什么不会串台？</span>
+                👶 <b>小白</b>：所有用户都在同一个进程、同一个 Saver 里，凭啥小明的话不会跑到小红的对话里？<br>
+                👨‍🏫 <b>老师</b>：因为读写检查点时<b>必须带 thread_id 当索引</b>。就像生活中不同玩家在同一台游戏机上各有各的<b>存档槽位</b>——小明存进"槽 A"、小红存进"槽 B"，加载时按各自槽位取，物理上就取不到别人的。你只要保证"一个用户一个 thread_id"，隔离是引擎替你保证的。</div>
                 <div class="baby"><span class="t">thread = 一个独立的对话/会话</span>
                 想象一个客服机器人同时服务 1000 个用户。<strong>每个用户一个 <code>thread_id</code>——他们的对话历史（检查点）各存各的，绝不串台。</strong>用户 A 发消息用 <code>thread_id="A"</code>，图自动加载 A 的历史、接着聊；用户 B 用 <code>"B"</code>，是全新的另一条线。<strong>这就是 LangGraph 做"多用户记忆"的方式：不用你手动管理会话字典，thread_id + checkpointer 自动搞定持久化和隔离。</strong>换个 thread_id 就是换个记忆空间。</div>
             </div>
@@ -150,6 +210,9 @@ graph.invoke({"messages":[HumanMessage("我叫啥?")]}, {"configurable":{"thread
                     <li>InMemory vs Sqlite vs Postgres 怎么选？</li>
                     <li>get_state / get_state_history 返回什么？</li>
                 </ul>
+                <div class="baby"><span class="t">🎯 一句话复述 + 记忆口诀</span>
+                一句话：<b>Saver 决定存档放哪种硬盘（内存/SQLite/Postgres），thread_id 决定存进哪个玩家的槽位——两件事互不干扰。</b><br>
+                口诀：<b>"Saver 选后端，thread 分槽位；换库改一行，隔离不用愁。"</b></div>
             </div>
             <div class="card">
                 <h3>✋ 动手</h3>

@@ -18,6 +18,22 @@
         .fanin{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 4px;font-size:12px;flex-wrap:wrap}
         .fanin .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary)}
         .fanin .a{color:#06b6d4;font-weight:800}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#06b6d4,#3b82f6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,6 +68,16 @@
             <p class="part-desc">拓扑执行的最后一块拼图。一个节点跑完，输出怎么精确地"喂"给下游？多个上游的节点怎么"攒齐"再跑？今天读 <code>_enqueue_next_nodes</code>。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 执行引擎</div>
+            <div class="steps">
+                <span class="st">D12 ExecutionManager</span><span class="sep">→</span>
+                <span class="st on">D13 数据流/拓扑</span><span class="sep">→</span>
+                <span class="st">D14 Scheduler</span><span class="sep">→</span>
+                <span class="st">D15 WebSocket</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>核心问题</h1></div>
             <div class="card">
@@ -75,6 +101,10 @@ async for output_name, output_data in block.execute(input_data, **extra_exec_kwa
         <section id="l03" class="section">
             <div class="section-header"><span class="section-number">L03</span><h1>输出喂给下游 _enqueue_next_nodes</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：节点跑出一个值，引擎凭什么知道"这值该给谁、下游能不能开跑"？</span>
+                节点 A 产出一个 <code>{"summary": "..."}</code>。引擎不能瞎猜——它得知道 A 的这个输出口连到了哪些下游的哪些输入口，还得判断被喂到的下游节点"输入是不是齐了"。全靠图里那些 Link（Day 11）和一段专门的派发逻辑。</div>
+                <div class="essence"><span class="t">💡 本质：execute_node 产出 → _enqueue_next_nodes 顺着连线派发 → 齐了才入队</span>
+                节点执行 <code>execute_node</code>（<code>manager.py:142</code>）像挤牙膏一样逐个 yield 出 (输出口名, 值)；<code>_enqueue_next_nodes</code>（<code>manager.py:389</code>）拿着每个输出，顺着以它为源的每条 Link 找到下游输入口、把值写进去；写完检查下游"必需输入齐了没"，齐了才把下游标 QUEUED 入队。<strong>整个拓扑执行，就是这一"产出→派发→凑齐→入队"的循环在推进。</strong></div>
                 <p><code>_enqueue_next_nodes</code>（<code>manager.py:389</code>）——数据流的引擎。对当前节点的每条 <code>output_link</code>：</p>
 <pre><code class="language-python"># 概念流程
 # 1. parse_execution_output 判断输出值是否匹配这条连线的 source_name
@@ -93,6 +123,12 @@ async for output_name, output_data in block.execute(input_data, **extra_exec_kwa
 <pre><code class="language-python"># 找一个"还没有这个输入口、且 INCOMPLETE"的下游节点执行，把值插进去
 # 找不到就新建一个 INCOMPLETE 执行
 # —— 陆续到来的多个输入被"攒"到同一次执行上</code></pre>
+                <div class="example"><span class="t">📝 举个例子：报告节点的 3 个输入陆续到齐的过程</span>
+                报告节点需要 <code>research</code>、<code>data</code>、<code>title</code> 三个输入：<br>
+                ① 研究块先完成 → <code>upsert</code> 找到一个 INCOMPLETE 执行，写入 <code>{research: ...}</code> → 检查：缺 data/title → <strong>只落库，不入队</strong><br>
+                ② 标题块完成 → 写入 <code>{title: ...}</code>（攒到同一条执行）→ 仍缺 data → 不入队<br>
+                ③ 数据块最后完成 → 写入 <code>{data: ...}</code> → 检查：三个全齐 → 标 <code>QUEUED</code> 入队，报告开跑。<br>
+                <strong>顺序无关：谁先谁后都行，只要三个都到，第三个到的那次触发入队。</strong></div>
                 <div class="baby"><span class="t">"攒输入"是怎么回事？</span>
                 一个下游节点有 3 个输入口，分别来自 3 个上游。这 3 个上游不会同时完成——A 先完成给了口1（此时口2、口3还空）、然后 C 完成给了口3、最后 B 完成给了口2。<strong><code>upsert_execution_input</code> 把陆续到来的值攒到<strong>同一个</strong>下游节点执行上（一个 INCOMPLETE 状态的执行记录），像往一个篮子里陆续放东西。每次放完就检查"篮子满了吗（所有必需输入都有了吗）"——满了才标 QUEUED 入队。</strong>这就实现了"等所有输入到齐才跑"。</div>
             </div>
@@ -105,6 +141,36 @@ async for output_name, output_data in block.execute(input_data, **extra_exec_kwa
                     <div style="display:flex;flex-direction:column;gap:4px"><span class="n">研究 Block</span><span class="n">分析 Block</span></div>
                     <span class="a">都完成才 →</span>
                     <span class="n" style="border-color:#22c55e">报告 Block<br><small>等两个输入齐</small></span>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 220" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <text x="10" y="20" fill="#06b6d4" font-size="13" font-weight="700">fan-out（一出多入）与 fan-in（多入汇聚）</text>
+                        <!-- source -->
+                        <rect x="20" y="90" width="120" height="46" rx="8" fill="#26323a" stroke="#06b6d4" stroke-width="2"/>
+                        <text x="80" y="118" fill="#fff" text-anchor="middle">触发/输入</text>
+                        <!-- two branches -->
+                        <rect x="270" y="45" width="130" height="46" rx="8" fill="#26323a" stroke="#8b5cf6"/>
+                        <text x="335" y="73" fill="#fff" text-anchor="middle">研究 Block</text>
+                        <rect x="270" y="135" width="130" height="46" rx="8" fill="#26323a" stroke="#8b5cf6"/>
+                        <text x="335" y="163" fill="#fff" text-anchor="middle">分析 Block</text>
+                        <!-- sink -->
+                        <rect x="530" y="90" width="150" height="60" rx="10" fill="#173a26" stroke="#34d399" stroke-width="2"/>
+                        <text x="605" y="115" fill="#fff" text-anchor="middle" font-weight="700">报告 Block</text>
+                        <text x="605" y="133" fill="#a7f3d0" text-anchor="middle" font-size="10">攒齐 2 个输入才 QUEUED</text>
+                        <!-- fan-out arrows -->
+                        <path d="M140 105 L268 68" stroke="#f59e0b" stroke-width="2" marker-end="url(#f1)"/>
+                        <path d="M140 121 L268 158" stroke="#f59e0b" stroke-width="2" marker-end="url(#f1)"/>
+                        <text x="150" y="45" fill="#fbbf24" font-size="10">fan-out：一个输出喂多个下游</text>
+                        <!-- fan-in arrows -->
+                        <path d="M400 68 L528 108" stroke="#34d399" stroke-width="2" marker-end="url(#f2)"/>
+                        <path d="M400 158 L528 132" stroke="#34d399" stroke-width="2" marker-end="url(#f2)"/>
+                        <text x="470" y="205" fill="#6ee7b7" font-size="10" text-anchor="middle">fan-in：两个上游都到齐，报告才开跑</text>
+                        <defs>
+                          <marker id="f1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#f59e0b"/></marker>
+                          <marker id="f2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#34d399"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">同一套"攒齐输入才入队"机制同时支持 fan-out（触发同时喂研究+分析）和 fan-in（报告耐心等两条支线都完成）——无需为复杂图另写逻辑。</div>
                 </div>
                 <div class="anno">读法：<b>"攒齐输入才入队"优雅地处理了 fan-in（多入汇聚）——报告节点耐心等研究和分析都完成。</b>同理 fan-out（一出多入）也自然支持：一个节点的一个输出口可以连多条 Link，每条都触发一个下游（一个输出喂给多个下游）。</div>
                 <div class="baby"><span class="t">为什么这套机制能处理任意复杂的图？</span>

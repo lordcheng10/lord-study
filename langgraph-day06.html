@@ -18,6 +18,22 @@
         .phases{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
         .phases .n{border:1px solid var(--border-color);border-radius:8px;padding:9px 13px;background:var(--bg-secondary);text-align:center}
         .phases .n b{display:block;color:#6366f1;font-size:11px} .phases .a{color:#14b8a6;font-weight:800}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,12 +68,17 @@
             <p class="part-desc">LangGraph 的执行引擎。它借鉴 Google Pregel（图计算）/ BSP（整体同步并行）模型——按"超步（super-step）"执行图。读 <code>pregel/main.py</code> 的 docstring。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
+        <div class="steps"><span class="st">invoke旅程</span><span class="sep">→</span><span class="st on">Pregel引擎</span><span class="sep">→</span><span class="st">Channels</span><span class="sep">→</span><span class="st">super-step</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>不是传统调用链</h1></div>
             <div class="card">
-                <p>LangGraph 的运行时<strong>不是</strong>"函数 A 调用函数 B"的传统调用链，而是 <strong>Pregel / BSP 模型</strong>。<code>pregel/main.py:454</code> 的 docstring 说得清楚：<em>"Pregel combines actors and channels... following the Pregel Algorithm / Bulk Synchronous Parallel model."</em></p>
+                <div class="ask"><span class="t">🤔 痛点</span>假设三个节点想同时改同一份状态（比如都往 <code>count</code> 里写）。传统写法里它们各自读一下、算一下、写回去——但"读"和"写"之间别人可能已经改了，于是结果乱套（竞态 race condition）。要靠加锁解决，又慢又容易死锁。<strong>怎么让"多个节点同时干活"既快又不出错？</strong></div>
+                <div class="essence"><span class="t">💡 本质</span>Pregel/BSP 的答案是<strong>"分步走 + 步内快照 + 步末统一提交"</strong>：把执行切成一个个"超步"，同一超步里的节点都读同一份"步初快照"（谁也改不了别人正在读的数据），各自的写入先攒着，等这一步所有节点跑完，才在超步之间统一合并提交。<strong>竞态从根上消失了——不用加锁，因为"读的时候没人写"。</strong></div>
+                <p>LangGraph 的运行时<strong>不是</strong>"函数 A 调用函数 B"的传统调用链，而是 <strong>Pregel / BSP 模型</strong>。<code>pregel/main.py:450</code> 的 <code>class Pregel</code> docstring 说得清楚：<em>"Pregel combines actors and channels... following the Pregel Algorithm / Bulk Synchronous Parallel model."</em></p>
                 <div class="baby"><span class="t">Pregel / BSP 是什么？（一句话）</span>
-                Pregel 是 Google 为超大规模图计算设计的模型，BSP（Bulk Synchronous Parallel，整体同步并行）是它的执行范式。<strong>核心思想：计算分成一个个"超步（super-step）"，每个超步里"该干活的节点并行干活、干完统一同步一次状态"，然后进入下一超步。</strong>就像多人协作："大家各自干（并行）→ 到点了统一汇报同步（barrier）→ 再各自干下一轮"。<strong>LangGraph 把这个模型用于执行 Agent 图——比传统 while 循环更适合"并行 + 可中断 + 可持久化"。</strong></div>
+                Pregel 是 Google 为超大规模图计算设计的模型，BSP（Bulk Synchronous Parallel，整体同步并行）是它的执行范式。<strong>核心思想：计算分成一个个"超步（super-step）"，每个超步里"该干活的节点并行干活、干完统一同步一次状态"，然后进入下一超步。</strong>就像多人协作："大家各自干（并行）→ 到点了统一汇报同步（barrier）→ 再各自干下一轮"。<strong>LangGraph 把这个模型用于执行 Agent 图——比传统 while 循环更适合"并行 + 可中断 + 可持久化"。</strong><br><strong>BSP 就像生活中上班族开例会：</strong>会前各自埋头干活（超步内并行）→ 到点全员进会议室对齐进度、更新共识（屏障同步）→ 散会后再各自干下一轮。谁也不会在会议进行到一半时偷偷改掉公共白板。</div>
             </div>
         </section>
 
@@ -75,11 +96,36 @@
             <div class="section-header"><span class="section-number">L03</span><h1>三阶段超步</h1></div>
             <div class="card">
                 <p>每个超步分三阶段（<code>main.py:464</code>）：</p>
+                <div class="svgbox">
+                <svg viewBox="0 0 640 260" width="100%" role="img" aria-label="BSP 超步示意图">
+                    <text x="320" y="22" text-anchor="middle" fill="#e5e5e5" font-size="13" font-weight="bold">BSP：超步内并行、超步间同步</text>
+                    <!-- Super-step N -->
+                    <text x="120" y="52" text-anchor="middle" fill="#bbb" font-size="12">超步 N（并行计算）</text>
+                    <rect x="30" y="66" width="80" height="34" rx="6" fill="#2a2a3a" stroke="#6366f1"/><text x="70" y="88" text-anchor="middle" fill="#e5e5e5" font-size="12">节点 A</text>
+                    <rect x="30" y="110" width="80" height="34" rx="6" fill="#2a2a3a" stroke="#8b5cf6"/><text x="70" y="132" text-anchor="middle" fill="#e5e5e5" font-size="12">节点 B</text>
+                    <rect x="30" y="154" width="80" height="34" rx="6" fill="#2a2a3a" stroke="#38bdf8"/><text x="70" y="176" text-anchor="middle" fill="#e5e5e5" font-size="12">节点 C</text>
+                    <!-- barrier -->
+                    <line x1="250" y1="60" x2="250" y2="200" stroke="#f59e0b" stroke-width="3" stroke-dasharray="6 4"/>
+                    <text x="250" y="222" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="bold">屏障 barrier</text>
+                    <text x="250" y="238" text-anchor="middle" fill="#bbb" font-size="10">统一提交写入</text>
+                    <line x1="110" y1="83" x2="245" y2="120" stroke="#6366f1" stroke-width="1.5"/>
+                    <line x1="110" y1="127" x2="245" y2="128" stroke="#8b5cf6" stroke-width="1.5"/>
+                    <line x1="110" y1="171" x2="245" y2="136" stroke="#38bdf8" stroke-width="1.5"/>
+                    <!-- Super-step N+1 -->
+                    <text x="470" y="52" text-anchor="middle" fill="#bbb" font-size="12">超步 N+1（下一轮并行）</text>
+                    <rect x="400" y="110" width="140" height="34" rx="6" fill="#2a2a3a" stroke="#6366f1"/><text x="470" y="132" text-anchor="middle" fill="#e5e5e5" font-size="12">被触发的节点</text>
+                    <line x1="255" y1="128" x2="395" y2="127" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a06)"/>
+                    <defs><marker id="a06" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b"/></marker></defs>
+                </svg>
+                <div class="cap">同一超步内 A/B/C 并行算 → 到屏障统一同步 → 下一超步接着并行</div>
+                </div>
                 <div class="phases">
                     <span class="n"><b>Plan 计划</b>选出这步要跑的节点</span><span class="a">→</span>
                     <span class="n"><b>Execution 执行</b>并行跑这些节点</span><span class="a">→</span>
                     <span class="n"><b>Update 更新</b>把写入应用到通道</span><span class="a">↺</span>
                 </div>
+                <div class="baby"><span class="t">🎵 记忆口诀（超步三拍）</span>
+                <strong>「取任务 → 并行跑 → 齐提交」</strong>——Plan 取任务、Execution 并行跑、Update 齐提交，跑完看还有没有活儿，有就再来一拍。三个字记一辈子：<strong>取、跑、交</strong>。</div>
                 <div class="anno">读法：<b><strong>Plan</strong>：第一步选订阅 input 通道的节点；后续步选"订阅了上一步被更新的通道"的节点。<strong>Execution</strong>：并行跑所有选中节点，直到全完成。<strong>Update</strong>：把节点写出的值用 reducer 应用到通道。<strong>重复，直到没有节点可选。</strong></b>（这就是 Day 05 每个超步的三阶段。）</div>
             </div>
         </section>
@@ -91,6 +137,11 @@
 <pre><code class="language-python"># Channel updates from step N are only visible in step N+1
 # channels are guaranteed to be immutable for the duration of the step,
 # with channel updates applied only at the transition between steps.</code></pre>
+                <div class="ask"><span class="t">💬 小白 vs 老师</span>
+                👶 <strong>小白：</strong>为什么不让节点算完就立刻把结果写进状态？那多直接。<br>
+                👨‍🏫 <strong>老师：</strong>因为同一步还有别的节点正在读这份状态。你立刻改，它就读到"改了一半"的数据了。<br>
+                👶 <strong>小白：</strong>那攒到最后一起写，会不会慢？<br>
+                👨‍🏫 <strong>老师：</strong>几乎不慢，却换来了"结果确定、可复现、不用加锁"。<strong>就像开例会：讨论时以会前的会议纪要为准，新决定散会后才统一更新纪要</strong>——没人边开会边改纪要，才不会乱。</div>
                 <div class="baby"><span class="t">快照隔离：一步之内通道不变</span>
                 关键规则：<strong>一个超步执行期间，通道是"冻结"的（不可变）——节点看到的是这一步开始时的状态快照。所有写入都攒着，只在超步之间（transition）统一应用。第 N 步的更新，第 N+1 步才可见。</strong>为什么这么设计？<strong>避免并行节点互相干扰！</strong>如果 A、B 同一步并行跑，B 读的状态不会被 A 中途改掉（都读同一份快照）——结果确定、可复现，不用担心竞态。<strong>"一步之内快照隔离、步末统一提交"是 BSP 让并行安全的核心。</strong>这和数据库的快照隔离一个道理。</div>
             </div>
@@ -104,6 +155,8 @@
     if channels[chan].is_available()  # ① 通道有值
        and versions.get(chan) > seen.get(chan):  # ② 通道版本 > 节点上次见过的版本
         return True                    # 该跑！</code></pre>
+                <div class="example"><span class="t">📝 例子：版本号怎么防重复</span>
+                通道 <code>messages</code> 初始版本 <code>v0</code>。节点 A 上次处理时记下 <code>seen[messages]=v0</code>。这一步有节点往 <code>messages</code> 写了新值 → 版本涨到 <code>v1</code>。下一步 Plan 检查 A：<code>v1 &gt; v0</code>？是 → A 该跑。A 跑完把 <code>seen[messages]</code> 更新成 <code>v1</code>。<strong>再下一步若没人写 messages，版本仍是 <code>v1</code>，<code>v1 &gt; v1</code> 不成立 → A 不会被无谓地再跑一遍。</strong>这就是"同一次更新只触发一次"。</div>
                 <div class="baby"><span class="t">版本号防重复触发</span>
                 每个通道有个<strong>版本号</strong>（每次被更新就 +1）；每个节点记录它<strong>上次见过</strong>每个通道的版本。<strong>触发条件：通道有值 且 当前版本 > 节点上次见过的版本（说明这通道被新更新了、节点还没处理）。</strong>处理后节点更新"已见版本"，于是<strong>同一次更新不会重复触发同一节点</strong>。这个 <code>channel_versions</code> vs <code>versions_seen</code> 的机制保证了幂等触发——BSP 里"上一步更新才触发下一步"的精确实现。</div>
             </div>

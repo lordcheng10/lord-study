@@ -18,6 +18,22 @@
         .arch{display:flex;flex-direction:column;gap:6px;margin:12px 0}
         .arch .r{border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;background:var(--bg-secondary);font-size:12.5px}
         .arch .r b{color:#06b6d4}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#06b6d4,#3b82f6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,14 +68,66 @@
             <p class="part-desc">整个平台的心脏。今天读 <code>executor/manager.py</code>：ExecutionManager 的进程架构（MQ + 线程池 + 事件总线）、一次图执行的生命周期、分布式锁去重。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 执行引擎</div>
+            <div class="steps">
+                <span class="st">D11 Graph 模型深入</span><span class="sep">→</span>
+                <span class="st on">D12 ExecutionManager</span><span class="sep">→</span>
+                <span class="st">D13 数据流/拓扑</span><span class="sep">→</span>
+                <span class="st">D14 Scheduler</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>执行引擎全景</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：几千个用户同时点"运行"，谁来跑、跑在哪、会不会互相拖垮？</span>
+                一张图可能跑几分钟到几小时（多次 LLM 调用 + 外部 API）。如果 Web 服务器收到请求就地开跑，请求会一直挂着、服务器被长任务占满，多用户根本扛不住。得有个专门"干重活"的角色，把执行从 Web 层剥离出去。</div>
+                <div class="essence"><span class="t">💡 本质：ExecutionManager = 一个"长期待命的工头"，从队列领活、丢给工人干</span>
+                它是个常驻进程（<code>manager.py:1353</code>）：盯着 RabbitMQ 队列，来一条"跑图请求"就从<strong>线程池</strong>（<code>executor</code> 属性返回 <code>ThreadPoolExecutor</code>，<code>manager.py:1395-1397</code>）派一个工人线程去跑；每个工人由 <code>ExecutionProcessor</code>（<code>manager.py:551</code>）驱动，一张图从头到尾走 <code>on_graph_execution</code>（<code>:812</code>），图里每个节点走 <code>on_node_execution</code>（<code>:578</code>）。工头只管调度，不亲自干活。</div>
                 <p><code>ExecutionManager</code>（<code>manager.py:1353</code>）是一个常驻进程。它由三样东西支撑：</p>
                 <div class="arch">
                     <div class="r"><b>RabbitMQ</b> — 消费"图执行请求"和"取消请求"两个队列（跨进程/跨机器分发任务）</div>
                     <div class="r"><b>线程池 ThreadPoolExecutor</b> — 每个图执行占一个 worker 线程（并发跑多个图）</div>
                     <div class="r"><b>Redis 事件总线</b> — 每次节点/图状态变化 publish 事件（推给前端/子 Agent）</div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 250" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <!-- MQ -->
+                        <rect x="20" y="90" width="130" height="60" rx="10" fill="#26323a" stroke="#f59e0b" stroke-width="2"/>
+                        <text x="85" y="116" fill="#fbbf24" text-anchor="middle" font-weight="700">RabbitMQ</text>
+                        <text x="85" y="134" fill="#9fb3c8" text-anchor="middle" font-size="10">跑图请求排队</text>
+                        <!-- Manager -->
+                        <rect x="210" y="80" width="150" height="80" rx="10" fill="#1e2a44" stroke="#3b82f6" stroke-width="2"/>
+                        <text x="285" y="110" fill="#93c5fd" text-anchor="middle" font-weight="700">ExecutionManager</text>
+                        <text x="285" y="128" fill="#9fb3c8" text-anchor="middle" font-size="10">工头 (:1353)</text>
+                        <text x="285" y="144" fill="#9fb3c8" text-anchor="middle" font-size="10">消费队列→派活</text>
+                        <!-- ThreadPool workers -->
+                        <rect x="430" y="30" width="150" height="46" rx="8" fill="#264a3a" stroke="#34d399"/>
+                        <text x="505" y="50" fill="#fff" text-anchor="middle" font-size="11">worker 1 · 图A</text>
+                        <text x="505" y="66" fill="#9fb3c8" text-anchor="middle" font-size="9">ExecutionProcessor</text>
+                        <rect x="430" y="94" width="150" height="46" rx="8" fill="#264a3a" stroke="#34d399"/>
+                        <text x="505" y="114" fill="#fff" text-anchor="middle" font-size="11">worker 2 · 图B</text>
+                        <text x="505" y="130" fill="#9fb3c8" text-anchor="middle" font-size="9">on_graph_execution</text>
+                        <rect x="430" y="158" width="150" height="46" rx="8" fill="#2a2a3a" stroke="#64748b" stroke-dasharray="4 3"/>
+                        <text x="505" y="185" fill="#94a3b8" text-anchor="middle" font-size="11">…共 pool_size 个</text>
+                        <text x="505" y="16" fill="#34d399" text-anchor="middle" font-size="10" font-weight="700">ThreadPoolExecutor (:1395)</text>
+                        <!-- Redis -->
+                        <rect x="610" y="94" width="90" height="46" rx="8" fill="#3a1e2a" stroke="#f472b6"/>
+                        <text x="655" y="115" fill="#f9a8d4" text-anchor="middle" font-size="11">Redis</text>
+                        <text x="655" y="131" fill="#9fb3c8" text-anchor="middle" font-size="9">事件总线</text>
+                        <!-- arrows -->
+                        <path d="M150 120 L208 120" stroke="#8b5cf6" stroke-width="2" marker-end="url(#m1)"/>
+                        <path d="M362 105 L428 53" stroke="#8b5cf6" stroke-width="2" marker-end="url(#m1)"/>
+                        <path d="M362 120 L428 117" stroke="#8b5cf6" stroke-width="2" marker-end="url(#m1)"/>
+                        <path d="M580 117 L608 117" stroke="#f472b6" stroke-width="2" marker-end="url(#m2)"/>
+                        <text x="235" y="238" fill="#94a3b8" font-size="10">① 请求入队 → ② 工头领取 → ③ 派线程池 worker 跑图 → ④ 每步进度 publish 到 Redis</text>
+                        <defs>
+                          <marker id="m1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#8b5cf6"/></marker>
+                          <marker id="m2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0 0 L7 3 L0 6 Z" fill="#f472b6"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">RabbitMQ 分发任务、线程池并发跑多张图（每图一个 worker 线程）、Redis 广播进度——工头 ExecutionManager 只负责"领活+派活"。</div>
                 </div>
                 <div class="baby"><span class="t">先建立全局图景</span>
                 <strong>REST 把"图执行请求"发到 RabbitMQ（Day 05）→ ExecutionManager 消费 → 交给线程池的一个 worker → worker 跑这张图（拓扑执行各 Block）→ 每步状态变化 publish 到 Redis → WebSocket 转发给前端。</strong>三个基础设施各司其职：MQ 分发任务、线程池并发执行、事件总线广播进度。今天聚焦"一张图怎么被一个 worker 跑起来"。</div>
@@ -109,6 +177,11 @@ while 队列有节点 或 有在跑的节点:
     billing.charge_usage(node)          # 预扣费（Day 09）
     异步执行 on_node_execution(node)    # 丢到专门的事件循环跑
     # 内层：取在跑节点的输出 → _process_node_output → 入队下游（Day 13）</code></pre>
+                <div class="example"><span class="t">📝 举个例子：一张"读网页→总结→发邮件"的图怎么被这个循环跑完</span>
+                起始节点[读网页]已是 QUEUED，进循环：<br>
+                <code>取[读网页]→预扣费→异步执行→产出"网页文本"→喂给[总结]，[总结]输入齐→入队</code><br>
+                <code>取[总结]→执行→产出"摘要"→喂给[发邮件]，入队</code><br>
+                <code>取[发邮件]→执行→发送→无下游</code> → 队列空且无在跑节点 → 循环退出，图执行完成。<strong>循环本身不认识"读网页/总结/发邮件"，它只做"取一个→跑→把产出喂下游→重复"。</strong></div>
                 <div class="anno">读法：<b>调度循环就是"从队列取节点 → 预扣费 → 异步执行 → 产出的输出决定下游哪些节点入队 → 重复，直到没有节点可跑"。</b>这就是 Day 05 讲的拓扑执行的代码核心。起始节点（Day 11 的 starting_nodes）在创建执行时已入队。</div>
             </div>
         </section>

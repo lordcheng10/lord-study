@@ -18,6 +18,22 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,9 +68,14 @@
             <p class="part-desc">Day 08 那行"每个超步存检查点"存的到底是什么？今天拆开 <code>libs/checkpoint/</code> 的 Checkpoint 数据结构——它是持久执行、时间旅行、人在环的共同根基。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
+        <div class="steps"><span class="st">节点·并行</span><span class="sep">→</span><span class="st on">Checkpoint</span><span class="sep">→</span><span class="st">Saver·threads</span><span class="sep">→</span><span class="st">时间旅行</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>检查点是什么</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：没有检查点会怎样？</span>一个 Agent 跑了半小时、调了十几次工具，进程突然崩了——内存里的 State 全没了，只能<strong>从头再来一遍</strong>。长流程、要人工审批的流程、可能中断的流程，全都无从谈起。</div>
+                <div class="essence"><span class="t">💡 本质：每个超步后存一份"整份 State 快照"</span>LangGraph 的解法极其朴素：<strong>每跑完一个超步，就把此刻所有通道的值（channels 快照）+ 进度信息打包存一份</strong>。崩溃后加载最近一份快照就能续跑。持久执行、时间旅行、人在环，全都是这一个机制的衍生品。</div>
                 <p>检查点（checkpoint）= <strong>某个超步结束时，整个图状态的一份完整快照</strong>。有了它，程序重启后能"回到那一刻继续"。</p>
                 <div class="baby"><span class="t">像游戏存档</span>
                 打游戏时每过一关自动存档。<strong>LangGraph 每跑完一个超步就"存档"一次——把此刻所有通道的值、进度信息打包保存。</strong>下次即使进程崩了、机器重启了，加载存档就能从那一步继续，不用从头打。<strong>更妙的是：因为每步都存，你还能"读档到任意一关"（时间旅行，Day 13），或"在某关暂停等玩家操作"（人在环，Day 14）。</strong>这一整周的能力，全靠"每步存档"这一个机制。</div>
@@ -64,7 +85,39 @@
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>Checkpoint 结构</h1></div>
             <div class="card">
-                <p><code>Checkpoint</code>（<code>libs/checkpoint/langgraph/checkpoint/base/__init__.py</code>）是个 TypedDict：</p>
+                <div class="svgbox">
+                <svg viewBox="0 0 620 170" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+                    <text x="10" y="20" fill="#bbb" font-size="12">超步 0 → 超步 1 → 超步 2，每步末尾产出一个检查点快照，串成一条链</text>
+                    <!-- 超步节点 -->
+                    <rect x="20" y="45" width="70" height="34" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
+                    <text x="55" y="67" fill="#e5e5e5" font-size="12" text-anchor="middle">超步 0</text>
+                    <rect x="230" y="45" width="70" height="34" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
+                    <text x="265" y="67" fill="#e5e5e5" font-size="12" text-anchor="middle">超步 1</text>
+                    <rect x="440" y="45" width="70" height="34" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
+                    <text x="475" y="67" fill="#e5e5e5" font-size="12" text-anchor="middle">超步 2</text>
+                    <!-- 向下到 checkpoint -->
+                    <line x1="55" y1="79" x2="55" y2="110" stroke="#34d399" stroke-width="1.5"/>
+                    <line x1="265" y1="79" x2="265" y2="110" stroke="#34d399" stroke-width="1.5"/>
+                    <line x1="475" y1="79" x2="475" y2="110" stroke="#34d399" stroke-width="1.5"/>
+                    <!-- checkpoint 快照 -->
+                    <rect x="15" y="110" width="80" height="40" rx="8" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="55" y="127" fill="#e5e5e5" font-size="11" text-anchor="middle">ckpt-0</text>
+                    <text x="55" y="142" fill="#bbb" font-size="9" text-anchor="middle">State 快照</text>
+                    <rect x="225" y="110" width="80" height="40" rx="8" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="265" y="127" fill="#e5e5e5" font-size="11" text-anchor="middle">ckpt-1</text>
+                    <text x="265" y="142" fill="#bbb" font-size="9" text-anchor="middle">State 快照</text>
+                    <rect x="435" y="110" width="80" height="40" rx="8" fill="#2a2a3a" stroke="#34d399"/>
+                    <text x="475" y="127" fill="#e5e5e5" font-size="11" text-anchor="middle">ckpt-2</text>
+                    <text x="475" y="142" fill="#bbb" font-size="9" text-anchor="middle">State 快照</text>
+                    <!-- checkpoint 之间的链（parents） -->
+                    <line x1="95" y1="130" x2="225" y2="130" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4 3"/>
+                    <line x1="305" y1="130" x2="435" y2="130" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4 3"/>
+                    <text x="160" y="123" fill="#6366f1" font-size="9" text-anchor="middle">parents</text>
+                    <text x="370" y="123" fill="#6366f1" font-size="9" text-anchor="middle">parents</text>
+                </svg>
+                <div class="cap">每个超步产出一份 checkpoint，靠 id/parents 串成可回溯的历史链</div>
+                </div>
+                <p><code>Checkpoint</code>（<code>libs/checkpoint/langgraph/checkpoint/base/__init__.py</code>，<code>class Checkpoint</code> L92）是个 TypedDict：</p>
 <pre><code class="language-python">class Checkpoint(TypedDict):
     v: int                              # 版本号（格式版本）
     id: str                             # 检查点 ID（单调递增，可排序）
@@ -74,6 +127,10 @@
     versions_seen: dict[str, dict]      # 每个节点"见过"的通道版本（触发去重）
     updated_channels: list[str] | None  # 本步更新了哪些通道</code></pre>
                 <div class="anno">读法：<b>一个检查点 = 状态本体（channel_values）+ 进度元信息（各种 versions）。<code>id</code> 单调递增，所以检查点天然可排序 → 能构成一条历史时间线（Day 13 时间旅行的基础）。</b></div>
+                <div class="anno">⚠️ <b>常见误解</b>：小白常以为检查点只是"把 messages 存一下"。其实它还存了一堆<b>进度元信息</b>（versions_seen 等），少了它们恢复就会重复执行——数据和进度必须一起存。</div>
+                <div class="ask"><span class="t">💬 小白 vs 老师：为什么不直接 pickle 整个对象？</span>
+                👶 <b>小白</b>：存档嘛，我直接 <code>pickle.dumps(整个图)</code> 一股脑存下来不就完了？<br>
+                👨‍🏫 <b>老师</b>：pickle 整个图有三个坑——① 图里有函数、锁、连接等<b>存不了/不该存</b>的东西；② 存成一坨二进制<b>没法排序、没法只读某一步</b>，时间旅行就废了；③ 换个代码版本可能就<b>反序列化失败</b>。所以 LangGraph 只存"纯数据 + 进度"这种结构化的 <code>Checkpoint</code>，而不是整个运行时对象。</div>
             </div>
         </section>
 
@@ -81,6 +138,14 @@
             <div class="section-header"><span class="section-number">L03</span><h1>channel_values（状态本体）</h1></div>
             <div class="card">
                 <p><code>channel_values</code> 是<strong>所有通道当前值的字典</strong>——就是你的 State 此刻的完整内容（Day 07 通道值的集合）。恢复时把它灌回各通道，状态就"活"过来了。</p>
+                <div class="example"><span class="t">📝 例子：一个 channel_values 长什么样</span>假设 State 有 <code>messages</code> 和 <code>count</code> 两个字段，聊了两轮后某个检查点里的 channel_values 大致是：
+<pre><code class="language-python">channel_values = {
+    "messages": [HumanMessage("我叫小明"), AIMessage("你好小明"),
+                 HumanMessage("我叫啥?")],   # add_messages 累加的历史
+    "count": 2,                              # 走了两个超步
+}
+# 恢复时：把这份 dict 灌回各通道 → State 瞬间回到"聊了两轮"那一刻</code></pre></div>
+                <p>另外几个字段（<code>class CheckpointTuple</code> L139 把 checkpoint、metadata、pending_writes 打包在一起）都是"怎么正确恢复和继续"的元信息。</p>
                 <div class="anno">读法：<b>这是存档的"主体数据"。你的 messages 历史、count、任何 State 字段，都在这里。</b>其余字段都是"怎么正确恢复和继续"的元信息。</div>
             </div>
         </section>
@@ -119,12 +184,23 @@
         <section id="l07" class="section">
             <div class="section-header"><span class="section-number">L07</span><h1>恢复过程</h1></div>
             <div class="card">
-                <p>带 checkpointer 的图再次 invoke 时（同一 thread_id），<code>_loop.py</code> 启动阶段：</p>
+                <p>带 checkpointer 的图再次 invoke 时（同一 thread_id），<code>_loop.py</code> 启动阶段会通过 <code>BaseCheckpointSaver</code>（同文件 <code>class BaseCheckpointSaver</code> L176，Day 12 细讲）读回检查点：</p>
 <pre><code class="language-python"># 1. 从 saver 读最新检查点（Day 12）
 # 2. channel_values → 灌回各通道（状态复活）
 # 3. versions_seen → 恢复触发进度
 # 4. pending_writes → 应用未提交的已完成写入
 # 5. 从下一超步继续 tick 循环（Day 08）</code></pre>
+                <div class="example"><span class="t">📝 简化版 → 真实版：如果让你自己写"存档器"</span>朴素做法可能就一个字典：
+<pre><code class="language-python"># 极简版：内存里存最新一份
+store = {}
+def save(thread_id, state):   store[thread_id] = state   # 只存"整步"结果
+def load(thread_id):          return store.get(thread_id)</code></pre>
+                对照真实的 <code>BaseCheckpointSaver</code>，会发现它多出几个方法，每个都在补朴素版的漏洞：
+<pre><code class="language-python">put(config, checkpoint, metadata)  # 存整步：但会保留历史多份（时间旅行），不是覆盖
+put_writes(config, writes, ...)    # 多出来：存"半步"里已完成节点的写入 → 单步崩了不重算
+get_tuple(config)                  # 读：能按 checkpoint_id 精确读某一份，不只是"最新"
+list(config)                       # 多出来：列出该 thread 所有历史 → 时间旅行遍历用</code></pre>
+                一句话：真实接口比"一个字典"多出来的，全是为了<b>历史可回溯</b>和<b>半步保护</b>。</div>
                 <div class="baby"><span class="t">"继续"而不是"重来"</span>
                 这就是"持久执行"（durable execution）的完整闭环：<strong>存档时保存了数据+进度+半完成保护，恢复时逐一还原，然后从断点的下一步继续跑。</strong>用户视角：一个跑了半小时、中途崩溃的长流程，重启后几乎无缝续上。<strong>这是 LangGraph 区别于"一个大 while 循环"式 Agent 的核心工程能力，也是它能支撑生产级长运行 Agent 的原因。</strong></div>
             </div>
@@ -141,6 +217,9 @@
                     <li>CheckpointMetadata 的 source/step/parents 干嘛？</li>
                     <li>恢复过程的 5 步？为什么是"继续"不是"重来"？</li>
                 </ul>
+                <div class="baby"><span class="t">🎯 一句话复述 + 记忆口诀</span>
+                一句话：<b>检查点就像生活中的游戏存档——每过一关（超步）自动存一份完整进度，崩了读档续玩，不用从头。</b><br>
+                口诀：<b>"每步一存档，数据带进度；崩了能续跑，半步不白干。"</b></div>
             </div>
             <div class="card">
                 <h3>✋ 动手</h3>

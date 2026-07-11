@@ -18,6 +18,22 @@
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#14b8a6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -52,6 +68,9 @@
             <p class="part-desc">全书最重要的概念。节点返回"局部更新"，reducer 决定这些更新<b>怎么合并进状态</b>（覆盖 vs 追加）。精读 add_messages。</p>
         </div>
 
+        <div class="journey"><div class="jt">📍 你在整门课的位置（第 1 周主线）</div>
+        <div class="steps"><span class="st">全景</span><span class="sep">→</span><span class="st">StateGraph</span><span class="sep">→</span><span class="st on">State+reducer</span><span class="sep">→</span><span class="st">条件边</span><span class="sep">→</span><span class="st">invoke旅程</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么需要 reducer</h1></div>
             <div class="card">
@@ -60,6 +79,10 @@
                     <li>同一步里<strong>多个节点并发</strong>给同一个键写值，怎么办？</li>
                     <li>一个"消息列表"，新消息应该<strong>追加</strong>还是<strong>覆盖</strong>整个列表？</li>
                 </ul>
+                <div class="ask"><span class="t">🤔 痛点：节点只会"报差异"，那"旧值 + 差异"谁来算？</span>
+                Day 02 说节点只返回局部更新，比如聊天节点返回 <code>{"messages": [新回复]}</code>。可 State 里本来已经有一串历史消息了——<strong>新回复是接到历史后面（追加），还是把整串历史换成只剩这一条（覆盖）？</strong>框架没法猜，这个"怎么合并"的规则必须由你指定。</div>
+                <div class="essence"><span class="t">💡 本质：reducer 就是每个字段的"合并规则" (旧, 新) → 结果</span>
+                LangGraph 的答案是：给每个 State 字段配一个 <strong>reducer</strong>——一个二元函数 <code>(旧值, 新值) → 合并后的值</code>。计数器用"覆盖"（<code>LastValue</code>，直接取新值）；消息列表用"追加"（<code>add_messages</code>）。<strong>节点永远只管报差异，"旧 + 新 = 什么"由字段的 reducer 一锤定音。</strong>这就是 LangGraph 状态管理的全部秘密。<br><strong>这就像生活中的记账本：</strong>"追加"reducer = 记<strong>流水账</strong>（每笔收支都记一行，历史全留）；"覆盖"reducer = 只写<strong>当前余额</strong>（新数字一写，旧的就没了）。同一本账，不同的字段用不同记法——这正是 reducer 的活。</div>
                 <div class="baby"><span class="t">reducer = "合并策略"</span>
                 答案就是 <strong>reducer</strong>：每个 State 字段背后是一个 <strong>channel（通道）</strong>，channel 的 <code>update()</code> 方法决定合并策略。<strong>reducer 签名 <code>(旧值, 新值) → 合并后的值</code>。</strong>比如聊天历史用"追加"reducer（新消息接到末尾），计数器用"覆盖"（新值替换旧值）。<strong>节点无需关心合并——只管返回局部更新，reducer 负责合并。这是 LangGraph 状态管理的精髓。</strong></div>
             </div>
@@ -88,6 +111,10 @@
         raise InvalidUpdateError("Can receive only one value per step. Use an Annotated key ...")
     self.value = values[-1]   # 直接覆盖</code></pre>
                 <div class="anno">读法：<b><code>LastValue</code> = "存最后一个值、每步最多接收一个"。</b>关键：<strong>没有 reducer 的字段，同一步被两个节点同时写就报错</strong>（"Can receive only one value per step"）——这就是新手常见的报错来源。所以并发写必须用 reducer（L07）。</div>
+                <div class="example"><span class="t">📝 简化版 → 真实版：如果让你自己写"合并"</span>
+                <strong>如果让你写，你八成会这样：</strong>
+<pre style="margin:6px 0"><code class="language-python">state["messages"] = new_messages   # 直接赋值：新的一写，历史全没了（= 覆盖）</code></pre>
+                这对计数器没问题，但聊天历史会被"清空只剩最新一条"。<strong>LangGraph 的真实做法</strong>（<code>last_value.py:20</code> 的 <code>LastValue.update</code>）也确实是"取最后一个值"——但它多做了一件事：<strong>发现一步里来了 2 个值就直接报错</strong>，逼你为这个字段想清楚合并策略，而不是静默丢数据。这行"多出来的报错"，就是真实版比朴素版更靠谱的地方。</div>
             </div>
         </section>
 
@@ -103,7 +130,7 @@ for value in values:
     self.value = self.operator(self.value, value)   # 用 operator 合并</code></pre>
                 <div class="anno">读法：<b><code>Annotated[list, operator.add]</code> 让多次写入<strong>逐个用 + 累加</strong>（列表拼接），而非覆盖。</b>于是多个节点并行往 <code>items</code> 写，全部被 <code>operator.add</code> 累加，不冲突。reducer 就是那个二元合并函数。</div>
                 <div class="baby"><span class="t">reducer 是什么（数学直觉）</span>
-                reducer 来自函数式编程的"归约"——把一串值用一个二元操作"折叠"成一个。<code>[1,2,3]</code> 用 <code>+</code> 归约 = <code>((0+1)+2)+3 = 6</code>。<strong>LangGraph 用它合并状态更新：旧状态 + 新更新 → 新状态。</strong>覆盖（LastValue）其实是"取最后一个"的特殊 reducer。<strong>把"如何合并状态"抽象成 reducer——灵活（你能自定义任意合并逻辑）、统一（所有字段都走这套机制）。</strong></div>
+                reducer 来自函数式编程的"归约"——把一串值用一个二元操作"折叠"成一个。<code>[1,2,3]</code> 用 <code>+</code> 归约 = <code>((0+1)+2)+3 = 6</code>。<strong>LangGraph 用它合并状态更新：旧状态 + 新更新 → 新状态。</strong>覆盖（LastValue）其实是"取最后一个"的特殊 reducer。<br><strong>这就像生活中的购物车：</strong><code>operator.add</code> 就是"往车里再放几件"（原有的都还在，新的加进去）；而覆盖则像"清空车、只留刚拿的这件"。多个人（并行节点）同时往同一辆车放东西也不冲突——这正是聚合型 reducer 的价值。<strong>把"如何合并状态"抽象成 reducer——灵活（你能自定义任意合并逻辑）、统一（所有字段都走这套机制）。</strong></div>
             </div>
         </section>
 
@@ -121,7 +148,32 @@ for m in right:
 # RemoveMessage(id=REMOVE_ALL_MESSAGES) 可清空所有</code></pre>
                 <div class="anno">读法：<b>新消息 ID 已存在 → 替换那条（改写）；新 ID → 追加到末尾。</b>还给缺 ID 的消息补 UUID、支持 <code>RemoveMessage</code> 删消息。</div>
                 <div class="baby"><span class="t">为什么聊天用 add_messages？</span>
-                聊天机器人每轮，节点只需 <code>return {"messages": [ai_回复]}</code>，<strong>add_messages 自动把新回复<strong>追加</strong>到历史里，而不是覆盖整段对话。</strong>如果用默认的 LastValue（覆盖），每轮就把历史丢了、只剩最新一条——聊天就"失忆"了。<strong>"同 ID 替换"则支持流式更新（同一条消息边生成边更新）。</strong>这个 reducer 是 LangGraph 聊天记忆的基础。</div>
+                聊天机器人每轮，节点只需 <code>return {"messages": [ai_回复]}</code>，<strong>add_messages 自动把新回复<strong>追加</strong>到历史里，而不是覆盖整段对话。</strong>如果用默认的 LastValue（覆盖），每轮就把历史丢了、只剩最新一条——聊天就"失忆"了。<strong>"同 ID 替换"则支持流式更新（同一条消息边生成边更新）。</strong>这个 reducer 是 LangGraph 聊天记忆的基础。<br><strong>这就像生活中的微信聊天记录：</strong>新消息永远接在下面（追加），你不会因为发了句"在吗"就把整段历史清空——聊天框用的正是"追加"。若换成覆盖，每发一句就"失忆"只剩最新一条。</div>
+                <div class="svgbox">
+                <svg viewBox="0 0 620 235" width="100%" font-family="sans-serif">
+                    <rect x="12" y="12" width="288" height="210" rx="10" fill="none" stroke="#6366f1" stroke-width="2"/>
+                    <text x="156" y="38" fill="#6366f1" font-size="13" font-weight="bold" text-anchor="middle">无 reducer = LastValue（覆盖）</text>
+                    <text x="30" y="72" fill="#bbb" font-size="11">旧 messages：</text>
+                    <rect x="150" y="58" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#14b8a6"/><text x="165" y="73" fill="#e5e5e5" font-size="11" text-anchor="middle">A</text>
+                    <text x="30" y="120" fill="#bbb" font-size="11">节点返回：</text>
+                    <rect x="150" y="106" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#8b5cf6"/><text x="165" y="121" fill="#e5e5e5" font-size="11" text-anchor="middle">B</text>
+                    <text x="30" y="176" fill="#bbb" font-size="11">合并后：</text>
+                    <rect x="150" y="162" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#8b5cf6"/><text x="165" y="177" fill="#e5e5e5" font-size="11" text-anchor="middle">B</text>
+                    <text x="196" y="177" fill="#f87171" font-size="11">← A 被覆盖丢失 ✗</text>
+                    <rect x="320" y="12" width="288" height="210" rx="10" fill="none" stroke="#14b8a6" stroke-width="2"/>
+                    <text x="464" y="38" fill="#14b8a6" font-size="13" font-weight="bold" text-anchor="middle">add_messages（追加）</text>
+                    <text x="338" y="72" fill="#bbb" font-size="11">旧 messages：</text>
+                    <rect x="458" y="58" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#14b8a6"/><text x="473" y="73" fill="#e5e5e5" font-size="11" text-anchor="middle">A</text>
+                    <text x="338" y="120" fill="#bbb" font-size="11">节点返回：</text>
+                    <rect x="458" y="106" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#8b5cf6"/><text x="473" y="121" fill="#e5e5e5" font-size="11" text-anchor="middle">B</text>
+                    <text x="338" y="176" fill="#bbb" font-size="11">合并后：</text>
+                    <rect x="458" y="162" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#14b8a6"/><text x="473" y="177" fill="#e5e5e5" font-size="11" text-anchor="middle">A</text>
+                    <rect x="492" y="162" width="30" height="20" rx="5" fill="#2a2a3a" stroke="#8b5cf6"/><text x="507" y="177" fill="#e5e5e5" font-size="11" text-anchor="middle">B</text>
+                    <text x="530" y="177" fill="#34d399" font-size="11">都在 ✓</text>
+                </svg>
+                <div class="cap">同样一次"返回 B"，覆盖 reducer 丢了 A，追加 reducer 两条都留 —— 差别全在字段配了哪个 reducer</div>
+                </div>
+                <div class="anno">⚠️ <b>小白常误以为</b> reducer 要自己在节点函数里手动调用（<code>merged = add_messages(old, new)</code>）。<b>其实</b>你只在 State 的类型注解里写一次 <code>Annotated[list, add_messages]</code>，框架就在每一步自动帮你合并——节点里永远只写 <code>return {"messages": [新消息]}</code>。</div>
             </div>
         </section>
 

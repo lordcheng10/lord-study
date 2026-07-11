@@ -120,6 +120,9 @@ expected_output: str    # 期望输出：做成什么样</code></pre>
                 </div>
                 <div class="baby"><span class="t">为什么 expected_output 是必填的？</span>
                 因为<strong>不说清"要什么样的结果"，AI 就会自由发挥、可能跑偏</strong>。<code>expected_output</code>="一份 5 条要点的清单"这种明确要求，等于给 AI 一个验收标准，它会朝这个方向产出。这是提示词工程的关键——<strong>明确的期望产出 = 更可控的结果</strong>。CrewAI 把它设为必填，逼你想清楚"我到底要什么"。</div>
+                <div class="essence"><span class="t">📋 生活类比：Task 就像给员工派一张工单</span>
+                <strong>定义 Task 就像车间主管开一张派工单：</strong><code>description</code> 是<strong>工作说明书</strong>（要做什么活）；<code>expected_output</code> 是<strong>验收标准</strong>（做成什么样才算交差）；<code>agent</code> 是<strong>指派给哪个师傅</strong>；<code>context</code>（L06）是<strong>随单附上的前置资料</strong>（上一道工序的半成品）。一张工单说清"干什么、交什么、谁干、带什么料"，员工才不会瞎干。</div>
+                <div class="anno">⚠️ <b>小白常误以为</b>：Task 自己会"执行"、里面藏着 AI。<b>其实</b> Task 只是一张"活儿的说明书"——它<strong>不干活</strong>，真正干活的是被指派的 Agent（<code>agent.execute_task</code>，L04 会看到）。就像工单纸自己不会造零件，得交到师傅手里。<strong>Task 管"定义"，Agent 管"执行"。</strong></div>
             </div>
         </section>
 
@@ -163,6 +166,16 @@ task = Task(
                 <code>result.pydantic.title</code> → <code>"CrewAI 多智能体框架速览"</code><br>
                 <code>result.pydantic.key_points</code> → <code>["组队协作", "角色扮演", "两种范式Crew/Flow"]</code><br>
                 → 下游代码直接 <code>for p in result.pydantic.key_points:</code> 遍历，<strong>不用正则从文本里抠</strong>。</div>
+                <div class="essence"><span class="t">🔧 简化版 → 真实版（不用 output_pydantic 会写成啥样）</span>
+                <strong>简化版（AI 只吐文本，你手动抠）</strong>：
+<pre style="margin:6px 0"><code class="language-python">text = task_result            # "标题：xxx\n要点：1. ... 2. ..."
+title = text.split("标题：")[1].split("\n")[0]      # 😰 脆弱
+points = re.findall(r"\d+\.\s*(.+)", text)          # 😰 换个格式就崩</code></pre>
+                <strong>真实版（交给框架约束）</strong>：
+<pre style="margin:6px 0"><code class="language-python">task = Task(..., output_pydantic=Report)
+report = result.pydantic       # 直接是 Report 对象
+report.title; report.key_points                     # ✅ 按字段稳取</code></pre>
+                <strong>多出来的 <code>output_pydantic=Report</code> 一行，替你省掉了所有脆弱的字符串解析。</strong>就像派工单时附一张"成品必须按这张模板填"的表格——师傅照着填，你收货时直接对表，不用猜他写在哪一行。</div>
                 <div class="baby"><span class="t">为什么结构化输出很重要？</span>
                 如果 AI 只吐文本，你想用其中的"要点列表"就得写脆弱的文本解析。让 AI 直接吐一个符合 <code>Report</code> 模型的结构化对象，<strong>下游程序能可靠地按字段取值</strong>——这是把 AI 接进真实软件系统的关键。<code>response_model</code>（<code>task.py:189</code>）则走 LLM 原生结构化输出（更可靠）。</div>
             </div>
@@ -199,6 +212,8 @@ output_format: OutputFormat # 标记当前是 RAW / JSON / PYDANTIC</code></pre>
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>上下文链：一个任务的输出喂给下一个（编排精髓）</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🚨 没有"上下文链"会出什么事故？</span>
+                假设三张工单 研究→分析→成文，但彼此<strong>不传上下文</strong>：写手接到"成文"工单时，手上一张纸都没有——它根本不知道研究员查到了什么、分析师得出了什么结论。<strong>结果它只能凭空编，或者干脆把研究、分析的活儿再自己重做一遍</strong>（重复、慢、还前后矛盾）。就像车间里下一道工序拿不到上一道的半成品，只能从原料重新造。<strong>上下文链就是那条"把上一张工单的产出，随单传给下一张"的传送带。</strong></div>
                 <p>这是 CrewAI 流水线的核心。串联在 Crew 层 <code>_get_context</code>（<code>crew.py:1827</code>），根据 <code>task.context</code> 的三种状态：</p>
                 <div class="chain">
                     <span class="n"><b>Task A</b>研究</span><span class="a">输出→context→</span>

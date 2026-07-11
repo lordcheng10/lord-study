@@ -20,6 +20,22 @@
         .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#14b8a6}
         .journey .step .num{font-size:10px;font-weight:800;color:#14b8a6;flex-shrink:0;margin-top:2px}
         .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
+        /* —— 改进版新增组件（进度条用 .journey.pbar，避免与本页已有 .journey 时间线冲突）—— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey.pbar{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#14b8a6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -54,6 +70,9 @@
             <p class="part-desc">把前四天串成故事线：一次 <code>graph.invoke()</code>，输入怎么流入状态、超步怎么推进、节点怎么跑、路由怎么走、循环怎么转、结果怎么出。</p>
         </div>
 
+        <div class="journey pbar"><div class="jt">📍 你在整门课的位置（第 1 周收官 → 下周进引擎）</div>
+        <div class="steps"><span class="st">全景</span><span class="sep">→</span><span class="st">StateGraph</span><span class="sep">→</span><span class="st">State+reducer</span><span class="sep">→</span><span class="st">条件边</span><span class="sep">→</span><span class="st on">invoke旅程</span><span class="sep">→</span><span class="st">Pregel引擎</span></div></div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>追踪一段代码</h1></div>
             <div class="card">
@@ -71,6 +90,11 @@ graph = builder.compile()
 
 graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行</code></pre>
                 <div class="anno">读法：<b>一个经典 ReAct 图：agent 节点 + tools 节点 + 条件边（判断要不要工具）+ 回头边（循环）。</b>下面逐超步追踪 invoke 的执行。</div>
+                <div class="essence"><span class="t">💡 本质：invoke 内部就是"开一个循环，反复推进超步，直到没人可跑"</span>
+                你调的 <code>graph.invoke()</code>，真身是 <code>Pregel.invoke</code>（<code>pregel/main.py:450</code>——还记得 Day 02 吗？编译产物继承 Pregel）。它内部开一个 <code>PregelLoop</code>（<code>pregel/_loop.py:158</code>），然后反复调 <code>loop.tick()</code>（<code>_loop.py:599</code>）——每调一次推进<strong>一个超步</strong>；直到再没有节点被触发（走到 <code>END</code>，<code>constants.py:28</code>）就停下、返回最终状态。<br><strong>这就像生活中的实习生干活：</strong>想一步（agent 调 LLM）→ 动手（tools 执行）→ 看结果 → 再想下一步……<code>tick()</code> 就是"你去把这一轮做完"的指令，反复喊，直到实习生说"完事了"。</div>
+                <div class="ask"><span class="t">🤔 对话：invoke 到底"跑了几次"图？</span>
+                <span>👶 <b>小白：</b>我只 <code>invoke</code> 了一次，为什么 agent 跑了两遍、tools 跑了一遍？</span><br>
+                <span>👨‍🏫 <b>老师：</b>一次 <code>invoke</code> = 一整段循环，里面有很多个"超步"。每个超步跑一批被触发的节点。你的一句"北京天气?"要经过 agent→tools→agent 三个超步才有答案，所以图被推进了 3 步——但对你只是一次调用。</span></div>
             </div>
         </section>
 
@@ -82,6 +106,36 @@ graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行<
                     <div class="step"><span class="num">2</span><div class="b"><b>START → agent</b>：START 边点亮 agent 的触发通道（Day 04），agent 成为超步 1 要跑的节点。</div></div>
                 </div>
                 <div class="anno">读法：<b>invoke 的输入被 START 通道分发进共享 State，然后 START→agent 的边让 agent 待执行。</b>此刻超步 0 结束，进入超步 1。</div>
+                <div class="svgbox">
+                <svg viewBox="0 0 730 120" width="100%" font-family="sans-serif">
+                    <defs><marker id="d5a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#8b5cf6"/></marker></defs>
+                    <rect x="8" y="38" width="82" height="46" rx="9" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
+                    <text x="49" y="66" fill="#e5e5e5" font-size="12" font-weight="bold" text-anchor="middle">invoke()</text>
+                    <line x1="90" y1="61" x2="118" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
+                    <rect x="122" y="38" width="128" height="46" rx="9" fill="#2a2a3a" stroke="#14b8a6" stroke-width="2"/>
+                    <text x="186" y="60" fill="#e5e5e5" font-size="11.5" text-anchor="middle">灌输入 → START</text>
+                    <text x="186" y="76" fill="#bbb" font-size="10" text-anchor="middle">分发进 State</text>
+                    <line x1="250" y1="61" x2="278" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
+                    <rect x="282" y="30" width="196" height="62" rx="9" fill="#2a2a3a" stroke="#14b8a6" stroke-width="2"/>
+                    <text x="380" y="52" fill="#e5e5e5" font-size="11.5" font-weight="bold" text-anchor="middle">loop.tick() 反复推进超步</text>
+                    <text x="380" y="69" fill="#bbb" font-size="10" text-anchor="middle">超步1 agent → 超步2 tools</text>
+                    <text x="380" y="83" fill="#bbb" font-size="10" text-anchor="middle">→ 超步3 agent（_loop.py:599）</text>
+                    <line x1="478" y1="61" x2="506" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
+                    <rect x="510" y="38" width="78" height="46" rx="9" fill="#2a2a3a" stroke="#8b5cf6" stroke-width="2"/>
+                    <text x="549" y="66" fill="#e5e5e5" font-size="12" font-weight="bold" text-anchor="middle">到 END</text>
+                    <line x1="588" y1="61" x2="616" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
+                    <rect x="620" y="38" width="102" height="46" rx="9" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
+                    <text x="671" y="66" fill="#e5e5e5" font-size="11.5" font-weight="bold" text-anchor="middle">返回 State</text>
+                </svg>
+                <div class="cap">一次 invoke 的时序：灌输入 → PregelLoop.tick 反复跑超步 → 到 END → 把最终 State 还给你</div>
+                </div>
+                <div class="example"><span class="t">🎬 第一人称：现在"你"就是那条输入</span>
+                想象<strong>你</strong>就是那条 <code>{"messages": [("user", "北京天气?")]}</code>，跟着走完这一生：<br>
+                ①「我从 <code>invoke</code> 的大门进来，被 START 通道<strong>登记进共享 State 的 messages 里</strong>。」<br>
+                ②「START→agent 的边亮了，我被送到 <strong>agent</strong> 工位；它读了我，问 LLM，LLM 说'先查天气'，往我身上<strong>贴了一条带 tool_calls 的 AI 消息</strong>。」<br>
+                ③「岔路口（条件边）看我最新那条有 tool_calls → 把我送去 <strong>tools</strong>；工具查到'25℃'，又给我贴一条结果消息。」<br>
+                ④「回头边把我送回 <strong>agent</strong>；这次 LLM 看到 25℃，直接给出答案（不再要工具）。岔路口一看'没 tool_calls'→ 送我去 <strong>END</strong>。」<br>
+                ⑤「大门打开，我（此刻已攒了 4 条消息的完整 State）被<strong>交还给最初调用的人</strong>。」</div>
             </div>
         </section>
 
@@ -130,7 +184,7 @@ graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行<
                     <div class="step"><span class="num">3</span><div class="b"><b>路由走 END</b>：条件边路由函数发现最新 AI 消息<strong>没有 tool_calls</strong> → 返回 END → 图停机。</div></div>
                 </div>
                 <div class="baby"><span class="t">循环怎么结束？</span>
-                每轮 agent 后都判断"还要调工具吗"。前面轮次要（有 tool_calls），就去 tools、再循环回来。<strong>直到某轮 LLM 觉得信息够了、直接给答案（不带 tool_calls），路由就走 END，循环结束。</strong>是 LLM 自己决定何时停——这就是 ReAct 的自主性。Day 04 的回头边让它能循环，条件边让它能停。</div>
+                每轮 agent 后都判断"还要调工具吗"。前面轮次要（有 tool_calls），就去 tools、再循环回来。<strong>直到某轮 LLM 觉得信息够了、直接给答案（不带 tool_calls），路由就走 END，循环结束。</strong>是 LLM 自己决定何时停——这就是 ReAct 的自主性。Day 04 的回头边让它能循环，条件边让它能停。<br><strong>还是那个实习生：</strong>他自己掂量"手头资料够不够写报告"——不够就再去查一轮（tools），够了就交稿（END）。停不停不是你规定死的轮数，是他"看情况"定的。<br>👉 <strong>一句话复述：</strong>一次 <code>invoke</code> = 反复跑超步的循环，每轮 agent 后由 LLM 自己决定"再来一轮还是收工"。</div>
             </div>
         </section>
 
@@ -138,7 +192,16 @@ graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行<
             <div class="section-header"><span class="section-number">L07</span><h1>⑥ 结果流出</h1></div>
             <div class="card">
                 <p>图停机后，<code>invoke</code> 返回<strong>最终的完整 State</strong>——<code>{"messages": [用户问题, AI(要工具), Tool(25℃), AI(最终答案)]}</code>。你取最后一条 AI 消息就是答案。</p>
-                <div class="glossary"><b>每步都存了检查点</b>（如果配了 checkpointer，Day 11）：超步 0/1/2/3 之间各存一次快照。所以这次运行能被恢复、时间旅行、或在中间中断等人工。<strong>整个旅程 = 输入灌入 State → 超步循环（Plan/Execution/Update）+ 路由 + 回头边 → LLM 决定结束 → 返回最终 State。</strong>这就是 LangGraph 执行一个 Agent 的全貌。</div>
+                <div class="example"><span class="t">🔍 单步走查表：State.messages 一步步长成什么样</span>
+                <table style="width:100%;border-collapse:collapse;font-size:12px;margin:6px 0">
+                    <tr style="text-align:left"><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">超步</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">跑哪个节点</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">此刻发生什么</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">State.messages（关键状态值）</th></tr>
+                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">0</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">START</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">灌入输入</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">[用户: 北京天气?]</td></tr>
+                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">1</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">agent</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">LLM 决定调工具</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>AI(要调 get_weather)</b></td></tr>
+                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">2</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">tools</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">执行工具</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>Tool(25℃)</b></td></tr>
+                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">3</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">agent</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">LLM 给最终答案 → END</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>AI(北京今天 25 度)</b></td></tr>
+                </table>
+                <span style="color:var(--text-muted);font-size:11.5px">每个超步只往 messages "追加"（add_messages reducer，Day 03），历史一条不丢——4 步下来攒成完整对话。</span></div>
+                <div class="glossary"><b>每步都存了检查点</b>（如果配了 checkpointer，Day 11）：超步 0/1/2/3 之间各存一次快照。所以这次运行能被恢复、时间旅行、或在中间中断等人工。<strong>整个旅程 = 输入灌入 State → 超步循环（Plan/Execution/Update）+ 路由 + 回头边 → LLM 决定结束 → 返回最终 State。</strong>这就是 LangGraph 执行一个 Agent 的全貌。<br><strong>检查点就像生活中的游戏存档：</strong>每过一关（超步）自动存一次档，中途关机也不怕——下次读档从上次那关接着打，甚至能"读一个更早的档"重走一遍（时间旅行）。没有存档的游戏，崩一次就得从头再来。</div>
             </div>
         </section>
 

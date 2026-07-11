@@ -20,6 +20,22 @@
         .pipe .r{background:rgba(6,182,212,.1);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}
         .pipe .buf{display:flex;gap:3px}.pipe .buf span{width:22px;height:22px;border-radius:5px;background:var(--bg-secondary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;font-size:10px}
         .pipe .a{color:var(--text-muted);font-weight:800}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00ADD8,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -54,10 +70,26 @@
             <p class="part-desc">Day 03 学了流的"用法"，今天潜入它的"实现"——Pipe 缓冲、背压、Copy 引用计数、多路合并、自动拼接。理解流式为什么能既快又安全。</p>
         </div>
 
+        <!-- 全程进度定位条 -->
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 4 周 进阶与生态（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D16 callbacks</span><span class="sep">→</span>
+                <span class="st on">D17 流式深水</span><span class="sep">→</span>
+                <span class="st">D18 类型/泛型</span><span class="sep">→</span>
+                <span class="st">D19 eino-ext</span><span class="sep">→</span>
+                <span class="st">D20 构建收官</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>回顾与今日目标</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个流只能读一次，可下游有好几个都要用它，怎么办？</span>
+                流式最反直觉的地方：<code>StreamReader</code> 像一次性水管，<code>Recv()</code> 取走一块就没了、只能被读一次。但真实场景里，同一个模型输出流常常要"喂给下一个节点 + 同时给 callbacks 埋点 + 同时推给前端"——三个下游都想读同一条流。另一头，一个"只要完整值"的节点却收到了碎成 20 段的流。这两个矛盾（<strong>一个流多处消费</strong> 和 <strong>碎片拼回完整</strong>）就是今天要解决的。</div>
                 <p>Day 03 记住的：StreamReader 像一次性水管，<code>Recv()</code> 取一块、取完 <code>io.EOF</code>、只能读一次、Copy 能分叉。今天回答"它内部怎么做到的"，代码在 <code>schema/stream.go</code>。</p>
+                <div class="essence"><span class="t">💡 本质：Copy 让一个流被多个下游消费，Concat 把碎片拼回完整——这是 4 范式自动转换的底层</span>
+                Day 06 的"4 种流式范式能自动互转"不是魔法，靠的正是今天这两块地基：<strong>Copy（<code>stream.go:261</code>）</strong>把一条流"一分多"给多个下游各读各的；<strong>Concat（<code>message.go:1644</code> 的 <code>ConcatMessages</code>、<code>agentic_message.go:901</code> 的 <code>ConcatAgenticMessages</code>）</strong>把流里的碎片"多合一"拼回完整值。有了它们，框架才能在"流"和"非流"之间随意转换，组件作者只实现一两种范式即可。</div>
                 <div class="baby"><span class="t">为什么值得深入？</span>
                 流式是 Eino 的一等公民（Day 01），几乎所有 Agent 交互都靠它。搞懂内部机制，你才能：写出不阻塞的流式代码、正确处理 Copy、排查"流读不到/读重了/卡死"的诡异 bug。<strong>这是从"会用"到"精通"的一课。</strong></div>
             </div>
@@ -99,6 +131,38 @@ for { chunk, err := sr.Recv(); if err==io.EOF {break}; 用(chunk) }  // 消费�
                 <div class="glossary"><b>惰性链表 + sync.Once</b>：Copy 出的 n 个 reader 共享同一条"块链表"，每个 reader 有自己的读取位置指针。某个块被<strong>所有</strong> reader 都读过了，才会被释放。用 <code>sync.Once</code> 保证每个块只从底层拉取一次（不会因为 n 个 reader 各拉一次而重复消费源）。<strong>所以 Copy 很轻——不复制数据，只维护"谁读到哪了"。</strong></div>
                 <div class="baby"><span class="t">直觉</span>
                 像 n 个人共看一部连载：小说只印一份（底层块链表），每人一个书签记自己看到第几章（读取位置）。所有人都看过的章节可以从桌上收走（释放）。没人重复印书，但每个人进度独立。<strong>这就是 Day 16 流式回调能"回调读副本、业务读原本"的底层原理。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 300" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <!-- 上半：Copy 一分多 -->
+                        <text x="20" y="24" fill="#00ADD8" font-weight="700">① Copy(n)：一条流「一分多」——多个下游各读各的</text>
+                        <rect x="30" y="40" width="120" height="34" rx="8" fill="#26323a" stroke="#00ADD8"/><text x="90" y="62" fill="#fff" text-anchor="middle">源 StreamReader</text>
+                        <path d="M150 57 L215 57" stroke="#00ADD8" stroke-width="1.5" marker-end="url(#c17)"/>
+                        <rect x="215" y="24" width="150" height="24" rx="6" fill="rgba(6,182,212,.1)" stroke="#00ADD8"/><text x="290" y="41" fill="#7fd4e6" text-anchor="middle" font-size="10.5">副本1 → 下一个节点</text>
+                        <rect x="215" y="52" width="150" height="24" rx="6" fill="rgba(6,182,212,.1)" stroke="#00ADD8"/><text x="290" y="69" fill="#7fd4e6" text-anchor="middle" font-size="10.5">副本2 → callbacks 埋点</text>
+                        <rect x="215" y="80" width="150" height="24" rx="6" fill="rgba(6,182,212,.1)" stroke="#00ADD8"/><text x="290" y="97" fill="#7fd4e6" text-anchor="middle" font-size="10.5">副本3 → 推前端</text>
+                        <path d="M150 57 L215 36" stroke="#00ADD8" stroke-width="1.2"/><path d="M150 57 L215 92" stroke="#00ADD8" stroke-width="1.2"/>
+                        <text x="400" y="66" fill="#8aa" font-size="10.5">共享底层块链表 + 各自读取位置，不复制数据</text>
+                        <!-- 分割线 -->
+                        <line x1="30" y1="130" x2="630" y2="130" stroke="var(--border-color)" stroke-dasharray="4 4"/>
+                        <!-- 下半：Concat 多合一 -->
+                        <text x="20" y="160" fill="#34d399" font-weight="700">② Concat：碎片「多合一」——拼回完整值喂给非流节点</text>
+                        <g>
+                            <rect x="30" y="178" width="40" height="30" rx="6" fill="var(--bg-card)" stroke="var(--border-color)"/><text x="50" y="198" fill="#ccc" text-anchor="middle" font-size="10">你好</text>
+                            <rect x="76" y="178" width="40" height="30" rx="6" fill="var(--bg-card)" stroke="var(--border-color)"/><text x="96" y="198" fill="#ccc" text-anchor="middle" font-size="10">，世</text>
+                            <rect x="122" y="178" width="40" height="30" rx="6" fill="var(--bg-card)" stroke="var(--border-color)"/><text x="142" y="198" fill="#ccc" text-anchor="middle" font-size="10">界！</text>
+                            <text x="180" y="198" fill="#8aa" font-size="10">…（20 段碎片）</text>
+                        </g>
+                        <path d="M280 193 L360 193" stroke="#34d399" stroke-width="2" marker-end="url(#g17)"/>
+                        <text x="320" y="185" fill="#6ee7b7" text-anchor="middle" font-size="10.5">ConcatMessages</text>
+                        <rect x="365" y="176" width="180" height="34" rx="8" fill="rgba(52,211,153,.12)" stroke="#34d399"/><text x="455" y="198" fill="#6ee7b7" text-anchor="middle">完整 Message「你好，世界！」</text>
+                        <text x="30" y="235" fill="#8aa" font-size="10.5">tool_call 参数被分块吐出时，也在这里拼成完整 JSON</text>
+                        <defs>
+                            <marker id="c17" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#00ADD8"/></marker>
+                            <marker id="g17" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#34d399"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">上：Copy 把一条流分给多个下游（不复制数据）；下：Concat 把碎片拼回一个完整值。</div>
+                </div>
             </div>
         </section>
 
@@ -121,6 +185,8 @@ func concatStreamReader[T](sr *StreamReader[T]) (T, error) {
     return concat(chunks)   // Message → ConcatMessages 拼成完整消息
 }</code></pre>
                 <div class="anno">读法：<b>把流里所有块收进 slice，再调对应类型的拼接函数合成一个完整值。</b>Message 的拼接会把内容片段接起来、合并 tool_calls 片段（Day 03 讲的模型分块吐 tool_call 参数，在这里拼完整）。类型→拼接函数的注册表在 <code>schema</code> 的 init（Day 03 提过）。</div>
+                <div class="example"><span class="t">📝 例子：模型分块吐 tool_call，靠 concat 拼回完整参数</span>
+                模型要调 <code>get_weather({"city":"北京","days":3})</code> 时，流式返回常把这段 JSON 拆成 <code>{"ci</code> → <code>ty":"北</code> → <code>京","da</code> → <code>ys":3}</code> 好几块。单看任何一块都不是合法 JSON，没法解析。框架在节点边界调 <code>ConcatMessages</code>（<code>schema/message.go:1644</code>）把这些块按 <code>tool_calls</code> 的 index 归并、字符串拼接，还原出完整参数再交给工具。AgenticMessage（Claude 那种带 content block 的消息）走的是 <code>ConcatAgenticMessages</code>（<code>schema/agentic_message.go:901</code>），内部再靠 <code>concatChunksOfSameContentBlock</code>（<code>agentic_message.go:1137</code>）把同一个内容块的碎片拼齐。<strong>所以你在业务里拿到的永远是完整参数，分块细节被 concat 藏起来了。</strong></div>
                 <div class="baby"><span class="t">这解释了 Day 06 的"一个非流节点冻结全链"</span>
                 因为 concat 必须<strong>等流全部到齐</strong>才能拼成完整值。所以链路里只要有一个"只要完整值"的节点，流到它这里就被"蓄水成池"，前面的流式优势断了。设计流水线时，尽量让流能一路贯通到最后（前端）。</div>
             </div>
