@@ -15,6 +15,23 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f59e0b,#ec4899);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -48,9 +65,23 @@
             <p class="part-desc">Day 04/08 说过路由可引用 service/consumer 复用配置。今天看这个"合并"具体怎么做：<code>merge_service_route</code> / <code>merge_consumer_route</code> 的规则、优先级、以及合并结果如何缓存以避免每请求重算。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整条链的位置（第 3 周 插件系统）</div>
+            <div class="steps">
+                <span class="st">run_plugin 执行 D12</span><span class="sep">→</span>
+                <span class="st on">配置合并（分层覆盖）</span><span class="sep">→</span>
+                <span class="st">鉴权/consumer D14</span><span class="sep">→</span>
+                <span class="st">典型插件 D15</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么要合并</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：100 条路由都要开同一套"限流 + 监控"</span>
+                难道每条路由都把这套插件配置抄一遍？改一次限流阈值就要改 100 处，漏改一处就出 bug。太痛苦了。</div>
+                <div class="essence"><span class="t">💡 本质：分层配置 + 运行时合并</span>
+                配置合并就像<strong>公司报销制度</strong>：公司有默认规则（service）、部门可以覆盖（route）、个人还有特批（consumer）。真报销时把这几层"叠加"算出"你这单按什么规则报"。APISIX 运行时同理——把 service / route / consumer 几层<strong>合并</strong>成"这个请求的最终配置"。100 条路由共享一个 service 的配置，改 service 一处，100 条全变。</div>
                 <div class="baby"><span class="t">"复用 + 定制"的矛盾靠合并解决</span>
                 <strong>你想复用（100 条路由共享一个 service 的配置），又想定制（某条路由单独加个插件、某个 consumer 有专属限流）。这就需要"分层配置 + 合并"：service 是基础层、route 覆盖它、consumer 再覆盖。</strong>运行时把这些层<strong>合并</strong>成一份"当前请求的最终配置"。<strong>合并的核心问题是：同一个插件在多层都配了，用谁的？——答案是"越具体的层优先"（下面细讲）。</strong></div>
             </div>
@@ -82,7 +113,23 @@ end</code></pre>
         <section id="l04" class="section">
             <div class="section-header"><span class="section-number">L04</span><h1>合并规则</h1></div>
             <div class="card">
-                <p>看 <code>merge_service_stream_route</code>（<code>plugin.lua:658-686</code>，规则清晰）体会合并思路：</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 190" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="10" y="16" fill="#888" font-size="10.5">下层只填补上层没有的；同名插件冲突时，越具体的层赢</text>
+                        <rect x="20" y="28" width="240" height="34" rx="7" fill="#2a3a4a" stroke="#60a5fa"/><text x="30" y="49" fill="#fff" font-size="10">Service（通用底座）：limit-count(100) · prometheus</text>
+                        <rect x="20" y="72" width="240" height="34" rx="7" fill="#3a2a4a" stroke="#a855f7"/><text x="30" y="93" fill="#fff" font-size="10">Route（本路由）：limit-count(20)</text>
+                        <rect x="20" y="116" width="240" height="34" rx="7" fill="#2a3a3a" stroke="#34d399"/><text x="30" y="137" fill="#fff" font-size="10">Consumer（alice 专属）：limit-count(5)</text>
+                        <path d="M270 45 L360 90" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a)"/>
+                        <path d="M270 89 L360 95" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a)"/>
+                        <path d="M270 133 L360 100" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#a)"/>
+                        <rect x="365" y="70" width="235" height="52" rx="8" fill="#1f2a1f" stroke="#34d399"/>
+                        <text x="375" y="90" fill="#eee" font-size="10">最终配置（alice 的请求）：</text>
+                        <text x="375" y="107" fill="#34d399" font-size="10">limit-count(5) ← consumer 赢 · prometheus ← service 补</text>
+                        <defs><marker id="a" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0 L5 3 L0 6 Z" fill="#f59e0b"/></marker></defs>
+                    </svg>
+                    <div class="cap">三层叠加：limit-count 三层都配了 → consumer(5) 最具体赢；prometheus 只有 service 配 → 补充进来。</div>
+                </div>
+                <p>看 <code>merge_service_stream_route</code>（<code>plugin.lua:659-686</code>，规则清晰）体会合并思路：</p>
 <pre><code class="language-lua">local new_conf = core.table.deepcopy(route_conf)   -- 以 route 为基础
 if service_conf.value.plugins then
     for name, conf in pairs(service_conf.value.plugins) do
@@ -96,6 +143,13 @@ if not new_conf.value.upstream and service_conf.value.upstream then
 end</code></pre>
                 <div class="baby"><span class="t">核心规则：route 优先，service 补充</span>
                 <strong>以 route 为基础，service 只"填补 route 没有的"——route 配了 limit-count 就用 route 的，route 没配 service 有就用 service 的。上游同理。</strong>这就是"具体覆盖通用":route（具体）优先于 service（通用）。<strong>注意是"插件级"覆盖（按插件名），不是"整个 plugins 字段"覆盖——两边的插件会合并到一起，冲突时 route 赢。</strong></div>
+                <div class="example"><span class="t">📝 举个例子</span>
+                service 配 <code>limit-count(count=100)</code> + <code>prometheus</code>；route 自己配 <code>limit-count(count=20)</code>。<br>
+                合并 → <code>limit-count</code> 用 <strong>route 的 20</strong>（同名冲突 route 赢）、<code>prometheus</code> 用 <strong>service 的</strong>（route 没配、补进来）。最终这条路由跑 <code>limit-count(20) + prometheus</code>。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：consumer 优先级最高，那我在 route 上配的限流不就白配了？</p>
+                    <p class="a">👨‍🏫 老师：不会。是<strong>按插件名</strong>覆盖——只有 consumer 也配了<em>同一个</em>插件（比如两边都配 limit-count），才用 consumer 的；route 上那些 consumer 没配的插件照样生效。合并是"叠加 + 同名冲突时具体层赢"，不是"整包替换"。</p>
+                </div>
             </div>
         </section>
 
@@ -127,6 +181,7 @@ end</code></pre>
                 <p>Day 04 里合并 service 后设 <code>api_ctx.conf_version = route.modifiedIndex .. "&" .. service.modifiedIndex</code>。<code>plugin.conf_version(conf)</code>（<code>plugin.lua:876</code>）用它做各种缓存的键。</p>
                 <div class="baby"><span class="t">版本号是缓存一致性的钥匙</span>
                 <strong>合并结果、编译的插件配置、picker 等都以 conf_version 为缓存键。只要 route 或 service 在 etcd 里改了，modifiedIndex 变、conf_version 变、所有相关缓存自动失效重建。</strong>这保证了"改配置立即生效"——热更新（Day 07）+ 版本化缓存的组合拳。<strong>不用手动清缓存，版本号一变全自动。</strong>这是 APISIX 又快又动态的深层机制。</div>
+                <div class="anno">⚠️ 常见误解：<b>小白常以为"合并结果被缓存了，那我改 consumer 配置岂不是要等缓存过期才生效"。其实缓存键里带了 <code>modifiedIndex</code>——你一改配置，etcd 的 modifiedIndex 就变，缓存键跟着变，等于自动换了一把新钥匙，旧缓存直接作废、立刻重新合并。缓存快 + 版本号保证不脏，两全。</b></div>
             </div>
         </section>
 
