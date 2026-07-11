@@ -15,6 +15,27 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -49,9 +70,24 @@
             <p class="part-desc">每个线程"阻塞在事件循环"里到底在干什么？今天拆开 <code>Dispatcher</code>——基于 libevent 的事件驱动引擎，非阻塞 IO 的核心。这是"单线程扛海量连接"的秘密。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 第 1 周（架构与线程）· 你在这里（拆开昨天说的"阻塞在事件循环"）</div>
+            <div class="steps">
+                <span class="st">D1 全景</span><span class="sep">→</span>
+                <span class="st">D2 启动路径</span><span class="sep">→</span>
+                <span class="st">D3 线程模型</span><span class="sep">→</span>
+                <span class="st on">D4 事件循环</span><span class="sep">→</span>
+                <span class="st">D5 请求入口</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>事件驱动</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个 worker 要盯着 1 万条连接，怎么盯得过来？</span>
+                Day 03 说每个 worker 线程管一批连接。可一条连接不是随时有数据——它可能空闲几秒才来一个包。<strong>如果 worker "站在每条连接前傻等它来数据"，1 万条连接就得 1 万个线程轮流等，切换开销爆炸。</strong>怎么让一个线程高效地"同时盯住"上万条大部分时间在发呆的连接？</div>
+                <div class="essence"><span class="t">💡 本质：不主动傻等，而是"谁就绪了叫我"（今天的类比世界观：餐厅服务员）</span>
+                答案是<strong>事件驱动</strong>：worker 不逐个连接去问"你有数据没"，而是把所有连接的"就绪通知"交给操作系统，自己只处理"已经就绪"的那几条。就像一个<strong>服务员看几十桌</strong>：不站在一桌前等他们慢慢点，而是<strong>哪桌举手（就绪）就去哪桌</strong>。这个"不停看哪桌举手、去处理、再看"的循环，就是今天的主角 <strong>Dispatcher 事件循环</strong>。</div>
                 <div class="baby"><span class="t">阻塞 vs 事件驱动</span>
                 传统写法：一个线程处理一个连接，读数据时"阻塞"等着（<code>read()</code> 卡住直到有数据）。<strong>1 万个连接就要 1 万个线程——内存爆炸、切换开销巨大。</strong>事件驱动完全不同：<strong>一个线程管上万个连接，用"非阻塞 IO + 事件循环"——不傻等，而是问操作系统"哪些连接有数据可读了？"，只处理就绪的那些。</strong>好比餐厅一个服务员看着几十桌：不站在一桌前等他们点完，而是哪桌举手（就绪）就去哪桌。<strong>这就是 Envoy 单个 worker 能扛海量连接的原因——事件循环（Dispatcher）就是那个"看着所有桌子的服务员"。</strong></div>
             </div>
@@ -84,6 +120,10 @@ enum class RunType { Block, NonBlock, RunUntilExit };  // :264</code></pre>
 // :64 loopExit = event_base_loopexit</code></pre>
                 <div class="baby"><span class="t">libevent 是什么？</span>
                 <strong>libevent 是一个成熟的 C 事件通知库</strong>——它封装了操作系统的 epoll（Linux）/kqueue（Mac）等高效 IO 多路复用机制，提供跨平台的"告诉我哪些 fd 就绪了"能力。<strong>Envoy 不重造轮子，而是站在 libevent 上：Dispatcher 是对 libevent 的面向对象封装。</strong><code>event_base_loop</code> 就是那个"不停问 OS 谁就绪、处理就绪事件"的循环。你只需理解 Dispatcher 这层抽象，libevent 是它的引擎。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：既然有现成的 libevent，Envoy 为什么还要包一层 Dispatcher，直接用 libevent 不好吗？</p>
+                    <p class="a">👨‍🏫 老师：三个好处。① <strong>换引擎不动上层</strong>：哪天想从 libevent 换成别的（Envoy 确实在演进），只改 Dispatcher 内部，上万行业务代码不用动。② <strong>加 Envoy 专属能力</strong>：<code>post</code> 跨线程投递、<code>deferredDelete</code> 延迟删除、线程安全断言，这些 libevent 没有，是 Dispatcher 补的。③ <strong>类型安全的 C++ 接口</strong>：libevent 是裸 C API，容易用错；Dispatcher 用 C++ 对象包好、更难写出 bug。这就是"面向接口而非面向具体库"的价值——你只认 Dispatcher，引擎随便换。</p>
+                </div>
             </div>
         </section>
 
@@ -99,6 +139,32 @@ enum class RunType { Block, NonBlock, RunUntilExit };  // :264</code></pre>
 6. 执行 work list（post 的任务、延迟删除、activate）
 7. 未退出则回到 1</code></pre>
                 <div class="anno">读法：<b>这就是事件循环的"一次心跳"：等 IO 就绪（第 3 步是唯一"阻塞"点）→ 处理就绪的 IO → 处理到期定时器 → 执行投递的任务 → 循环。<code>post</code>/<code>deferredDelete</code> 都是第 6 步的 work list 项。</b>这段注释是理解事件循环的黄金教材。<code>poll_delay_us</code>/<code>loop_duration_us</code> 直方图统计每轮耗时（可观测）。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 520 300" width="100%" style="max-width:520px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="260" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">事件循环的一次"心跳"（转一圈再回到起点）</text>
+                        <g text-anchor="middle">
+                          <rect x="180" y="40" width="160" height="34" rx="8" fill="#3a2a3f" stroke="#e91e63"/><text x="260" y="61" fill="#fff">① 算超时（下个定时器多久到）</text>
+                          <rect x="330" y="95" width="170" height="34" rx="8" fill="#26323a" stroke="#22c55e"/><text x="415" y="116" fill="#fff">③ poll 等就绪 ★唯一阻塞点</text>
+                          <rect x="330" y="185" width="160" height="34" rx="8" fill="#2a2a4a" stroke="#7c4dff"/><text x="410" y="206" fill="#fff">⑤ 处理到期定时器</text>
+                          <rect x="180" y="245" width="160" height="34" rx="8" fill="#2a2a4a" stroke="#7c4dff"/><text x="260" y="266" fill="#fff">⑥ 跑 work list（post/删除）</text>
+                          <rect x="20" y="185" width="150" height="34" rx="8" fill="#26323a" stroke="#22c55e"/><text x="95" y="206" fill="#fff">④ check 回调</text>
+                          <rect x="20" y="95" width="150" height="34" rx="8" fill="#3a2a3f" stroke="#e91e63"/><text x="95" y="116" fill="#fff">② prepare 回调</text>
+                        </g>
+                        <g stroke="#94a3b8" stroke-width="1.5" fill="none">
+                          <path d="M180 57 Q90 70 95 93" marker-end="url(#a4)"/>
+                          <path d="M170 112 Q260 100 330 108" marker-end="url(#a4)"/>
+                          <path d="M415 129 Q450 160 410 184" marker-end="url(#a4)"/>
+                          <path d="M330 205 Q260 215 175 205" marker-end="url(#a4)"/>
+                          <path d="M95 219 Q120 260 178 262" marker-end="url(#a4)"/>
+                          <path d="M340 262 Q430 250 415 131" marker-end="url(#a4)" stroke="#f59e0b" stroke-dasharray="4 3"/>
+                        </g>
+                        <text x="260" y="162" fill="#94a3b8" text-anchor="middle">⟳ 循环</text>
+                        <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：一圈里只有第③步"poll"会真的阻塞（等 OS 说谁就绪），其余步骤都是快速处理。处理完回到①，无限转。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：1 万条连接里只有 3 条来了数据</span>
+                worker 盯着 1 万条连接。这一轮 poll 阻塞等待 → OS 返回"fd 87、fd 512、fd 9001 可读了" → 事件循环只对<strong>这 3 条</strong>调回调处理数据，其余 9997 条完全不占 CPU → 处理完回到 poll 继续等。<strong>所以"盯 1 万条"实际只花在"真有事的那几条"上。</strong></div>
             </div>
         </section>
 

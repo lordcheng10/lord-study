@@ -15,6 +15,27 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#ff7043,#e91e63);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -49,9 +70,24 @@
             <p class="part-desc">第 2 周深入"请求怎么被处理"。先看最底层的 L4（TCP 字节流）过滤器：<code>FilterStatus</code>、ReadFilter/WriteFilter 接口、FilterManager 的读写链表，以及迭代/暂停/恢复机制。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 第 2 周（过滤器与请求）· 你在这里（从最底层的 L4 字节流开始）</div>
+            <div class="steps">
+                <span class="st on">D6 L4 过滤器</span><span class="sep">→</span>
+                <span class="st">D7 HCM</span><span class="sep">→</span>
+                <span class="st">D8 L7 过滤器</span><span class="sep">→</span>
+                <span class="st">D9 Router</span><span class="sep">→</span>
+                <span class="st">D10 Codec</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>过滤器链思想</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：网关要做限速、加密、日志、转发……全塞一个大函数里吗？</span>
+                如果把所有处理写进一个几千行的 <code>handleConnection()</code>，想加一个"限流"就得改这个巨函数，改错一处全崩。而且不同场景要的功能组合还不一样（有的要限流不要日志）。<strong>怎么让功能像积木一样自由增删、互不影响？</strong></div>
+                <div class="essence"><span class="t">💡 本质：把处理拆成一节节"工位"，串成流水线（今天的类比世界观：机场安检）</span>
+                答案是<strong>过滤器链</strong>：数据像行李一样，依次经过一个个独立工位（过滤器），每个工位只干一件事，处理完决定"放行给下一关（Continue）"还是"扣下先别过（StopIteration）"。就像<strong>机场安检流水线</strong>：一道验登机牌、一道过 X 光、一道人工复查，任何一关都能把你拦下。想加一道安检，插一个工位即可，别的关卡不用动——这就是"可插拔"。</div>
                 <div class="baby"><span class="t">过滤器链 = "流水线"</span>
                 Envoy 处理请求像工厂流水线：数据依次经过一个个"工位"（过滤器），每个工位做一件事（限速、加密、日志、转发…）。<strong>每个过滤器处理完，决定"传给下一个工位"（Continue）还是"先停一下"（StopIteration）。</strong>好处：功能<strong>可组合、可插拔</strong>——想加个限流，插一个限流过滤器进链子即可，不用改别的。<strong>L4 过滤器处理原始 TCP 字节流，L7 过滤器处理解析后的 HTTP（Day 08）。今天讲 L4。</strong></div>
             </div>
@@ -66,6 +102,10 @@ enum class FilterStatus {
   StopIteration    // 停止迭代（等异步操作完成后再 continue）
 };</code></pre>
                 <div class="anno">读法：<b>L4 层的迭代控制极简——只有两个值。每个过滤器处理完返回其一：Continue = "我处理好了，交给下一个"；StopIteration = "我还没处理完（比如在等一个异步鉴权），先别往下走，我完事了会主动喊继续"。</b>L7 的状态码丰富得多（Day 08）。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：返回 <code>StopIteration</code> 之后，被停住的后续过滤器不就永远饿死了吗？</p>
+                    <p class="a">👨‍🏫 老师：不会。<code>StopIteration</code> 是"先暂停"不是"永久取消"。返回它的那个过滤器，一定是在等某件异步的事（比如问外部鉴权服务）。事情办完，它会主动调 <code>continueReading()</code>（L07 会讲），链子就从暂停点接着往下跑。就像安检员对你说"你这箱子要开箱复查，先靠边等一下"——查完了照样放你走，不是把你扔那不管了。真正"拦死"的场景是过滤器直接关连接或返回错误，那是另一回事。</p>
+                </div>
             </div>
         </section>
 
@@ -102,6 +142,27 @@ addReadFilter()   // :315 FIFO 顺序（先加先调）
 addWriteFilter()  // :303 LIFO 顺序（后加先调）</code></pre>
                 <div class="baby"><span class="t">为什么读是 FIFO、写是 LIFO？</span>
                 想象过滤器 A、B 按顺序配置（A 在前）。<strong>读方向（进来）：A→B（先配的先处理进入的数据，FIFO）。写方向（出去）：B→A（后配的先处理出去的数据，LIFO）。</strong>为什么？因为要对称——数据"进来时 A 先看、出去时 A 后看"，就像剥洋葱：进去一层层往里剥（A、B），出来一层层往外包（B、A）。<strong>比如 A 是加密过滤器：进来时 A 先解密（最外层），出去时 A 最后加密（最外层）。FIFO/LIFO 保证了这种对称的"洋葱模型"。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">洋葱模型：进来 A→B（FIFO），出去 B→A（LIFO）</text>
+                        <rect x="90" y="40" width="460" height="120" rx="10" fill="none" stroke="#ff7043"/>
+                        <text x="110" y="58" fill="#ff7043" font-weight="700">过滤器 A（外层，如加解密）</text>
+                        <rect x="180" y="70" width="280" height="70" rx="10" fill="none" stroke="#e91e63"/>
+                        <text x="200" y="88" fill="#e91e63" font-weight="700">过滤器 B（内层）</text>
+                        <rect x="280" y="100" width="80" height="30" rx="6" fill="#2a2a4a" stroke="#7c4dff"/><text x="320" y="120" fill="#fff" text-anchor="middle">连接核心</text>
+                        <path d="M20 90 L88 90" stroke="#22c55e" stroke-width="2" marker-end="url(#a6)"/><text x="54" y="82" fill="#22c55e" text-anchor="middle" font-size="10">读入</text>
+                        <text x="30" y="112" fill="#94a3b8" font-size="10">A解 → B处理</text>
+                        <path d="M88 150 L20 150" stroke="#f59e0b" stroke-width="2" marker-end="url(#a6b)"/><text x="54" y="172" fill="#f59e0b" text-anchor="middle" font-size="10">写出</text>
+                        <text x="470" y="112" fill="#94a3b8" font-size="10">出去 B先→A后</text>
+                        <defs>
+                          <marker id="a6" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                          <marker id="a6b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：A 是最外层。进来 A 先剥（解密），出去 A 最后包（加密）——像剥/包洋葱，方向对称，所以读 FIFO、写 LIFO。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：A=加解密、B=统计字节数</span>
+                配置顺序 A、B。<strong>请求进来</strong>（读 FIFO）：A 先把密文解成明文 → B 数明文有多少字节。<strong>响应出去</strong>（写 LIFO）：B 先数一遍出去的明文字节 → A 最后把明文加密成密文发走。<br>如果写方向也用 FIFO（A 先），A 会先加密，B 再去数——B 数到的是密文乱码，统计就错了。<strong>正是 LIFO 保证了 B 永远处理明文、A 永远在最外层管密文。</strong></div>
             </div>
         </section>
 

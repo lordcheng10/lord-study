@@ -15,6 +15,27 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -49,11 +70,45 @@
             <p class="part-desc">Envoy 为什么这么快？核心答案就是今天的线程模型：<strong>1 个主线程 + N 个 worker 线程 + 线程本地存储（TLS）</strong>，让请求处理的热路径<strong>完全无锁</strong>。这是 Envoy 最值得学的设计。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 第 1 周（架构与线程）· 你在这里（今天是招牌设计，最值得学）</div>
+            <div class="steps">
+                <span class="st">D1 全景</span><span class="sep">→</span>
+                <span class="st">D2 启动路径</span><span class="sep">→</span>
+                <span class="st on">D3 线程模型</span><span class="sep">→</span>
+                <span class="st">D4 事件循环</span><span class="sep">→</span>
+                <span class="st">D5 请求入口</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>1 主 + N worker</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：多线程一起改同一份数据，会出什么事故？</span>
+                最朴素的多线程做法：所有线程共享一份"集群列表/路由表"。一个线程正在读它转发请求，另一个线程同时在改它（配置更新）——读到一半数据被换掉，轻则转发到错误后端，重则程序崩溃。<strong>传统解法是"加锁"：改之前把数据锁住，谁也别动。但锁一多，几十个线程互相等锁，快不起来。</strong>Envoy 每秒要处理百万请求，加锁这条路走不通。</div>
+                <div class="essence"><span class="t">💡 本质：与其"抢一份共享数据+加锁"，不如"每人发一份副本"（今天的类比世界观：厨房）</span>
+                Envoy 的招牌解法：<strong>把厨房分成"主厨"和"多个厨师"</strong>。<strong>主厨（主线程）</strong>只负责定菜单、备料（管配置），不炒菜；<strong>厨师（worker 线程，N 个）</strong>各自炒菜（处理请求），<strong>每人手里一份自己的菜谱副本</strong>。厨师看菜谱时（读配置）根本不用问别人、不用抢——因为是自己那份。这就把"加锁抢共享数据"变成了"各看各的副本"，热路径彻底无锁。今天全程用这个"主厨+厨师+菜谱副本"的比喻。</div>
                 <div class="baby"><span class="t">分工：主线程"管理"，worker"干活"</span>
                 <strong>主线程（main thread）</strong>：负责"管理"——加载/更新配置、维护集群列表、协调。它<strong>不处理业务请求</strong>。<strong>worker 线程（N 个）</strong>：负责"干活"——每个 worker 独立处理一批网络连接的请求。<strong>关键：配置的"读写分离"——只有主线程能改配置，worker 只读配置的本地副本。</strong>好比一个厨房：主厨（主线程）定菜单、备料（配置），多个厨师（worker）各自炒菜（处理请求），各用各的一份菜谱副本，谁也不用等谁、不用抢。这就是无锁的前提。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 700 260" width="100%" style="max-width:700px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="350" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">1 主厨 + N 厨师，每人一份菜谱副本（TLS）</text>
+                        <rect x="250" y="34" width="200" height="46" rx="8" fill="#3a2a3f" stroke="#e91e63"/>
+                        <text x="350" y="53" fill="#fff" text-anchor="middle" font-weight="700">主线程（主厨）</text>
+                        <text x="350" y="70" fill="#94a3b8" text-anchor="middle">改配置 = 定菜单/备料，不炒菜</text>
+                        <g font-size="10.5">
+                          <rect x="40" y="150" width="170" height="70" rx="8" fill="#26323a" stroke="#22c55e"/><text x="125" y="170" fill="#fff" text-anchor="middle" font-weight="700">worker 0（厨师）</text><text x="125" y="187" fill="#94a3b8" text-anchor="middle">独立事件循环</text><text x="125" y="203" fill="#60a5fa" text-anchor="middle">📕 本线程菜谱副本</text>
+                          <rect x="265" y="150" width="170" height="70" rx="8" fill="#26323a" stroke="#22c55e"/><text x="350" y="170" fill="#fff" text-anchor="middle" font-weight="700">worker 1（厨师）</text><text x="350" y="187" fill="#94a3b8" text-anchor="middle">独立事件循环</text><text x="350" y="203" fill="#60a5fa" text-anchor="middle">📕 本线程菜谱副本</text>
+                          <rect x="490" y="150" width="170" height="70" rx="8" fill="#26323a" stroke="#22c55e"/><text x="575" y="170" fill="#fff" text-anchor="middle" font-weight="700">worker N（厨师）</text><text x="575" y="187" fill="#94a3b8" text-anchor="middle">独立事件循环</text><text x="575" y="203" fill="#60a5fa" text-anchor="middle">📕 本线程菜谱副本</text>
+                        </g>
+                        <g stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3">
+                          <path d="M320 80 L140 148" marker-end="url(#a3)"/><path d="M350 80 L350 148" marker-end="url(#a3)"/><path d="M380 80 L560 148" marker-end="url(#a3)"/>
+                        </g>
+                        <text x="350" y="120" fill="#f59e0b" text-anchor="middle">配置更新时：主厨用 post 给每人"发一份新菜谱"（不是去抢改共享数据）</text>
+                        <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：读配置=看自己那份菜谱（零锁）；改配置=主厨给每个厨师发新菜谱（post 投递，见 L06）。</div>
+                </div>
             </div>
         </section>
 
@@ -127,6 +182,21 @@ thread_local InstanceImpl::ThreadLocalData InstanceImpl::thread_local_data_;
 //   用 shared_ptr 自定义 deleter，在最后一个线程完成后回主线程触发回调</code></pre>
                 <div class="baby"><span class="t">配置更新怎么"无锁"地传到每个 worker？</span>
                 主线程算好新配置后，要更新到每个 worker 的副本。<strong>它<strong>不</strong>直接去改 worker 的数据（那要加锁），而是给每个 worker 的事件循环<strong>投递一个任务</strong>（<code>dispatcher.post</code>）："等你有空时，把你自己的副本换成这份新的。"</strong>worker 在自己的线程里执行这个替换——因为是在它自己线程里改自己的数据，<strong>没有竞争、无需锁</strong>。这就是"用消息投递代替共享内存加锁"的并发哲学（Actor 模型的思想）。<code>still_alive_guard_</code> + weak_ptr 确保 slot 已销毁时回调不会 use-after-free。</div>
+                <div class="example"><span class="t">📝 举个例子：给某集群加一台后端，配置怎么传到 3 个 worker</span>
+                运维把 <code>order-cluster</code> 从 2 台改成 3 台 → 主线程算出"新集群对象（含 3 台）" → 对 worker 0/1/2 各调一次 <code>dispatcher.post(替换成新对象)</code> → 三个 worker 在<strong>各自的事件循环</strong>里、有空时把本线程那份 <code>shared_ptr</code> 指向新对象。全程没有一把锁，正在处理请求的 worker 也不会被打断。</div>
+                <table class="ttable">
+                    <thead><tr><th>时刻</th><th>主线程（主厨）</th><th>worker 1（厨师）在干什么</th></tr></thead>
+                    <tbody>
+                        <tr><td>t0</td><td>算好新菜谱（3 台后端的集群对象）</td><td>正用旧菜谱（2 台）转发请求</td></tr>
+                        <tr><td>t1</td><td><code>post</code> 一个"换菜谱"任务到 worker1 队列</td><td>还在用旧菜谱（任务只是排进队列）</td></tr>
+                        <tr><td>t2</td><td>去通知别的 worker</td><td>手头请求处理完，事件循环第 6 步执行任务：本线程 <code>shared_ptr</code> 换成新对象</td></tr>
+                        <tr><td>t3</td><td>—</td><td>之后的请求读到新菜谱（3 台），全程零锁、无中断</td></tr>
+                    </tbody>
+                </table>
+                <div class="qa">
+                    <p class="q">👶 小白：主厨发新菜谱的瞬间，厨师正拿着旧菜谱炒菜，不会读到"改了一半"的乱菜谱吗？</p>
+                    <p class="a">👨‍🏫 老师：不会。关键在"换的是一个<strong>整体的新对象</strong>，而不是就地一个字段一个字段地改旧对象"。厨师要么还拿着完整的旧菜谱、要么已经拿着完整的新菜谱，绝不会拿到"改一半"的。而且"换指针"这个动作发生在厨师<strong>自己的线程</strong>里（不是主厨伸手进来改），所以天然没有竞争，也就不需要锁。这就是"不可变对象 + 消息投递"胜过"共享可变 + 加锁"的地方。</p>
+                </div>
             </div>
         </section>
 
