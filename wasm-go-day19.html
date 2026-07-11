@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00add8,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -45,14 +60,45 @@
         <div class="part-header">
             <span class="part-label">Day 19 / 共 20 天 · 第 4 周 高级特性与实战</span>
             <h1 class="part-title">性能、稳定性与测试</h1>
-            <p class="part-desc">插件跑在网关关键路径上，性能和稳定性至关重要。今天看 wasm-go 应对 Wasm 特有问题的三个机制（rebuild 重建、IO 限流、streaming inject），以及怎么给插件写单元测试。</p>
+            <p class="part-desc">前面几天你已经能写出功能完整的插件；今天补上"上生产"的最后一环——性能与稳定性。插件跑在网关关键路径上，一点抖动都会放大。今天看 wasm-go 应对 Wasm 特有问题的三个机制（rebuild 重建、IO 限流、streaming inject），以及怎么给插件写单元测试。明天（Day 20）就编译部署收官。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置（wasm-go 20 天 · 第 4 周 高级特性与实战）</div>
+            <div class="steps">
+                <span class="st">Token 解析 D18</span><span class="sep">→</span>
+                <span class="st on">性能/稳定/测试 D19</span><span class="sep">→</span>
+                <span class="st">构建部署 D20</span><span class="sep">→</span>
+                <span class="st">🎓 毕业</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>Wasm 的内存难题</h1></div>
             <div class="card">
+                <div class="essence"><span class="t">💡 本质：rebuild = 长跑接力"换人"，把内存清零</span>
+                <strong>Wasm 里 Go 的内存"只进不太出"——就像一条越用越占地方的长跑选手，跑久了会越来越"胖"（内存膨胀）。你没法让他中途减肥，但可以<strong>换一个体力满格的新人接棒</strong>（重建一个干净 VM），旧的退场、内存归零。</strong>rebuild 就是"跑够一定路程 或 体重超标就换人"的自动接力机制，用一次性小抖动换长期稳定。</div>
                 <div class="baby"><span class="t">Wasm 里 Go 的 GC 有点尴尬</span>
                 <strong>Go 有垃圾回收（GC），但在 Wasm 环境里，Go runtime 的内存管理受限——内存只增不太还给宿主，长期运行可能累积、导致 VM 内存越来越大。</strong>而且 Wasm VM 的内存一旦分配很难收缩。<strong>长跑的插件可能慢慢"内存膨胀",影响网关。</strong>解法：<strong>定期"重建"（rebuild）这个 VM——销毁旧的、建个干净的新的，内存归零。</strong>就像"跑久了重启一下"。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 190" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="10" y="16" fill="#f59e0b" font-size="12" font-weight="700">VM 内存随请求增长 → 触发 rebuild 归零（锯齿形）</text>
+                        <line x1="40" y1="150" x2="640" y2="150" stroke="#555" stroke-width="1.5"/>
+                        <line x1="40" y1="40" x2="40" y2="150" stroke="#555" stroke-width="1.5"/>
+                        <text x="30" y="44" fill="#888" text-anchor="end" font-size="9">内存</text>
+                        <text x="635" y="165" fill="#888" text-anchor="end" font-size="9">请求数 →</text>
+                        <line x1="40" y1="60" x2="640" y2="60" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 3"/>
+                        <text x="600" y="56" fill="#ef4444" font-size="9">100MB 阈值</text>
+                        <!-- sawtooth -->
+                        <path d="M40 150 L200 62 L200 150 L360 62 L360 150 L520 62 L520 150 L600 105" fill="none" stroke="#22c55e" stroke-width="2"/>
+                        <circle cx="200" cy="62" r="4" fill="#7c4dff"/><circle cx="360" cy="62" r="4" fill="#7c4dff"/><circle cx="520" cy="62" r="4" fill="#7c4dff"/>
+                        <text x="200" y="52" fill="#cbf" text-anchor="middle" font-size="8.5">rebuild</text>
+                        <text x="360" y="52" fill="#cbf" text-anchor="middle" font-size="8.5">rebuild</text>
+                        <text x="520" y="52" fill="#cbf" text-anchor="middle" font-size="8.5">rebuild</text>
+                        <text x="120" y="140" fill="#9df" text-anchor="middle" font-size="8.5">满 1000 请求</text>
+                    </svg>
+                    <div class="cap">图注：不重建时内存会一路涨破阈值；开了 rebuild，每满 1000 请求或到 100MB 就换新 VM，内存被压成安全的锯齿形。</div>
+                </div>
             </div>
         </section>
 
@@ -72,6 +118,11 @@
                     <li><strong>按请求数</strong>（<code>WithRebuildAfterRequests</code>）：处理满 N 个请求就重建——适合"内存随请求数线性增长"的场景。</li>
                     <li><strong>按内存</strong>（<code>WithRebuildMaxMemBytes</code>）：VM 内存达到阈值就重建——更精准，直接盯内存。</li>
                 </ul>
+                <div class="example"><span class="t">📝 举个例子：谁先到谁触发</span>
+                设 <code>WithRebuildAfterRequests(1000)</code> + <code>WithRebuildMaxMemBytes(100MB)</code>。<br>
+                场景 A（内存涨得慢）：处理到第 1000 个请求时内存才 40MB → <strong>按请求数</strong>先触发重建。<br>
+                场景 B（有个大 body 请求）：才处理 300 个请求，内存已冲到 100MB → <strong>按内存</strong>先触发重建。<br>
+                两条防线像"每 1 万公里 或 每半年保养"，哪个先到走哪个。</div>
                 <div class="baby"><span class="t">两条防线可以同时用</span>
                 <strong>请求数是"粗略估计"（假设每请求耗一点内存），内存阈值是"精准兜底"。两个都设，谁先到谁触发。</strong>好比汽车保养"每 1 万公里 或 每半年"，哪个先到都提醒。<strong>取值要权衡：太频繁重建（比如每 100 请求）会有重建开销和瞬时抖动，太久又可能内存涨太多。</strong>rebuild-example 里用的是 1000 请求 / 100MB。</div>
             </div>
@@ -131,6 +182,9 @@ memorySize := binary.LittleEndian.Uint64([]byte(data))   // 当前 VM 内存字�
                     <li>IO 并发限制解决什么隐患？为什么全局取最小值？</li>
                     <li>streaming inject 适合什么场景？怎么给插件写单测？</li>
                 </ul>
+                <div class="baby"><span class="t">🎯 记忆口诀</span>
+                <strong>"内存膨胀就 rebuild（够请求数 或 超内存），并发堵 IO 就限流，边流边改用 inject，上线前 pkg/test 跑单测。"</strong></div>
+                <div class="anno">⚠️ <b>常见误解</b>：小白以为"rebuild 越勤越安全，干脆每 100 请求重建一次"。<strong>其实重建本身有开销和瞬时抖动，太勤反而拖慢网关。阈值要按实际内存增长曲线权衡（rebuild-example 用 1000 请求 / 100MB 是个合理起点）。</strong></div>
             </div>
             <div class="card">
                 <h3>✋ 动手</h3>

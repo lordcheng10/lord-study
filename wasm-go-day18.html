@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00add8,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         th,td{border:1px solid var(--border-color);padding:5px 8px;text-align:left}
         th{background:var(--bg-secondary);color:#22c55e}
@@ -48,14 +63,43 @@
         <div class="part-header">
             <span class="part-label">Day 18 / 共 20 天 · 第 4 周 高级特性与实战</span>
             <h1 class="part-title">AI Token 用量解析</h1>
-            <p class="part-desc">AI 网关要按 Token 计费和限流，第一步是"知道每次请求用了多少 Token"。但各家大模型的响应格式都不一样。今天看 <code>tokenusage</code> 包怎么统一从 OpenAI/Gemini/Anthropic 等格式里提取 Token 数。</p>
+            <p class="part-desc">这是把前面能力"串起来"的一天。AI 网关要按 Token 计费和限流，第一步是"知道每次请求用了多少 Token"。但各家大模型的响应格式都不一样。今天看 <code>tokenusage</code> 包怎么统一从 OpenAI/Gemini/Anthropic 等格式里提取 Token 数——它要用到 Day 11 的流式处理、Day 12 的 Context、Day 15 的 Redis。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置（wasm-go 20 天 · 第 4 周 高级特性与实战）</div>
+            <div class="steps">
+                <span class="st">Leader 选举 D17</span><span class="sep">→</span>
+                <span class="st on">AI Token 解析 D18</span><span class="sep">→</span>
+                <span class="st">性能/测试 D19</span><span class="sep">→</span>
+                <span class="st">构建部署 D20</span><span class="sep">→</span>
+                <span class="st">🎓 毕业</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么要解析 Token</h1></div>
             <div class="card">
+                <div class="essence"><span class="t">💡 本质：tokenusage = 多国货币的"统一验钞机"</span>
+                <strong>各家大模型报账单的"格式"就像不同国家的货币：OpenAI 把用量写在 <code>usage.prompt_tokens</code>、Gemini 写在 <code>usageMetadata.promptTokenCount</code>、Anthropic 写在 <code>message.usage.input_tokens</code>——同一个"输入 Token 数"，藏在完全不同的路径里。</strong>tokenusage 就是那台"统一验钞机"：不管塞进去哪国钞票，都换算成同一种"标准币"（<code>TokenUsage</code> 结构）交给下游。<strong>输入多样、输出统一——这是"适配层"的经典套路（回想上一站 ai-proxy 统一成 OpenAI 协议）。</strong></div>
                 <div class="baby"><span class="t">Token 是大模型的"计量单位"</span>
                 <strong>大模型按 Token（词元）收费——输入多少 Token、输出多少 Token，各有单价。AI 网关要做计费、配额、限流，就必须知道每次调用用了多少 Token。</strong>这个数据在 LLM 的响应里（<code>usage</code> 字段）。<strong>但麻烦在于：OpenAI 叫 <code>usage.prompt_tokens</code>、Gemini 叫 <code>usageMetadata.promptTokenCount</code>、Anthropic 叫 <code>message.usage.input_tokens</code>——每家路径都不同！</strong><code>tokenusage</code> 包就是把这些差异抹平，统一提取。上一站的 ai-statistics、ai-token-ratelimit 插件都靠它。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 680 190" width="100%" style="max-width:680px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="10" y="16" fill="#22c55e" font-size="12" font-weight="700">三种厂商格式 → 一台"验钞机" → 统一结构</text>
+                        <rect x="14" y="34" width="180" height="30" rx="6" fill="#2a2a3a" stroke="#38bdf8"/><text x="104" y="53" fill="#9df" text-anchor="middle" font-size="9">OpenAI: usage.prompt_tokens</text>
+                        <rect x="14" y="80" width="180" height="30" rx="6" fill="#2a2a3a" stroke="#38bdf8"/><text x="104" y="99" fill="#9df" text-anchor="middle" font-size="9">Gemini: usageMetadata.promptTokenCount</text>
+                        <rect x="14" y="126" width="180" height="30" rx="6" fill="#2a2a3a" stroke="#38bdf8"/><text x="104" y="145" fill="#9df" text-anchor="middle" font-size="9">Anthropic: message.usage.input_tokens</text>
+                        <rect x="270" y="66" width="150" height="58" rx="12" fill="#3a2f1a" stroke="#f59e0b" stroke-width="2"/><text x="345" y="90" fill="#fff" text-anchor="middle" font-weight="700">GetTokenUsage</text><text x="345" y="108" fill="#fda" text-anchor="middle" font-size="8.5">多路径兜底，哪个存在用哪个</text>
+                        <path d="M194 49 Q235 60 270 82" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a18)"/>
+                        <path d="M194 95 L270 95" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a18)"/>
+                        <path d="M194 141 Q235 130 270 108" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a18)"/>
+                        <rect x="490" y="66" width="180" height="58" rx="12" fill="#1a3a2a" stroke="#22c55e" stroke-width="2"/><text x="580" y="86" fill="#fff" text-anchor="middle" font-weight="700">TokenUsage</text><text x="580" y="102" fill="#cfc" text-anchor="middle" font-size="8.5">InputToken/OutputToken</text><text x="580" y="116" fill="#cfc" text-anchor="middle" font-size="8.5">/TotalToken/Model…</text>
+                        <path d="M420 95 L490 95" stroke="#22c55e" stroke-width="1.8" marker-end="url(#a18)"/>
+                        <defs><marker id="a18" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：三家不同路径的账单进"验钞机"，Extract 系列挨个路径试，最后都吐出同一个 TokenUsage 结构给下游。</div>
+                </div>
             </div>
         </section>
 
@@ -125,6 +169,11 @@ if v := gjson.GetBytes(chunk, UsageInputTokensPathOpenAIChatCompletions); v.Exis
 } else if v := gjson.GetBytes(chunk, UsageInputTokensPathAnthropicMessages); v.Exists() {
     ...
 }</code></pre>
+                <div class="example"><span class="t">📝 举个例子：一个 OpenAI 结束块被解析</span>
+                输入 SSE 块：<code>data: {"model":"gpt-4o","usage":{"prompt_tokens":128,"completion_tokens":42,"total_tokens":170}}</code><br>
+                <code>ExtractInputTokens</code> 试 OpenAI 路径 <code>usage.prompt_tokens</code> → 存在 → <code>u.InputToken=128</code>（不再试 Gemini/Anthropic 路径）。<br>
+                同理得 <code>OutputToken=42</code>、<code>TotalToken=170</code>、<code>Model="gpt-4o"</code>。<br>
+                若换成 Gemini 的块，OpenAI 路径取不到 → 自动落到 <code>usageMetadata.promptTokenCount</code>，结果照样填对。</div>
                 <div class="anno">读法：<b>"多路径兜底"——挨个协议的路径试，哪个存在用哪个。<strong>这样一个函数就能处理所有厂商，不用外面判断"这是哪家"。</strong>还处理了 Anthropic 的缓存 Token（<code>cache_creation_input_tokens</code>/<code>cache_read_input_tokens</code>）等细节。gjson 的按路径取值在这里发挥到极致。</b></div>
             </div>
         </section>
@@ -148,6 +197,9 @@ if v := gjson.GetBytes(chunk, UsageInputTokensPathOpenAIChatCompletions); v.Exis
                     <li>GetTokenUsage 为什么按 SSE 分块、只处理含 usage 的块？</li>
                     <li>Extract 的"多路径兜底"怎么一个函数处理所有厂商？</li>
                 </ul>
+                <div class="baby"><span class="t">🎯 记忆口诀</span>
+                <strong>"多厂商入、统一结构出；按 SSE 切块、只挑含 usage 的块；每项 Extract 多路径兜底，哪家路径在用哪家。"</strong></div>
+                <div class="anno">⚠️ <b>常见误解</b>：小白以为"每个流式块都带 Token 用量"。<strong>其实用量通常只在最后一个（或特定）块里，内容块根本没有 <code>usage</code> 字段——所以 <code>GetTokenUsage</code> 才要跳过不含 usage 的块，别在每块都白解析。</strong></div>
             </div>
             <div class="card">
                 <h3>✋ 动手</h3>

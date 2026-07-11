@@ -15,6 +15,21 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00add8,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -45,12 +60,25 @@
         <div class="part-header">
             <span class="part-label">Day 17 / 共 20 天 · 第 4 周 高级特性与实战</span>
             <h1 class="part-title">Leader 选举与共享数据</h1>
-            <p class="part-desc">有些活只该"一个实例干"（定时上报、清理过期数据），不能每个 VM 都干一遍。今天看 wasm-go 怎么在没有外部协调服务的情况下，靠 SharedData + CAS 选出一个 Leader。这是分布式系统的经典问题。</p>
+            <p class="part-desc">昨天（Day 15）用 Redis 做跨实例共享；今天讲另一种<strong>不依赖外部服务</strong>的跨 VM 共享——proxy-wasm 自带的 SharedData。有些活只该"一个实例干"（定时上报、清理过期数据），不能每个 VM 都干一遍。今天看 wasm-go 怎么靠 SharedData + CAS 选出一个 Leader。这是分布式系统的经典问题。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置（wasm-go 20 天 · 第 4 周 高级特性与实战）</div>
+            <div class="steps">
+                <span class="st">日志 D16</span><span class="sep">→</span>
+                <span class="st on">Leader 选举 D17</span><span class="sep">→</span>
+                <span class="st">Token 解析 D18</span><span class="sep">→</span>
+                <span class="st">性能测试 D19</span><span class="sep">→</span>
+                <span class="st">构建部署 D20</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么要选 Leader</h1></div>
             <div class="card">
+                <div class="essence"><span class="t">💡 本质：选 Leader = 一群人抢一块"值班牌"</span>
+                <strong>想象一屋子平等的员工，桌上有唯一一块"今日值班"牌子。谁先抢到就负责当天的独占活（打扫、上报），别人待命。</strong>难点是"同时伸手抢时怎么保证只有一个人拿到"——靠 <strong>CAS（拿牌时报一下牌子的编号，编号没变才算你拿到）</strong>。而且这牌子要<strong>定时打卡续期</strong>，值班的人跑路了（VM 崩了），牌子过期，别人就能重新抢。全程没有"班长"来分配，纯靠这块牌子自组织。</div>
                 <div class="baby"><span class="t">"这活只能一个人干"</span>
                 网关有很多实例、每个实例很多 VM。<strong>有些任务重复干会出问题：比如"每分钟向监控系统上报一次汇总"——如果每个 VM 都报，数据翻了 N 倍；"每小时清理一次过期缓存"——多个一起清会冲突。</strong>解法：<strong>选出一个 Leader，只有它干这些独占任务，其余待命。</strong>这就是"Leader 选举"。难点在于：<strong>没有 ZooKeeper/etcd 这种协调服务，怎么在一堆平等的 VM 里选出唯一一个？</strong></div>
             </div>
@@ -64,6 +92,26 @@
 proxywasm.SetSharedData(key, newValue, cas)       // 只有 cas 匹配才写成功</code></pre>
                 <div class="baby"><span class="t">CAS = 原子的"没人改过我才写"</span>
                 <strong>读的时候拿到一个版本号 <code>cas</code>；写的时候带上它——如果期间别人改过（版本变了），你的写入失败。</strong>这保证了"多个 VM 同时抢，只有一个能成功写入"。<strong>回想 Day 07 的乐观锁、Day 15 的 Redis SetNX——都是同一个思想：用原子操作在竞争中选出唯一赢家。</strong>SharedData + CAS 是 wasm-go 不依赖外部服务就能做 Leader 选举的基础。（Day 09 的规则备份也存在 SharedData 里。）</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 200" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="10" y="16" fill="#f59e0b" font-size="12" font-weight="700">两个 VM 同时抢租约，CAS 保证只有一个赢</text>
+                        <rect x="20" y="34" width="150" height="40" rx="8" fill="#2a2a3a" stroke="#38bdf8"/><text x="95" y="50" fill="#fff" text-anchor="middle">VM-A 读: cas=7</text><text x="95" y="66" fill="#9bd" text-anchor="middle" font-size="8.5">"我要抢"</text>
+                        <rect x="20" y="126" width="150" height="40" rx="8" fill="#2a2a3a" stroke="#f472b6"/><text x="95" y="142" fill="#fff" text-anchor="middle">VM-B 读: cas=7</text><text x="95" y="158" fill="#fbb" text-anchor="middle" font-size="8.5">"我也要抢"</text>
+                        <rect x="270" y="72" width="150" height="56" rx="10" fill="#3a1a2a" stroke="#7c4dff" stroke-width="2"/><text x="345" y="96" fill="#fff" text-anchor="middle" font-weight="700">SharedData 租约</text><text x="345" y="114" fill="#cbf" text-anchor="middle" font-size="9">当前版本 cas=7</text>
+                        <path d="M170 54 Q230 70 270 90" stroke="#22c55e" stroke-width="1.6" marker-end="url(#a17)"/>
+                        <path d="M170 146 Q230 130 270 110" stroke="#f472b6" stroke-width="1.6" marker-end="url(#a17b)"/>
+                        <rect x="470" y="40" width="180" height="44" rx="8" fill="#1a3a2a" stroke="#22c55e"/><text x="560" y="58" fill="#fff" text-anchor="middle" font-weight="700">A 先写(带 cas=7)✔</text><text x="560" y="74" fill="#cfc" text-anchor="middle" font-size="8.5">成功 → 版本变 8 → A 当选</text>
+                        <rect x="470" y="118" width="180" height="44" rx="8" fill="#3a1a1a" stroke="#ef4444"/><text x="560" y="136" fill="#fff" text-anchor="middle" font-weight="700">B 再写(带 cas=7)✘</text><text x="560" y="152" fill="#fbb" text-anchor="middle" font-size="8.5">版本已是 8≠7 → 失败 → 认输</text>
+                        <path d="M420 92 L470 62" stroke="#22c55e" stroke-width="1.6" marker-end="url(#a17)"/>
+                        <path d="M420 108 L470 138" stroke="#ef4444" stroke-width="1.6" marker-end="url(#a17c)"/>
+                        <defs>
+                          <marker id="a17" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                          <marker id="a17b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f472b6"/></marker>
+                          <marker id="a17c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#ef4444"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：两个 VM 都读到 cas=7 后抢写。A 先写成功、版本变 8；B 带着旧的 cas=7 再写，版本对不上被拒——唯一赢家 = A。</div>
+                </div>
             </div>
         </section>
 
@@ -127,6 +175,11 @@ return true        // 写入成功，我是 Leader</code></pre>
 }</code></pre>
                 <div class="baby"><span class="t">tick + 选举 = 自动故障转移</span>
                 <strong>每 3 秒跑一次选举：Leader 借此续租（刷新时间戳）；非 Leader 借此检查"现任 Leader 是否过期"。</strong>Leader 挂了 → 停止续租 → 60 秒后租约过期 → 下次某个 VM 的 tick 检测到过期 → 抢成新 Leader。<strong>整个过程无需人工干预、无需外部协调服务——纯靠 SharedData+CAS+tick 自组织。</strong>这是很优雅的分布式设计。</div>
+                <div class="example"><span class="t">📝 单步走查：Leader 挂了之后发生了什么</span>
+                <b>t=0s</b> VM-A 是 Leader，每 3 秒 tick 续租，Timestamp 一直刷新。<br>
+                <b>t=10s</b> VM-A 所在实例崩溃 → 不再 tick → 租约的 Timestamp 停在 10s。<br>
+                <b>t=13/16/…s</b> VM-B 的 tick 照常跑 <code>DoLeaderElection</code>，读到租约还是 A 的、且 <code>now-Timestamp</code> 还没超 60s → B 判定"现任有效"，不抢，继续待命。<br>
+                <b>t=71s</b> B 的某次 tick 发现 <code>now-Timestamp = 61 &gt; 60</code> → 租约过期 → B 用 CAS 抢写成功 → <strong>B 成为新 Leader，独占任务自动接管</strong>，全程无人干预。</div>
             </div>
         </section>
 
@@ -135,6 +188,7 @@ return true        // 写入成功，我是 Leader</code></pre>
             <div class="card">
                 <p><code>IsLeader()</code>（<code>plugin_wrapper.go:629-631</code>）返回当前 VM 是否是 Leader。在需要"只干一次"的地方判断它。</p>
                 <div class="anno">读法：<b>典型场景：<strong>定时上报统计、定时清理、定时拉取远端配置——用 <code>if ctx.IsLeader()</code> 包起来，保证全局只有一个实例执行。</strong>注意 <code>isLeader</code> 是每次 <code>DoLeaderElection</code> 后更新的快照，所以要在 tick 里持续选举保持新鲜。这个能力让单个 Wasm 插件也能安全地做"集群级单例任务"。</b></div>
+                <div class="anno">⚠️ <b>常见误解</b>：小白以为"调一次 <code>DoLeaderElection</code> 当选后就永远是 Leader"。<strong>其实 <code>isLeader</code> 只是上一次选举后的快照——必须放进 tick 里持续续租，否则时间戳不刷新、60 秒后被判过期，你会"莫名"丢失 Leader 身份。</strong></div>
             </div>
         </section>
 
