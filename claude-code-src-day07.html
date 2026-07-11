@@ -24,6 +24,24 @@
         .ps .n{flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--accent-purple);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
         .ps p{margin:0;font-size:12.5px;color:var(--text-secondary)} .ps p b{color:var(--text-primary)}
         .ps.hot{border-color:var(--accent-green)} .ps.hot .n{background:var(--accent-green)}
+        /* —— 改进版增强组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#8b5cf6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -56,8 +74,22 @@
         <div class="part-header">
             <span class="part-label">Day 07 / 共 20 天 · 第 2 周 核心引擎 · 加深版</span>
             <h1 class="part-title">工具系统 Tool 接口</h1>
-            <p class="part-desc">Agent 的"手脚"。这一页贴 <code>Tool.ts</code>、<code>api.ts</code> 的真实源码逐段讲：一个工具必须实现什么、<code>buildTool</code> 的安全默认值、以及"发给模型的说明用 prompt() 不是 description()"这个反直觉点。</p>
+            <p class="part-desc">Agent 的"手脚"。这一页贴 <code>Tool.ts</code>、<code>api.ts</code> 的真实源码逐段讲：一个工具必须实现什么、<code>buildTool</code> 的安全默认值、以及"发给模型的说明用 prompt() 不是 description()"这个反直觉点。<strong>昨天（Day 06）读透了循环这颗"大脑"，今天讲它指挥的"手脚"</strong>，Day 08 再拆几把具体工具，Day 09 讲工具动手前的"签字"。</p>
         </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 2 周 核心引擎</div>
+            <div class="steps">
+                <span class="st">D06 QueryEngine</span><span class="sep">→</span>
+                <span class="st on">D07 工具接口</span><span class="sep">→</span>
+                <span class="st">D08 内置工具</span><span class="sep">→</span>
+                <span class="st">D09 权限</span><span class="sep">→</span>
+                <span class="st">D10 上下文/Token</span>
+            </div>
+        </div>
+
+        <div class="essence"><span class="t">💡 用一个类比先兜住今天（本日世界观：一个"工具箱"）</span>
+        工具系统就是实习生的<strong>工具箱</strong>：里面 60+ 把工具（读文件、跑命令、搜代码…）。每把工具都得配齐三样：一张<strong>规格卡（schema + 说明书）</strong>告诉模型"我叫啥、要递给我什么参数、什么时候用我"；一道<strong>签字关（权限）</strong>——拿电钻（改文件、跑命令）前得先让你签字确认；以及<strong>真正干活的手柄（call）</strong>。今天贯穿一个安全原则：<strong>fail-closed——一把工具没主动贴"我很安全"的标签，就一律当"危险的、要小心串行用"来对待</strong>。宁可慢，绝不出事。</div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>工具解决哪 3 件事</h1></div>
@@ -68,6 +100,11 @@
                 <b>① 定义/schema</b>：怎么告诉模型"有这个工具、它叫什么、要传什么参数"。<br>
                 <b>② 权限</b>：怎么判断"这次调用能不能执行"（读文件放行、删库要问）。<br>
                 <b>③ 执行</b>：怎么真去干活、并返回结果。</div>
+                <div class="example"><span class="t">📝 举个例子：一次工具调用的"三件事"串起来</span>
+                模型吐出 <code>{ name:"Read", input:{ file_path:"a.ts" } }</code>（① <strong>定义/schema</strong>让它知道有 Read、要传 file_path）<br>
+                → 系统检查"读 a.ts 允许吗？"（② <strong>权限</strong>：工作目录内 → 放行）<br>
+                → 真去读文件，返回内容（③ <strong>执行</strong>）<br>
+                → 内容作为 <code>tool_result</code> 回喂给模型。<strong>本页就是把这三件事在源码里各自的落点讲清。</strong></div>
                 <p>今天就顺着这三件事读源码。核心文件：接口定义 <code>src/Tool.ts</code>（802 行）、工具实现在 <code>packages/builtin-tools/</code>（Day 08 精读）、暴露给模型的转换在 <code>src/utils/api.ts</code>。</p>
             </div>
         </section>
@@ -144,6 +181,20 @@ export function buildTool&lt;D&gt;(def: D): BuiltTool&lt;D&gt; {
 }</code></pre>
                 <div class="anno"><code>{ ...TOOL_DEFAULTS, ...def }</code> 是"对象展开"：<b>先把默认值铺一遍，再用工具自己写的 <code>def</code> 覆盖同名字段。</b>所以工具没写的字段 = 用默认；写了的 = 用自己的。<code>() =&gt; false</code> 是"箭头函数"，等于"一个返回 false 的函数"。</div>
                 <div class="glossary"><b>fail-closed（默认保守）——这是安全设计的精髓</b>：默认值是 <code>isConcurrencySafe: false</code>（不可并发）、<code>isReadOnly: false</code>（会写）。也就是说，一个工具只有<strong>主动声明</strong> <code>isReadOnly: () =&gt; true</code> 才会被当只读、才能并发跑。<strong>忘记声明的后果是"被当成危险的写工具、串行执行"——慢一点，但绝不出事。</strong>反过来若默认"只读+可并发"，忘声明的写工具就会被误当只读并发跑坏。<b>不确定时选更安全的默认</b>，这就是 fail-closed。所有 60+ 工具都通过 <code>buildTool({...})</code> 导出。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 190" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">fail-closed：没主动贴"安全"标签，就当危险处理</text>
+                        <rect x="220" y="34" width="160" height="40" rx="9" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="300" y="58" fill="#e2e8f0" text-anchor="middle" font-weight="700">一把工具</text>
+                        <text x="300" y="92" fill="#94a3b8" text-anchor="middle">它有没有主动写 isReadOnly:()=&gt;true ?</text>
+                        <path d="M300 74 L300 98" stroke="#475569" stroke-width="1.2"/>
+                        <rect x="40" y="118" width="230" height="54" rx="9" fill="rgba(34,197,94,.1)" stroke="#22c55e"/><text x="155" y="139" fill="#34d399" text-anchor="middle" font-weight="700">✔ 写了 → 当只读</text><text x="155" y="157" fill="#94a3b8" text-anchor="middle">可并发（快，绿色通道，上限10）</text>
+                        <rect x="330" y="118" width="230" height="54" rx="9" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/><text x="445" y="139" fill="#fbbf24" text-anchor="middle" font-weight="700">✘ 没写 → 默认当会写</text><text x="445" y="157" fill="#94a3b8" text-anchor="middle">串行执行（慢一点，但绝不写冲突）</text>
+                        <path d="M280 100 L180 116" stroke="#22c55e" stroke-width="1.3" marker-end="url(#f7)"/>
+                        <path d="M320 100 L420 116" stroke="#f59e0b" stroke-width="1.3" marker-end="url(#f7)"/>
+                        <defs><marker id="f7" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：默认往"危险"一侧靠——工具作者忘了声明只读，最坏就是被保守地串行执行（慢），而不是被误当只读并发跑坏文件。</div>
+                </div>
             </div>
         </section>
 
@@ -181,6 +232,10 @@ base = {
                     <p style="margin:0;color:var(--text-secondary);">⚠️ <strong>反直觉但极重要</strong>：发给模型的工具"描述"字段（<code>description</code>），取自 <code>tool.<strong>prompt()</strong></code>，<strong>不是</strong> <code>tool.description()</code>！<code>description()</code> 是给<strong>界面/权限弹窗</strong>看的（简短）；<code>prompt()</code> 才是给<strong>模型</strong>看的（详细的使用说明，教模型什么时候、怎么用这个工具）。<strong>想知道"模型看到的工具说明长啥样"，去读工具的 <code>prompt()</code> 方法。</strong></p>
                 </div>
                 <div class="glossary"><b>为什么起这么容易混的名字？</b> 这是逆向自官方代码的历史命名。记住区分：<code>prompt()</code> → 给 AI 看（详细、教它用）；<code>description()</code> → 给人看（简短、UI 显示）。<b>延迟加载工具</b>：有些不常用的工具（Artifact/LSP/NotebookEdit）标了 <code>shouldDefer: true</code>，schema <strong>不发给模型</strong>（省 prompt 空间），模型要用时先调 <code>SearchExtraTools</code> 发现、再 <code>ExecuteExtraTool</code> 调用。这就是你在系统提示里偶尔见到 "deferred tools" 的由来——工具太多、按需加载。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：一把工具为啥要写两份说明（prompt 和 description）？留一份不够吗？</p>
+                    <p class="a">👨‍🏫 老师：因为两份说明是给<strong>两个不同的读者</strong>看的。<code>prompt()</code> 是给<strong>模型</strong>看的"使用手册"——要写得详细，教它什么时候用、参数怎么填、有什么坑；<code>description()</code> 是给<strong>你（人）</strong>在终端权限弹窗里看的一句话摘要——越短越好。就像同一台设备，给工程师的是厚厚的技术手册，给用户的是包装盒上一行字。<strong>想知道"模型眼里这工具是什么"，永远去读 <code>prompt()</code>。</strong></p>
+                </div>
             </div>
         </section>
 
