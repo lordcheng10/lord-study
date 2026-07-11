@@ -15,6 +15,22 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#66bb6a,#4a7fd6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -46,12 +62,27 @@
         <div class="part-header">
             <span class="part-label">Day 19 / 共 20 天 · 第 4 周 遥测/扩展/安装</span>
             <h1 class="part-title">Operator 与安装</h1>
-            <p class="part-desc"><code>istioctl install</code> 怎么把 Istio 装进集群？今天看安装机制：新版纯 render 模型（客户端渲染 Helm + server-side apply）、IstioOperator 配置、组件依赖图。</p>
+            <p class="part-desc"><code>istioctl install</code> 怎么把 Istio 装进集群？今天看安装机制：新版纯 render 模型（客户端渲染 Helm + server-side apply）、IstioOperator 配置、组件依赖图。<strong>前 18 天讲的都是"Istio 跑起来之后怎么工作"，今天回到最开头——它当初是怎么被装进集群的。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 4 周「遥测 / 扩展 / 安装」（W1-3 全部 ✓）</div>
+            <div class="steps">
+                <span class="st">D16 遥测</span><span class="sep">→</span>
+                <span class="st">D17 EnvoyFilter</span><span class="sep">→</span>
+                <span class="st">D18 istioctl</span><span class="sep">→</span>
+                <span class="st on">D19 安装</span><span class="sep">→</span>
+                <span class="st">D20 收官</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>新版 render 模型</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：装个 Istio 要手调几百个参数？</span>
+                Istio 有 istiod、网关、CNI、一堆 CRD 和 RBAC，参数成百上千。<strong>如果让你手写全部 K8s YAML 再 apply，既容易漏、又难保证组件按正确顺序装上、还难升级。</strong>怎么把"装一个合理的 Istio"变成可复制的一步操作？</div>
+                <div class="essence"><span class="t">💡 本质：像宜家家具——给你图纸+套餐，按序组装</span>
+                安装 Istio 好比装宜家家具：<strong>profile 是"预选套餐"（简约款/豪华款/毛坯款），Helm chart 是"图纸"，<code>istioctl install</code> 是那个照图纸把零件拼起来的人</strong>。<strong>新版是"自己照图纸装"（客户端 render 模型）——不再像旧版"请个常驻管家(controller)住你家帮你装"。</strong>而且组装讲顺序：先打地基(Base/CRD)、再立柱子(istiod)、最后挂门窗(网关)。今天就看这套组装逻辑。</div>
                 <div class="glossary"><b>重要：新版 operator 已无集群内 controller</b>：本版本是<strong>纯 render 模型</strong>——<code>istioctl install</code> 在<strong>客户端</strong>渲染 Helm chart 并 server-side apply，<strong>不再有集群内 operator controller、不再有 IstioOperator CRD</strong>。（老教程/博客可能还讲"装个 operator 监听 CRD"，那是旧模型。）</div>
                 <div class="baby"><span class="t">"render 模型" vs 旧"controller 模型"</span>
                 <strong>旧模型：集群里跑一个 operator controller，watch IstioOperator CRD，据此在集群内 reconcile 出 Istio 组件。新模型更简单：<code>istioctl install</code> 直接在你的电脑上（客户端）把 Helm chart 渲染成 K8s 清单，然后 apply 到集群——没有常驻 controller。</strong>好处：更简单、更可预测、少一个要维护的组件。<code>operator/</code> 目录是纯上游 Istio（无 Higress 定制）——Higress 的定制在 pilot/proxy 层。</div>
@@ -98,6 +129,8 @@
 # translateIstioOperatorToHelm：spec.hub→global.hub、spec.meshConfig→meshConfig …</code></pre>
                 <div class="baby"><span class="t">又是"分层覆盖"（配置系统的通用模式）</span>
                 安装配置来自多处：内置默认、选的 profile、集群探测结果、你的 <code>-f</code> 文件、命令行 <code>--set</code>。<strong>优先级从低到高——越"具体、越靠近命令行"的越优先。</strong>这和 Envoy 的模板路径优先级（Day 13）、OpenClaw 的 env 链、Istio 自己的 exportTo 层级都是同一个思想：<strong>提供合理默认，允许逐层覆盖。</strong><code>translateIstioOperatorToHelm</code> 把 IstioOperator 字段翻译成 Helm values（因为底层是 Helm chart）。</div>
+                <div class="example"><span class="t">📝 举个例子：同一个值被层层覆盖</span>
+                副本数 <code>pilot.replicaCount</code>：内置默认 <code>1</code> → 选了 <code>demo</code> profile 设成 <code>1</code> → 你 <code>-f myvalues.yaml</code> 写 <code>2</code> → 命令行又 <code>--set pilot.replicaCount=3</code> → <strong>最终生效 3</strong>。谁离命令行近谁赢：<code>内置 &lt; profile &lt; 集群探测 &lt; -f 文件 &lt; --set</code>。</div>
             </div>
         </section>
 
@@ -118,6 +151,29 @@
 //   serverSideApply（FieldManager:"istio-operator"）→ prune（按 owner label 清孤儿）</code></pre>
                 <div class="baby"><span class="t">为什么安装要讲依赖顺序？</span>
                 组件之间有依赖：<strong>Base（含 CRD）必须先装——否则后面的组件引用的 CRD 还不存在；Pilot（istiod）要在网关之前——网关连 istiod 拿配置。</strong>所以按依赖图有序安装：Base → Pilot → 网关/CNI → Ztunnel。同层可并发。<strong>安装完还 <code>prune</code>——按 owner label 删除"上次装了但这次没有"的孤儿资源（比如你从 demo 切到 minimal，多余的组件被清理）。</strong>这保证集群状态和你的配置一致。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 170" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <rect x="20" y="65" width="120" height="44" rx="8" fill="#264a3a" stroke="#34d399"/><text x="80" y="85" fill="#fff" text-anchor="middle" font-weight="700">Base</text><text x="80" y="101" fill="#9fe" text-anchor="middle" font-size="9.5">CRD+基础(先)</text>
+                        <rect x="190" y="65" width="120" height="44" rx="8" fill="#22323a" stroke="#66bb6a"/><text x="250" y="85" fill="#fff" text-anchor="middle" font-weight="700">Pilot(istiod)</text><text x="250" y="101" fill="#9cd" text-anchor="middle" font-size="9.5">核心</text>
+                        <rect x="360" y="20" width="130" height="40" rx="8" fill="#2a3a4a" stroke="#4a7fd6"/><text x="425" y="45" fill="#fff" text-anchor="middle" font-weight="700">IngressGateway</text>
+                        <rect x="360" y="70" width="130" height="40" rx="8" fill="#2a3a4a" stroke="#4a7fd6"/><text x="425" y="95" fill="#fff" text-anchor="middle" font-weight="700">Cni</text>
+                        <rect x="360" y="120" width="130" height="40" rx="8" fill="#2a3a4a" stroke="#4a7fd6"/><text x="425" y="145" fill="#fff" text-anchor="middle" font-weight="700">EgressGateway</text>
+                        <rect x="520" y="70" width="80" height="40" rx="8" fill="#2a2a3a" stroke="#a855f7"/><text x="560" y="95" fill="#fff" text-anchor="middle" font-weight="700">Ztunnel</text>
+                        <path d="M140 87 L188 87" stroke="#34d399" stroke-width="2" marker-end="url(#a19)"/>
+                        <path d="M310 82 L358 45" stroke="#66bb6a" stroke-width="1.6" marker-end="url(#a19b)"/>
+                        <path d="M310 87 L358 90" stroke="#66bb6a" stroke-width="1.6" marker-end="url(#a19b)"/>
+                        <path d="M310 92 L358 135" stroke="#66bb6a" stroke-width="1.6" marker-end="url(#a19b)"/>
+                        <path d="M490 90 L518 90" stroke="#4a7fd6" stroke-width="1.6" marker-end="url(#a19c)"/>
+                        <text x="300" y="15" fill="#9ad" text-anchor="middle" font-size="10">按依赖图有序 apply，同层可并发；装完 prune 清孤儿</text>
+                        <defs>
+                            <marker id="a19" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
+                            <marker id="a19b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#66bb6a"/></marker>
+                            <marker id="a19c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#4a7fd6"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">组件依赖图：Base(地基)→Pilot(柱子)→网关/CNI(门窗)→Ztunnel。就像装家具，顺序错了后面装不上。</div>
+                </div>
+                <div class="anno">⚠️ 常见误解：<b>网上老教程常说"先在集群里装个 Istio operator，它 watch IstioOperator CRD 自动 reconcile"。<strong>那是旧的 controller 模型，本版本已废弃</strong>——现在是纯客户端 render：<code>istioctl install</code> 本地渲染完直接 apply，集群里没有常驻 operator 进程。</b></div>
             </div>
         </section>
 

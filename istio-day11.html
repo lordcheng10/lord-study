@@ -16,6 +16,22 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#00acc1,#66bb6a);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -46,12 +62,27 @@
         <div class="part-header">
             <span class="part-label">Day 11 / 共 20 天 · 第 3 周 sidecar 与安全</span>
             <h1 class="part-title">Sidecar 注入</h1>
-            <p class="part-desc">Istio 怎么把 Envoy"塞进"你的业务 Pod？靠 Kubernetes 的 MutatingWebhook——Pod 创建时拦截、返回一份 JSON Patch，Pod 就多了一个 Envoy sidecar 容器。今天读透注入机制。</p>
+            <p class="part-desc">Istio 怎么把 Envoy"塞进"你的业务 Pod？靠 Kubernetes 的 MutatingWebhook——Pod 创建时拦截、返回一份 JSON Patch，Pod 就多了一个 Envoy sidecar 容器。今天读透注入机制。<strong>第 3 周开场：W1-2 我们看的是 istiod 这个"总调度室"怎么生成 xDS，从今天起看这些配置最终落到哪——先解决"Envoy 怎么进到每个 Pod 里"。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周「sidecar 与安全」（W1 控制面全景 ✓ · W2 xDS 生成 ✓）</div>
+            <div class="steps">
+                <span class="st on">D11 sidecar 注入</span><span class="sep">→</span>
+                <span class="st">D12 pilot-agent</span><span class="sep">→</span>
+                <span class="st">D13 bootstrap</span><span class="sep">→</span>
+                <span class="st">D14 mTLS·CA</span><span class="sep">→</span>
+                <span class="st">D15 SDS·授权</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>什么是 sidecar 注入</h1></div>
             <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：没有"自动注入"你得怎么办？</span>
+                你有 200 个 Deployment，想让每个都用上 Istio 的流量治理/加密。<strong>没有注入机制，你得手动给每个 Deployment 的 YAML 加一个 Envoy 容器、一个 init 容器、一堆卷和环境变量——200 份、每份几十行、还不能写错。</strong>升级 Envoy 版本？200 份再改一遍。这显然不可接受。</div>
+                <div class="essence"><span class="t">💡 本质：一次登记，全楼自动配"贴身管家"</span>
+                sidecar 注入就像<strong>物业在小区大门口立了个规矩</strong>：以后任何住户（Pod）入住，门口自动派一个"贴身管家"（Envoy）跟着他，管家帮他收发所有快递（流量）。<strong>你不用挨家挨户签合同，只要在大门口登记一次规则（MutatingWebhook），后续全自动。</strong>这就是把 W1-2 里"总调度室"（istiod）算好的治理能力，透明地送到每个住户身边。</div>
                 <div class="baby"><span class="t">sidecar = "跟班"</span>
                 sidecar（边车，摩托车挎斗）模式：给你的业务容器<strong>配一个"跟班"容器（Envoy）</strong>，它俩住在同一个 Pod 里、共享网络。<strong>业务容器的所有进出流量，都被悄悄改道，先经过这个 Envoy 跟班</strong>（靠 init 容器改 iptables 规则实现）。于是 Envoy 就能对流量做治理（路由/mTLS/遥测），而业务代码完全无感——它以为在直接收发，其实中间隔了个 Envoy。<strong>"注入"就是"自动给 Pod 加上这个 Envoy 跟班"的过程。</strong>你不用手动改每个 Deployment，Istio 自动帮你塞。</div>
             </div>
@@ -67,6 +98,38 @@
 #   且 sidecar.istio.io/inject != "false" 才注入</code></pre>
                 <div class="baby"><span class="t">MutatingWebhook = "K8s 的拦截钩子"</span>
                 Kubernetes 允许你注册一个"变更 webhook"：<strong>每当有人创建某类资源（这里是 Pod），API Server 先把这个资源发给你的 webhook，你可以返回一份"修改补丁"，API Server 应用后再真正创建。</strong>Istio 就注册了这么个钩子——Pod 创建时，K8s 把 Pod 发给 istiod 的 <code>/inject</code>，istiod 返回"加一个 Envoy 容器"的补丁。<strong>这就是"自动注入"的魔法：不改你的 YAML，在 Pod 落地前动态改。</strong>只对打了 Istio 标签的 namespace/Pod 生效。</div>
+                <div class="example"><span class="t">📝 举个例子：一个 Pod 走一遍注入</span>
+                你 <code>kubectl apply</code> 一个只有 1 个容器 <code>app</code> 的 Deployment →
+                API Server 创建 Pod 前先把它发给 istiod 的 <code>/inject</code> →
+                istiod 返回 JSON Patch <code>[{op:add, path:/spec/initContainers, ...istio-init}, {op:add, path:/spec/containers/-, ...istio-proxy}]</code> →
+                最终落地的 Pod 里有 <strong>3 样东西</strong>：<code>istio-init</code>(init 容器) + 你的 <code>app</code> + <code>istio-proxy</code>(Envoy)。你原来的 Deployment YAML <strong>一个字没动</strong>。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 720 200" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="60" y="20" fill="#9ad" text-anchor="middle">你 (kubectl)</text>
+                        <text x="270" y="20" fill="#9ad" text-anchor="middle">API Server</text>
+                        <text x="500" y="20" fill="#9ad" text-anchor="middle">istiod /inject</text>
+                        <text x="660" y="20" fill="#9ad" text-anchor="middle">etcd</text>
+                        <line x1="60" y1="30" x2="60" y2="185" stroke="#456" stroke-dasharray="3 3"/>
+                        <line x1="270" y1="30" x2="270" y2="185" stroke="#456" stroke-dasharray="3 3"/>
+                        <line x1="500" y1="30" x2="500" y2="185" stroke="#456" stroke-dasharray="3 3"/>
+                        <line x1="660" y1="30" x2="660" y2="185" stroke="#456" stroke-dasharray="3 3"/>
+                        <path d="M60 50 L268 50" stroke="#66bb6a" stroke-width="2" marker-end="url(#a11a)"/>
+                        <text x="165" y="44" fill="#cfe" text-anchor="middle">apply Pod(1 容器)</text>
+                        <path d="M270 82 L498 82" stroke="#00acc1" stroke-width="2" marker-end="url(#a11a)"/>
+                        <text x="385" y="76" fill="#cfe" text-anchor="middle">AdmissionReview(Pod)</text>
+                        <path d="M500 114 L272 114" stroke="#f59e0b" stroke-width="2" marker-end="url(#a11b)"/>
+                        <text x="385" y="108" fill="#fd9" text-anchor="middle">返回 JSON Patch(+init +proxy)</text>
+                        <path d="M270 150 L658 150" stroke="#a855f7" stroke-width="2" marker-end="url(#a11c)"/>
+                        <text x="460" y="144" fill="#dcf" text-anchor="middle">写入改造后的 Pod(3 样东西)</text>
+                        <text x="270" y="178" fill="#888" text-anchor="middle" font-size="10">API Server 把 patch 应用到 Pod 后才真正落库</text>
+                        <defs>
+                            <marker id="a11a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#66bb6a"/></marker>
+                            <marker id="a11b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                            <marker id="a11c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#a855f7"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">自动注入时序：Pod 在"落库"前被 istiod webhook 拦一道、打上补丁。你的原始 YAML 全程没被改。</div>
+                </div>
             </div>
         </section>
 
@@ -94,6 +157,15 @@
 // 4. 未显式指定 → 匹配 NeverInjectSelector / AlwaysInjectSelector（:243/:258）
 // 5. 最后按 config.Policy 综合出 required（:274）</code></pre>
                 <div class="anno">读法：<b>不是所有 Pod 都注入——有精细的判定规则。<code>HostNetwork</code> 的不能注入（会搞乱宿主机网络），系统 ns 不注入，用户可用注解/标签显式开关。</b>这套"多层判定 + 显式优先"避免误注入。</div>
+                <div class="example"><span class="t">📝 单步走查：4 个 Pod 分别判成什么</span>
+                <table class="k" style="margin-top:6px">
+                    <tr><th>Pod 情况</th><th>命中哪条规则</th><th>结果</th></tr>
+                    <tr><td>普通业务 Pod（ns 打了 istio-injection=enabled）</td><td>走到第 5 步按 Policy</td><td>✅ 注入</td></tr>
+                    <tr><td>Pod 标了 <code>sidecar.istio.io/inject: "false"</code></td><td>第 3 步 label 显式关</td><td>❌ 跳过</td></tr>
+                    <tr><td><code>hostNetwork: true</code> 的 Pod</td><td>第 1 步直接跳过</td><td>❌ 跳过</td></tr>
+                    <tr><td><code>kube-system</code> 里的 Pod</td><td>第 2 步系统 ns</td><td>❌ 跳过</td></tr>
+                </table></div>
+                <div class="anno">⚠️ 常见误解：<b>小白常以为"只要装了 Istio，所有 Pod 就都被注入了"。其实不是——注入是"选择性"的：既要 namespace/Pod 命中标签，又不能被显式关闭，还要躲开 hostNetwork/系统 ns 这些红线。判定顺序里"显式 label/注解"优先级最高，是你手动开关的总闸。</b></div>
             </div>
         </section>
 
@@ -129,6 +201,11 @@
             <div class="card">
                 <p>除自动注入，还能手动：<code>istioctl kube-inject</code>（<code>istioctl/pkg/kubeinject/kubeinject.go:477</code>）在本地渲染并直接产出注入后的 YAML。</p>
 <pre><code class="language-bash">kubectl apply -f &lt;(istioctl kube-inject -f deployment.yaml)</code></pre>
+                <div class="ask"><span class="t">👶 小白 vs 👨‍🏫 老师</span>
+                <strong>👶：手动注入和自动注入产出的 Pod 会不会不一样？</strong><br>
+                👨‍🏫：一样。它俩<strong>共用同一套渲染引擎</strong>（<code>pkg/kube/inject</code>），区别只是"谁来触发、在哪渲染"——自动是 API Server 回调 istiod 在线渲染，手动是 <code>istioctl</code> 在你本机离线渲染。就像同一份"改装图纸"，可以工厂帮你装（自动），也可以你自己按图纸装（手动），装出来的车一样。<br>
+                <strong>👶：那什么时候用手动？</strong><br>
+                👨‍🏫：调试时想先看看"到底会注入成啥样"，或者你不想开 webhook（比如 CI 里生成静态 YAML）。</div>
                 <div class="anno">读法：<b>手动（istioctl 本地渲染）和自动（API Server 回调 istiod）<strong>共用同一套渲染引擎</strong>（<code>pkg/kube/inject</code>）。手动适合调试/不想开 webhook 的场景。istiod 侧的装配在 <code>pilot/pkg/bootstrap/sidecarinjector.go:43</code>。</b></div>
             </div>
         </section>
