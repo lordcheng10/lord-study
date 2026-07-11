@@ -15,6 +15,24 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a78bfa;background:rgba(167,139,250,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa .t{font-weight:700;color:#a78bfa;display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
     </style>
 </head>
 <body>
@@ -49,6 +67,17 @@
             <p class="part-desc">Envoy 快的最后一块拼图：<strong>零拷贝 Buffer</strong>——数据在系统里尽量不复制。再看它为什么用 Bazel 构建、以及扩展裁剪机制（Higress 定制 Envoy 的关键）。</p>
         </div>
 
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 4 周「扩展/可观测/构建」（D18 讲了"看见" → 今天补上高性能<b>最后一块拼图·零拷贝</b>，再讲 Bazel 构建）</div>
+            <div class="steps">
+                <span class="st">D16 扩展机制</span><span class="sep">→</span>
+                <span class="st">D17 Wasm</span><span class="sep">→</span>
+                <span class="st">D18 可观测</span><span class="sep">→</span>
+                <span class="st on">D19 Buffer/Bazel</span><span class="sep">→</span>
+                <span class="st">D20 收官</span>
+            </div>
+        </div>
+
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>为什么零拷贝</h1></div>
             <div class="card">
@@ -56,6 +85,35 @@
                 代理转发数据，数据要经手很多环节（读 socket → 过滤器 → 写 socket）。<strong>每次把数据从一块内存复制到另一块，都花 CPU + 内存带宽。海量流量下，反复拷贝会成为瓶颈。</strong>零拷贝（zero-copy）的目标：<strong>数据"移动"时尽量只传递"指针/所有权"，不真复制字节。</strong>好比搬家——能直接把箱子（整块内存）搬过去，就别把箱子里每样东西掏出来再装进新箱子。Envoy 的 Buffer 系统就是为此精心设计的。</div>
             </div>
         </section>
+
+        <div class="card">
+            <div class="essence"><span class="t">💡 Slice = 一块内存 + 三个游标，分出三段</span>
+            一块连续内存被游标分成三段：<strong>已读走的(Drained) | 待处理的有效数据(Data) | 还没用的可写空间(Reservable)</strong>。读走数据 <code>drain()</code> 只是把游标往后挪（O(1)，不删字节）；写只往 Reservable 段写。<strong>"追加/排空"都变成"移游标"而非"搬数据"</strong>——这就是快的根源。</div>
+            <div class="example"><span class="t">📝 举个例子：drain 10 字节为什么 O(1)</span>
+            buffer 里有 <code>[已排空 20 | 有效 100 | 可写 30]</code>。上层消费了 10 字节 → <code>drain(10)</code> 只做 <code>data_ 游标 += 10</code> → 变成 <code>[已排空 30 | 有效 90 | 可写 30]</code>。<strong>没有 memmove，没有 realloc，就挪个数字。</strong></div>
+            <div class="svgbox">
+                <svg viewBox="0 0 620 130" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                    <rect x="40" y="45" width="120" height="40" fill="#2a2a3a" stroke="#555"/><text x="100" y="70" fill="#888" text-anchor="middle">已排空 Drained</text>
+                    <rect x="160" y="45" width="280" height="40" fill="#264a3a" stroke="#34d399"/><text x="300" y="70" fill="#34d399" text-anchor="middle" font-weight="700">有效数据 Data</text>
+                    <rect x="440" y="45" width="140" height="40" fill="#26323a" stroke="#38bdf8"/><text x="510" y="70" fill="#7dd3fc" text-anchor="middle">可写 Reservable</text>
+                    <g font-size="10" fill="#e91e63">
+                        <text x="40" y="38" text-anchor="middle">base_</text>
+                        <text x="160" y="38" text-anchor="middle">data_</text>
+                        <text x="440" y="38" text-anchor="middle">reservable_</text>
+                        <text x="580" y="38" text-anchor="middle">capacity_</text>
+                    </g>
+                    <path d="M160 95 L200 95" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#a19)"/>
+                    <text x="230" y="99" fill="#fbbf24" font-size="10">drain() 只把 data_ 往右挪 = O(1)</text>
+                    <path d="M440 105 L480 105" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#a19b)"/>
+                    <text x="510" y="109" fill="#7dd3fc" font-size="10">写入往 Reservable</text>
+                    <defs>
+                        <marker id="a19" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#fbbf24"/></marker>
+                        <marker id="a19b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#38bdf8"/></marker>
+                    </defs>
+                </svg>
+                <div class="cap">Slice 三段模型：四个偏移把内存分成"已排空/有效/可写"。读写都是挪游标，不搬字节。</div>
+            </div>
+        </div>
 
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>Slice 三段模型</h1></div>
@@ -103,6 +161,14 @@
                 如果下游（客户端）读得慢，而上游（后端）拼命发，Envoy 的 buffer 会越积越多，最终内存爆炸。<strong>水位缓冲的招数：设一个高水位线，buffer 积压超过它就触发回调——通常"暂停从上游读"（叫上游别发了）；等 buffer 排空到低水位线以下，再"恢复读"。</strong>就像水库：水太满就关闸，水位下去再开闸。<strong>低水位 = 高水位的一半（滞回，避免在阈值附近反复开关）。</strong>这就是流控/背压，防止快的一方压垮慢的一方——分布式系统的必备机制。</div>
             </div>
         </section>
+
+        <div class="card">
+            <div class="anno">⚠️ 常见误解：以为"零拷贝 = 一次都不拷贝"。其实是<b>尽量少拷贝</b>——很小的碎片（&lt; 阈值）反而会主动<b>拷贝合并</b>（减少碎片、让后续访问更快），大块才走 <code>move</code> 转移所有权。工程是权衡，不是教条。</div>
+            <div class="essence"><span class="t">💡 顺带记住：Bazel = "锁死食材版本的菜谱"</span>
+            Envoy 依赖 abseil/protobuf/gRPC/BoringSSL/V8… 一堆库，每个都要特定版本。<strong>Bazel 用 URL+sha256+版本把每样"食材"锁死——任何人、任何厨房，照这份菜谱做出的"菜"（二进制）都一模一样（可复现）。</strong>代价是菜谱难学，但对"依赖地狱 + 要极致可靠"的 Envoy 值得。</div>
+            <div class="baby"><span class="t">口诀：Envoy 快靠三支柱（本课性能主线收束）</span>
+            <strong>无锁（D03/D13 线程本地）+ 事件驱动（D04）+ 零拷贝（今天）</strong>——三根支柱撑起"百万并发还低延迟"。明天 D20 会把它们和请求全链路一起收官。这套模式（TLS 无锁 + 事件循环 + 零拷贝）可带走用到任何高性能网络系统。</div>
+        </div>
 
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>为什么用 Bazel</h1></div>

@@ -15,6 +15,27 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a78bfa;background:rgba(167,139,250,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa .t{font-weight:700;color:#a78bfa;display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#7c4dff}
+        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
     </style>
 </head>
 <body>
@@ -47,6 +68,17 @@
             <span class="part-label">Day 12 / 共 20 天 · 第 3 周 xDS 与上游</span>
             <h1 class="part-title">配置订阅机制</h1>
             <p class="part-desc">Day 11 讲了 xDS 协议，今天看它<em>怎么实现</em>：<code>Subscription</code>/<code>SubscriptionCallbacks</code> 接口、<code>GrpcMux</code> 多路复用（ADS 复用一条 gRPC 流）、以及"订阅→下发→应用→ACK"的热更新闭环。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周「xDS 与上游」（承接 D11 xDS 协议，今天看它<b>怎么落地成代码</b>）</div>
+            <div class="steps">
+                <span class="st">D11 xDS 总览</span><span class="sep">→</span>
+                <span class="st on">D12 配置订阅</span><span class="sep">→</span>
+                <span class="st">D13 集群管理</span><span class="sep">→</span>
+                <span class="st">D14 负载均衡</span><span class="sep">→</span>
+                <span class="st">D15 健康检查/发现</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
@@ -102,6 +134,37 @@ class GrpcSubscriptionImpl : public Subscription, protected UntypedConfigUpdateC
             </div>
         </section>
 
+        <div class="card">
+            <div class="ask"><span class="t">🤔 痛点：LDS/CDS/RDS/EDS 各开一条连接，会乱套</span>
+            接着 D11 的"连锁总部"比喻：如果总部用 4 个不同频道分别播报"监听/集群/路由/端点"，门店可能<strong>先听到"新端点"、还没听到"新集群"</strong>——引用了不存在的集群，短暂报错。多条连接也更占资源、难保证顺序。</div>
+            <div class="essence"><span class="t">💡 本质：GrpcMux = 一根对讲机线路，复用多个"频道"</span>
+            <code>GrpcMux</code> 就是"多路复用器"：<strong>把 LDS/CDS/RDS/EDS 多类规章塞进同一条 gRPC 长连接，每类是一个 <code>watch</code>（频道）</strong>。收到下发就按 <code>type_url</code> 分发给对应订阅者。<strong>ADS</strong> 更进一步——总部在这一条线路上<strong>控制播报顺序</strong>（先集群后端点），门店永远不会遇到"引用了还没到的东西"。</div>
+            <div class="example"><span class="t">📝 举个例子：CDS 订阅怎么走 mux</span>
+            CDS 调 <code>addWatch("...Cluster", {"user-service"}, 回调)</code> 注册一个 watch → GrpcMux 在同一条流上 <code>sendDiscoveryRequest</code>（首帧带 node）→ 收到 <code>onDiscoveryResponse</code> 后，按 <code>type_url=Cluster</code> 把配置<strong>只分发给 CDS 的回调</strong>，不会误发给 LDS。</div>
+            <div class="svgbox">
+                <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                    <g font-weight="700" font-size="11">
+                        <rect x="20" y="20" width="90" height="24" rx="12" fill="#26323a" stroke="#38bdf8"/><text x="65" y="36" fill="#7dd3fc" text-anchor="middle">LDS watch</text>
+                        <rect x="20" y="52" width="90" height="24" rx="12" fill="#26323a" stroke="#38bdf8"/><text x="65" y="68" fill="#7dd3fc" text-anchor="middle">CDS watch</text>
+                        <rect x="20" y="84" width="90" height="24" rx="12" fill="#26323a" stroke="#38bdf8"/><text x="65" y="100" fill="#7dd3fc" text-anchor="middle">RDS watch</text>
+                        <rect x="20" y="116" width="90" height="24" rx="12" fill="#26323a" stroke="#38bdf8"/><text x="65" y="132" fill="#7dd3fc" text-anchor="middle">EDS watch</text>
+                    </g>
+                    <rect x="180" y="55" width="120" height="52" rx="10" fill="#3a2a4a" stroke="#e91e63"/><text x="240" y="78" fill="#fff" text-anchor="middle" font-weight="700">GrpcMux</text><text x="240" y="95" fill="#bbb" text-anchor="middle">多路复用器</text>
+                    <path d="M110 32 Q150 40 180 62" stroke="#888" stroke-width="1.4" fill="none" marker-end="url(#a12)"/>
+                    <path d="M110 64 Q150 70 180 74" stroke="#888" stroke-width="1.4" fill="none" marker-end="url(#a12)"/>
+                    <path d="M110 96 Q150 92 180 86" stroke="#888" stroke-width="1.4" fill="none" marker-end="url(#a12)"/>
+                    <path d="M110 128 Q150 110 180 98" stroke="#888" stroke-width="1.4" fill="none" marker-end="url(#a12)"/>
+                    <rect x="330" y="66" width="150" height="30" rx="15" fill="#2a2a3a" stroke="#e91e63" stroke-dasharray="5 3"/><text x="405" y="85" fill="#fff" text-anchor="middle" font-weight="700">一条 gRPC 双向流</text>
+                    <path d="M300 81 L330 81" stroke="#e91e63" stroke-width="2" marker-end="url(#a12)"/>
+                    <rect x="500" y="55" width="120" height="52" rx="10" fill="#3a2a4a" stroke="#e91e63"/><text x="560" y="78" fill="#fff" text-anchor="middle" font-weight="700">控制面</text><text x="560" y="95" fill="#bbb" text-anchor="middle">按序下发(ADS)</text>
+                    <path d="M480 81 L500 81" stroke="#e91e63" stroke-width="2" marker-end="url(#a12)"/>
+                    <text x="240" y="165" fill="#34d399" text-anchor="middle" font-size="11">↑ 下发回来按 type_url 分发给对应 watch 的回调 ↑</text>
+                    <defs><marker id="a12" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#e91e63"/></marker></defs>
+                </svg>
+                <div class="cap">四类配置各是一个 watch，全部复用同一条 gRPC 流（ADS）；GrpcMux 收发并按 type_url 分发。</div>
+            </div>
+        </div>
+
         <section id="l05" class="section">
             <div class="section-header"><span class="section-number">L05</span><h1>GrpcMux 多路复用</h1></div>
             <div class="card">
@@ -130,6 +193,21 @@ class GrpcMux {
                 如果 LDS、CDS、RDS、EDS 各开一条独立连接，会有<strong>顺序问题</strong>：比如新集群（CDS）和它的端点（EDS）分别从两条流来，可能端点先到、集群还没到 → 短暂不一致甚至报错。<strong>ADS 把它们放一条流，管理服务器能<strong>控制下发顺序</strong>（先 CDS 后 EDS、先 LDS 后 RDS），保证配置更新时序一致、无中间态错误。</strong>这就是为什么生产环境几乎都用 ADS。<code>pausable_ack_queue.cc</code> 的可暂停 ACK 队列就是为保证这种依赖顺序服务的。</div>
             </div>
         </section>
+
+        <div class="card">
+            <p><strong>🚶 第一人称·你现在是一次配置热更新</strong>，跟着单步走查表走完闭环（以 CDS 新增一个集群为例）：</p>
+            <table class="k">
+                <tr><th>步</th><th>此刻发生什么</th><th>关键状态</th></tr>
+                <tr><td>1</td><td>建流 <code>establishNewStream()</code></td><td>gRPC 双向流就绪</td></tr>
+                <tr><td>2</td><td>发 Request：我要 Cluster 类资源</td><td>type_url=Cluster，首帧带 node</td></tr>
+                <tr><td>3</td><td>控制面推 <code>onDiscoveryResponse</code></td><td>resources=[user-service]，version=v7</td></tr>
+                <tr><td>4</td><td>解码成 <code>DecodedResource</code>，调 CDS 的 <code>onConfigUpdate</code></td><td>ClusterManager 新增该集群</td></tr>
+                <tr><td>5</td><td>应用成功 → 回 ACK</td><td>Request 带 version=v7 + 相同 nonce</td></tr>
+                <tr><td>✗</td><td>若第 4 步失败 → 回 NACK</td><td>带 error_detail，<b>保留旧配置继续跑</b></td></tr>
+            </table>
+            <div class="baby"><span class="t">记忆口诀：建流→订阅→下发→应用→确认</span>
+            五个字概括热更新闭环：<strong>「建、订、发、用、认」</strong>。全程进程不重启——这正是 D11 那句"改配置不停机"落到代码上的样子。断线了？<code>onStreamEstablished</code> 自动重连并重发所有 type_url 的订阅，恢复如初。</div>
+        </div>
 
         <section id="l07" class="section">
             <div class="section-header"><span class="section-number">L07</span><h1>热更新闭环</h1></div>

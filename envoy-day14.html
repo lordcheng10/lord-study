@@ -15,6 +15,24 @@
         .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
         .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        /* —— 改进版新增组件 —— */
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a78bfa;background:rgba(167,139,250,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa .t{font-weight:700;color:#a78bfa;display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#e91e63,#7c4dff);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#7c4dff}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
@@ -50,6 +68,17 @@
             <span class="part-label">Day 14 / 共 20 天 · 第 3 周 xDS 与上游</span>
             <h1 class="part-title">负载均衡</h1>
             <p class="part-desc">集群里有多个后端，一个请求该发给哪个？这就是负载均衡（LB）。今天看 <code>LoadBalancer::chooseHost</code> 接口，以及轮询、最少请求（P2C）、一致性哈希几种经典算法的实现。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周「xDS 与上游」（D13 选到了"哪组窗口"Cluster → 今天讲<b>从这组里挑哪个具体窗口</b>）</div>
+            <div class="steps">
+                <span class="st">D11 xDS 总览</span><span class="sep">→</span>
+                <span class="st">D12 配置订阅</span><span class="sep">→</span>
+                <span class="st">D13 集群管理</span><span class="sep">→</span>
+                <span class="st on">D14 负载均衡</span><span class="sep">→</span>
+                <span class="st">D15 健康检查/发现</span>
+            </div>
         </div>
 
         <section id="l01" class="section">
@@ -95,6 +124,48 @@ class RoundRobinLoadBalancer : public EdfLoadBalancerBase {
             </div>
         </section>
 
+        <div class="card">
+            <div class="ask"><span class="t">🤔 痛点："扫描所有窗口、选最闲的"听着最优，其实会翻车</span>
+            延续餐厅比喻：大堂经理想把新顾客派给"当前最空的窗口"。<strong>直觉做法是扫一遍所有窗口选最闲的——但两个问题：①窗口多时扫描慢（O(N)）；②"羊群效应"——所有服务员同一瞬间都把顾客往那个"最闲窗口"塞，一下把它挤爆。</strong></div>
+            <div class="essence"><span class="t">💡 本质：P2C = 随机瞄两个窗口，挑人少的那个</span>
+            <strong>Power of Two Choices：随机挑 2 个后端，选活跃请求更少的那个。</strong>只看 2 个（O(1) 超快），却能很好地近似"全局最少"；而且因为有随机性，不会所有人挤同一个——羊群效应消失。这是负载均衡领域著名的理论结果，Envoy 默认就用它。</div>
+            <div class="example"><span class="t">📝 举个例子：5 个后端的活跃请求数 [3,1,4,1,5]</span>
+            全局最少：所有 worker 同时都选到 index=1（值 1）→ 瞬间被打爆。<br>
+            P2C：worker A 随机抽到 [4,1]→选 1；worker B 随机抽到 [3,5]→选 3；worker C 抽到 [4,1(第4个)]→选第4个。<strong>负载被摊开，没人扎堆。</strong></div>
+            <div class="svgbox">
+                <svg viewBox="0 0 620 200" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                    <text x="155" y="18" fill="#f87171" text-anchor="middle" font-weight="700">❌ 全局选最少（羊群）</text>
+                    <g>
+                        <rect x="40" y="70" width="50" height="30" rx="6" fill="#2a2a3a" stroke="#555"/><text x="65" y="90" fill="#bbb" text-anchor="middle">3</text>
+                        <rect x="100" y="70" width="50" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="125" y="90" fill="#34d399" text-anchor="middle" font-weight="700">1</text>
+                        <rect x="160" y="70" width="50" height="30" rx="6" fill="#2a2a3a" stroke="#555"/><text x="185" y="90" fill="#bbb" text-anchor="middle">4</text>
+                        <rect x="220" y="70" width="50" height="30" rx="6" fill="#2a2a3a" stroke="#555"/><text x="245" y="90" fill="#bbb" text-anchor="middle">5</text>
+                    </g>
+                    <path d="M65 130 L120 102" stroke="#f87171" stroke-width="1.5" marker-end="url(#a14)"/>
+                    <path d="M155 130 L125 102" stroke="#f87171" stroke-width="1.5" marker-end="url(#a14)"/>
+                    <path d="M245 130 L128 103" stroke="#f87171" stroke-width="1.5" marker-end="url(#a14)"/>
+                    <text x="155" y="150" fill="#f87171" text-anchor="middle">3 个 worker 全挤向"1"→ 它被打爆</text>
+                    <line x1="310" y1="10" x2="310" y2="180" stroke="#444"/>
+                    <text x="470" y="18" fill="#34d399" text-anchor="middle" font-weight="700">✅ P2C（随机二选一）</text>
+                    <g>
+                        <rect x="360" y="70" width="50" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="385" y="90" fill="#34d399" text-anchor="middle">3</text>
+                        <rect x="420" y="70" width="50" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="445" y="90" fill="#34d399" text-anchor="middle">1</text>
+                        <rect x="480" y="70" width="50" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="505" y="90" fill="#34d399" text-anchor="middle">4</text>
+                        <rect x="540" y="70" width="50" height="30" rx="6" fill="#264a3a" stroke="#34d399"/><text x="565" y="90" fill="#34d399" text-anchor="middle">5</text>
+                    </g>
+                    <path d="M400 130 L390 102" stroke="#34d399" stroke-width="1.5" marker-end="url(#a14b)"/>
+                    <path d="M470 130 L445 102" stroke="#34d399" stroke-width="1.5" marker-end="url(#a14b)"/>
+                    <path d="M540 130 L505 102" stroke="#34d399" stroke-width="1.5" marker-end="url(#a14b)"/>
+                    <text x="470" y="150" fill="#34d399" text-anchor="middle">各抽 2 个选较闲的 → 负载摊开</text>
+                    <defs>
+                        <marker id="a14" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f87171"/></marker>
+                        <marker id="a14b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
+                    </defs>
+                </svg>
+                <div class="cap">左：全局选最少 → 所有请求扎堆同一个"最闲"节点（羊群效应）。右：P2C 随机二选一 → O(1) 且负载分散。</div>
+            </div>
+        </div>
+
         <section id="l04" class="section">
             <div class="section-header"><span class="section-number">L04</span><h1>最少请求 P2C</h1></div>
             <div class="card">
@@ -121,6 +192,21 @@ class RoundRobinLoadBalancer : public EdfLoadBalancerBase {
                 有些场景需要"同一用户的请求总落到同一后端"——比如后端在本地缓存了该用户的会话数据。<strong>一致性哈希（ring_hash/maglev）把后端排在一个哈希环上，请求按 key 哈希落到环上最近的后端。</strong>关键优点：<strong>某个后端挂了，只有它负责的那一小段 key 需要重新分配，其他用户不受影响</strong>（普通哈希取模会导致后端数变化时几乎所有 key 重新分配）。maglev 是 Google 的改进版，分布更均匀。这是"有状态服务"负载均衡的标准解法。</div>
             </div>
         </section>
+
+        <div class="card">
+            <p><strong>🧭 到底选哪个 LB？</strong>一张对照表帮你决策：</p>
+            <table class="k">
+                <tr><th>算法</th><th>什么时候用</th><th>一句话</th></tr>
+                <tr><td>round_robin</td><td>后端等价、无状态、想最简单公平</td><td>轮流发牌</td></tr>
+                <tr><td>least_request(P2C)</td><td>后端处理慢快不一（默认）</td><td>随机二选一挑闲的</td></tr>
+                <tr><td>ring_hash/maglev</td><td>要会话粘性（后端缓存了用户态）</td><td>老顾客总去熟悉的窗口</td></tr>
+                <tr><td>random</td><td>极简、量大、不在乎精细</td><td>随手一指</td></tr>
+                <tr><td>subset</td><td>先按元数据筛一批再 LB</td><td>先分区再挑</td></tr>
+            </table>
+            <div class="anno">⚠️ 常见误解：以为"轮询最公平所以最好"。其实轮询只在<b>每个请求耗时都差不多</b>时才公平；一旦有慢节点，轮询照样把请求塞给它 → 越塞越堵。<b>least_request(P2C)</b> 才会避开繁忙节点，所以 Envoy 默认用它。</div>
+            <div class="baby"><span class="t">口诀：等价轮询、快慢用 P2C、粘性用哈希</span>
+            权重不等时，以上算法都会走 <code>EdfLoadBalancerBase</code>（EDF 加权平滑，L05），保证"权重 3 的收 3 倍流量，却是 A B A A B 交错、不是 AAA…BBB"。</div>
+        </div>
 
         <section id="l07" class="section">
             <div class="section-header"><span class="section-number">L07</span><h1>LB 是扩展</h1></div>
