@@ -31,6 +31,11 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
         table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
         table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#e11d48}
         table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
@@ -105,6 +110,24 @@
                     <li>usage 累加回 <code>run.ts</code>（<code>UsageAccumulator</code>）。</li>
                 </ol>
                 <div class="anno">读法：<b>Day 07 的两层 failover 在最外面，本课的 attempt/prompt/subscribe 是"一次尝试"内部的事。</b>一次尝试失败 → Day 07 的循环换 profile/模型再来一次 attempt。层层嵌套但职责清晰。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 210" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">俄罗斯套娃：一层套一层，最里面才是"想+做"</text>
+                        <rect x="20" y="30" width="620" height="168" rx="10" fill="rgba(225,29,72,.06)" stroke="#e11d48"/>
+                        <text x="34" y="48" fill="#fb7185" font-weight="700">runWithModelFallback（Day 07 · 挂了换模型/profile）</text>
+                        <rect x="46" y="58" width="568" height="130" rx="9" fill="rgba(139,92,246,.07)" stroke="#8b5cf6"/>
+                        <text x="60" y="76" fill="#c4b5fd" font-weight="700">runEmbeddedPiAgent（enqueueSession 会话串行排队 · run.ts）</text>
+                        <rect x="70" y="86" width="520" height="94" rx="8" fill="rgba(14,165,233,.07)" stroke="#0ea5e9"/>
+                        <text x="84" y="104" fill="#7dd3fc" font-weight="700">runEmbeddedAttempt（体检+修复会话/建提示 · attempt.ts:1369）</text>
+                        <rect x="94" y="114" width="472" height="58" rx="8" fill="rgba(52,211,153,.09)" stroke="#34d399"/>
+                        <text x="330" y="134" fill="#6ee7b7" text-anchor="middle" font-weight="700">session.prompt()  ← Pi 的 ReAct 循环（想→调工具→看结果→再想）</text>
+                        <text x="330" y="152" fill="#94a3b8" text-anchor="middle">attempt.ts:2460 · OpenClaw 只"喂输入"</text>
+                        <text x="330" y="166" fill="#94a3b8" text-anchor="middle">subscribeEmbeddedPiSession 在旁"看输出"（订阅事件流）</text>
+                    </svg>
+                    <div class="cap">图注：failover 在最外层，最里层的 <code>session.prompt()</code> 才是真正的"想+做"；OpenClaw 管最内层的两端（喂输入 / 看输出）。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：一条"北京天气？"怎么穿过这几层</span>
+                入站 → 组装参数（<code>agent-runner-execution.ts</code>）→ 进 <code>runWithModelFallback</code>（先用 gpt-5，挂了才换）→ 进 <code>runEmbeddedPiAgent</code>（若你同时又发一条，它排队等这条跑完）→ 进 <code>runEmbeddedAttempt</code>（打开会话、拼系统提示、修好脏历史）→ 执行 <code>session.prompt("北京天气？")</code>：Pi 里模型想"要查天气"→调 weather 工具→拿到"晴 25°C"→再想"够了"→出文字。全程 <code>subscribe</code> 把"文字增量/工具结果/token 用量"转成回调推给渠道。输出 <code>"北京今天晴，25°C"</code>。</div>
             </div>
         </section>
 
@@ -114,6 +137,10 @@
                 <p><code>runEmbeddedPiAgent</code> 用 <code>enqueueSession</code>/<code>enqueueGlobal</code>（<code>run.ts:275-276</code>）把运行串行化。</p>
                 <div class="baby"><span class="t">为什么要排队？</span>
                 同一个会话的状态（消息历史）存在文件里。<strong>如果用户连发两条消息、两个 Agent 运行同时去读写同一个会话文件，就会写坏（竞态）。</strong>解决办法：<strong>同一会话的运行排成一队，一个跑完再跑下一个</strong>（enqueueSession）；某些全局资源还有全局队列（enqueueGlobal）。这和 Day 07 SuperAGI 的"状态存 DB"、LangGraph 的"检查点"一样，都是在解决"Agent 状态并发安全"这个共性问题——只是 OpenClaw 用"会话级串行队列"来解。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：那我连发三条消息，助理岂不是要等半天才理我？</p>
+                    <p class="a">👨‍🏫 老师：排队只针对<strong>同一个会话</strong>——你和助理这一条对话线里的消息按顺序处理，保证它不会把你第 2 句的答复写进第 1 句的历史里（写坏存档）。但<strong>不同会话之间是并行的</strong>：你在 Telegram 私聊 和 你在某个群里，是两条独立的队，互不阻塞。就像银行柜台：同一个人的业务得一笔一笔办（防止账目错乱），但多个柜台可以同时服务不同的人。</p>
+                </div>
             </div>
         </section>
 
