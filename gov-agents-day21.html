@@ -54,6 +54,19 @@
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fields { border:1px solid var(--border-color); border-radius:10px; overflow:hidden; margin:10px 0; }
+        .fields .fr { display:grid; grid-template-columns:210px 1fr; gap:0; border-bottom:1px solid var(--border-color); }
+        .fields .fr:last-child { border-bottom:none; }
+        .fields .fk { background:var(--bg-secondary); padding:8px 12px; font-family:'SF Mono',monospace; font-size:12px; color:var(--accent-cyan); }
+        .fields .fv { padding:8px 12px; font-size:12.5px; color:var(--text-secondary); }
+        @media(max-width:768px){ .fields .fr{grid-template-columns:1fr} }
+        .tradeoff{border-left:3px solid #eab308;background:rgba(234,179,8,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#eab308;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-family:'SF Mono',monospace;font-size:11px;color:var(--accent-purple);background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.25);border-radius:5px;padding:1px 7px;margin:2px 0}
+        .walk{border-left:3px solid #3b82f6;background:rgba(59,130,246,.05);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .walk .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
     </style>
 </head>
 <body>
@@ -246,15 +259,37 @@ uv run demo-agent run "你好"          # 跑通！</code></pre>
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>步骤 4 · 写你的业务图（核心）</h1></div>
             <div class="card">
-                <p>模板已是分层骨架（跟 Day 05 讲的标准 agent 结构一致）：<strong>节点在 <code>nodes/</code>，<code>builder.py</code> 只组装，共享字段在 <code>state.py</code></strong>。改 <code>nodes/run.py</code> 那个 demo 节点为你的逻辑：</p>
-<pre><code class="language-python"># demo_agent/nodes/run.py
-from ..state import AgentState
-def run_node(state: AgentState) -&gt; AgentState:
+                <p>模板已是分层骨架（跟 Day 05 讲的标准 agent 结构一致）：<strong>节点在 <code>nodes/</code>，<code>builder.py</code> 只组装，共享字段在 <code>state.py</code></strong>。别对着示意图脑补——直接读模板里的真代码。先看它的黑板 <span class="fileref">examples/standalone-agent-template/your_agent/state.py</span>，薄得只有两个字段：</p>
+<pre><code class="language-python">class AgentState(TypedDict, total=False):     # state.py
+    input: str
+    output: str
+    # ← 加你的中间字段,例如:parsed: dict / findings: list / verdict: str</code></pre>
+                <p>再看示例节点 <span class="fileref">your_agent/nodes/run.py</span>——这是模板里的<strong>完整真实代码</strong>（不是简化版），它悄悄替你处理了"没配 key"的情况：</p>
+<pre><code class="language-python"># your_agent/nodes/run.py —— 示例节点(完整)
+def run_node(state: AgentState) -> AgentState:
     text = state.get("input", "")
-    # ← 这里换成你的活：调下游 / 解析 / 生成 ...
-    out = get_llm("sonnet").invoke([HumanMessage(content=text)]).content
+    try:
+        from ai_trust_toolkit.llm import get_llm            # ← 走 toolkit 注入点
+        from langchain_core.messages import HumanMessage, SystemMessage
+        resp = get_llm("sonnet").invoke(
+            [SystemMessage(content=RUN_SYSTEM), HumanMessage(content=text)])
+        out = getattr(resp, "content", str(resp))
+        if isinstance(out, list):                           # content block list 兼容
+            out = next((b.get("text", "") for b in out if isinstance(b, dict)), str(out))
+    except Exception:   # noqa: BLE001 — 无 key / 无依赖 · 回显
+        out = f"(echo · 未接 LLM){text}"
     return {"output": out}</code></pre>
-                <p>多步流程（scan→处理→verify→report）：<strong>每个节点一个 <code>nodes/*.py</code></strong>，在 <code>builder.py</code> 用 <code>StateGraph</code> 串（就是 gov-agents Day 03/05 学的那套）。节点间传的字段加到 <code>state.py</code>。</p>
+                <div class="walk"><span class="t">🔍 逐行走读</span>
+                <strong>①</strong> 从黑板取 <code>input</code>。<strong>②</strong> <code>get_llm("sonnet")</code>——回扣 Day 11 铁律：<strong>业务代码永远不 import anthropic，只走 toolkit 的 <code>get_llm</code></strong>，成本/观测/FakeLLM 全自动接。<strong>③</strong> 那个 <code>if isinstance(out, list)</code> 是处理"新版 Anthropic 返回 content block 列表"的兼容层。<strong>④</strong> 最关键——整段包在 <code>try/except</code> 里，<strong>没 key 或缺依赖时不报错，回显 <code>(echo)你好</code></strong>。这就是为什么 L05 说"没填 key 也能跑通"：降级逻辑就写在这。</div>
+                <p>最后看组装图 <span class="fileref">your_agent/builder.py</span>——单节点 demo，就是 Day 03 那套 <code>StateGraph → add_node → set_entry_point → add_edge → compile</code>：</p>
+<pre><code class="language-python">def build_graph() -> Any:                     # builder.py
+    from langgraph.graph import END, StateGraph
+    g = StateGraph(AgentState)
+    g.add_node("run", run_node)
+    g.set_entry_point("run")
+    g.add_edge("run", END)
+    return g.compile()</code></pre>
+                <p>多步流程（scan→处理→verify→report）：<strong>每个节点一个 <code>nodes/*.py</code></strong>，在 <code>builder.py</code> 里多 <code>add_node</code> + <code>add_edge</code> 串起来，节点间传的字段加到 <code>state.py</code>。跟 monorepo 内的 agent 一模一样——<strong>学会 Day 05 那户，这里零成本迁移。</strong></p>
                 <p>skill 给了几条"要更复杂时怎么长"的指引，正好回扣前面学的模块：</p>
                 <table>
                     <thead><tr><th>需求</th><th>怎么做（对应 gov-agents 教程）</th></tr></thead>
@@ -274,11 +309,102 @@ def run_node(state: AgentState) -&gt; AgentState:
             <div class="section-header"><span class="section-number">L07</span><h1>步骤 5-7 · telemetry / 形态 / 测</h1></div>
             <div class="card">
                 <h3>步骤 5 · 接 telemetry（让平台看见你的效果）</h3>
-                <p><code>core.py</code> 跑完图后已有这段，把 key 换成你的领域指标：</p>
-<pre><code class="language-python">with bind_effect():
-    record_effect("done", 1)          # ← 换成你的：upgraded / scanned / reviewed ...
-    push_invoke_metrics(result, form="cli")</code></pre>
-                <p>✅ 期望：跑完后平台 <code>/agents/demo-agent</code> 几分钟内出现一条调用 + 你的效果数。本地调试不想上报加 <code>--no-telemetry</code>。这正是 gov-agents Day 11 讲的 <code>record_effect</code>/ContextVar 自动采集。</p>
+                <p>模板的 <span class="fileref">your_agent/core.py</span> 里已经写好了"跑图 + 上报"的整套包装（<code>run_agent</code>），你只需把效果 key 换成自己的。先读它的真实核心：</p>
+<pre><code class="language-python"># your_agent/core.py —— 形态无关的 invoke 包装
+def run_agent(initial_state, *, form="cli", telemetry=True, ...) -> RunResult:
+    start = time.monotonic()
+    graph = (graph_factory or build_graph)()
+    final = graph.invoke(initial_state, config={"recursion_limit": 50})
+    success = bool(final.get("output"))          # ← 换成你的"成功"判定
+    result = RunResult(success=success, status="ok" if success else "failsafe",
+                       duration_ms=int((time.monotonic()-start)*1000), final_state=final)
+    if telemetry:
+        _report(result, form)
+    return result
+
+def _report(result: RunResult, form: str) -> None:
+    """上报 portal KPI · best-effort · 失败静默(toolkit 缺失/网络都不抛)。"""
+    try:
+        from ai_trust_toolkit import bind_effect, record_effect
+        from ai_trust_toolkit.portal_telemetry import push_invoke_metrics
+        with bind_effect():
+            if result.success:
+                record_effect("done", 1)         # ← 换成你的领域效果 key(upgraded / scanned)
+            push_invoke_metrics(result, form=form)
+    except Exception:  # noqa: BLE001 — telemetry 不阻断业务
+        pass</code></pre>
+                <div class="walk"><span class="t">🔍 逐行走读：三个动作 + 一层保险</span>
+                <strong>①</strong> <code>run_agent</code> 跑完图，把耗时/成功与否打包成一个 <code>RunResult</code> dataclass。<strong>②</strong> <code>_report</code> 里 <code>with bind_effect():</code> 开一个"效果累加器"，<code>record_effect("done", 1)</code> 记一笔领域效果。<strong>③</strong> <code>push_invoke_metrics(result, form)</code> 把这次调用连同效果推给平台。<strong>④ 整个 <code>_report</code> 包在 <code>try/except Exception: pass</code> 里</strong>——这是本篇最该记住的一行：<strong>telemetry 挂了（没装 toolkit、网络断、平台宕），你的业务照跑，一声不吭。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 180" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：上报靠两样东西拼出 payload</text>
+                        <rect x="30" y="34" width="250" height="130" rx="10" fill="rgba(139,92,246,.07)" stroke="#8b5cf6"/>
+                        <text x="155" y="54" fill="#c4b5fd" text-anchor="middle" font-weight="700">RunResult dataclass (core.py)</text>
+                        <text x="155" y="76" fill="#cbd5e1" text-anchor="middle">success: bool</text>
+                        <text x="155" y="93" fill="#cbd5e1" text-anchor="middle">status: ok | critic_reject | failsafe</text>
+                        <text x="155" y="110" fill="#cbd5e1" text-anchor="middle">duration_ms: int</text>
+                        <text x="155" y="127" fill="#cbd5e1" text-anchor="middle">workspace_hash / token_usage</text>
+                        <text x="155" y="150" fill="#64748b" text-anchor="middle">→ push 用 getattr 逐个取</text>
+                        <rect x="360" y="34" width="250" height="130" rx="10" fill="rgba(6,182,212,.07)" stroke="#06b6d4"/>
+                        <text x="485" y="54" fill="#67e8f9" text-anchor="middle" font-weight="700">effect ContextVar (effect.py)</text>
+                        <text x="485" y="76" fill="#cbd5e1" text-anchor="middle">_current_effect: dict|None</text>
+                        <text x="485" y="93" fill="#cbd5e1" text-anchor="middle">bind_effect() 进块塞空 dict</text>
+                        <text x="485" y="110" fill="#cbd5e1" text-anchor="middle">record_effect("done",1) 累加</text>
+                        <text x="485" y="127" fill="#cbd5e1" text-anchor="middle">没 bind → None → no-op</text>
+                        <text x="485" y="150" fill="#64748b" text-anchor="middle">→ 主路径 · 覆盖 result</text>
+                        <text x="320" y="176" fill="#94a3b8" text-anchor="middle">payload.metrics = _collect_effect_metrics(result)：ContextVar 优先 · result.effect_metrics 兜底 · 两空为 None</text>
+                    </svg>
+                    <div class="cap">图注：通用字段来自 RunResult（getattr 取），领域效果来自 ContextVar 累加——合并成一次上报的 payload。</div>
+                </div>
+                <p>那 <code>record_effect</code> 到底怎么工作？翻 toolkit 真源码 <span class="fileref">ai_trust_toolkit/effect.py:50</span>：</p>
+<pre><code class="language-python">_current_effect: ContextVar[dict|None] = ContextVar("...", default=None)  # effect.py:29
+
+def record_effect(key: str, n: float = 1) -> None:          # effect.py:50
+    acc = _current_effect.get()
+    if acc is None:
+        return          # ← AC-1.4 · 没 bind_effect / 非 invoke 路径 · 静默 no-op 不抛
+    if not isinstance(key, str) or not key:
+        return
+    acc[key] = acc.get(key, 0.0) + float(n)                 # 同 invoke 内多次调累加</code></pre>
+                <div class="essence"><span class="t">💡 逐行讲：为什么它是 ContextVar，且"没 bind 就 no-op"？</span>
+                <code>_current_effect</code> 是一个 <strong>ContextVar</strong>（任务本地变量）——<code>bind_effect()</code> 那个 <code>with</code> 块进去时给它塞个空 dict，块内不管在哪个节点、哪个并发子任务里调 <code>record_effect</code>，都累加到同一个 dict（LangGraph 并发节点会 copy 上下文，所以并发也正确，跟 Day 11 的成本记账 <code>_current_tracker</code> 是同一套范式）。<strong>关键那句 <code>if acc is None: return</code></strong>：如果你在非 invoke 路径（比如单元测试、脚本里）误调 <code>record_effect</code>，它不会炸，直接静默 no-op。<strong>这保证了"埋点代码放哪都安全"。</strong></div>
+                <p>再看上报函数 <span class="fileref">ai_trust_toolkit/portal_telemetry.py:100</span> 的两处硬约束：</p>
+<pre><code class="language-python">DEFAULT_PORTAL_URL = "https://gov-agents-platform.bmaicsaws-prod.com/portal/v1"  # :34
+_TIMEOUT_S = 2  # AC-TELEMETRY.9 · 不可改 · 防 portal 慢拖业务                    # :35
+
+def push_invoke_metrics(result, form, ...) -> None:          # portal_telemetry.py:100
+    payload = { "agent_id": agent_id, "deploy_form": form,
+        "duration_ms": getattr(result, "duration_ms", 0),    # ← 全走 getattr · 缺字段给默认
+        "success": getattr(result, "success", False),
+        "metrics": _collect_effect_metrics(result), ... }
+    try:
+        urllib.request.urlopen(req, timeout=_TIMEOUT_S)      # 2s 超时
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        log.debug("telemetry push failed (silent): %s", e)   # ← AC-TELEMETRY.8 · 静默</code></pre>
+                <div class="tradeoff"><span class="t">⚖️ 设计取舍①：为什么上报超时写死 2 秒、且注释"不可改"？</span>
+                telemetry 是"锦上添花"，绝不能变成"业务的拖累"。如果平台大屏那台服务器变慢，你的 agent 每次跑完都卡在上报上等 30 秒，用户就会骂"这 agent 怎么这么慢"。写死 <code>_TIMEOUT_S = 2</code> 且标"不可改"，就是<strong>给"给别人看的用量表"设一个死线——2 秒推不上去就放弃，绝不拖累"你自己的活"</strong>。次要功能永远不能拖累主要功能。</div>
+                <div class="tradeoff"><span class="t">⚖️ 设计取舍②：为什么 payload 全用 <code>getattr(result, "x", default)</code> 取字段，而不是直接 <code>result.x</code>？</span>
+                因为 <code>push_invoke_metrics</code> 要能吃<strong>任何形状的 result</strong>——你的 <code>RunResult</code>、bmc-agent 的 result、甚至一个普通 dict-like。用 <code>getattr(..., 默认值)</code>，<strong>某个 agent 没有 <code>duration_ms</code> 字段也不会崩，给个默认值继续</strong>。这就是"鸭子类型 + 优雅缺省"：上报函数不强求调用者的类型，谁都能用、老 agent 加了新字段也向后兼容（回扣 Day 20 那条 <code>effect_metrics</code> proposal 里说的 "老 agent 无字段走 None · BC"）。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：两路效果指标冲突时谁赢？</span>
+                <code>_collect_effect_metrics</code>（<span class="fileref">portal_telemetry.py:72</span>）合并两个来源：<code>result.effect_metrics</code>（兜底）和 ContextVar 累加值（主）。源码里明确 <strong>ContextVar 优先覆盖 result</strong>，且<strong>两路都空时返回 <code>None</code> 而不是空 dict</strong>（<code>return merged or None</code>）——空 dict 和 None 在下游语义不同，这个细节避免了"上报一个空 metrics 让平台以为有数据但都是 0"。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：run_agent 一次调用的 telemetry 旁路</text>
+                        <rect x="30" y="40" width="120" height="40" rx="8" fill="rgba(139,92,246,.12)" stroke="#8b5cf6"/><text x="90" y="58" fill="#c4b5fd" text-anchor="middle" font-weight="700">graph.invoke</text><text x="90" y="72" fill="#94a3b8" text-anchor="middle">跑业务图</text>
+                        <rect x="185" y="40" width="120" height="40" rx="8" fill="rgba(6,182,212,.12)" stroke="#06b6d4"/><text x="245" y="58" fill="#67e8f9" text-anchor="middle" font-weight="700">RunResult</text><text x="245" y="72" fill="#94a3b8" text-anchor="middle">打包耗时/成功</text>
+                        <rect x="340" y="40" width="130" height="40" rx="8" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/><text x="405" y="58" fill="#fbbf24" text-anchor="middle" font-weight="700">_report(try)</text><text x="405" y="72" fill="#94a3b8" text-anchor="middle">record_effect</text>
+                        <rect x="505" y="40" width="110" height="40" rx="8" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/><text x="560" y="58" fill="#fbbf24" text-anchor="middle" font-weight="700">POST portal</text><text x="560" y="72" fill="#94a3b8" text-anchor="middle">2s 超时</text>
+                        <path d="M150 60 L183 60 M305 60 L338 60 M470 60 L503 60" stroke="#64748b" stroke-width="1.3" marker-end="url(#at)"/>
+                        <rect x="185" y="120" width="285" height="40" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/><text x="327" y="138" fill="#86efac" text-anchor="middle" font-weight="700">return RunResult → 用户拿到结果</text><text x="327" y="152" fill="#94a3b8" text-anchor="middle">业务主线 · 不等 telemetry</text>
+                        <path d="M245 80 L300 118" stroke="#22c55e" stroke-width="1.4" marker-end="url(#at)"/>
+                        <path d="M560 80 Q560 175 475 140" fill="none" stroke="#ef4444" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#atr)"/>
+                        <text x="470" y="195" fill="#f87171" text-anchor="middle">上报超时/报错 → except pass → 业务无感</text>
+                        <defs><marker id="at" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker>
+                        <marker id="atr" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#ef4444"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：telemetry 是主线之外的"旁路"——推得上就上，推不上(2s 超时/报错)就 except pass，业务结果照常返回。</div>
+                </div>
+                <p>✅ 期望：跑完后平台 <code>/agents/demo-agent</code> 几分钟内出现一条调用 + 你的效果数。本地调试不想上报加 <code>--no-telemetry</code>（CLI 里 <code>run_agent(..., telemetry=not no_telemetry)</code>，见 <span class="fileref">your_agent/cli.py</span>）。这正是 gov-agents Day 11 讲的 <code>record_effect</code>/ContextVar 自动采集。</p>
                 <h3>步骤 6 · 选额外入口形态（按需，多选叠加）</h3>
                 <p><strong>先 CLI 跑通业务，形态后加不返工</strong>（模板都预留好了）：</p>
                 <table class="forms-tbl">
