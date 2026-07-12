@@ -3,254 +3,350 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 11 · Flow 事件驱动编排 — CrewAI 源码学习</title>
+    <title>Day 11 · 工具处理 tools_handler 与缓存 — CrewAI 60 天源码深度</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        .vs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
-        .vs .c{border-radius:10px;padding:14px;border:1px solid var(--border-color)}
-        .vs .c.a{border-color:#ef4444;background:rgba(239,68,68,.05)} .vs .c.b{border-color:#8b5cf6;background:rgba(139,92,246,.05)}
-        .vs .c h4{margin:0 0 6px;font-size:13px} .vs .c.a h4{color:#ef4444} .vs .c.b h4{color:#8b5cf6} .vs .c li{font-size:11.5px;color:var(--text-secondary);margin:4px 0}
-        .layers{display:flex;flex-direction:column;gap:8px;margin:12px 0}
-        .layers .ly{border-radius:9px;padding:11px 14px;border:1px solid var(--border-color);background:var(--bg-secondary);font-size:12.5px}
-        .layers .ly b{color:#8b5cf6}
-        @media(max-width:768px){.vs{grid-template-columns:1fr}}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
         .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
-        .journey .st.on{background:linear-gradient(135deg,#8b5cf6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
     <nav class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">11</div>
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">11</div>
             <h2>Day 11</h2>
-            <p class="version">Flow 事件驱动编排 · 8 讲</p>
+            <p class="version">工具处理与缓存 · 7 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Flow 是什么</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Flow vs Crew</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 一个最小 Flow</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三段式架构</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 事件驱动的执行</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Flow 里内嵌 Crew</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 防死循环</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要缓存工具结果</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ToolCalling + ToolsHandler</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · on_tool_use 写缓存</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · CacheHandler 与读写锁</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 执行前先查缓存</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · cache_function 决定缓不缓</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 取舍 · 边界 · 小结</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="crewai-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 任务输出</a></li>
-            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="crewai-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 装饰器 &rarr;</a></li>
+            <li><a href="crewai-day10.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 10 单步执行</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day12.html" class="nav-link" style="color:var(--accent-green);">Day 12 LiteAgent &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 11 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
-            <h1 class="part-title">Flow：事件驱动编排</h1>
-            <p class="part-desc">CrewAI 的第二种范式。Crew 是"让 Agent 自主协作"，Flow 是"你精确控制步骤顺序"的确定性事件驱动工作流。今天讲它是什么、与 Crew 的区别、三段式架构。</p>
+            <span class="part-label">Day 11 / 共 60 天 · 阶段2 Agent 深入</span>
+            <h1 class="part-title">tools_handler 与缓存：让"同样的工具调用"不白花第二次钱</h1>
+            <p class="part-desc">前几天 <code>tools_handler</code> 和"工具缓存"反复出现，今天专门拆它。<code>agents/tools_handler.py</code> 只有 50 行，配合 <code>agents/cache/cache_handler.py</code> 的读写锁缓存，构成一套<strong>"同工具 + 同输入 → 直接返回上次结果"</strong>的机制。看懂它，你就理解了 Day 07 那个 <code>cache=True</code> 到底在缓存什么、怎么保证线程安全、以及 <code>cache_function</code> 怎么让你精细控制"哪次该缓、哪次别缓"。</p>
         </div>
 
-        <!-- 全程进度定位条 -->
         <div class="journey">
-            <div class="jt">📍 你在整门课的位置（第 3 周 Flow / 工具 / LLM 开篇）</div>
+            <div class="jt">📍 你在 60 天里的位置（阶段2 Agent 深入 · 共 6 天）</div>
             <div class="steps">
-                <span class="st">Task 输出与护栏（W2）</span><span class="sep">·</span>
-                <span class="st on">Flow 编排</span><span class="sep">·</span>
-                <span class="st">Flow 装饰器</span><span class="sep">·</span>
-                <span class="st">状态持久化</span><span class="sep">·</span>
-                <span class="st">工具 / LLM</span>
+                <span class="st">阶段1 入门 D01-06</span><span class="sep">→</span>
+                <span class="st">D07 全字段</span><span class="sep">→</span>
+                <span class="st">D08 执行循环</span><span class="sep">→</span>
+                <span class="st">D09 输出解析</span><span class="sep">→</span>
+                <span class="st">D10 单步执行</span><span class="sep">→</span>
+                <span class="st on">D11 工具缓存</span><span class="sep">→</span>
+                <span class="st">D12 LiteAgent</span><span class="sep">→</span>
+                <span class="st">阶段3 Task</span>
             </div>
         </div>
 
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        工具缓存就像办公室里一本<strong>"常见问题速查本"</strong>。有人问"3 号楼 WiFi 密码多少"，前台第一次真的跑去问了 IT，把答案<strong>记在速查本上</strong>；下次再有人问<strong>同样的问题</strong>，前台翻速查本直接答，不用再跑一趟。<code>ToolsHandler</code> 就是这个"前台 + 速查本"的组合：工具跑完，它把 <code>问题(工具名+输入) → 答案(输出)</code> 记进本子；下次遇到一模一样的问题，直接翻本子。省下的就是一次 API 调用的钱和时间。今天就看这本速查本怎么写、怎么查、怎么保证多人同时用不打架。</div>
+
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>Flow 是什么</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：Agent 反复调同一个工具，钱和时间都在漏</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点：Crew 结果"不可控"，但我要的是精确流程怎么办？</span>
-                Crew 让 Agent 自主协作，产出有创造力——但也<strong>不确定</strong>：每次跑步骤顺序可能不同，很难保证"必须先分类、再判断、投诉才生成回复、最后发送"这种<strong>严格固定的流程</strong>。真实业务里很多环节是死规矩，不能让 AI 随性发挥。<strong>能不能有一种"我来定步骤顺序、AI 只在某几步发挥"的编排？</strong></div>
-                <div class="essence"><span class="t">💡 一句话本质：Flow = 事件驱动的状态机/工作流</span>
-                <strong>Flow 就像摆好的一排多米诺骨牌</strong>：你事先精确摆好顺序，推倒第一张（kickoff），后面就"这张倒了自动撞倒下一张"连锁推进——路线是你摆死的、绝不会乱。<strong>而 Crew 更像一支放养的团队</strong>：你只给目标，谁先干、怎么配合让他们自己决定（结果有创造力但不确定）。<strong>Crew = 让 Agent 自己决定怎么干（涌现）；Flow = 你摆好骨牌顺序，把 Crew/Agent 当其中一张牌（确定）。</strong></div>
-                <p><strong>Flow（工作流）</strong>是较新的、<strong>事件驱动、确定性</strong>的编排范式。你用装饰器把一组普通方法连成一张图，引擎按"某方法完成 → 触发监听它的方法"精确推进。<code>Flow</code> 类在 <code>flow/flow.py:33</code>。</p>
-                <div class="baby"><span class="t">先建直觉</span>
-                Flow 像你画的一张<strong>流程图</strong>：<code>开始 → 步骤A → (成功?) → 步骤B / 步骤C</code>。你精确规定了"先做什么、哪一步完成后触发哪一步、什么条件走哪条分支"。<strong>Flow 本身不需要 LLM 决策——路线是你写死的。</strong>但 Flow 的某一步内部可以调用一个 Crew 或 Agent（让 AI 在那一步自主发挥）。<strong>一句话：Crew = 让 Agent 自己决定怎么干；Flow = 你决定步骤顺序，把 Crew/Agent 当成其中一步。</strong></div>
+                <div class="ask"><span class="t">🤔 痛点</span>ReAct 循环里 Agent 会<strong>反复调工具</strong>。想象一个循环转了 10 圈，其中 3 圈都调了 <code>search("CrewAI 是什么")</code>——同样的工具、同样的输入，结果必然一样，可每次都真去执行：如果是收费 API，就是<strong>白花 3 次钱</strong>；如果是慢查询，就是<strong>白等 3 次</strong>。更别说多个 Agent、多个任务里的重复调用。有没有办法"同样的调用只真跑一次，之后直接取结果"？</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                工具缓存 = 一个 <strong><code>{"工具名-输入": 输出}</code> 的字典</strong>。执行工具<strong>前</strong>先按这个 key 查字典：命中就直接返回旧结果（不执行）；没命中才真执行，再把结果写进字典。<code>ToolsHandler</code> 负责"写"，<code>CacheHandler</code> 是那个字典本身（还带线程安全的读写锁）。<strong>一句话：拿"工具名+输入"当钥匙，缓存输出。</strong></div>
+                <p>先看 <code>ToolsHandler</code> 的字段（<span class="fileref">tools_handler.py:15</span>），麻雀虽小：</p>
+<pre><code class="language-python"># tools_handler.py:15
+class ToolsHandler(BaseModel):
+    """Callback handler for tool usage."""
+    cache: CacheHandler | None = Field(default=None)             # 那本"速查本"
+    last_used_tool: ToolCalling | InstructorToolCalling | None = Field(default=None)  # 最近一次调用</code></pre>
+                <div class="baby"><span class="t">大白话</span><code>ToolsHandler</code> 就两个属性：一个 <code>cache</code>（速查本，可能没有），一个 <code>last_used_tool</code>（记住"最近调的是哪个工具"，用于训练/审计）。它自己不存数据，真正的字典在 <code>CacheHandler</code> 里。<code>ToolsHandler</code> 是"前台"，<code>CacheHandler</code> 是"本子"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>Flow vs Crew</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>ToolCalling：一次工具调用长什么样</h1></div>
             <div class="card">
-                <div class="vs">
-                    <div class="c a"><h4>👥 Crew</h4>
-                        <ul><li>自主 Agent 团队</li><li>行为<b>涌现式/非确定</b></li><li>你给目标，AI 决定过程</li><li>适合开放、创造性任务</li></ul>
-                    </div>
-                    <div class="c b"><h4>🔀 Flow</h4>
-                        <ul><li>事件驱动的方法图</li><li>行为<b>确定/可控</b></li><li>你写死步骤和分支</li><li>适合流程固定、要精确控制</li></ul>
-                    </div>
+                <p>缓存的 key 从"一次调用"里提取，所以先看"一次调用"的数据结构（<span class="fileref">tools/tool_calling.py:11</span>）：</p>
+<pre><code class="language-python"># tools/tool_calling.py:11
+class ToolCalling(BaseModel):
+    tool_name: str = Field(..., description="The name of the tool to be called.")
+    arguments: dict[str, Any] | None = Field(
+        ..., description="A dictionary of arguments to be passed to the tool.")
+
+class InstructorToolCalling(PydanticBaseModel):
+    tool_name: str = PydanticField(..., description="The name of the tool to be called.")
+    arguments: dict[str, Any] | None = PydanticField(
+        ..., description="A dictionary of arguments to be passed to the tool.")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>tool_name</code><span>调哪个工具。缓存 key 的前半段。</span></div>
+                    <div class="r"><code>arguments (dict)</code><span>传给工具的参数字典。缓存 key 的后半段——参数不同，就是不同的调用，不能共用缓存。</span></div>
+                    <div class="r"><code>两个几乎一样的类</code><span><code>ToolCalling</code> 和 <code>InstructorToolCalling</code> 结构相同，区别在<b>由谁生成</b>：一个是框架内部解析出的，一个是 <code>instructor</code> 库（结构化输出）生成的。缓存逻辑对两者一视同仁。</span></div>
                 </div>
-                <div class="baby"><span class="t">💬 对话体：三个最常见的疑问</span>
-                <strong>问：Flow 不用 LLM，那它还算"AI 框架"吗？</strong><br>答：Flow 本身是纯确定性的"骨牌摆放器"，不需要 LLM 决策；但它的<strong>某一张牌（某个方法）内部可以调用 Crew/Agent</strong>，让 AI 在那一步发挥。骨架确定、局部智能。<br>
-                <strong>问：那我干嘛不直接写普通 Python 函数互相调用？</strong><br>答：可以，但步骤一多、还带条件分支和"等多个前置完成"时，手写调用会绕成一团。Flow 用装饰器<strong>声明</strong>触发关系，一眼看清谁触发谁，还自带并行、竞速、防死循环。<br>
-                <strong>问：什么时候用 Crew、什么时候用 Flow？</strong><br>答：开放创造性任务（写报告、做研究）用 <strong>Crew</strong>；流程固定要精确控制（读邮件→分类→投诉才生成回复→发送）用 <strong>Flow</strong>。实践中常组合（L06）。</div>
-                <div class="svgbox">
-                    <svg viewBox="0 0 880 250" width="100%" style="max-width:880px;display:block;margin:0 auto" font-family="system-ui,sans-serif">
-                        <!-- Crew 侧 -->
-                        <rect x="12" y="20" width="410" height="210" rx="12" fill="rgba(239,68,68,.05)" stroke="#ef4444" stroke-dasharray="4 3"/>
-                        <text x="28" y="42" fill="#ef4444" font-size="13" font-weight="700">👥 Crew：自主协作（非确定）</text>
-                        <circle cx="120" cy="120" r="34" fill="#3a1a1a" stroke="#ef4444"/><text x="120" y="124" fill="#fff" text-anchor="middle" font-size="11.5" font-weight="700">Agent A</text>
-                        <circle cx="300" cy="95" r="34" fill="#3a1a1a" stroke="#ef4444"/><text x="300" y="99" fill="#fff" text-anchor="middle" font-size="11.5" font-weight="700">Agent B</text>
-                        <circle cx="230" cy="185" r="34" fill="#3a1a1a" stroke="#ef4444"/><text x="230" y="189" fill="#fff" text-anchor="middle" font-size="11.5" font-weight="700">Agent C</text>
-                        <path d="M152 112 L268 100" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 3"/>
-                        <path d="M138 150 L212 168" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 3"/>
-                        <path d="M262 175 L288 125" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 3"/>
-                        <text x="217" y="222" fill="#bbb" text-anchor="middle" font-size="10.5">谁跟谁聊、什么顺序 → AI 自己决定</text>
-                        <!-- Flow 侧 -->
-                        <rect x="458" y="20" width="410" height="210" rx="12" fill="rgba(139,92,246,.05)" stroke="#8b5cf6" stroke-dasharray="4 3"/>
-                        <text x="474" y="42" fill="#8b5cf6" font-size="13" font-weight="700">🔀 Flow：事件驱动链条（确定）</text>
-                        <rect x="480" y="90" width="110" height="48" rx="8" fill="#2a1a3a" stroke="#8b5cf6"/><text x="535" y="112" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">@start</text><text x="535" y="128" fill="#bbb" text-anchor="middle" font-size="10">fetch_data</text>
-                        <path d="M590 114 L636 114" stroke="#8b5cf6" stroke-width="2" marker-end="url(#f11)"/>
-                        <text x="613" y="106" fill="#a78bfa" text-anchor="middle" font-size="9.5">返回值</text>
-                        <rect x="636" y="90" width="120" height="48" rx="8" fill="#2a1a3a" stroke="#8b5cf6"/><text x="696" y="108" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">@listen</text><text x="696" y="124" fill="#bbb" text-anchor="middle" font-size="10">process(data)</text>
-                        <text x="663" y="180" fill="#bbb" text-anchor="middle" font-size="10.5">A 完成→发事件→触发 B，顺序你写死</text>
-                        <defs>
-                            <marker id="f11" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#8b5cf6"/></marker>
-                        </defs>
-                    </svg>
-                    <div class="cap">左：Crew 是一群 Agent 自主协作，顺序涌现、不确定；右：Flow 是 @start→@listen 的确定链条，上游返回值喂给下游，顺序由你写死。</div>
-                </div>
+                <div class="essence"><span class="t">💡 为什么 key 要"工具名 + 参数"两部分？</span>因为缓存的正确前提是"<strong>相同输入必然相同输出</strong>"。同一个工具，参数不同结果就不同（<code>search("A")</code> 和 <code>search("B")</code> 显然不能共用结果）。所以 key 必须同时包含<strong>调哪个工具</strong>和<strong>用什么参数</strong>——两者都一样，才算"同一次调用"，才能复用结果。这是所有"记忆化（memoization）"缓存的通用规则：key = 所有影响输出的输入。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>一个最小 Flow</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>on_tool_use：工具跑完，把结果记进速查本</h1></div>
             <div class="card">
-<pre><code class="language-python">from crewai.flow import Flow, start, listen
-
-class MyFlow(Flow):
-    @start()                          # 入口点
-    def fetch_data(self):
-        return "原始数据"
-
-    @listen(fetch_data)               # 监听：fetch_data 完成后触发
-    def process(self, data):          # data 就是 fetch_data 的返回值
-        return f"处理后的：{data}"
-
-result = MyFlow().kickoff()           # 开工
-</code></pre>
-                <div class="anno">读法：<b><code>@start()</code> 标记入口方法，<code>@listen(fetch_data)</code> 标记"fetch_data 完成后我就执行"。</b>上游方法的返回值作为参数传给下游（<code>data</code>）。你不用手写"调完 fetch_data 再调 process"——装饰器声明了这个"接线"，引擎自动按事件推进。</div>
-                <div class="example"><span class="t">📝 跑一遍上面的 MyFlow，看返回值怎么"流"</span>
-                <code>MyFlow().kickoff()</code> 执行时：<br>
-                ① <code>@start</code> 的 <code>fetch_data()</code> 先跑 → 返回 <code>"原始数据"</code><br>
-                ② 引擎发现 <code>process</code> 在 <code>@listen(fetch_data)</code> → 自动调用 <code>process("原始数据")</code>（上游返回值当参数 <code>data</code>）<br>
-                ③ <code>process</code> 返回 <code>"处理后的：原始数据"</code> → 没有下游监听器了，作为最终结果<br>
-                <strong>输入：无 → 输出：<code>处理后的：原始数据</code></strong>。你全程没写"先调谁再调谁"，是装饰器 + 引擎按事件自动接力。</div>
-                <div class="baby"><span class="t">和 Crew 写法的直观区别</span>
-                Crew 里你定义 Agent 和 Task，然后"放手让它们协作"。Flow 里你写<strong>普通的 Python 方法</strong>，用装饰器声明它们的触发关系——更像写代码控制流程，只是"调用关系"由装饰器声明、引擎驱动。<strong>Flow 让你用熟悉的"方法 + 装饰器"精确编排，把不确定性关进每个方法内部。</strong></div>
+                <p><code>ToolsHandler</code> 的核心方法 <code>on_tool_use</code>（<span class="fileref">tools_handler.py:26</span>），在工具执行完被调用：</p>
+<pre><code class="language-python"># tools_handler.py:26
+def on_tool_use(self, calling, output, should_cache: bool = True) -> None:
+    """Run when tool ends running."""
+    self.last_used_tool = calling                       # ① 记住最近这次调用
+    if self.cache and should_cache and calling.tool_name != CacheTools().name:  # ② 三个条件都满足才缓存
+        input_str = ""
+        if calling.arguments:
+            if isinstance(calling.arguments, dict):
+                input_str = json.dumps(calling.arguments)   # ③ 参数字典 → JSON 字符串当 key
+            else:
+                input_str = str(calling.arguments)
+        self.cache.add(tool=calling.tool_name, input=input_str, output=output)  # ④ 写进缓存</code></pre>
+                <div class="walk">
+                    <div class="r"><code>① last_used_tool = calling</code><span>无论缓不缓存，都先记下"最近调的是这个"。训练模式、日志、审计会用到。</span></div>
+                    <div class="r"><code>② 三重门</code><span>★要写缓存必须同时：有 <code>cache</code> 本子 + 本次 <code>should_cache</code> 允许 + 调的<b>不是缓存工具自己</b>（<code>CacheTools</code>，否则会套娃）。缺一不缓。</span></div>
+                    <div class="r"><code>③ json.dumps(arguments)</code><span>把参数字典序列化成 JSON 字符串，作为 key 的输入部分。字典没法直接当 key，转成字符串才行。</span></div>
+                    <div class="r"><code>④ cache.add</code><span>把 <code>(工具名, 输入串, 输出)</code> 交给 <code>CacheHandler</code> 存起来。真正的存储在下一讲。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：json.dumps 的 key 顺序问题</span>
+                这里用 <code>json.dumps(arguments)</code> 生成 key。但字典 <code>{"a":1,"b":2}</code> 和 <code>{"b":2,"a":1}</code> 语义完全相同，<code>json.dumps</code> 默认<strong>按插入顺序</strong>输出，可能得到不同字符串 <code>'{"a":1,"b":2}'</code> vs <code>'{"b":2,"a":1}'</code>——于是<strong>同一个调用被当成两次，缓存白建</strong>。更严谨的做法是 <code>json.dumps(arguments, sort_keys=True)</code> 把键排序后再当 key。这是缓存实现里非常常见的隐蔽坑：<strong>"逻辑相同的输入"必须映射到"完全相同的 key"，否则缓存命中率会莫名很低。</strong>读源码时留意这类细节，能帮你在自己项目里避坑。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>三段式架构</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>CacheHandler：那本速查本，加了把读写锁</h1></div>
             <div class="card">
-                <p>Flow 被拆成三层（<code>flow.py:1-14</code> 模块 docstring）：</p>
-                <div class="layers">
-                    <div class="ly"><b>① 编写层 dsl</b> — <code>@start/@listen/@router</code>、<code>or_/and_</code> 装饰器。你用它们写 Flow。（Day 12）</div>
-                    <div class="ly"><b>② 中间表示 flow_definition</b> — 把一个 Flow <b>静态描述成可序列化的数据</b>（"契约"）。</div>
-                    <div class="ly"><b>③ 执行层 runtime</b> — 真正的执行引擎，负责 kickoff、派发监听器。</div>
+                <p>真正存数据的是 <code>CacheHandler</code>（<span class="fileref">cache/cache_handler.py:10</span>）：</p>
+<pre><code class="language-python"># cache/cache_handler.py:10
+class CacheHandler(BaseModel):
+    """Handles caching of tool execution results.
+    Provides thread-safe in-memory caching ... Uses a read-write lock to allow
+    concurrent reads while ensuring exclusive write access."""
+    _cache: dict[str, Any] = PrivateAttr(default_factory=dict)   # 真正的字典
+    _lock: RWLock = PrivateAttr(default_factory=RWLock)          # 读写锁
+
+    def add(self, tool: str, input: str, output: Any) -> None:   # :23
+        with self._lock.w_locked():                              # 写：独占锁
+            self._cache[f"{tool}-{input}"] = output              # ★key = "工具名-输入串"
+
+    def read(self, tool: str, input: str) -> Any | None:        # :37
+        with self._lock.r_locked():                              # 读：共享锁
+            return self._cache.get(f"{tool}-{input}")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_cache = dict</code><span>就是一个普通字典，key 是 <code>f"{tool}-{input}"</code> 拼出来的字符串，value 是工具输出。<code>PrivateAttr</code> 表示它是私有的、不进 JSON。</span></div>
+                    <div class="r"><code>key 用 "-" 拼接</code><span>★<code>f"{tool}-{input}"</code>：工具名和输入串用连字符连起来当 key。极简。</span></div>
+                    <div class="r"><code>add 用 w_locked（写锁）</code><span>写入时<b>独占</b>——同一时刻只允许一个写，防止两个线程同时改字典导致数据损坏。</span></div>
+                    <div class="r"><code>read 用 r_locked（读锁）</code><span>★读取时<b>共享</b>——多个线程可以<b>同时读</b>，互不阻塞。只有"要写"时才需要排他。</span></div>
                 </div>
-                <div class="baby"><span class="t">这个"编写/中间表示/执行"三段式为什么好？</span>
-                <strong>装饰器只负责"贴元数据"（说明谁触发谁），不含执行逻辑。</strong>类定义时，装饰器把触发关系记在方法上；引擎启动时读取这些元数据、构建出一张 <code>FlowDefinition</code>（中间表示）、再驱动执行。好处：同一个 Flow <strong>既能用 Python 类写、也能从 YAML 声明式加载</strong>（<code>Flow.from_declaration</code>）——因为中间表示是纯数据。<strong>"声明与执行分离"是编译器/工作流引擎的经典架构（呼应 eino 的 compile）。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：缓存字典 + 读写锁</text>
+                        <rect x="200" y="32" width="240" height="86" rx="9" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/>
+                        <text x="320" y="50" fill="#93c5fd" text-anchor="middle" font-weight="700">_cache: dict</text>
+                        <text x="320" y="72" fill="#cbd5e1" text-anchor="middle" font-size="10">"search-{\"q\":\"CrewAI\"}"  →  "CrewAI 是..."</text>
+                        <text x="320" y="92" fill="#cbd5e1" text-anchor="middle" font-size="10">"add-{\"a\":2,\"b\":3}"  →  "5"</text>
+                        <text x="320" y="110" fill="#64748b" text-anchor="middle" font-size="9.5">key = f"{工具名}-{输入串}"</text>
+                        <rect x="40" y="150" width="250" height="44" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="165" y="168" fill="#86efac" text-anchor="middle" font-size="10.5">读锁 r_locked：多线程可同时读 ✓✓✓</text>
+                        <text x="165" y="184" fill="#cbd5e1" text-anchor="middle" font-size="9.5">read() 走这里</text>
+                        <rect x="350" y="150" width="250" height="44" rx="8" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="475" y="168" fill="#fca5a5" text-anchor="middle" font-size="10.5">写锁 w_locked：同时只允许一个写 ✓</text>
+                        <text x="475" y="184" fill="#cbd5e1" text-anchor="middle" font-size="9.5">add() 走这里</text>
+                        <path d="M165 150 L280 120" stroke="#22c55e" stroke-width="1"/>
+                        <path d="M475 150 L360 120" stroke="#ef4444" stroke-width="1"/>
+                    </svg>
+                    <div class="cap">图注：读多写少的场景，读写锁让"查缓存"高度并发，只有"写缓存"才短暂互斥。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用读写锁（RWLock）而不是普通互斥锁（Lock）？</span>
+                普通锁 <code>Lock</code> 简单粗暴：读也锁、写也锁，同一时刻只准一个线程碰缓存。但工具缓存是<strong>典型的"读多写少"</strong>——ReAct 循环里查缓存（读）远比写缓存频繁，多个并行工具（Day 08 的线程池）还会同时读。用普通锁的话，这些读会<strong>互相排队</strong>，白白串行化。<strong>读写锁允许"多个读并发、写时独占"</strong>：读操作不互相阻塞，只有写来了才短暂排他。用一点实现复杂度，换来读密集场景的并发性能。代价是 RWLock 比 Lock 难写（要处理读写饥饿），但对高频缓存很值。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>事件驱动的执行</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>执行前先查：缓存命中就不真跑工具</h1></div>
             <div class="card">
-                <p><code>kickoff()</code>（<code>runtime/__init__.py:1920</code>）→ <code>kickoff_async</code>（<code>:1985</code>）。执行主线：</p>
-                <ul>
-                    <li>发 <code>FlowStartedEvent</code>，找到所有 <code>@start</code> 方法，<strong>并行</strong>执行（<code>asyncio.gather</code>）。</li>
-                    <li>每个方法执行完，发 <code>MethodExecutionFinishedEvent</code>，然后 <code>_execute_listeners</code>（<code>:2727</code>）触发监听它的方法。</li>
-                    <li>被触发的监听器也<strong>并行</strong>执行；如此推进，直到没有监听器可跑。</li>
-                    <li>最后 <code>method_outputs[-1]</code> 作为最终返回，发 <code>FlowFinishedEvent</code>。</li>
-                </ul>
-                <div class="baby"><span class="t">"事件驱动"到底什么意思？</span>
-                方法之间<strong>不直接互相调用</strong>。而是"方法A 完成 → 发出'A 完成了'这个事件 → 引擎查谁监听 A → 触发那些方法"。就像公司里"报告写完了 → 通知相关人 → 他们各自开始下一步"。<strong>解耦：A 不需要知道谁在等它的结果，只管完成、发事件；引擎负责路由。</strong>这就是发布-订阅模式。和 OpenHands 的事件流、eino 的图执行异曲同工。</div>
-                <div class="essence"><span class="t">🧑‍🚀 第一人称之旅：假如"我"是一条流经 Flow 的事件</span>
-                「kickoff 一响，<strong>我诞生了</strong>——引擎喊'FlowStarted！'，找到所有 <code>@start</code> 方法把我并行送进去。<code>fetch_data</code> 跑完，我变成它的返回值，同时化作一声广播'<strong>fetch_data 完成了！</strong>'。引擎不认识具体谁在等我，它只翻花名册：'谁 <code>@listen(fetch_data)</code>？'——哦，<code>process</code> 举手，于是我被当参数递给它。<code>process</code> 跑完再广播……如此接力，直到<strong>没人再监听我</strong>，引擎宣布 'FlowFinished'，把最后一站的产出当最终结果。」<strong>我全程没被谁'直接调用'，我只是不断'完成→广播→被监听者接住'——这就是事件驱动。</strong></div>
+                <p>写缓存在 <code>on_tool_use</code>，那"读缓存"在哪触发？在工具真正执行前（<code>tools/tool_usage.py</code>，<span class="fileref">tool_usage.py:276</span>）：</p>
+<pre><code class="language-python"># tools/tool_usage.py:276
+from_cache = False
+result = None
+try:
+    if self.tools_handler and self.tools_handler.cache:      # 有缓存本子
+        input_str = ""
+        if calling.arguments:
+            input_str = json.dumps(calling.arguments) if isinstance(calling.arguments, dict) \
+                        else str(calling.arguments)
+        result = self.tools_handler.cache.read(              # ★执行前先查缓存
+            tool=sanitize_tool_name(calling.tool_name), input=input_str)
+        from_cache = result is not None                      # 查到了就标记"来自缓存"
+    ...
+    elif result is None:                                     # ★只有没命中缓存才真执行
+        ...
+        result = await tool.ainvoke(input=arguments, config=fingerprint_config)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>cache.read(...)</code><span>★用和写入时一样的 key（工具名 + json 参数）去查。查到 → <code>result</code> 有值；查不到 → <code>None</code>。</span></div>
+                    <div class="r"><code>from_cache = result is not None</code><span>标记这次结果是"缓存来的"还是"真跑的"。事件/日志里会体现，方便你观察缓存命中率。</span></div>
+                    <div class="r"><code>elif result is None</code><span>★关键分支：<b>只有缓存没命中</b>（result 还是 None）才走 <code>tool.ainvoke</code> 真正执行工具。命中的话直接用旧结果，跳过执行。</span></div>
+                    <div class="r"><code>sanitize_tool_name</code><span>读写两侧都对工具名做<b>同样的规范化</b>（去空格、统一大小写等），保证 key 一致——否则写入用原名、读取用规范名，永远命不中。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 180" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一次工具调用的缓存路径</text>
+                        <rect x="20" y="40" width="130" height="40" rx="8" fill="rgba(59,130,246,.1)" stroke="#3b82f6"/>
+                        <text x="85" y="64" fill="#93c5fd" text-anchor="middle">要调工具</text>
+                        <rect x="190" y="40" width="140" height="40" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="260" y="64" fill="#fcd34d" text-anchor="middle">cache.read 查缓存</text>
+                        <rect x="400" y="18" width="210" height="38" rx="8" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="505" y="41" fill="#86efac" text-anchor="middle">命中 → 直接返回旧结果</text>
+                        <rect x="400" y="70" width="210" height="38" rx="8" fill="rgba(56,189,248,.1)" stroke="#38bdf8"/>
+                        <text x="505" y="88" fill="#7dd3fc" text-anchor="middle">未命中 → 真执行工具</text>
+                        <text x="505" y="102" fill="#cbd5e1" text-anchor="middle" font-size="9.5">on_tool_use 把结果写回缓存</text>
+                        <path d="M150 60 L188 60" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a11)"/>
+                        <path d="M330 55 L398 40" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a11g)"/>
+                        <path d="M330 65 L398 85" stroke="#38bdf8" stroke-width="1.1" marker-end="url(#a11c)"/>
+                        <path d="M505 108 C505 145 260 150 260 82" stroke="#38bdf8" stroke-width="1.1" stroke-dasharray="4 3" fill="none" marker-end="url(#a11c)"/>
+                        <text x="330" y="168" fill="#38bdf8" text-anchor="middle" font-size="10">下次同样调用 → 查缓存直接命中，不再执行</text>
+                        <defs>
+                          <marker id="a11" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a11g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                          <marker id="a11c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#38bdf8"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：查在前、执行在后、写在末尾。第二次同样调用直接从"命中"分支返回，省下一次真执行。</div>
+                </div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>Flow 里内嵌 Crew（两范式合体）</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>cache_function：让工具自己决定"这次要不要缓"</h1></div>
             <div class="card">
-                <p>Flow 的某个方法内部可以调用一个 Crew（<code>flow_definition.py</code> 甚至有专门的 <code>FlowCrewActionDefinition</code>、<code>FlowAgentActionDefinition</code>）：</p>
-<pre><code class="language-python">class ContentFlow(Flow):
-    @start()
-    def get_topic(self):
-        return "多智能体"
-
-    @listen(get_topic)
-    def research_and_write(self, topic):
-        # 在这一步内部调用一个 Crew，让 AI 团队自主完成
-        return ResearchCrew().crew().kickoff(inputs={"topic": topic})</code></pre>
-                <div class="anno">读法：<b>Flow 控制"大流程的确定性步骤"，某个步骤内部用 Crew 让 AI 自主发挥——两种范式的完美结合。</b>你既有 Flow 的精确控制（哪步先做、条件分支），又有 Crew 的 AI 自主能力（在某步内）。</div>
-                <div class="baby"><span class="t">这是 CrewAI 的推荐用法</span>
-                纯 Crew 太"放飞"（不好控制流程），纯 Flow 又失去 AI 的自主智能。<strong>组合起来最强：用 Flow 搭确定性骨架（保证流程正确、可控），在需要 AI 智能的步骤内嵌 Crew（发挥创造力）。</strong>这也是为什么 Flow 是较新推出的——它解决了"纯 Crew 难以精确控制复杂流程"的痛点。</div>
+                <p>不是所有结果都该缓存。执行完，源码给工具一个"投票权"（<span class="fileref">tool_usage.py:351</span>）：</p>
+<pre><code class="language-python"># tools/tool_usage.py:351
+if self.tools_handler:
+    should_cache = True                                   # 默认缓
+    original_tool = getattr(available_tool, "_original_tool", None)
+    cache_func = None
+    if original_tool and hasattr(original_tool, "cache_function"):
+        cache_func = original_tool.cache_function
+    elif hasattr(available_tool, "cache_function"):
+        cache_func = available_tool.cache_function
+    if cache_func:
+        should_cache = cache_func(calling.arguments, result)   # ★工具自定义：看参数和结果决定缓不缓
+    self.tools_handler.on_tool_use(
+        calling=calling, output=result, should_cache=should_cache)   # 把决定传给写缓存</code></pre>
+                <div class="walk">
+                    <div class="r"><code>should_cache 默认 True</code><span>不特别设置的话，所有工具结果都缓存（呼应 Day 07 的 <code>cache=True</code>）。</span></div>
+                    <div class="r"><code>cache_function(arguments, result)</code><span>★工具可以定义一个 <code>cache_function(参数, 结果) -> bool</code>：框架把<b>这次的参数和结果</b>都传给它，让它自己判断"这次值不值得缓"。返回 True 才缓。</span></div>
+                    <div class="r"><code>传给 on_tool_use</code><span>投票结果 <code>should_cache</code> 传进 L03 的 <code>on_tool_use</code>——那里的"三重门"之一就是它。所以工具的意愿最终生效。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值：什么时候 cache_function 派上用场</span>
+                一个"查订单状态"的工具：如果订单<strong>已完成</strong>（状态不会再变），结果可以缓；如果订单<strong>还在处理中</strong>（状态随时变），就别缓。于是可以写：<br>
+                <code>def cache_function(args, result): return "completed" in result</code><br>
+                —— 结果里含 "completed" 才缓存。<strong>同一个工具，根据具体的参数和结果，动态决定缓不缓</strong>，比"整个工具一刀切缓/不缓"精细得多。</div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么把"缓不缓"的决定权交给工具，而不是框架统一定？</span>
+                框架<strong>无法知道</strong>某个工具的结果"能不能安全缓存"——那取决于工具的业务语义（查天气不能缓、算加法能缓、查已完成订单能缓、查处理中订单不能缓）。硬要框架统一决定，要么太激进（缓了时效数据出 bug），要么太保守（啥都不缓、缓存形同虚设）。所以源码把决策权<strong>下放给最懂业务的工具作者</strong>，用一个可选的 <code>cache_function</code> 回调，还额外把<strong>实际结果</strong>也传给它（而不只是参数）——因为有时"能不能缓"要看结果内容（如上面的订单例子）。<strong>"把领域决策交给领域专家、框架只提供机制"</strong>，是可扩展框架的核心设计哲学。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>防死循环</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>CacheTools 边界 + 今日小结</h1></div>
             <div class="card">
-                <p>Flow 支持<strong>循环流</strong>（方法可从"已完成集合"里被移除以便重跑，做迭代/重试）。但循环有失控风险，所以有 <code>max_method_calls</code>（默认 100），超限抛 <code>RecursionError</code>（<code>runtime/__init__.py:2928</code>）。</p>
-                <div class="glossary"><b>常见死循环原因</b>：<code>@listen</code> 标签误写成方法<strong>自身</strong>的名字——方法完成触发自己、无限循环。<code>max_method_calls</code> 就是防这个的熔断。<strong>和 Crew 的 max_iter、eino 的 MaxRunSteps、OpenHands 的 max_iterations 一样——凡是能循环的地方，必配次数上限。</strong>这是 Agent/工作流系统的铁律。</div>
-            </div>
-        </section>
-
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
-            <div class="card highlight-card">
-                <h3>🧠 今天你应该能回答</h3>
-                <ul>
-                    <li>Flow 是什么？和 Crew 的本质区别？</li>
-                    <li>什么时候用 Flow、什么时候用 Crew、怎么组合？</li>
-                    <li>三段式架构（编写/中间表示/执行）为什么好？</li>
-                    <li>"事件驱动"是什么意思？和发布-订阅什么关系？</li>
-                    <li>Flow 里怎么内嵌 Crew？为什么这是推荐用法？</li>
-                </ul>
-            </div>
-            <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=lib/crewai/src/crewai/flow
-sed -n '1,40p' $P/flow.py                          # Flow 类 + 三段式 docstring
-sed -n '1985,2060p' $P/runtime/__init__.py | head -50   # kickoff_async 执行主线
-grep -n 'max_method_calls\|RecursionError' $P/runtime/__init__.py</code></pre>
-                <div class="tip"><strong>明天预告 · Day 12</strong>：<strong>Flow 装饰器</strong>——精读 @start / @listen / @router / and_ / or_ 怎么把方法接线成图。它们如何"贴元数据"、引擎如何懒加载构建 FlowDefinition、条件组合怎么落地。</div>
-            </div>
-            <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="crewai-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 任务输出</a>
-                <a href="crewai-day12.html" style="color:var(--accent-green);">Day 12 · Flow 装饰器 &rarr;</a>
+                <p>还有个有趣的角色 <code>CacheTools</code>（<span class="fileref">tools/cache_tools/cache_tools.py</span>）——把"读缓存"本身也包装成一个工具：</p>
+<pre><code class="language-python"># tools/cache_tools/cache_tools.py
+class CacheTools(BaseModel):
+    name: str = "Hit Cache"
+    cache_handler: CacheHandler = Field(default_factory=CacheHandler)
+    def hit_cache(self, key: str) -> str | None:
+        split = key.split("tool:")
+        tool = split[1].split("|input:")[0].strip()
+        tool_input = split[1].split("|input:")[1].strip()
+        return self.cache_handler.read(tool, tool_input)</code></pre>
+                <div class="pitfall"><span class="t">⚠️ 边界：为什么 on_tool_use 要排除 CacheTools 自己？</span>
+                回看 L03 的三重门：<code>calling.tool_name != CacheTools().name</code>。为什么要特意<strong>不缓存"缓存工具"的调用</strong>？因为 <code>CacheTools</code> 的作用就是"去读缓存"，它本身是<strong>缓存机制的一部分</strong>。如果连它的调用也缓存，就成了"缓存的缓存"——不仅无意义，还可能造成<strong>递归套娃或脏数据</strong>（缓存里存了一条"读缓存的结果"，下次读缓存读到的是这条元数据而非真实工具结果）。<strong>基础设施组件要小心别把自己也卷进它管理的数据里</strong>——这是实现缓存/日志/代理这类"元层"组件时的经典陷阱。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：这个缓存是永久的吗？程序重启还在吗？</p>
+                    <p class="a">👨‍🏫 老师：不是永久的。<code>CacheHandler._cache</code> 就是一个<strong>内存里的字典</strong>（<code>dict</code>），程序一退出就没了，也不跨进程共享。它是"一次运行内"的加速，不是持久化存储。想跨运行、跨机器复用结果，那是阶段6"记忆与知识"要讲的持久化记忆/RAG 的活儿——<strong>工具缓存解决的是"这一次跑里别重复调"，不是"永远记住"</strong>。两者层次不同，别混。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>工具缓存的 key 是什么？（<code>f"{工具名}-{输入串}"</code>）为什么要含参数？</li>
+                        <li><code>ToolsHandler</code> 和 <code>CacheHandler</code> 的分工？（前台 vs 本子）</li>
+                        <li>缓存"读"在何时触发？"写"在何时触发？</li>
+                        <li>为什么用读写锁而不是普通互斥锁？</li>
+                        <li><code>cache_function</code> 解决什么问题？为什么要把结果也传给它？</li>
+                        <li>为什么 <code>on_tool_use</code> 要排除 <code>CacheTools</code> 自己？</li>
+                        <li><code>json.dumps</code> 当 key 有什么隐蔽坑？（键顺序）</li>
+                        <li>这个缓存是持久的吗？和记忆/RAG 有何区别？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+cat -n            $P/agents/tools_handler.py          # ToolsHandler（50 行全看）
+cat -n            $P/agents/cache/cache_handler.py    # CacheHandler + 读写锁
+sed -n '276,366p' $P/tools/tool_usage.py              # 执行前查缓存 + cache_function
+sed -n '1,60p'    $P/tools/cache_tools/cache_tools.py # CacheTools
+# 亲手验证缓存命中
+python -c "
+from crewai.agents.cache.cache_handler import CacheHandler
+c = CacheHandler()
+c.add(tool='search', input='{\"q\":\"CrewAI\"}', output='一个多智能体框架')
+print('命中:', c.read('search', '{\"q\":\"CrewAI\"}'))
+print('未命中:', c.read('search', '{\"q\":\"别的\"}'))
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 12</strong>：阶段2 收官。前 5 天讲的都是"重型" Agent（Agent + CrewAgentExecutor 那一套）。明天看 CrewAI 的<strong>轻量级 Agent</strong>——<code>lite_agent.py</code> 的 <code>LiteAgent</code> 和它的输出 <code>lite_agent_output.py</code>：为什么要有一个"精简版"、它的 <code>kickoff</code> 循环和 Day 08 有何异同、<code>LiteAgentOutput</code> 怎么统一封装 raw/pydantic/usage 结果，以及什么时候该用轻量版。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day10.html" style="color:var(--accent-cyan);">&larr; Day 10 单步执行</a>
+                    <a href="crewai-day12.html" style="color:var(--accent-green);">Day 12 · LiteAgent &rarr;</a>
+                </div>
             </div>
         </section>
     </main>

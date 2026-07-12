@@ -3,26 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 08 · Agent 间委派 — CrewAI 源码学习</title>
+    <title>Day 08 · crew_agent_executor 执行循环 — CrewAI 60 天源码深度</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -31,11 +29,21 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
-        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
-        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
         .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
-        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
         .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -43,201 +51,372 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">08</div>
             <h2>Day 08</h2>
-            <p class="version">Agent 间委派 · 8 讲</p>
+            <p class="version">执行循环 crew_agent_executor · 8 讲</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 委派是什么</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 委派被做成"工具"</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两个委派工具</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _execute 核心</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 名字容错</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工具怎么注入</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为什么用"工具"实现</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 执行器就是一个 while</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · invoke 入口与初始化</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两种模式分流</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 文本 ReAct 主循环</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 循环里的三件事</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 原生函数调用循环</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 异常自愈与刹车</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="crewai-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 执行循环</a></li>
-            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="crewai-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 Planning &rarr;</a></li>
+            <li><a href="crewai-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 全字段</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day09.html" class="nav-link" style="color:var(--accent-green);">Day 09 输出解析 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 08 / 共 20 天 · 第 2 周 Crew 编排深入</span>
-            <h1 class="part-title">Agent 间委派 delegation</h1>
-            <p class="part-desc">多智能体的"协作"具体怎么发生？一个 Agent 怎么"喊同事帮忙"？今天揭示：委派被巧妙地实现成了"工具"，复用 Agent 已有的工具调用能力。</p>
+            <span class="part-label">Day 08 / 共 60 天 · 阶段2 Agent 深入</span>
+            <h1 class="part-title">CrewAgentExecutor：Agent 真正干活的那个 while 循环</h1>
+            <p class="part-desc">Day 07 说 Agent 只是"档案"，真正干活的是 <code>executor_class</code> 指向的执行器。今天就把 <code>agents/crew_agent_executor.py</code> 里的 <code>CrewAgentExecutor</code> 拆开，逐行读它的执行循环：<strong>怎么开局、怎么在"原生函数调用 / 文本 ReAct"之间分流、怎么问一次 LLM、怎么把工具结果喂回去、怎么用 <code>max_iter</code> 刹车、出错怎么自愈</strong>。这是整个 Agent 系统的心脏。</p>
         </div>
 
         <div class="journey">
-            <div class="jt">📍 你在整门课的位置（第 2 周 Crew 编排 · 昨天 Day 07 拆了单个 Agent 的 ReAct 循环，今天看 Agent 之间怎么委派协作，明天 Day 09 进 Planning 规划）</div>
+            <div class="jt">📍 你在 60 天里的位置（阶段2 Agent 深入 · 共 6 天）</div>
             <div class="steps">
-                <span class="st">全景 D1</span><span class="sep">·</span>
-                <span class="st">Agent·Task·Crew D2-4</span><span class="sep">·</span>
-                <span class="st">kickoff 旅程 D5</span><span class="sep">·</span>
-                <span class="st">Process D6</span><span class="sep">·</span>
-                <span class="st">ReAct D7</span><span class="sep">·</span>
-                <span class="st on">委派 D8</span><span class="sep">·</span>
-                <span class="st">规划·护栏 D9-10</span>
+                <span class="st">阶段1 入门 D01-06</span><span class="sep">→</span>
+                <span class="st">D07 全字段</span><span class="sep">→</span>
+                <span class="st on">D08 执行循环</span><span class="sep">→</span>
+                <span class="st">D09 输出解析</span><span class="sep">→</span>
+                <span class="st">D10 单步执行</span><span class="sep">→</span>
+                <span class="st">D11 工具缓存</span><span class="sep">→</span>
+                <span class="st">D12 LiteAgent</span><span class="sep">→</span>
+                <span class="st">阶段3 Task</span>
             </div>
         </div>
 
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        执行器就像一个<strong>项目经理跟一个"不能上网的专家"来回对话</strong>。经理（执行器）把任务念给专家（LLM）听，专家要么说"我要查个资料"（要用工具），要么说"我有答案了"（Final Answer）。只要专家还没给答案，经理就<strong>不停地：问一句 → 听回答 → 该查资料就替他去查 → 把查到的念回给他 → 再问</strong>。这个"问到有答案为止"的来回，本质就是一个 <code>while not 是最终答案</code> 的循环。今天就是读这个循环的每一步。</div>
+
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>委派是什么</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：Agent 怎么"自己转起来"？</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点：一个 Agent 卡住了，能不能喊同事帮忙？</span>
-                写手 Agent 写着写着，发现缺一个只有研究员才查得到的数据。它能不能<strong>暂停自己、把这个子问题丢给研究员</strong>，拿到答案再继续？多个 Agent 之间到底怎么"通信协作"——靠一套神秘的消息协议吗？</div>
-                <p><strong>委派（delegation）</strong>= 一个 Agent 把某件事交给另一个 Agent 去做。<code>allow_delegation=True</code> 的 Agent（或层级模式的经理，Day 06）才有这能力。</p>
-                <div class="baby"><span class="t">用团队打比方</span>
-                写手 Agent 写着写着发现"我需要一个具体的数据，但这是研究员的专长"。如果它 <code>allow_delegation=True</code>，就能<strong>"喊研究员帮忙查一下"</strong>——把这个子任务委派给研究员，拿到结果后继续自己的工作。层级模式的经理更是把整个任务都委派给合适的下属。<strong>委派 = 团队成员之间互相求助/分派——这就是"协作"的具体机制。</strong></div>
+                <div class="ask"><span class="t">🤔 痛点</span>大模型的本事就一句话：给它一段文字，它续一段文字。可我们要 Agent 能<strong>查资料、调 API、算数、然后根据结果继续想</strong>——一次对话根本做不完。那它到底是怎么"自己一步步推进、直到把活干完"的？谁来判断"该停了"？工具结果又是怎么回到对话里让它接着想的？答案全在执行器的那个循环里。</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong>执行器 = 一个 <code>while not isinstance(answer, AgentFinish)</code> 的循环。</strong>每一圈：问一次 LLM → 把回答解析成"要调工具（AgentAction）"或"给答案（AgentFinish）" → 是工具就执行、把结果 append 进消息历史 → 进入下一圈。直到 LLM 输出 Final Answer，或者转够 <code>max_iter</code> 圈被强制收尾。<strong>LLM 只负责"决策一步"，循环负责"执行 + 把观察喂回去 + 判断该不该停"。</strong></div>
+                <p>类的骨架（<span class="fileref">crew_agent_executor.py:98</span>），它继承 <code>BaseAgentExecutor</code>：</p>
+<pre><code class="language-python"># crew_agent_executor.py:98
+class CrewAgentExecutor(BaseAgentExecutor):
+    ...
+    def invoke(self, inputs): ...              # :208 对外入口
+    def _invoke_loop(self): ...                # :309 分流：原生 or 文本
+    def _invoke_loop_react(self): ...          # :330 文本 ReAct 循环
+    def _invoke_loop_native_tools(self): ...   # :484 原生函数调用循环
+    def _handle_agent_action(self, ...): ...   # :1456 执行工具后把结果写回</code></pre>
+                <div class="baby"><span class="t">大白话</span>看方法名就懂大结构：<code>invoke</code> 是大门，进去后 <code>_invoke_loop</code> 做一次"走哪条路"的选择，然后要么走 <code>_react</code>（文本解析）要么走 <code>_native</code>（原生调用）。两条路各是一个 while 循环，殊途同归——都要转到"拿到最终答案"。今天按这个顺序逐个读。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>委派被做成"工具"（精妙设计）</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>invoke：开局做的四件事</h1></div>
             <div class="card">
-                <p>关键洞察：CrewAI 没有另造一套"协作协议"，而是把委派实现成 Agent 的<strong>工具（tool）</strong>。<code>AgentTools.tools()</code>（<code>tools/agent_tools/agent_tools.py:22</code>）生成两个工具：</p>
-<pre><code class="language-python">delegate_tool = DelegateWorkTool(agents=self.agents, ...)  # 把整件事交给同事做
-ask_tool = AskQuestionTool(agents=self.agents, ...)        # 只是问同事一个问题</code></pre>
-                <div class="anno">读法：<b>委派 = 给 Agent 装一个"委派工具"。</b>Agent 想找同事帮忙时，就像调用普通工具（Day 07）一样"调用委派工具"——填上"找谁、什么任务/问题"。这样多 Agent 协作<strong>复用了 Agent 已有的 function-calling 能力</strong>，不用另造轮子。</div>
-                <div class="essence"><span class="t">💡 一句话本质</span>
-                <strong>委派 = 把"找同事协作"这件事，包装成一个普通的工具调用。</strong>Agent 本来就会"选工具、填参数"（Day 07 的 ReAct），CrewAI 不另造通信协议，而是塞给它两个特殊工具——调用它们就等于"喊某个同事做事/回答问题"。协作因此复用了 Agent 已有的 function-calling 能力。</div>
-                <div class="svgbox">
-                    <svg viewBox="0 0 720 230" width="100%" style="max-width:720px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
-                        <rect x="30" y="80" width="150" height="66" rx="9" fill="#2a2a3a" stroke="#f97316"/>
-                        <text x="105" y="106" fill="#fff" text-anchor="middle" font-weight="700">Agent A（写手）</text>
-                        <text x="105" y="124" fill="#bbb" text-anchor="middle" font-size="10">allow_delegation=True</text>
-                        <rect x="270" y="46" width="200" height="46" rx="8" fill="#26323a" stroke="#60a5fa"/>
-                        <text x="370" y="66" fill="#fff" text-anchor="middle" font-weight="700">DelegateWorkTool</text>
-                        <text x="370" y="83" fill="#bbb" text-anchor="middle" font-size="10">派活 · delegate_work_tool.py:16</text>
-                        <rect x="270" y="134" width="200" height="46" rx="8" fill="#26323a" stroke="#60a5fa"/>
-                        <text x="370" y="154" fill="#fff" text-anchor="middle" font-weight="700">AskQuestionTool</text>
-                        <text x="370" y="171" fill="#bbb" text-anchor="middle" font-size="10">提问 · ask_question_tool.py:14</text>
-                        <rect x="550" y="80" width="150" height="66" rx="9" fill="#264a3a" stroke="#34d399"/>
-                        <text x="625" y="106" fill="#fff" text-anchor="middle" font-weight="700">Agent B（研究员）</text>
-                        <text x="625" y="124" fill="#bbb" text-anchor="middle" font-size="10">跑自己的 ReAct</text>
-                        <path d="M180 105 L270 74" stroke="#60a5fa" stroke-width="2" marker-end="url(#d8b)"/>
-                        <path d="M180 120 L270 156" stroke="#60a5fa" stroke-width="2" marker-end="url(#d8b)"/>
-                        <text x="212" y="152" fill="#bbb" font-size="10">当作工具调用</text>
-                        <path d="M470 69 L550 100" stroke="#60a5fa" stroke-width="2" marker-end="url(#d8b)"/>
-                        <path d="M470 157 L550 126" stroke="#60a5fa" stroke-width="2" marker-end="url(#d8b)"/>
-                        <text x="512" y="60" fill="#888" font-size="10">_execute 临造 Task</text>
-                        <path d="M550 138 Q360 214 180 138" stroke="#34d399" stroke-width="2" stroke-dasharray="4 3" fill="none" marker-end="url(#d8g)"/>
-                        <text x="365" y="210" fill="#34d399" text-anchor="middle" font-size="10">B 的回答作为"工具返回值"回到 A</text>
-                        <defs>
-                            <marker id="d8b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#60a5fa"/></marker>
-                            <marker id="d8g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
-                        </defs>
-                    </svg>
-                    <div class="cap">委派 = 工具调用：Agent A 调 DelegateWorkTool / AskQuestionTool（填 coworker + task/question + context），框架临时造一个 Task 交给 Agent B，B 跑完把结果当"工具返回值"交回 A。</div>
+                <p>对外入口 <code>invoke</code>（<span class="fileref">crew_agent_executor.py:208</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:208
+def invoke(self, inputs: dict[str, Any]) -> dict[str, Any]:
+    if self._resuming:
+        self._resuming = False
+    else:
+        self.messages = []          # ① 清空消息历史
+        self.iterations = 0         # ② 迭代计数归零
+        self._setup_messages(inputs)        # ③ 组装系统提示 + 任务提示
+        self._inject_multimodal_files(inputs)
+
+    self._show_start_logs()
+    self.ask_for_human_input = bool(inputs.get("ask_for_human_input", False))
+
+    with _llm_stop_words_applied(self.llm, self):
+        try:
+            formatted_answer = self._invoke_loop()   # ④ 进入循环，直到拿到答案
+        except AssertionError:
+            ...
+            raise
+    if self.ask_for_human_input:
+        formatted_answer = self._handle_human_feedback(formatted_answer)
+    self._save_to_memory(formatted_answer)
+    return {"output": formatted_answer.output}</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self._resuming 判断</code><span>支持"恢复执行"（人在环打断后继续）。恢复时<b>不清空</b>历史，接着上次跑；否则从头开始。</span></div>
+                    <div class="r"><code>messages=[] / iterations=0</code><span>每次全新执行都<b>重置</b>消息历史和圈数计数——保证两次执行互不污染。</span></div>
+                    <div class="r"><code>_setup_messages</code><span>把 Day 07 的 role/goal/backstory + 任务描述 + 工具说明<b>组装成初始消息</b>塞进 <code>self.messages</code>。这是 LLM 的第一份输入。</span></div>
+                    <div class="r"><code>_llm_stop_words_applied</code><span>上下文管理器：临时给 LLM 设置停止词（如遇到 <code>Observation:</code> 就停）。出了 <code>with</code> 自动还原。</span></div>
+                    <div class="r"><code>_invoke_loop()</code><span>★真正的循环在这。返回一个 <code>AgentFinish</code>，取它的 <code>.output</code> 作为结果。</span></div>
+                    <div class="r"><code>_save_to_memory</code><span>收尾：把这次执行的结果存进记忆（阶段6 讲）。然后返回 <code>{"output": ...}</code>。</span></div>
                 </div>
-                <div class="baby"><span class="t">为什么这个设计聪明？</span>
-                Agent 本来就会"用工具"（Day 07 的 ReAct）。把"找同事帮忙"也包装成一个工具，Agent 就能用它<strong>已经掌握的方式</strong>去协作——不需要学一套新的"协作 API"。对框架来说，也不用维护单独的多 Agent 通信机制。<strong>用已有的抽象（工具）去实现新需求（协作）——这是优雅设计的标志。</strong></div>
+                <div class="essence"><span class="t">💡 为什么消息历史是执行器的实例状态（self.messages）？</span>因为 ReAct 循环<strong>一圈一圈都要在同一份对话上追加</strong>：这一圈的工具结果，下一圈 LLM 得能看到。把 <code>messages</code> 存成实例属性，循环里各处 <code>self.messages.append(...)</code> 就都在往同一个"对话记录本"里写。<strong>状态集中在一处、循环各步共享——这是有状态执行器的标准做法。</strong></div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>两个委派工具</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>_invoke_loop：走原生还是走文本？</h1></div>
             <div class="card">
-                <p>两者共享基类 <code>BaseAgentTool</code>（<code>base_agent_tools.py:15</code>），区别只在参数：</p>
-                <ul>
-                    <li><code>DelegateWorkTool</code>（<code>delegate_work_tool.py</code>）：参数 <code>task</code>（要做的事）+ <code>context</code> + <code>coworker</code>（找谁）。"把这件事交给同事做完"。</li>
-                    <li><code>AskQuestionTool</code>（<code>ask_question_tool.py</code>）：参数 <code>question</code>（问题）+ <code>context</code> + <code>coworker</code>。"只是问同事一个问题"。</li>
-                </ul>
-                <div class="glossary"><b>为什么分"委派整件事"和"只问一个问题"？</b> 粒度不同。有时你需要同事<strong>完整做一件事</strong>（"帮我写一段代码"），有时只需要<strong>问一句</strong>（"这个 API 的参数是什么？"）。分成两个工具，让委派方能精确表达意图，也让被委派方知道该做多少。两者的 <code>_run</code> 都转调基类的 <code>_execute</code>。</div>
+                <p>进循环第一件事是分流（<span class="fileref">crew_agent_executor.py:309</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:309
+def _invoke_loop(self) -> AgentFinish:
+    use_native_tools = (
+        hasattr(self.llm, "supports_function_calling")
+        and callable(getattr(self.llm, "supports_function_calling", None))
+        and self.llm.supports_function_calling()   # 模型支持"原生函数调用"吗？
+        and self.original_tools                     # 且确实配了工具？
+    )
+    if use_native_tools:
+        return self._invoke_loop_native_tools()    # 现代模型：结构化 tool_calls
+    return self._invoke_loop_react()               # 老模型 / 无原生支持：文本解析</code></pre>
+                <div class="walk">
+                    <div class="r"><code>hasattr + callable 双检查</code><span>防御式编程：先确认 LLM <b>有</b>这个方法、<b>能调用</b>，再真的调。不假设 LLM 一定实现了它——不同 provider 的 LLM 能力不齐。</span></div>
+                    <div class="r"><code>supports_function_calling()</code><span>问模型："你会结构化的工具调用吗？"GPT-4/Claude 会，很多老模型/本地小模型不会。</span></div>
+                    <div class="r"><code>and self.original_tools</code><span>就算模型会，也得<b>确实有工具</b>才走原生。没工具就没必要，走普通文本。</span></div>
+                    <div class="r"><code>两个 return</code><span>四个条件全满足 → 原生模式（更可靠）；否则 → 文本 ReAct（兜底、向后兼容）。</span></div>
+                </div>
+                <div class="baby"><span class="t">"原生函数调用" vs "文本 ReAct" 的区别</span>
+                <strong>文本 ReAct</strong>：把工具说明写进 prompt，让模型按 <code>Thought:/Action:/Action Input:</code> 的<strong>文本格式</strong>输出，框架用正则解析出"要调哪个工具"。缺点：模型可能格式写错，解析会失败。<strong>原生函数调用</strong>：模型直接返回<strong>结构化</strong>的 tool_call（训练时就学过这个格式），框架直接读，不用解析文本。<strong>原生更可靠，是现代首选；文本 ReAct 是老模型的兜底。</strong>两条路后面各是一个 while。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>_execute：委派的核心</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>文本 ReAct 主循环：那个 while 长什么样</h1></div>
             <div class="card">
-                <p><code>BaseAgentTool._execute</code>（<code>base_agent_tools.py:46</code>）做三件事：</p>
-<pre><code class="language-python"># 1. 规范化同事名字（容错，L05）
-# 2. 按 role 找到目标 agent（找不到返回可用同事列表）
-# 3. 动态新建一个 Task 交给目标 agent 执行（:112-120）
-task_with_assigned_agent = Task(
-    description=task, agent=selected_agent,
-    expected_output=I18N_DEFAULT.slice("manager_request"),
-)
-return selected_agent.execute_task(task_with_assigned_agent, context)</code></pre>
-                <div class="anno">读法：<b>委派的本质 = "临时造一个 Task，指定目标 agent，让它执行，拿回结果"。</b>没有神秘的通信机制——就是动态创建一个新任务、调目标 agent 的 <code>execute_task</code>（Day 02）、返回结果。委派方拿到这个结果，继续自己的 ReAct 循环。</div>
-                <div class="baby"><span class="t">串起来看</span>
-                写手 Agent（在自己的 ReAct 循环里）→ 决定调"委派工具"、参数 coworker="研究员"、task="查 X 的数据" → <code>_execute</code> 临时造一个 Task 交给研究员 Agent → 研究员跑<strong>它自己的 ReAct 循环</strong>完成 → 结果作为"工具返回值"回到写手 → 写手继续写。<strong>一个 Agent 的执行嵌套了另一个 Agent 的执行——这就是多智能体协作在代码层的真身。</strong></div>
-                <div class="example"><span class="t">📝 例子：一次 delegate 的输入与输出</span>
-                写手 Agent 在自己的 ReAct 里调用 <code>Delegate work to coworker</code>，填三个参数：<br>
-                <code>coworker="研究员"</code>、<code>task="查 2024 全球 AI 市场规模"</code>、<code>context="我正在写一篇行业文章"</code><br>
-                → <code>_execute</code> 临时造一个 Task 交给研究员 Agent，研究员跑<strong>它自己的 ReAct</strong> 查完 → 返回 <code>"约 XXX 亿美元（来源…）"</code><br>
-                → 这个字符串作为"工具返回值"回到写手，写手带着它继续写文章。</div>
-                <div class="qa">
-                    <p class="q">👶 小白：写手把活甩给研究员，那研究员干活的时候，写手自己在干嘛？会不会忘了自己写到哪了？</p>
-                    <p class="a">👨‍🏫 老师：不会忘。就像你手头写着报告、卡在一个数据上，于是发消息问同事——发完消息你就<strong>原地等回复</strong>，你的稿子、思路都还在桌上。研究员这段"帮忙"就嵌在写手这一次工具调用里，研究员一交回答案，写手就<strong>拿着这条新信息接着原来的思路往下写</strong>，前面写的东西都在对话历史里，一点没丢。</p>
-                    <p class="q">👶 小白：那会不会俩人你委派我、我委派你，转来转去停不下来？</p>
-                    <p class="a">👨‍🏫 老师：理论上可能，所以每个 Agent 都有 Day 07 讲的 <code>max_iter</code>（最多来回几趟）兜底——就像同事之间来回踢皮球，总有个"别再转了，赶紧给个结果"的上限。而且只有 <code>allow_delegation=True</code> 的人才有"转派权"，没开这个开关的员工只能自己埋头干。</p>
+                <p>核心循环 <code>_invoke_loop_react</code>（<span class="fileref">crew_agent_executor.py:330</span>），骨架是"没拿到 AgentFinish 就一直转"：</p>
+<pre><code class="language-python"># crew_agent_executor.py:330
+def _invoke_loop_react(self) -> AgentFinish:
+    formatted_answer = None
+    while not isinstance(formatted_answer, AgentFinish):   # ★核心条件
+        try:
+            if has_reached_max_iterations(self.iterations, self.max_iter):
+                formatted_answer = handle_max_iterations_exceeded(...)   # 到上限强制收尾
+                break
+            enforce_rpm_limit(self.request_within_rpm_limit)   # 限流
+            answer = get_llm_response(llm=..., messages=self.messages, ...)  # 问一次 LLM
+            answer_str = str(answer) if not isinstance(answer, str) else answer
+            formatted_answer = process_llm_response(answer_str, self.use_stop_words)  # 解析
+            if isinstance(formatted_answer, AgentAction):     # 解析出"要调工具"
+                tool_result = execute_tool_and_check_finality(...)   # 执行工具
+                formatted_answer = self._handle_agent_action(formatted_answer, tool_result)
+            self._invoke_step_callback(formatted_answer)
+            self._append_message(formatted_answer.text)       # 结果进对话历史
+        except OutputParserError as e:
+            formatted_answer = handle_output_parser_exception(...)   # 解析失败→自愈
+        except Exception as e:
+            ...
+        finally:
+            self.iterations += 1        # ★每圈计数 +1（放 finally 保证一定执行）
+    ...
+    return formatted_answer</code></pre>
+                <div class="walk">
+                    <div class="r"><code>while not ...AgentFinish</code><span>★整个循环的灵魂：只要还没拿到"最终答案"这个类型，就继续转。拿到了自然退出。</span></div>
+                    <div class="r"><code>has_reached_max_iterations</code><span>先查刹车：转够 <code>max_iter</code>（Day 07，默认 25）圈还没答案，就 <code>handle_max_iterations_exceeded</code> 逼它基于现有信息给个答案，<code>break</code> 跳出。</span></div>
+                    <div class="r"><code>get_llm_response</code><span>问一次大模型，拿到它这一圈说的话。</span></div>
+                    <div class="r"><code>process_llm_response</code><span>★把这段话<b>解析</b>成 <code>AgentAction</code>（要调工具）或 <code>AgentFinish</code>（给答案）——这就是 Day 09 的主题。</span></div>
+                    <div class="r"><code>if AgentAction: 执行工具</code><span>解析出要调工具，就真去执行，再 <code>_handle_agent_action</code> 把结果写回消息。</span></div>
+                    <div class="r"><code>finally: iterations += 1</code><span>★放在 <code>finally</code> 里，意味着<b>无论这圈是正常还是抛异常，圈数都会 +1</b>。保证刹车计数不被异常绕过。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 250" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一圈 ReAct 循环的分支</text>
+                        <rect x="255" y="30" width="150" height="30" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="330" y="49" fill="#fcd34d" text-anchor="middle">① 到 max_iter 了吗？</text>
+                        <rect x="470" y="30" width="170" height="30" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="555" y="49" fill="#fca5a5" text-anchor="middle">是→强制收尾 break</text>
+                        <path d="M405 45 L468 45" stroke="#ef4444" stroke-width="1.2" marker-end="url(#a8)"/>
+                        <rect x="255" y="75" width="150" height="28" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="330" y="93" fill="#93c5fd" text-anchor="middle">② 问一次 LLM</text>
+                        <path d="M330 60 L330 74" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a8)"/>
+                        <rect x="255" y="115" width="150" height="28" rx="7" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="330" y="133" fill="#c084fc" text-anchor="middle">③ 解析回答</text>
+                        <path d="M330 103 L330 114" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a8)"/>
+                        <rect x="60" y="160" width="200" height="30" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="160" y="179" fill="#86efac" text-anchor="middle">AgentFinish → 退出循环 ✅</text>
+                        <rect x="400" y="160" width="220" height="30" rx="7" fill="rgba(56,189,248,.1)" stroke="#38bdf8"/>
+                        <text x="510" y="179" fill="#7dd3fc" text-anchor="middle">AgentAction → 执行工具</text>
+                        <path d="M290 143 L160 158" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a8g)"/>
+                        <path d="M370 143 L510 158" stroke="#38bdf8" stroke-width="1.1" marker-end="url(#a8c)"/>
+                        <path d="M510 190 C510 220 330 225 330 105" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#a8c)"/>
+                        <text x="330" y="238" fill="#38bdf8" text-anchor="middle" font-size="10.5">④ 工具结果 append 进 messages → 回到②再问（下一圈 iterations+1）</text>
+                        <defs>
+                          <marker id="a8" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a8g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                          <marker id="a8c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#38bdf8"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：解析结果分两支——AgentFinish 出门，AgentAction 执行工具后把观察喂回、回到"问 LLM"。这就是 while 的一圈。</div>
                 </div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>名字容错 sanitize_agent_name</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>循环里的三件事：执行工具 → 写回 → 喂给下一圈</h1></div>
             <div class="card">
-                <p><code>_execute</code> 第一步就规范化同事名字（<code>base_agent_tools.py:20</code>）——小写、去引号、合并空白，再按 role 模糊匹配。</p>
-                <div class="baby"><span class="t">为什么需要这么多容错？（源码注释点明了）</span>
-                因为<strong>弱一点的模型经常把同事名字写得乱七八糟</strong>——加引号（<code>"研究员"</code>）、大小写不一致、多余空格、甚至编成非法 JSON。如果严格匹配，委派就总失败。所以框架做了大量容错：规范化名字、模糊匹配 role、<strong>找不到时返回"可用同事列表"的友好错误</strong>（而不是直接崩），让模型看到列表后重新选。<strong>"假设模型会犯错并优雅兜底"——又一次体现 Agent 框架的健壮性哲学（Day 07）。</strong></div>
+                <p>当这圈解析出 <code>AgentAction</code>，循环做的关键动作（<span class="fileref">crew_agent_executor.py:402</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:402
+if isinstance(formatted_answer, AgentAction):
+    fingerprint_context = {}
+    if self.agent and hasattr(self.agent, "security_config") ...:
+        fingerprint_context = {"agent_fingerprint": str(self.agent.security_config.fingerprint)}
+
+    tool_result = execute_tool_and_check_finality(   # ★真正执行工具
+        agent_action=formatted_answer,
+        tools=self.tools,
+        tools_handler=self.tools_handler,   # 缓存中枢（D11）
+        task=self.task, agent=self.agent, crew=self.crew, ...)
+    formatted_answer = self._handle_agent_action(formatted_answer, tool_result)  # 把结果写回</code></pre>
+                <p>而 <code>_handle_agent_action</code>（<span class="fileref">crew_agent_executor.py:1456</span>）里对"贴图片工具"有特殊处理，其余交给通用核心函数：</p>
+<pre><code class="language-python"># crew_agent_executor.py:1456
+def _handle_agent_action(self, formatted_answer, tool_result):
+    add_image_tool = I18N_DEFAULT.tools("add_image")
+    if isinstance(add_image_tool, dict) and formatted_answer.tool.casefold().strip() == ...:
+        self.messages.append({"role": "assistant", "content": tool_result.result})
+        return formatted_answer     # 图片：直接作为一条消息塞进去
+    return handle_agent_action_core(       # 普通工具：走通用逻辑
+        formatted_answer=formatted_answer, tool_result=tool_result,
+        messages=self.messages, step_callback=self.step_callback, show_logs=self._show_logs)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>execute_tool_and_check_finality</code><span>★干三件事：执行工具、查缓存（经 <code>tools_handler</code>）、并检查这个工具是不是 <code>result_as_answer</code>（结果就当最终答案）。</span></div>
+                    <div class="r"><code>fingerprint_context</code><span>把 Agent 的"指纹"传进去（安全/审计用），让工具调用能追溯到是哪个 Agent 发起的。</span></div>
+                    <div class="r"><code>add_image 特判</code><span>贴图片是特殊工具：结果要作为<b>多模态消息</b>而非普通文本观察，所以单独 append。</span></div>
+                    <div class="r"><code>handle_agent_action_core</code><span>通用路径：把工具结果格式化成 <code>Observation:</code> 追加进 <code>messages</code>，让下一圈 LLM 看得到。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 例子：一轮工具调用里 messages 怎么变</span>
+                问："SF 今天几度？"（带一个 search 工具）。<br>
+                第 1 圈 LLM 输出 <code>Thought: 我要查天气 / Action: search / Action Input: SF weather</code> → 解析成 <strong>AgentAction</strong>；框架执行 search 得 <code>SF 18°C</code>，作为 <code>Observation: SF 18°C</code> <strong>append 进 self.messages</strong>。<br>
+                第 2 圈 LLM 看到这条观察 → 输出 <code>Final Answer: SF 今天 18 度</code> → 解析成 <strong>AgentFinish</strong>，<code>while</code> 条件不成立，退出。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：为啥不让 LLM 一口气把答案说完，非要一圈圈来回？</p>
+                    <p class="a">👨‍🏫 老师：因为 LLM 脑子里<strong>没有</strong>"SF 今天 18°C"这条实时信息——你逼它一次答完，它只会<strong>瞎编</strong>一个温度。必须让它先开口要工具、框架真去查一次、把真实结果喂回去，它才有据可答。<strong>一圈圈，是为了在"想"和"真实世界数据"之间反复对齐。</strong></p>
+                </div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>委派工具怎么注入</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>原生函数调用循环：单个执行 vs 并行提速</h1></div>
             <div class="card">
-                <p>委派工具在 <code>_prepare_tools</code>（<code>crew.py:1606</code>）里按需注入：</p>
-<pre><code class="language-python">if getattr(agent, "allow_delegation", False):
-    if self.process == Process.hierarchical:
-        tools = self._update_manager_tools(task, tools)   # 给经理注入
-    elif agent:
-        tools = self._add_delegation_tools(task, tools)   # 给普通 agent 注入</code></pre>
-                <div class="anno">读法：<b>只有 <code>allow_delegation=True</code> 的 agent 才被注入委派工具。</b><code>_add_delegation_tools</code>（<code>crew.py:1781</code>）把"除自己之外"的所有 agent 作为可委派对象。层级模式的经理（Day 06）则总是被注入——它的全部工具就是委派工具（Day 06 讲的"经理不能带普通工具"）。</div>
-                <div class="glossary">所以：<strong>顺序模式下</strong>某个 agent 设了 <code>allow_delegation=True</code>，它就能在需要时喊别的同事帮忙；<strong>层级模式下</strong>经理靠委派工具把每个任务分派给下属。两种协作场景，同一套委派工具机制。</div>
+                <p>另一条路 <code>_invoke_loop_native_tools</code>（<span class="fileref">crew_agent_executor.py:484</span>），先把工具转成 OpenAI schema，再进 <code>while True</code>：</p>
+<pre><code class="language-python"># crew_agent_executor.py:484
+def _invoke_loop_native_tools(self) -> AgentFinish:
+    if not self.original_tools:
+        return self._invoke_loop_native_no_tools()   # 没工具→只问一次就结束
+    openai_tools, available_functions, self._tool_name_mapping = (
+        convert_tools_to_openai_schema(self.original_tools))
+    while True:
+        ...
+        answer = get_llm_response(llm=..., tools=openai_tools, ...)  # LLM 直接返回结构化
+        if isinstance(answer, list) and answer and self._is_tool_call_list(answer):
+            tool_finish = self._handle_native_tool_calls(answer, available_functions)
+            if tool_finish is not None:
+                return tool_finish
+            continue                       # 没结束→喂回结果，继续 while
+        if isinstance(answer, str):        # 返回纯文本→就是最终答案
+            formatted_answer = AgentFinish(thought="", output=answer, text=answer)
+            ...
+            return formatted_answer</code></pre>
+                <p>关键在 <code>_handle_native_tool_calls</code>（<span class="fileref">crew_agent_executor.py:667</span>）的策略——<strong>默认只执行第一个</strong>：</p>
+<pre><code class="language-python"># crew_agent_executor.py:667（docstring + 精简）
+"""Executes only the FIRST tool call and appends the result to message history.
+This enables sequential tool execution with reflection after each tool ..."""
+if len(parsed_calls) > 1:
+    has_result_as_answer_in_batch = any(... "result_as_answer" ...)
+    has_max_usage_count_in_batch  = any(... "max_usage_count" ...)
+    if has_result_as_answer_in_batch or has_max_usage_count_in_batch:
+        logger.debug("Skipping parallel native execution ...")   # 有特殊工具→不并行
+    else:
+        # :746 用线程池并行执行多个独立工具
+        max_workers = min(8, len(execution_plan))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(contextvars.copy_context().run,
+                       self._execute_single_native_tool_call, ...): idx for ...}
+            for future in as_completed(futures):
+                ordered_results[futures[future]] = future.result()
+        ...
+        return None
+# :786 常规情况：只取第一个执行
+call_id, func_name, func_args = parsed_calls[0]
+...</code></pre>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么默认只执行第一个工具？</span>
+                Agent 干活常有<strong>依赖</strong>——"先查 A，根据 A 的结果再决定查什么"。如果模型一次说要调 3 个工具就全执行，第 2、3 个的参数可能本该依赖第 1 个的结果，一起并行就错了。所以源码默认<strong>只执行第一个 → 把结果喂回 → 让模型重新推理再决定下一步</strong>（顺序 + 反思，更稳）。只有当一批多个工具<strong>明显互不依赖</strong>（都不带 <code>result_as_answer</code>/<code>max_usage_count</code>）时，才用线程池并行提速（最多 8 个）。<strong>正确性优先、性能其次</strong>——很稳健的权衡。</div>
+                <div class="anno">并行时用 <code>contextvars.copy_context().run</code> 提交任务（<span class="fileref">:749</span>）：把当前线程的<b>上下文变量</b>复制给子线程，保证并行工具也能读到正确的 Agent/Task 上下文，结果按 <code>idx</code> 归位以保持顺序。这是并发编程里"上下文隔离"的标准手法。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>为什么用"工具"实现委派（设计回味）</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>异常自愈、上下文压缩与优雅降级</h1></div>
             <div class="card">
-                <ul>
-                    <li><strong>复用能力</strong>：Agent 本就会用工具，委派复用这个能力，零学习成本。</li>
-                    <li><strong>统一循环</strong>：委派发生在 Agent 的 ReAct 循环里，和调普通工具没区别，执行引擎不用特殊处理。</li>
-                    <li><strong>自然嵌套</strong>：被委派的 Agent 跑自己的循环，结果作为工具返回值——天然支持多层协作。</li>
-                    <li><strong>LLM 友好</strong>：模型擅长"选工具、填参数"，委派用这个它熟悉的方式表达。</li>
-                </ul>
-                <div class="glossary"><b>这是"命令模式 + 工具抽象"的结合</b>：委派被封装成一个可调用的命令对象（工具），协作复用 LLM 的 function-calling。<strong>回味 Day 13 的 OpenHands——它也把"子 Agent 委派"实现为 TaskAction/子 Agent 工具；eino 也推荐"Agent-as-Tool"。三个框架不约而同——因为"把协作做成工具"确实是最优雅的方案。</strong></div>
+                <p>循环对各种"模型会犯的错"有细致处理（<span class="fileref">crew_agent_executor.py:434</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:434
+except OutputParserError as e:
+    formatted_answer = handle_output_parser_exception(   # ① 解析失败→把纠错提示喂回，重来
+        e=e, messages=self.messages, iterations=self.iterations, ...)
+except Exception as e:
+    if e.__class__.__module__.startswith("litellm"):
+        raise e                          # ② litellm 的错(如鉴权/网络)→原样抛出，不吞
+    if is_context_length_exceeded(e):
+        handle_context_length(           # ③ 上下文超长→自动摘要压缩历史
+            respect_context_window=self.respect_context_window, messages=self.messages, ...)
+        continue                         # 压缩后继续 while
+    handle_unknown_error(PRINTER, e, verbose=self.agent.verbose)
+    raise e
+finally:
+    self.iterations += 1</code></pre>
+                <p>原生模式里还有一处降级（<span class="fileref">crew_agent_executor.py:577</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:577
+if is_native_tool_calling_unsupported_error(e):
+    self._append_text_tool_calling_fallback_message()
+    return self._invoke_loop_react()     # ④ 模型其实不支持原生→当场切回文本 ReAct</code></pre>
+                <div class="walk">
+                    <div class="r"><code>① OutputParserError</code><span>LLM 格式跑偏（既没 Action 也没 Final Answer）→ 把"你哪里写错了"的提示喂回去，让它自己改，而不是崩。</span></div>
+                    <div class="r"><code>② litellm 的错原样抛</code><span>★边界：鉴权失败、网络错这类<b>底层错</b>不该被"自愈"吞掉——吞了会让 Agent 假装没事继续瞎转。直接 <code>raise</code> 让上层看到真问题。</span></div>
+                    <div class="r"><code>③ 上下文超长</code><span>历史太长撑爆窗口 → 按 Day 07 的 <code>respect_context_window</code> 自动摘要压缩，然后 <code>continue</code> 接着跑。</span></div>
+                    <div class="r"><code>④ 原生不支持→降级</code><span>模型声称支持原生但实际报错 → 当场切回文本 ReAct，而非直接失败。最大化兼容性。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：哪些错该"自愈"、哪些该"抛出"？</span>
+                源码画了一条清晰的线：<strong>"模型犯的错"（格式错、上下文爆、原生不支持）→ 自愈</strong>（转成反馈让它改、压缩、降级）；<strong>"系统/底层的错"（litellm 鉴权、网络、未知异常）→ 抛出</strong>。区分标准是"这个错重试/换策略有没有意义"。格式错重试有意义（模型下次可能写对），鉴权错重试无意义（key 错了转一万圈也没用）。<strong>盲目 try/except 吞所有错是反模式——会把真 bug 藏起来，让 Agent 在错误状态里空转烧钱。</strong></div>
             </div>
         </section>
 
         <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
-            <div class="card highlight-card">
-                <h3>🧠 今天你应该能回答</h3>
-                <ul>
-                    <li>委派是什么？谁有委派能力？</li>
-                    <li>委派为什么被实现成"工具"？聪明在哪？</li>
-                    <li>两个委派工具的区别？</li>
-                    <li>_execute 的本质是什么？（临时造 Task 交给目标 agent）</li>
-                    <li>为什么需要大量的名字容错？</li>
-                </ul>
-            </div>
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=lib/crewai/src/crewai/tools/agent_tools
-sed -n '15,130p' $P/base_agent_tools.py         # _execute + 名字容错
-cat $P/delegate_work_tool.py $P/ask_question_tool.py
-grep -n '_add_delegation_tools\|allow_delegation' ../../crew.py 2>/dev/null || \
-  grep -n '_add_delegation_tools\|allow_delegation' lib/crewai/src/crewai/crew.py</code></pre>
-                <div class="tip"><strong>明天预告 · Day 09</strong>：<strong>Planning 规划</strong>——复杂任务执行前先"制定计划"。看两套规划：Crew 级（开工前一次性生成计划塞进任务描述）和 Step 级（执行中动态观察、按需重规划）。</div>
-            </div>
-            <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="crewai-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 执行循环</a>
-                <a href="crewai-day09.html" style="color:var(--accent-green);">Day 09 · Planning &rarr;</a>
+                <div class="pitfall"><span class="t">⚠️ 边界：循环结束却没拿到 AgentFinish 怎么办？</span>
+                循环退出后源码还有一道校验（<span class="fileref">crew_agent_executor.py:462</span>）：<code>if not isinstance(formatted_answer, AgentFinish): raise RuntimeError(...)</code>。为什么要多此一举？因为 <code>while</code> 是靠"是不是 AgentFinish"来退出的——正常退出时它<strong>一定</strong>是 AgentFinish。但如果因为某个 bug（比如 <code>break</code> 时状态没设对）退出而它不是，说明代码逻辑坏了。<strong>与其返回一个类型不对的东西让调用方在很远处崩，不如在这里立刻 raise 一个清晰的错误。</strong>这是"防御性断言"——把不该发生的情况显式拦下。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：<code>max_iter=25</code> 转满了，会报错吗？</p>
+                    <p class="a">👨‍🏫 老师：不会报错。到上限时 <code>handle_max_iterations_exceeded</code> 会<strong>逼 LLM 基于目前已有信息给一个最终答案</strong>，然后 <code>break</code> 正常退出。所以答案可能质量不高（因为它没查够），但流程不会崩。这比"无限循环烧钱"或"直接抛错扔掉半成品"都好——<strong>有下限地优雅收尾。</strong></p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>执行器的本质是什么？（一个 <code>while not AgentFinish</code> 循环）</li>
+                        <li><code>invoke</code> 开局做哪四件事？为什么 <code>messages</code> 是实例状态？</li>
+                        <li>原生 vs 文本模式怎么分流？各自更适合什么模型？</li>
+                        <li>一圈循环里"执行工具→写回→喂下一圈"是怎么串起来的？</li>
+                        <li>原生模式为什么默认只执行第一个工具？何时才并行？</li>
+                        <li>哪些错自愈、哪些错抛出？判断标准是什么？</li>
+                        <li><code>iterations += 1</code> 为什么放在 <code>finally</code>？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '309,328p'  $P/agents/crew_agent_executor.py   # 分流
+sed -n '330,468p'  $P/agents/crew_agent_executor.py   # 文本 ReAct 主循环 + 异常
+sed -n '667,807p'  $P/agents/crew_agent_executor.py   # 原生工具调用：单个/并行策略
+# 打开 verbose 亲眼看循环每一圈
+python -c "
+from crewai import Agent, Task, Crew
+a=Agent(role='算术员', goal='算数', backstory='你会用工具', verbose=True)
+t=Task(description='算 23*19', expected_output='一个数字', agent=a)
+print(Crew(agents=[a], tasks=[t]).kickoff())
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 09</strong>：今天循环里那句 <code>process_llm_response</code> 把 LLM 的文本解析成 AgentAction/AgentFinish——它内部就是 <code>agents/parser.py</code>。明天逐行读这个解析器：<code>Thought/Action/Final Answer</code> 怎么用正则抠出来、破损 JSON 怎么修、解析失败怎么生成"给模型的纠错提示"。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day07.html" style="color:var(--accent-cyan);">&larr; Day 07 全字段</a>
+                    <a href="crewai-day09.html" style="color:var(--accent-green);">Day 09 · 输出解析 &rarr;</a>
+                </div>
             </div>
         </section>
     </main>
