@@ -404,6 +404,10 @@ class BeforeLLMCallHookMethod:
                 回顾 L05/L06 都是 <code>try: ... except Exception: printer.print(...)</code>——钩子抛异常只打 warning，主流程继续。这和 Day 08 里"litellm 底层错要抛出"看似矛盾，其实标准一致：<strong>钩子是"锦上添花"的增强逻辑，不是主链路</strong>。一个日志钩子写了 bug，不该让整个 Agent 任务失败。反过来，鉴权错是主链路的错，必须抛。<strong>判断标准仍是"这个组件是核心还是增强"。</strong>（当然，若你的钩子做的是"审批"这种关键闸门，就得自己在钩子内确保逻辑健壮，别指望框架替你兜。）</div>
                 <div class="pitfall"><span class="t">⚠️ 边界：全局钩子在测试里会串味</span>
                 因为 <code>_before_llm_call_hooks</code> 是模块级列表，import 一次就常驻。写单测时，A 用例注册的钩子会泄漏到 B 用例。源码专门提供 <code>clear_before_llm_call_hooks()</code>（<span class="fileref">hooks/llm_hooks.py:293</span>）等清理函数，返回清掉的数量。<strong>测试 setUp/tearDown 里记得清，否则会遇到"单跑通过、一起跑失败"的诡异现象。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：我同时挂了三个 before_llm_call 钩子，它们按什么顺序跑？其中一个返回 False 会怎样？</p>
+                    <p class="a">👨‍🏫 老师：按<strong>注册顺序</strong>依次跑（就是你 <code>@before_llm_call</code> 的先后）。一旦<strong>任一个返回 False，立刻熔断</strong>——后面的钩子不再执行、这次 LLM 也不调（回看 L05 的 <code>if result is False: return False</code>）。所以把"最可能拦截的闸门"放前面能省点开销；也要注意别让某个爱返回 False 的钩子挡住后面钩子该做的事。</p>
+                </div>
                 <div class="card highlight-card">
                     <h3>🧠 今天你应该能回答</h3>
                     <ul>
