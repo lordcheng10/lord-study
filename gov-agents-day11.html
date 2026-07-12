@@ -126,7 +126,31 @@ if result["ok"]:
 else:
     data = result["data"]        # 失败：fallback 兜底值
     err  = result["error"]       # "ConnectionError: ..."（带异常类名）</code></pre>
-                <p>返回的 <code>ToolResult</code>（<code>safe_result.py:30</code>）永远是 <code>{ok, data, error}</code>。成功 <code>ok=True</code>；异常时 <code>ok=False</code>、<code>data=fallback</code>、<code>error</code> 带上异常类名（便于聚合分析）。还支持 <code>timeout</code> 参数（<code>asyncio.wait_for</code> 超时也算失败）。</p>
+                <p>返回的 <code>ToolResult</code> 是一个 TypedDict（<code>safe_result.py:30</code>），三个字段固定死：</p>
+<pre><code class="language-python"># tools/safe_result.py:30
+class ToolResult(TypedDict):
+    ok: bool           # 成功 True / 失败 False
+    data: Any          # 成功=真实返回；失败=fallback 兜底值
+    error: str | None  # 成功=None；失败="异常类名: 消息"</code></pre>
+                <p>装饰器的核心就一个 <code>wrapper</code>，把整个调用包进 try/except（<code>safe_result.py:54</code>）：</p>
+<pre><code class="language-python"># tools/safe_result.py:54
+@functools.wraps(fn)
+async def wrapper(*args, **kwargs) -> ToolResult:
+    try:
+        if timeout:
+            import asyncio
+            data = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout)  # 超时也算失败
+        else:
+            data = await fn(*args, **kwargs)
+        return {"ok": True, "data": data, "error": None}
+    except Exception as e:
+        logger.warning("Tool %s failed: %s", fn.__name__, e, exc_info=True)
+        # 带上异常类型名，方便测试 / 监控按类别聚合
+        err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        return {"ok": False, "data": fallback, "error": err_msg}
+
+wrapper.__safe_tool_result__ = True   # 打个标记，别处可探测这个函数已被包过</code></pre>
+                <div class="baby"><span class="t">👶 逐行大白话</span><code>try</code> 里正常调你的工具函数，成功就返 <code>{ok:True, data:真实结果}</code>。<code>except Exception</code> 捞住<strong>任何</strong>异常（连超时都被 <code>wait_for</code> 转成异常一起捞），记一条 warning 日志，然后返 <code>{ok:False, data:fallback, error:"ConnectionError: timed out"}</code>。最后一行给函数打个 <code>__safe_tool_result__</code> 标记——像贴张"已装止水阀"的贴纸，方便别的代码检查。</div>
                 <div class="example"><span class="t">📝 举个例子：同一个 get_metrics，两种结局都不抛</span>
                 成功：Prometheus 正常 → <code>{"ok": true, "data": {"p99": 820, ...}, "error": null}</code><br>
                 失败：Prometheus 挂了 → <code>{"ok": false, "data": {"hint": "tool failed"}, "error": "ConnectionError: timed out"}</code><br>
@@ -153,6 +177,8 @@ else:
                     <div class="cap">图注：无论工具成功还是炸了，出口永远是统一的 {ok,data,error}——异常绝不外泄，图不会被掀翻。</div>
                 </div>
                 <div class="tip"><strong>为什么强制这个约定？</strong> 因为一个 Agent 要调很多外部系统（Prometheus、日志、发布记录），任何一个抖动都不该让整个图崩。统一成 <code>{ok, data, error}</code> 后，节点里只需判 <code>ok</code>，代码干净、行为可预测。这也是 Day 05 里 sre-rca 的 4 个 observability 工具全都带这个装饰器的原因。</div>
+                <div class="anno">⚠️ 设计取舍①：<code>error</code> 为什么写成 <code>f"{type(e).__name__}: {e}"</code>（<code>safe_result.py:66</code>）而不是只存 <code>str(e)</code>？因为<b>带上异常类名</b>（<code>ConnectionError</code> / <code>TimeoutError</code> / <code>ValueError</code>）后，监控可以按"错误类别"聚合——"这周 ConnectionError 涨了 3 倍"一眼可见。只存消息文本就聚合不了。这是"为可观测性多存一点结构"的典型取舍。</div>
+                <div class="anno">⚠️ 边界/易错点：<code>fallback</code> 不传时默认是 <code>{}</code>（<code>safe_result.py:49</code>）。所以调用方在 <code>ok=False</code> 时拿到的 <code>data</code> 可能是<b>空字典</b>——节点代码要能接受"降级数据是空的"这种情况，别默认 <code>data</code> 里一定有你要的键。给关键工具<b>显式传一个有意义的 fallback</b>（如 <code>{"hint": "tool failed"}</code>）是更稳的写法。</div>
             </div>
         </section>
 
@@ -166,13 +192,31 @@ else:
                 </div>
                 <div class="essence"><span class="t">💡 本质：get_llm 就是全楼那个"标准插座"</span>你家买冰箱(写业务节点)时，从不关心插座背后是市电、太阳能还是发电机——你只管插进标准插座(<code>get_llm("sonnet")</code>)。生产时插座背后接的是真 Claude，测试时物业把插座背后<strong>整个换成假电源</strong>(<code>set_llm_factory(...FakeLLM)</code>)，冰箱一个螺丝都不用动。以后想换供电商(换大模型厂商)？也只改插座背后那一处工厂，全楼家电无感。这就是"依赖注入"。</div>
                 <div class="essence"><span class="t">🛠 如果让你自己实现，你会怎么写？</span>朴素做法：业务里直接 <code>llm = ChatAnthropic(api_key=...)</code>。问题立刻来了——① 测试怎么办？总不能每跑一次单测就真调一次 Claude、花钱又慢又飘；② 想换厂商？得改几十处业务代码。<strong>把"创建模型"从业务里抽出来、藏到一个可替换的工厂背后</strong>，这两个问题一起解决——这正是 <code>get_llm</code> 存在的动机。</div>
-                <p>核心 3 个函数（<code>llm.py</code>）：</p>
-                <ul>
-                    <li><code>get_llm(tier, cache_system=, ...)</code>（<code>llm.py:325</code>）：从"当前工厂"取一个模型实例。</li>
-                    <li><code>set_llm_factory(fn)</code>（<code>llm.py:311</code>）：注入自定义工厂（测试用）。</li>
-                    <li><code>reset_llm_factory()</code>（<code>llm.py:408</code>）：测试结束还原。</li>
-                </ul>
-                <div class="glossary"><b>这就是"依赖注入"</b>：业务只依赖 <code>get_llm</code> 这个抽象入口，真正给什么模型由外部工厂决定。它是 Day 10 讲的"评测/测试全走 FakeLLM"能成立的根本前提，也让"以后想换个大模型厂商"变成只改一处工厂的事。<code>AGENTS.md</code> 把"直接 import anthropic"列为头号反模式。</div>
+                <p>机制其实很轻——就是一个模块级的可替换工厂 <code>_factory</code>（<code>llm.py:29</code>）。<code>get_llm</code> 每次去问"当前工厂是谁"：</p>
+<pre><code class="language-python"># llm.py:29
+_factory: Callable[[ModelTier], Any] | None = None   # None 时用默认工厂
+
+# llm.py:311  测试时注入假工厂
+def set_llm_factory(fn):
+    global _factory
+    _factory = fn
+
+# llm.py:359  get_llm 取模型:有自定义工厂用它,否则用默认工厂
+factory = _factory or _default_factory</code></pre>
+                <p>默认工厂 <code>_default_factory</code>（<code>llm.py:224</code>）才是真正 <code>import anthropic</code> 的<strong>唯一地方</strong>——全框架就这一处碰真厂商 SDK：</p>
+<pre><code class="language-python"># llm.py:224  唯一创建真 ChatAnthropic 的地方
+def _default_factory(tier="sonnet", *, cache_system=False, cache_messages=False):
+    from langchain_anthropic import ChatAnthropic       # 只有这里 import 厂商 SDK
+    callbacks = _default_callbacks()                     # 自动挂计费回调(Day 11 L07)
+    if tier == "haiku":
+        model = os.environ.get("AI_TRUST_HAIKU_MODEL", "claude-haiku-4-5")
+        llm = ChatAnthropic(model=model, temperature=0.2, max_tokens=..., callbacks=callbacks)
+    else:  # sonnet 默认
+        model = os.environ.get("AI_TRUST_SONNET_MODEL", "claude-sonnet-4-5")
+        llm = ChatAnthropic(model=model, temperature=0.2, max_tokens=8192, callbacks=callbacks)
+    return llm</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>业务写 <code>get_llm("sonnet")</code>，get_llm 去看 <code>_factory</code> 这个"当前插座接谁"：生产时是 <code>None</code>，就走 <code>_default_factory</code> 造一个真 Claude（还顺手挂上计费回调）；测试时 <code>set_llm_factory(...)</code> 把 <code>_factory</code> 换成返回 FakeLLM 的函数，get_llm 就返回假模型。<strong>业务代码一个字都不用改</strong>——它只认 <code>get_llm</code> 这个入口。连模型 ID 都从环境变量读，换个具体型号也不用动代码。</div>
+                <div class="glossary"><b>这就是"依赖注入"</b>：业务只依赖 <code>get_llm</code> 这个抽象入口，真正给什么模型由外部工厂决定（<code>reset_llm_factory()</code> <code>llm.py:408</code> 测试后还原）。它是 Day 10 "评测/测试全走 FakeLLM"能成立的根本前提，也让"换大模型厂商"变成只改 <code>_default_factory</code> 一处的事。<code>AGENTS.md</code> 把"业务直接 import anthropic"列为头号反模式——因为那等于把插座焊死在市电上。</div>
             </div>
         </section>
 
@@ -186,12 +230,44 @@ else:
                     <div class="t a"><h4>auto ⭐</h4><p>自动选<br>按预算动态降级</p></div>
                 </div>
                 <p><code>get_llm("auto")</code> 是 v0.6 的成本感知路由：预算充足用 Sonnet，<strong>预算剩余低于阈值（默认 10%）时自动降到 Haiku</strong>。决策在 <code>cost/router.py</code> 的 <code>CostAwareRouter.resolve_tier()</code>（<code>router.py:108</code>），按优先级短路：</p>
-<pre><code class="language-python"># router.py:118 —— 按优先级决定实际用哪个 tier
-if requested != "auto":      return (requested, "explicit")       # 明确指定就用它
-if tracker is None:          return (default,   "no_tracker")      # 没追踪器用默认
-if not tenant_id:            return (default,   "no_tenant")
-if pct &lt; threshold:          return (degrade_tier, "budget_degradation")  # 预算紧张降级
-else:                        return (default,   "default")</code></pre>
+<pre><code class="language-python"># cost/router.py:127  resolve_tier 按优先级"短路"返回 (tier, reason)
+if requested != "auto":                 return (requested, REASON_EXPLICIT)     # 明确指定就用它
+if tracker is None:                     return (self.default_tier, REASON_NO_TRACKER)
+tenant_id = getattr(tracker, "tenant_id", None) or ""
+if not tenant_id:                       return (self.default_tier, REASON_NO_TENANT)
+try:
+    pct = get_pct_sync(tenant_id)       # 读预算剩余百分比(60s sync cache · 不 await)
+except Exception:
+    return (self.default_tier, REASON_FALLBACK_PCT_ERROR)   # 查失败也不降级(fail-safe)
+if pct &lt; self.budget_pct_degrade_threshold:  return (self.degrade_tier, REASON_BUDGET_DEGRADATION)
+return (self.default_tier, REASON_DEFAULT)</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 230" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <rect x="200" y="8" width="160" height="30" rx="7" fill="rgba(6,182,212,.1)" stroke="#06b6d4"/>
+                        <text x="280" y="27" fill="#67e8f9" text-anchor="middle" font-weight="700">resolve_tier(requested)</text>
+                        <g stroke="#94a3b8" stroke-width="1.2" fill="none">
+                          <path d="M280 38 L280 56"/><path d="M280 84 L280 100"/><path d="M280 128 L280 144"/><path d="M280 172 L280 188"/>
+                        </g>
+                        <rect x="150" y="56" width="260" height="28" rx="6" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="280" y="74" fill="#fbbf24" text-anchor="middle">requested≠auto ? → explicit</text>
+                        <rect x="150" y="100" width="260" height="28" rx="6" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="280" y="118" fill="#fbbf24" text-anchor="middle">tracker/tenant 空 ? → 默认 sonnet</text>
+                        <rect x="150" y="144" width="260" height="28" rx="6" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="280" y="162" fill="#fbbf24" text-anchor="middle">pct &lt; 10% ? → 降级 haiku</text>
+                        <rect x="150" y="188" width="260" height="28" rx="6" fill="rgba(52,211,153,.08)" stroke="#34d399"/>
+                        <text x="280" y="206" fill="#34d399" text-anchor="middle">都不命中 → 默认 sonnet(强模型)</text>
+                        <g font-size="9.5">
+                          <text x="440" y="74" fill="#c4b5fd">命中→立即返回</text>
+                          <text x="440" y="118" fill="#c4b5fd">命中→立即返回</text>
+                          <text x="440" y="162" fill="#c4b5fd">命中→立即返回</text>
+                          <text x="120" y="74" fill="#94a3b8" text-anchor="end">否↓</text>
+                          <text x="120" y="118" fill="#94a3b8" text-anchor="end">否↓</text>
+                          <text x="120" y="162" fill="#94a3b8" text-anchor="end">否↓</text>
+                        </g>
+                        <text x="280" y="228" fill="#94a3b8" text-anchor="middle" font-size="9.5">"短路":从上往下，第一个命中的分支立即 return，后面不再判</text>
+                    </svg>
+                    <div class="cap">图注：resolve_tier 的"优先级短路"控制流——越靠上优先级越高，命中即返回。</div>
+                </div>
                 <p>把 <code>resolve_tier</code> 当调试器<strong>单步走一遍</strong>——4 个不同请求进来，看它命中哪条短路、最终用哪档模型：</p>
                 <table>
                     <thead><tr><th>请求</th><th>命中哪条短路</th><th>reason</th><th>实际 tier</th></tr></thead>
@@ -203,7 +279,17 @@ else:                        return (default,   "default")</code></pre>
                     </tbody>
                 </table>
                 <div class="anno">⚠️ 小白常误以为「<code>auto</code> 会一直挑最便宜的省钱」。<b>其实相反</b>：<code>auto</code> 默认给你<strong>最强的 Sonnet</strong>，只有当预算真的快烧光(剩余&lt;10%)才"忍痛"降到 Haiku 保命。省钱是<strong>兜底策略</strong>，不是默认行为。</div>
-                <div class="note"><strong>两个工程细节值得学</strong>：① 决策原因（reason）走一个<strong>白名单</strong>（<code>router.py:63</code>），防止乱塞字面量导致 Prometheus label 爆炸。② 整个 <code>resolve_tier</code> 全程 try/except 不抛——路由决策<strong>绝不能阻塞主推理路径</strong>，出错就退回默认 tier。cost-routing.json（根目录）配置了每个 agent 的默认 tier 和基线用量。</div>
+                <p>每个 <code>reason</code> 都不是随手写的字符串，而是从一个 <code>frozenset</code> 白名单里取（<code>router.py:63</code>）：</p>
+<pre><code class="language-python"># cost/router.py:63  reason 只能是这几个之一
+REASON_ALLOWLIST: frozenset[str] = frozenset({
+    REASON_EXPLICIT, REASON_NO_TRACKER, REASON_NO_TENANT,
+    REASON_BUDGET_DEGRADATION, REASON_DEFAULT,
+    REASON_FALLBACK_NO_BUDGET_MODULE, REASON_FALLBACK_PCT_ERROR,
+    REASON_QUOTA_DEGRADATION, REASON_RATELIMIT_BURST,  # 预留未来信号
+})</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么 reason 要用 frozenset 白名单？</span>因为这个 reason 会当作 <strong>Prometheus 指标的 label</strong>（<code>agent_invoke_routing_decision_total{reason=...}</code>）。监控系统里，label 每多一个不同取值就多存一条时间序列——如果有人随手 <code>return (tier, f"budget_{tenant_id}")</code> 把租户 ID 拼进 reason，几万个租户就是几万条序列，<strong>监控直接被撑爆（label cardinality 爆炸）</strong>。用 <code>frozenset</code>（不可变、防误改）锁死"合法 reason 只有这 9 个"，加新 reason 必须改这里 + 改 capability spec，逼你走正规流程。<code>__slots__</code>（<code>router.py:92</code>）也是同款洁癖：锁死 Router 只能有那 3 个属性，防手滑加字段。</div>
+                <div class="essence"><span class="t">💡 设计取舍③：为什么 resolve_tier 全程 sync + try/except 不抛？</span>看模块顶部的反模式清单（<code>router.py:22-26</code>）就懂：<code>❌ async resolve_tier + await sqlite · 在 event loop 内 deadlock</code>。路由决策是每次 <code>get_llm</code> 都要走的<strong>热路径</strong>，它绝不能 <code>await</code>（会阻塞/死锁 LangGraph 的节点），也绝不能抛异常（一抛就掀翻主推理）。所以它做成纯 sync、读 60s 缓存、任何一步失败都 <code>fallback 默认 tier 不降级</code>。<strong>"路由是辅助功能，出问题时宁可不省钱，也不能拖垮主流程"</strong>。</div>
+                <div class="anno">⚠️ 边界/易错点：降级判定是<b>严格小于</b> <code>pct &lt; threshold</code>（<code>router.py:152</code>），不是 <code>&lt;=</code>。所以"预算剩余<b>正好</b> 10%"这个临界点<b>走默认 sonnet、不降级</b>（源码 docstring 明确写了这条边界，<code>router.py:125</code>）。还有个反直觉点在下面这条 anno——</div>
             </div>
         </section>
 
@@ -211,7 +297,25 @@ else:                        return (default,   "default")</code></pre>
             <div class="section-header"><span class="section-number">L05</span><h1>prompt 缓存：同样的开头别重复付费</h1></div>
             <div class="card">
                 <p>Critic、专家这些节点的 system prompt 很长且<strong>每次调用都一样</strong>。Anthropic 的 prompt caching 能让"重复的前缀"只算一次钱（后续命中约 9 折优惠）。<code>get_llm("haiku", cache_system=True)</code> 就是开启它。</p>
-                <p>实现上有个兼容性巧思（<code>llm.py:361-368</code>）：<code>get_llm</code> 先尝试把 cache 参数传给工厂；如果工厂签名不支持（比如测试注入的 FakeLLM），<strong>catch 掉 TypeError，退化成"取到 llm 再外层包一层"</strong>——保证真模型能用缓存、假模型也不会崩。</p>
+                <p>实现上有个兼容性巧思，就藏在 <code>get_llm</code> 尾部这段 try/except 里（<code>llm.py:359</code>）：</p>
+<pre><code class="language-python"># llm.py:359
+factory = _factory or _default_factory
+try:
+    # 先假设工厂支持 cache 形参(默认工厂支持)
+    return factory(actual_tier, cache_system=cache_system, cache_messages=cache_messages)
+except TypeError:
+    # 自定义工厂签名不支持 cache 形参(常见:测试 set_llm_factory(lambda tier: FakeLLM()))
+    llm = factory(actual_tier)                       # 退一步:只按 tier 取 llm
+    if cache_system or cache_messages:
+        return _wrap_with_cache_control(llm, cache_system=cache_system, cache_messages=cache_messages)
+    return llm</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>业务想要缓存，就调 <code>get_llm("haiku", cache_system=True)</code>。get_llm 先<strong>大胆假设</strong>工厂认识 <code>cache_system</code> 这个参数，直接传过去（真默认工厂确实认）。可测试注入的假工厂往往是 <code>lambda tier: FakeLLM()</code>——它只收一个 <code>tier</code>，多传参数就抛 <code>TypeError</code>。这时 <code>except</code> 接住，<strong>退一步</strong>：只按 tier 取到 llm，再在外面自己包一层缓存 transform。真模型走缓存优化、假模型也不崩。</div>
+                <p>那"外面包一层"包的是什么？看 <code>_wrap_with_cache_control</code>（<code>llm.py:265</code>）——它还要分两种情况：</p>
+<pre><code class="language-python"># llm.py:280
+if isinstance(llm, Runnable):
+    return RunnableLambda(_transform) | llm     # 真 ChatAnthropic:走 LangChain 管道
+return _NonRunnableCacheWrap(llm, _transform)   # FakeLLM 等非 Runnable:套透明委托壳</code></pre>
+                <p><code>_NonRunnableCacheWrap</code>（<code>llm.py:287</code>）是个"透明壳"：只拦 <code>invoke</code>/<code>ainvoke</code> 塞进 transform，<strong>其它属性全用 <code>__getattr__</code> 转发给里面的真对象</strong>（<code>llm.py:306</code>）——所以 FakeLLM 不用被迫去继承 LangChain 的 Runnable 协议。</p>
                 <div class="glossary"><b>为什么这个兼容这么重要？</b> 因为同一份业务代码要同时服务"真 Claude（要缓存优化）"和"FakeLLM（不懂缓存）"两种场景。框架用"先试传参、失败降级"的方式让两者都能跑——这类"为可测试性做的隐藏兼容"，在 <code>get_llm</code>、<code>budget_gate</code>（无 tracker 静默）、<code>sensitivity.classify</code>（async 无 IO）里到处都是，是可信工程化的暗线。</div>
                 <div class="note">仓库还有 <code>scripts/lint_cache_system.py</code>：静态检查每处 <code>cache_system=True</code> 附近必须有"prompt 需 ≥1024 token 才真生效"的注释——防止有人以为开了缓存就一定省钱（system prompt 太短根本触发不了缓存）。</div>
             </div>
@@ -226,6 +330,54 @@ else:                        return (default,   "default")</code></pre>
                     <li><strong>SystemAwareFake(rules, default)</strong>（<code>fakes.py:62</code>）：<strong>按 system prompt 里的关键词分发</strong>不同回复。适合一个进程里多个节点共用一个工厂——比如 sre-rca 里 4 个专家 + 综合 + Critic 各要不同假答案，靠各自 system prompt 的关键词区分。</li>
                     <li><strong>install_fakes()</strong>（<code>fakes.py:119</code>）：一键装好"假 LLM + 假 embedder + 内存向量库"，返回三件套，测试 fixture 一行搞定。</li>
                 </ul>
+                <p>先看最简单的 <code>FakeLLM.ainvoke</code>（<code>fakes.py:47</code>）——它就是个"按次数发牌"的机器：</p>
+<pre><code class="language-python"># testing/fakes.py:47
+async def ainvoke(self, messages, **kwargs) -> FakeResponse:
+    self.calls.append(messages)                      # 记下这次被谁调了(方便断言)
+    if self.call_count &gt;= len(self.responses):
+        self.call_count += 1
+        return FakeResponse(content="(no more fake responses)")   # 预置回复用完的哨兵
+    resp = self.responses[self.call_count]
+    self.call_count += 1
+    return resp</code></pre>
+                <p>而 <code>SystemAwareFake</code> 更聪明，靠 system prompt 里的关键词<strong>路由</strong>到对应回复（<code>fakes.py:91</code>）：</p>
+<pre><code class="language-python"># testing/fakes.py:91
+async def ainvoke(self, messages, **kwargs) -> FakeResponse:
+    system_text = self._extract_system(messages)     # 抠出 system prompt 文本(fakes.py:106)
+    for key, resp in self.rules.items():
+        if key in system_text:                        # 第一个命中关键词的规则胜出
+            self.calls.append((key, messages))
+            return resp
+    self.calls.append(("default", messages))
+    return self.default                               # 都不命中 → 兜底回复</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 580 180" width="100%" style="max-width:580px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="290" y="20" fill="#e2e8f0" text-anchor="middle" font-weight="700">一个进程里 6 个节点共用一个 SystemAwareFake</text>
+                        <rect x="20" y="40" width="150" height="120" rx="8" fill="rgba(6,182,212,.06)" stroke="#06b6d4"/>
+                        <text x="95" y="60" fill="#67e8f9" text-anchor="middle" font-weight="700">6 次 LLM 调用</text>
+                        <text x="34" y="82" fill="#94a3b8" font-size="9.5">system:"Trace 专家…"</text>
+                        <text x="34" y="100" fill="#94a3b8" font-size="9.5">system:"Metric 专家…"</text>
+                        <text x="34" y="118" fill="#94a3b8" font-size="9.5">system:"最终综合…"</text>
+                        <text x="34" y="136" fill="#94a3b8" font-size="9.5">system:"质检员…"</text>
+                        <text x="34" y="152" fill="#64748b" font-size="9">…各自 prompt 不同</text>
+                        <path d="M170 100 L214 100" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#s3)"/>
+                        <text x="192" y="93" fill="#f59e0b" text-anchor="middle" font-size="9">关键词匹配</text>
+                        <rect x="218" y="40" width="180" height="120" rx="8" fill="rgba(139,92,246,.07)" stroke="#8b5cf6"/>
+                        <text x="308" y="60" fill="#c4b5fd" text-anchor="middle" font-weight="700">rules 字典</text>
+                        <text x="230" y="82" fill="#e2e8f0" font-size="9.5">"Trace 专家" → trace 假答案</text>
+                        <text x="230" y="100" fill="#e2e8f0" font-size="9.5">"Metric 专家" → metric 假答案</text>
+                        <text x="230" y="118" fill="#e2e8f0" font-size="9.5">"最终综合" → hypotheses 假答案</text>
+                        <text x="230" y="136" fill="#e2e8f0" font-size="9.5">"质检员" → critique 假答案</text>
+                        <text x="230" y="152" fill="#64748b" font-size="9">都不中 → default</text>
+                        <path d="M398 100 L442 100" stroke="#34d399" stroke-width="1.5" marker-end="url(#s3)"/>
+                        <rect x="446" y="76" width="120" height="48" rx="8" fill="rgba(52,211,153,.07)" stroke="#34d399"/>
+                        <text x="506" y="97" fill="#34d399" text-anchor="middle">对号入座</text>
+                        <text x="506" y="114" fill="#94a3b8" text-anchor="middle" font-size="9.5">各拿各的假答案</text>
+                        <defs><marker id="s3" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：SystemAwareFake 用 system prompt 关键词把一个假工厂"分流"给多个节点，一次 RCA 里 4 专家+综合+Critic 各取所需。</div>
+                </div>
+                <div class="anno">⚠️ 边界/易错点：<code>FakeLLM</code> 预置回复<b>用完后</b>不会报错，而是一直返回哨兵字符串 <code>"(no more fake responses)"</code>（<code>fakes.py:51</code>）。所以如果你的测试节点比预期多调了一次 LLM，拿到的不是异常而是这句"废话"——JSON 解析多半会失败让你察觉，但记得：<b>看到 "(no more fake responses)" 就说明预置的回复不够用了</b>，不是模型坏了。</div>
 <pre><code class="language-python"># 典型的 conftest.py fixture
 @pytest.fixture(autouse=True)
 def fake_llm():

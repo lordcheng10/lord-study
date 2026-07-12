@@ -125,7 +125,18 @@
                         <div class="cc">实例C：不设 = 挂全部</div>
                     </div>
                 </div>
-                <p>好处：同一个制品在不同环境按需组合，SRE 相关的部一台、质量相关的部一台，互不干扰又共用一份代码。不设 <code>ENABLED_AGENTS</code> 就挂全部；写了不存在的名字<strong>立刻报错退出</strong>（fail-fast，绝不静默忽略）。</p>
+                <p>好处：同一个制品在不同环境按需组合，SRE 相关的部一台、质量相关的部一台，互不干扰又共用一份代码。这套逻辑就一个小函数 <code>_parse_enabled</code>（<code>main.py:289</code>）：</p>
+<pre><code class="language-python"># main.py:289
+def _parse_enabled(raw: str | None) -> list[str]:
+    if not raw or not raw.strip():
+        return list(AGENT_REGISTRY)                 # 不设 ENABLED_AGENTS → 挂全部
+    names = [a.strip() for a in raw.split(",") if a.strip()]
+    unknown = [n for n in names if n not in AGENT_REGISTRY]
+    if unknown:                                     # 写了名册上没有的名字
+        raise RuntimeError(f"未知 agent: {unknown!r}。合法值: {sorted(AGENT_REGISTRY)}")
+    return names</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>读环境变量 <code>ENABLED_AGENTS</code>：空的就返回注册表里全部 agent；否则按逗号切开、去空格，然后<strong>逐个核对名字在不在注册表里</strong>。只要有一个不认识，<strong>当场 <code>raise RuntimeError</code> 崩给你看</strong>，绝不静默跳过。</div>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么拼错名字要"崩"，不是忽略？</span>这叫 <strong>fail-fast（快速失败）</strong>。想象你部署时把 <code>sre-rca</code> 拼成 <code>sre_rca</code>：如果程序"善解人意"地忽略这个不认识的名字，服务照常起来，但那个你以为部上了的 agent<strong>根本没挂</strong>——直到线上有人调它 404 你才发现，排查半天。fail-fast 的选择是：<strong>宁可启动时就当着你的面崩，也不要带着错误配置"假装正常"地跑起来</strong>。配置错误在部署那一刻就暴露，比藏到线上才炸好得多。</div>
             </div>
         </section>
 
@@ -139,9 +150,30 @@
     "alert-triage":   ("alert_triage.server",   "build_router"),
     # ... 共 18 条
 }</code></pre>
-                <p>启动时按名字用 <code>importlib.import_module</code> <strong>懒加载</strong>对应模块，取出它的 <code>build_router</code> 函数。<code>_load_router()</code>（<code>main.py:299</code>）还有<strong>三条调用约定</strong>：</p>
+                <p>启动时按名字用 <code>importlib.import_module</code> <strong>懒加载</strong>对应模块，取出它的 <code>build_router</code> 函数。看真实的 <code>_load_router</code>（<code>main.py:299</code>），它有<strong>三条调用约定</strong>：</p>
+<pre><code class="language-python"># main.py:299
+def _load_router(name, *, case_store=None, pool=None, app=None) -> APIRouter:
+    import inspect as _inspect
+    mod_path, fn_name = AGENT_REGISTRY[name]         # 查名册拿到("sre_rca.server","build_router")
+    mod = importlib.import_module(mod_path)          # 懒加载:用到才 import(启动更快)
+    fn = getattr(mod, fn_name)
+    if name in AGENTS_NEED_POOL:                     # 约定①:需要 DB 池的 agent
+        if pool is None:
+            raise RuntimeError(f"Agent '{name}' requires a database pool but none was provided.")
+        return fn(pool)                              #   → 位置传 pool
+    kwargs = {"case_store": case_store}              # 约定②:普通 agent → 关键字传 case_store
+    try:
+        sig = _inspect.signature(fn)                 # 约定③:探测 build_router 签名
+        if "app" in sig.parameters and app is not None:
+            kwargs["app"] = app                      #   含 app 参数就注入 FastAPI 实例
+    except (ValueError, TypeError):
+        pass                                         #   拿不到签名(罕见)→ 退化为不传
+    return fn(**kwargs)</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>拿到 agent 名字后：先查名册翻出"它在哪个模块、工厂函数叫啥"，<code>import_module</code> 把那个模块<strong>现用现加载</strong>；然后看它是不是"需要数据库的特殊 agent"（<code>AGENTS_NEED_POOL</code> 里只有 <code>arch-compliance</code>），是就位置传 pool；普通的就用关键字传 case_store；最后还用 <code>inspect.signature</code> <strong>偷看</strong>这个 build_router 收不收 <code>app</code> 参数——收的话（比如 agent-creator 要用 sandbox）就把整个 FastAPI 实例也塞给它。</div>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么用 inspect.signature 探测，而不是让所有 agent 签名统一？</span>因为 21 个 agent 是<strong>陆续加进来的</strong>，早期的 <code>build_router(case_store=...)</code> 和后来需要 <code>app</code> 的新 agent 签名不一样。要么"一刀切"强制所有老 agent 改签名（改 21 处、容易漏），要么让加载器<strong>运行时探测每个 agent 到底收哪些参数、按需喂</strong>。框架选了后者——<code>inspect.signature</code> 让新能力（注入 app）平滑加入而<strong>不破坏任何旧 agent</strong>（源码注释原话："旧 agent 不破"）。这是"向后兼容优先"的典型取舍。</div>
+                <p>三条约定用一张表看更清楚：</p>
                 <div class="pipeline2">
-                    <div class="ps"><div class="n">1</div><p>需要 DB 池的 agent（如 arch-compliance）→ <code>fn(pool)</code> 位置传参</p></div>
+                    <div class="ps"><div class="n">1</div><p>需要 DB 池的 agent（<code>AGENTS_NEED_POOL</code> 只有 arch-compliance）→ <code>fn(pool)</code> 位置传参</p></div>
                     <div class="ps"><div class="n">2</div><p>普通 agent → <code>fn(case_store=...)</code> 关键字传参</p></div>
                     <div class="ps"><div class="n">3</div><p>用 <code>inspect.signature</code> 探测：<code>build_router</code> 含 <code>app</code> 参数就额外注入 FastAPI 实例（给 agent-creator 的 sandbox 用）</p></div>
                 </div>
@@ -161,7 +193,46 @@
                     <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>lifespan 生命周期</h4><p>启动时初始化 SqliteCaseStore、给需要的 agent 建 DB 池（不可达就 warning 降级、跳过该 agent，其余照常）；退出时清理。</p></div></div>
                     <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>挂路由 + 静态资源 + 可观测</h4><p>遍历 enabled 逐个 <code>_load_router</code> 并 include；挂 <code>/skills</code>、<code>/install</code>；<code>setup_observability</code> 挂 <code>/metrics</code>。</p></div></div>
                 </div>
-                <div class="tip"><strong>韧性设计</strong>：某个 agent 需要的数据库连不上时，平台不会整体启动失败，而是打个 warning、跳过这个 agent，让其它 agent 正常服务。这种"部分降级而非全盘崩溃"的思路，和 Day 08 的失败闸门一脉相承。</div>
+                <p>第 4 步的"韧性"最值得看真代码。lifespan 里给 pool 类 agent（arch-compliance）建 MySQL 连接池，注意它<strong>被 try/except 整个包住</strong>（<code>main.py:400</code>）：</p>
+<pre><code class="language-python"># main.py:400  lifespan 内建 aiomysql 连接池
+pool: aiomysql.Pool | None = None
+if needs_pool:
+    db = _cfg.database.arch_compliance
+    if db is None:
+        log.error("configs/&lt;APP_ENV&gt;.yaml 缺 database.arch_compliance 配置 · 跳过 pool agents")
+    else:
+        try:
+            pool = await aiomysql.create_pool(host=db.host, port=db.port, ..., minsize=2, maxsize=10)
+        except Exception as e:
+            log.warning("aiomysql pool 创建失败(%s: %s)· 跳过 pool agents · 平台其他 agent 正常",
+                        type(e).__name__, e)          # ← 降级:不 raise!
+            pool = None
+    if pool is not None:
+        for name in needs_pool:
+            app.include_router(_load_router(name, pool=pool))   # 有池才挂业务路由</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>只有 <code>arch-compliance</code> 这种 agent 需要数据库（MySQL，用 <code>aiomysql</code> 建池，最少 2 条最多 10 条连接）。建池要么成功、要么<strong>被 <code>except</code> 接住只打一条 warning 就 <code>pool = None</code></strong>——注意这里<strong>没有 <code>raise</code></strong>。池是 None 时就不挂这个 agent 的业务路由，但整个平台照常启动，其它 17 个 agent 完全不受影响。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 580 150" width="100%" style="max-width:580px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <rect x="14" y="58" width="96" height="36" rx="7" fill="rgba(6,182,212,.1)" stroke="#06b6d4"/>
+                        <text x="62" y="80" fill="#67e8f9" text-anchor="middle" font-weight="700">平台启动</text>
+                        <path d="M110 76 L146 76" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#d1)"/>
+                        <rect x="148" y="52" width="120" height="48" rx="7" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="208" y="72" fill="#fbbf24" text-anchor="middle">建 MySQL 池</text>
+                        <text x="208" y="90" fill="#94a3b8" text-anchor="middle">(仅 arch-compliance)</text>
+                        <path d="M268 64 L320 34" stroke="#34d399" stroke-width="1.3" marker-end="url(#d1)"/>
+                        <text x="292" y="42" fill="#34d399" font-size="9">成功</text>
+                        <path d="M268 88 L320 118" stroke="#ef4444" stroke-width="1.3" marker-end="url(#d1)"/>
+                        <text x="292" y="118" fill="#fca5a5" font-size="9">连不上</text>
+                        <rect x="324" y="16" width="240" height="34" rx="7" fill="rgba(52,211,153,.07)" stroke="#34d399"/>
+                        <text x="444" y="37" fill="#34d399" text-anchor="middle">挂 arch-compliance 业务路由</text>
+                        <rect x="324" y="102" width="240" height="34" rx="7" fill="rgba(239,68,68,.07)" stroke="#ef4444"/>
+                        <text x="444" y="118" fill="#fca5a5" text-anchor="middle">warning + 跳过它，其它 agent 照常</text>
+                        <text x="444" y="132" fill="#94a3b8" text-anchor="middle" font-size="9">← 关键:不 raise，平台不整体崩</text>
+                        <defs><marker id="d1" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：数据库连不上时的降级分叉——单个 agent 掉线，平台整体存活。</div>
+                </div>
+                <div class="tip"><strong>设计取舍③·韧性设计</strong>：某个 agent 需要的数据库连不上时，平台不会整体启动失败，而是打个 warning、跳过这个 agent，让其它 agent 正常服务。这种"<strong>部分降级而非全盘崩溃</strong>"的思路，和 Day 08 的失败闸门、Day 11 的路由 fail-safe 一脉相承——但要跟上一讲的 fail-fast 区分开：<strong>"配置写错"(拼错 agent 名)要 fail-fast 当场崩，"外部依赖临时不可达"(数据库抖动)要降级存活</strong>。人为错误早暴露、环境问题别放大，是两种相反但都正确的选择。</div>
             </div>
         </section>
 
@@ -203,7 +274,23 @@ def build_router(case_store=None):
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>一次 invoke 的完整治理链</h1></div>
             <div class="card">
-                <p>把前面所有天串起来——一次 <code>POST /v1/agent/rca/invoke</code> 进来，<code>_do_invoke</code>（<code>router.py:318</code>）按顺序过这条链（前面的日子学的东西全在这里汇合）：</p>
+                <p>把前面所有天串起来——一次 <code>POST /v1/agent/rca/invoke</code> 进来，<code>_do_invoke</code>（<code>router.py:318</code>）按顺序过这条链。开头这几行就是治理三闸 + 建账（前面的日子学的东西全在这里汇合）：</p>
+<pre><code class="language-python"># api/router.py:325  _do_invoke 开头
+await get_rate_limiter().check_or_raise(ctx.user_id)   # ① 限频:超额抛 429(不计 case/cost)
+await check_quota(user_id=ctx.user_id)                 # ② token 配额:查上次累计(不含本次)
+await check_budget(tenant_id=ctx.tenant_id)            # ③ 租户月度 USD cap:超 → 429
+case_id = new_case_id()                                # ④ 生成 26 字符 ULID
+...
+tracker = CostTracker(agent=agent_name, user_id=ctx.user_id, tenant_id=ctx.tenant_id)
+try:
+    with bind_tracker(tracker):                        # ⑤ 绑记账器(Day 11 ContextVar)
+        outcome = await invoke_fn(body, ctx, tracker)  # ⑥ 执行你写的 _invoke(跑图)
+    metrics = tracker.finalize(status=outcome.status, retry_count=outcome.retry_count)  # 抄表
+    envelope = _build_envelope(agent=agent_name, case_id=case_id, outcome=outcome, ...)  # ⑦ 装信封
+    await _persist_case(..., envelope=envelope, sensitive_fields=sensitive)              # ⑧ 脱敏落库
+    await record_quota_usage(...); await record_budget_cost(...)                          # 回写用量
+    return envelope</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>三道闸 <code>check_*</code> 都是"不通过就直接抛 429 请你回去"，通过了才发一个 <code>case_id</code>（唯一登记号）。然后 <code>with bind_tracker</code> 装上电表，<strong>你写的 <code>_invoke</code> 只在第 ⑥ 步被调用</strong>——业务只占这一格。跑完 <code>finalize</code> 抄电表得到 <code>metrics</code>，装进统一 <code>envelope</code>，脱敏后落库，最后把这次用了多少 token/多少钱回写进配额和预算账本（供下一次请求的②③闸判断）。</div>
                 <div class="pipeline2">
                     <div class="ps"><div class="n">1</div><p><b>限频 ratelimit</b>：这个 user 每分钟没超 60 次？（Day 08 四件套）</p></div>
                     <div class="ps"><div class="n">2</div><p><b>token 配额 quota</b>：日/月 token 没超？</p></div>
@@ -241,6 +328,8 @@ def build_router(case_store=None):
                     <div class="cap">图注：业务代码只负责中间那一格(⑥)，两头的安检与归档全是 build_v1_router 自动加的。</div>
                 </div>
                 <div class="tip"><strong>这就是"跟一次请求走全程"的主线</strong>。你现在应该能看懂：一个请求先过一堆治理闸（限频/配额/预算），再进业务图（分诊→取证→综合→Critic），出来包成统一信封、脱敏落库、推指标。前 11 天的知识点在这一条链上全部各就各位。</div>
+                <div class="anno">⚠️ 设计取舍④：请求失败时（业务抛异常、或 <code>BudgetExceeded</code> 硬熔断），源码<b>仍然落库 + 仍然回写配额用量</b>（<code>router.py:378-400</code> 的 BudgetExceeded 分支、<code>router.py:428-451</code> 的通用异常分支）。为什么失败了还要记账？源码注释写得直白："<b>失败 invoke 仍 record quota · 防恶意刷 fail-fast 仍烧 token</b>"——一次调用哪怕最后失败，只要它已经烧了大模型的 token/钱，就必须记进账本，否则有人靠"故意触发失败"来白嫖额度。失败也是一次真实消耗。</div>
+                <div class="anno">⚠️ 边界/易错点：并不是所有异常都落库。业务 <code>_invoke</code> <b>主动抛的 <code>HTTPException</code></b>（如入参校验失败 422、找不到 404）会被<b>原样 re-raise、不持久化</b>（<code>router.py:404-406</code>）——因为那是"请求本身不合法"，还没真正开跑、没烧钱，不该占一条 case 记录。只有"跑起来之后才炸"的才落库。</div>
             </div>
         </section>
 
@@ -248,17 +337,69 @@ def build_router(case_store=None):
             <div class="section-header"><span class="section-number">L07</span><h1>统一 envelope & 鉴权契约</h1></div>
             <div class="card">
                 <h3>统一 envelope（api/envelope.py:63）</h3>
-                <p>所有 agent 返回的外壳完全一致（Day 02 见过）：</p>
-<pre><code class="language-python">class InvokeResponse(BaseModel):
-    case_id: str        # 26 字符 ULID（带校验）
+                <p>所有 agent 返回的外壳完全一致（Day 02 见过），这是真实定义：</p>
+<pre><code class="language-python"># api/envelope.py:22
+InvokeStatus = Literal["success", "critic_end", "failed"]
+
+# api/envelope.py:63
+class InvokeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # 多一个字段都报错(严格)
+    case_id: str                                 # 26 字符 ULID(带校验)
     agent: str
-    status: InvokeStatus            # success / critic_end / failed
-    result: dict                    # agent 的业务字段装这
-    metrics: Metrics                # elapsed_ms / tokens_in|out / cost_usd / retry_count
+    status: InvokeStatus                         # success / critic_end / failed
+    result: dict[str, Any]                       # agent 的业务字段装这
+    metrics: Metrics                             # 平台维度量度(见下)
     trace_id: str
-    deprecated_path: str | None     # 走老路径时的提示</code></pre>
+    deprecated_path: str | None = None           # 走老路径时的提示
+
+    @field_validator("case_id")                  # api/envelope.py:81
+    @classmethod
+    def _check_case_id_format(cls, v: str) -> str:
+        if len(v) != 26:                         # ULID 必须 26 字符,否则拒绝
+            raise ValueError(f"case_id 必须 26 char ULID,当前 {len(v)} char: {v!r}")
+        return v</code></pre>
+                <p><code>metrics</code> 里的字段名要记准（<code>envelope.py:40</code>），别写成简写：</p>
+<pre><code class="language-python"># api/envelope.py:40
+class Metrics(BaseModel):
+    elapsed_ms: int = 0            # 耗时毫秒
+    llm_tokens_in: int = 0        # 输入 token（不是 tokens_in！）
+    llm_tokens_out: int = 0       # 输出 token
+    cache_creation_tokens: int = 0; cache_read_tokens: int = 0   # v0.6+ prompt caching
+    estimated_cost_usd: float = 0.0                              # 预估花费 USD
+    retry_count: int = 0
+    budget_exceeded_scope: str | None = None                    # 硬熔断时填 per_invoke/per_node</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 200" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <rect x="14" y="12" width="532" height="176" rx="10" fill="rgba(6,182,212,.05)" stroke="#06b6d4"/>
+                        <text x="280" y="32" fill="#67e8f9" text-anchor="middle" font-weight="700">InvokeResponse（统一信封 · 21 个 agent 都长这样）</text>
+                        <g font-size="10">
+                          <rect x="28" y="44" width="150" height="26" rx="5" fill="rgba(139,92,246,.1)" stroke="#8b5cf6"/><text x="103" y="61" fill="#c4b5fd" text-anchor="middle">case_id · 26 ULID</text>
+                          <rect x="188" y="44" width="150" height="26" rx="5" fill="rgba(139,92,246,.1)" stroke="#8b5cf6"/><text x="263" y="61" fill="#c4b5fd" text-anchor="middle">agent · trace_id</text>
+                          <rect x="348" y="44" width="184" height="26" rx="5" fill="rgba(139,92,246,.1)" stroke="#8b5cf6"/><text x="440" y="61" fill="#c4b5fd" text-anchor="middle">status: success/critic_end/failed</text>
+                        </g>
+                        <rect x="28" y="80" width="504" height="46" rx="6" fill="rgba(52,211,153,.06)" stroke="#34d399"/>
+                        <text x="40" y="98" fill="#34d399" font-weight="700">result: dict  ← 业务字段只能装这里</text>
+                        <text x="40" y="116" fill="#94a3b8" font-size="9.5">(hypotheses / conclusion / confidence … 每个 agent 自己定)</text>
+                        <rect x="28" y="134" width="504" height="44" rx="6" fill="rgba(245,158,11,.06)" stroke="#f59e0b"/>
+                        <text x="40" y="152" fill="#fbbf24" font-weight="700">metrics: Metrics  ← 平台自动填(业务白拿)</text>
+                        <text x="40" y="170" fill="#94a3b8" font-size="9.5">elapsed_ms / llm_tokens_in|out / estimated_cost_usd / retry_count</text>
+                    </svg>
+                    <div class="cap">图注：平台字段(紫)神圣不可污染，业务字段一律装进 result(绿)，度量由平台自动填入 metrics(橙)。</div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍⑤：为什么 envelope 用 <code>extra="forbid"</code> + case_id 强校验？</span>因为这个信封是<strong>全平台 21 个 agent 对外的统一契约</strong>，下游（portal 前端、CLI、其它 agent）都按这个结构解析。<code>extra="forbid"</code>（<code>envelope.py:71</code>）意味着"业务想往信封顶层塞私货字段？直接报错"——业务字段只能装进 <code>result</code>，平台字段（case_id/status/metrics…）神圣不可污染。case_id 强制 26 字符则保证它<strong>永远是合法 ULID</strong>，下游拿去当主键、做枚举检查都不会踩到脏值。用一点"严格"换整条调用链的"可信"。</div>
                 <h3>鉴权 header 契约（api/auth.py）</h3>
-                <p>请求通过几个 header 传身份：<code>X-User-Id</code> / <code>X-Tenant-Id</code> / <code>X-Trace-Id</code> / <code>X-Anthropic-Api-Key</code>。这些被封装成 <code>CallContext</code>（<code>auth.py:45</code>）传给业务——注意 <strong>per-request 的 API key 不落库</strong>，用完即弃。三档鉴权模式 <code>PLATFORM_AUTH_MODE</code>：open / header / strict。</p>
+                <p>请求通过几个 header 传身份，被封装成 <code>CallContext</code>（<code>auth.py:46</code>）传给业务：</p>
+<pre><code class="language-python"># api/auth.py:46
+@dataclass
+class CallContext:
+    user_id: str
+    tenant_id: str
+    trace_id: str
+    trust_level: TrustLevel               # "high" | "low" | "anonymous"
+    anthropic_api_key: str | None = None  # 来自 X-Anthropic-Api-Key · 用完即弃 · 不落库</code></pre>
+                <p>三档鉴权模式 <code>PLATFORM_AUTH_MODE</code>（<code>auth.py:32</code>）：<code>open</code>（默认，缺 X-User-Id 自动匿名）/ <code>header</code>（灰度过渡）/ <code>strict</code>（缺 X-User-Id 直接 401）。</p>
+                <div class="anno">⚠️ 设计取舍⑥·安全：<code>anthropic_api_key</code> 来自 per-request 的 <code>X-Anthropic-Api-Key</code> header，<b>用完即弃、绝不落库</b>（源码注释明确）。这样每个租户可以带自己的 key 调用，而平台<b>永远不持有</b>你的 key——落库的 case 里也搜不到它。这是"最小信任"的设计：能不存的敏感信息就一秒都不存。</div>
+                <div class="anno">⚠️ 边界/易错点：跨 agent / 跨 user 访问别人的 case 时，源码返回的是 <b>404 而不是 403</b>（<code>router.py:40</code>）。为什么不返"无权限"？因为 403 等于告诉攻击者"这个 case_id 真实存在，只是你没权限"——他就能靠枚举 case_id 探测哪些存在。统一返 404"查无此 case"，<b>连"存不存在"都不泄漏</b>。</div>
                 <div class="note"><strong>命名的三层别混淆</strong>（Day 13 还会遇到）：注册表名（<code>sre-rca</code>）≠ 路由名（<code>rca</code>，由各 agent 的 <code>build_router</code> 传给 <code>build_v1_router</code> 决定）≠ CLI/MCP 认的 canonical 名。同一个 agent 在不同层可能叫不同名字，看代码时留意 <code>agent_name=</code> 参数到底传的啥。</div>
             </div>
         </section>

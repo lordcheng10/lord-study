@@ -103,27 +103,89 @@
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>golden set 与评测样本</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>golden set 与评测样本（数据结构走读）</h1></div>
             <div class="card">
-                <p>"标准考卷"就是一批 <strong>EvalSample</strong>（<code>schemas.py:61</code>），存成 JSONL 文件（每行一个样本），放在每个 agent 的 <code>data/eval_samples.jsonl</code>。一个样本长这样：</p>
+                <p>"标准考卷"就是一批 <strong>EvalSample</strong>，存成 JSONL 文件（每行一个 JSON 样本），放在每个 agent 的 <code>data/eval_samples.jsonl</code>。先看它的真实 dataclass 定义（<code>eval/schemas.py:61</code>）：</p>
+<pre><code class="language-python"># eval/schemas.py:61
+@dataclass
+class EvalSample:
+    id: str
+    description: str
+    input: dict[str, Any]              # 初始 state 的输入(trace_id / service_name / user_question)
+    ground_truth: GroundTruth          # 标准答案(人工标注)
+    mock_responses: dict[str, list[str]] | None = None  # 喂给 FakeLLM 的固定回复</code></pre>
+                <div class="baby"><span class="t">👶 逐字段翻译</span><code>id</code> = 这道题的编号；<code>input</code> = 把哪些字段塞进图的初始 state（相当于"题干"）；<code>ground_truth</code> = "参考答案"（下面细讲）；<code>mock_responses</code> = 预先录好的"假大模型该怎么答"——键是 system prompt 里的关键词（如"Trace 专家"），值是该节点每次调用返回的字符串序列。<strong>有了它，评测走 FakeLLM 就能几秒跑完、每次分数完全一样。</strong></div>
+                <p>真实样本长这样（来自 <code>apps/sre-rca-agent/data/eval_samples.jsonl</code> 第 1 行，已折叠 mock_responses）：</p>
 <pre><code class="language-json">{
-  "id": "sample-001",
-  "description": "DB 连接池耗尽导致的服务雪崩",
-  "input": { "user_question": "service-A 大量超时" },
-  "ground_truth": {              // 标准答案（人工标注）
-    "primary_category": "db_connection_pool",
-    "candidate_categories": ["db_connection_pool", "slow_query"],
-    "keywords_in_hypothesis": ["连接池", "耗尽"],
-    "min_supporting_specialists": 2,
-    "overall_confidence_at_least": "中"
+  "id": "db-pool-001",
+  "description": "service-A 连接池打满 + 慢查询",
+  "input": {
+    "trace_id": "trace-db-pool-001",
+    "service_name": "service-A",
+    "user_question": "service-A 14:23 突然变慢，DB 连接池打满"
   },
-  "mock_responses": { ... }      // 喂给 FakeLLM 的固定回复，保证可复现
+  "mock_responses": {
+    "Trace 专家":   ["{\"evidence_ids\":[\"trace-1\"], \"hint\":\"SELECT span 8.2s\", ...}"],
+    "Metric 专家":  ["{\"evidence_ids\":[\"metric-1\"], \"hint\":\"connection_pool_usage 98%\", ...}"],
+    "最终综合节点": ["{\"hypotheses\":[{\"category\":\"DB_POOL_EXHAUSTED\", ...}], \"confidence\":\"高\"}"],
+    "质检员":      ["{\"critique_passed\": true, \"rule_results\": {...}}"]
+  },
+  "ground_truth": {
+    "primary_category": "DB_POOL_EXHAUSTED",
+    "candidate_categories": ["DB_POOL_EXHAUSTED", "DB_SLOW_QUERY"],
+    "keywords_in_hypothesis": ["service-A", "连接池", "98%"],
+    "min_supporting_specialists": 3,
+    "overall_confidence_at_least": "高"
+  }
 }</code></pre>
-                <div class="glossary">
-                    <b>ground_truth（标准答案）</b>：人工标注的"这题正确答案应该长什么样"。评测就是拿 Agent 的输出跟它比。<br>
-                    <b>mock_responses</b>：因为评测走 FakeLLM（Day 11），这里预置了假大模型该返回什么——保证每次评测结果<strong>完全可复现</strong>，不受真实 LLM 随机性干扰。
+                <p>再看"参考答案" <strong>GroundTruth</strong> 的字段（<code>schemas.py:21</code>）——每个字段就是评测的一把尺子：</p>
+<pre><code class="language-python"># eval/schemas.py:21
+@dataclass
+class GroundTruth:
+    primary_category: str = ""                       # 期望的第一根因 category
+    candidate_categories: list[str] = field(default_factory=list)   # 期望进 Top-3 的集合
+    keywords_in_hypothesis: list[str] = field(default_factory=list) # 结论文本必须含的关键词
+    min_supporting_specialists: int = 2              # 至少几位专家印证
+    overall_confidence_at_least: str = "中"          # 置信度至少几级(高>中>低)
+    detail: dict[str, Any] = field(default_factory=dict)  # v0.6+:扩展字段桶</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 580 210" width="100%" style="max-width:580px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <rect x="12" y="12" width="230" height="186" rx="8" fill="rgba(139,92,246,.07)" stroke="#8b5cf6"/>
+                        <text x="127" y="32" fill="#c4b5fd" text-anchor="middle" font-weight="700">EvalSample（一道题）</text>
+                        <text x="26" y="56" fill="#e2e8f0">id · description</text>
+                        <text x="26" y="78" fill="#e2e8f0">input {…}   ← 题干(初始 state)</text>
+                        <text x="26" y="100" fill="#e2e8f0">mock_responses {…} ← 假答案</text>
+                        <rect x="26" y="116" width="200" height="70" rx="6" fill="rgba(52,211,153,.07)" stroke="#34d399"/>
+                        <text x="36" y="134" fill="#34d399" font-weight="700">ground_truth（参考答案）</text>
+                        <text x="36" y="152" fill="#94a3b8" font-size="10">primary_category / candidates</text>
+                        <text x="36" y="167" fill="#94a3b8" font-size="10">keywords / min_specialists</text>
+                        <text x="36" y="181" fill="#94a3b8" font-size="10">min_confidence / detail 桶</text>
+                        <path d="M242 105 L288 105" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ar)"/>
+                        <text x="265" y="98" fill="#f59e0b" text-anchor="middle" font-size="10">load_jsonl</text>
+                        <rect x="292" y="40" width="278" height="130" rx="8" fill="rgba(6,182,212,.06)" stroke="#06b6d4"/>
+                        <text x="431" y="60" fill="#67e8f9" text-anchor="middle" font-weight="700">from_dict 的巧思</text>
+                        <text x="306" y="84" fill="#e2e8f0" font-size="10.5">已知 key → 对应字段</text>
+                        <text x="306" y="104" fill="#e2e8f0" font-size="10.5">别名兼容:top1_category→primary_category</text>
+                        <text x="306" y="124" fill="#e2e8f0" font-size="10.5">未知 key → 自动塞进 detail 桶</text>
+                        <text x="306" y="148" fill="#fbbf24" font-size="10.5">→ 一套结构复用给 RCA + coding agent</text>
+                        <defs><marker id="ar" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：EvalSample 的数据结构与 from_dict 的"未知 key 塞 detail 桶"设计。</div>
                 </div>
-                <p><code>EvalSample.load_jsonl()</code>（<code>schemas.py:84</code>）批量读入。<code>GroundTruth.from_dict()</code>（<code>schemas.py:44</code>）还有个巧思：不认识的 key 自动塞进 <code>detail</code>，方便非 RCA 类 agent 复用同一套结构。</p>
+                <p><code>load_jsonl()</code>（<code>schemas.py:84</code>）逐行读、跳过空行和 <code>#</code> 注释行，每行 <code>json.loads</code> 后交给 <code>from_dict</code>。而 <code>GroundTruth.from_dict</code>（<code>schemas.py:44</code>）里藏着关键一手：</p>
+<pre><code class="language-python"># eval/schemas.py:44
+@classmethod
+def from_dict(cls, d: dict) -> GroundTruth:
+    detail = dict(d.get("detail") or {})
+    for k, v in d.items():
+        if k not in _KNOWN_GT_FIELDS:      # 不认识的 key
+            detail.setdefault(k, v)        # 自动收进 detail 桶
+    return cls(
+        primary_category=d.get("primary_category") or d.get("top1_category", ""),  # 别名兼容
+        ...
+    )</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么要一个 detail「杂物桶」？</span>朴素做法是给每种 agent（RCA、coding、doc-check…）各定义一个 GroundTruth 类。但那样评测框架就要认识 N 种答案结构。这里的选择是：<strong>只定一套 GroundTruth，RCA 用得上的字段列出来当"一等公民"，其它 agent 特有的字段（如 coding agent 的 <code>golden_patch_count</code>、<code>golden_hunk_count</code>）统统塞进 <code>detail</code> 桶</strong>。coding scorer 自己去 <code>ground_truth.detail</code> 里取。代价是 detail 里的东西没有类型检查；收益是一套 schema 通吃所有 agent，样本文件格式统一。</div>
+                <div class="anno">⚠️ 易错点：<code>from_dict</code> 里 <code>primary_category</code> 还兼容了别名 <code>top1_category</code>，<code>candidate_categories</code> 兼容 <code>top3_categories</code>（<code>schemas.py:52-56</code>）。所以你在样本里写 <code>top1_category</code> 也能被认出来——但<b>团队里最好统一一种写法</b>，否则 grep 样本时两种名字都要搜。</div>
             </div>
         </section>
 
@@ -138,7 +200,31 @@
                     <div class="dim"><div class="ico">👥</div><h5>specialists</h5><p>足够多专家支撑</p></div>
                     <div class="dim"><div class="ico">🔑</div><h5>keywords</h5><p>关键词命中率≥50%</p></div>
                 </div>
-                <p style="margin-top:12px;">匹配逻辑很务实（<code>scorers.py:321</code> <code>_category_match</code>）：大小写不敏感、去下划线、支持子串——避免因为"DB_pool" vs "db pool"这种格式差异误判。置信度比较用 <code>{低:1, 中:2, 高:3}</code> 的等级映射（<code>scorers.py:77</code>）。</p>
+                <p style="margin-top:12px;">现在钻进 <code>FiveDimScorer.score()</code>（<code>scorers.py:54</code>）看它<strong>逐维怎么算</strong>。第一步是从图的最终 state 里把结论抠出来：</p>
+<pre><code class="language-python"># eval/scorers.py:60
+score = EvalScore(sample_id=sample_id)
+conclusion = final_state.get(self.conclusion_field) or {}          # 默认取 state["conclusion"]
+hypotheses = conclusion.get("hypotheses") or conclusion.get("top_root_causes") or []</code></pre>
+                <p>然后 5 个维度一个个填。挑最关键的三维看：</p>
+<pre><code class="language-python"># ① top1_hit —— 第一条 hypothesis 的 category 对不对（scorers.py:65）
+top1_cat = _get_hypothesis_field(hypotheses[0] if hypotheses else None, "category")
+score.top1_hit = top1_cat is not None and _category_match(top1_cat, ground_truth.primary_category)
+
+# ③ confidence —— 用 {低:1,中:2,高:3} 把中文置信度变成可比的数（scorers.py:76）
+actual_conf   = conclusion.get("confidence") or conclusion.get("overall_confidence") or "低"
+actual_rank   = CONFIDENCE_RANK.get(str(actual_conf), 1)
+expected_rank = CONFIDENCE_RANK.get(ground_truth.overall_confidence_at_least, 2)
+score.confidence_meets = actual_rank &gt;= expected_rank
+
+# ⑤ keywords —— 半数以上关键词命中算过（scorers.py:89）
+text_blob = (_flatten_text(hypotheses) + _flatten_text([conclusion])).lower()
+if not ground_truth.keywords_in_hypothesis:
+    score.keywords_meets = True                       # 没要求关键词 → 直接算过
+else:
+    hits = sum(1 for kw in ground_truth.keywords_in_hypothesis if kw.lower() in text_blob)
+    ratio = hits / len(ground_truth.keywords_in_hypothesis)
+    score.keywords_meets = ratio &gt;= 0.5</code></pre>
+                <div class="baby"><span class="t">👶 逐行大白话</span>① 拿到 Agent 排第一的猜测，把它的 category 跟标准答案比——<code>_category_match</code> 会把大小写、下划线、连字符全抹平再比（<code>scorers.py:321</code>），所以 <code>"db_pool"</code> 能匹配 <code>"DB_POOL_EXHAUSTED"</code>。③ 中文"高/中/低"没法直接比大小，先用字典 <code>CONFIDENCE_RANK</code>（<code>scorers.py:18</code>）翻译成 3/2/1，再比"实际 ≥ 要求"。⑤ 把结论里所有文字拍平成一个大字符串（<code>_flatten_text</code>），数关键词命中几个，命中一半以上就算过。</div>
                 <div class="essence"><span class="t">💡 本质：5 维就是验房清单上的 5 个勾</span>验房师不会只写"房子 80 分"，而是逐项打钩：水（top1_hit 第一根因对不对）、电（top3_hit 候选里有没有）、防水（confidence 置信度别虚高）、门窗（specialists 有没有足够专家撑腰）、墙面（keywords 关键词覆盖够不够）。哪一项没打钩，你立刻知道<strong>是哪面墙漏水</strong>，而不是对着一个模糊总分发愁。</div>
                 <div class="svgbox">
                     <svg viewBox="0 0 560 150" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
@@ -167,6 +253,8 @@
                     <div class="cap">图注：多维打分让"退步"能被精确定位到某一维（这里是 keywords 掉到阈值以下），而不是只看到一个模糊的总分下降。</div>
                 </div>
                 <div class="tip"><strong>为什么用"多维布尔"而不是"一个总分"？</strong> 因为不同维度反映不同问题：top1 不中但 top3 中，说明"方向对但排序不准"；关键词全中但置信度虚高，说明"过度自信"。分维度看，你能精确知道<strong>是哪一项退步了</strong>，而不是只看到一个模糊的总分下降。</div>
+                <div class="anno">⚠️ 设计取舍②：<code>_category_match</code>（<code>scorers.py:321</code>）故意做成<b>大小写不敏感 + 去下划线/连字符 + 允许子串</b>（<code>a in e or e in a</code>）。好处：容忍 LLM 输出 <code>"db pool"</code>、样本写 <code>"DB_POOL_EXHAUSTED"</code> 这种格式差异，不会误判。代价：可能"过宽"——比如 <code>"pool"</code> 会匹配上 <code>"DB_POOL_EXHAUSTED"</code>。这是"宁可放过、不可错杀"的评测哲学：评测是<b>回归护栏</b>，不追求学术级精确，只要能稳定抓到"明显退步"即可。</div>
+                <div class="anno">⚠️ 易错点：keywords 维在<b>关键词列表为空时直接判过</b>（<code>scorers.py:91</code>）。也就是说样本里 <code>keywords_in_hypothesis</code> 留空，这一维永远绿灯——不是 bug，是"这道题不考关键词"的显式表达。别误以为"绿了就代表命中了"。</div>
             </div>
         </section>
 
@@ -185,8 +273,36 @@
                         <tr><td>change_minimality</td><td>改动是否最小化（可选用 Haiku 当裁判）</td></tr>
                     </tbody>
                 </table>
-                <p><code>change_minimality</code> 支持两种裁判模式：<code>heuristic</code>（纯计算）或 <code>haiku</code>（用便宜 LLM 判断"这次改动是不是过度了"，失败自动回退启发式，<code>scorers.py:177</code>）。</p>
-                <div class="glossary">两种 scorer 都实现同一个 <code>BaseScorer</code> 协议——所以 <code>run_eval</code> 不用关心具体是哪种，传进去就能跑。这又是 Day 09 讲的"依赖抽象接口"套路。<code>EvalScore.all_passed</code>（<code>schemas.py:142</code>）会自动识别是 5 维布尔还是 coding 加权，选对应的判据。</div>
+                <p>权重是写死的常量（<code>scorers.py:22</code>），<code>build_pass</code>（能不能通过构建）占最重的 0.30——因为对 coding agent 来说"改完能跑"是硬指标：</p>
+<pre><code class="language-python"># eval/scorers.py:22
+CODING_DIM_WEIGHTS: dict[str, float] = {
+    "tool_success": 0.20, "build_pass": 0.30, "patch_count": 0.15,
+    "iterations": 0.15, "risk_distribution": 0.10, "change_minimality": 0.10,
+}   # sum == 1.0
+
+# score() 里加权求和 → total（scorers.py:153）
+total = round(sum(dims[k] * self.weights[k] for k in self.weights), 4)
+return EvalScore(sample_id=sample_id, dim_scores=dims, total=total,
+                 total_passed=total &gt;= self.slo)   # 默认 SLO=0.6</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍③：为什么这套用「加权浮点」，而 RCA 用「布尔」？</span>RCA 的问题是"对/错分明"——第一根因要么命中要么没命中，用布尔最清晰。coding agent 的问题却是"<strong>程度</strong>"——改动比标准答案多改了 30% 算轻微超标、多改 3 倍算严重超标，这种连续的"好坏程度"用 0.0~1.0 的浮点分才表达得出来，最后加权成一个 total 卡 SLO。两套 scorer 都实现同一个 <code>BaseScorer</code> Protocol（<code>scorers.py:37</code>），<code>run_eval</code> 不关心用了哪套；<code>EvalScore.all_passed</code>（<code>schemas.py:142</code>）靠"<code>dim_scores</code> 是否非空"自动切换判据——非空走 <code>total_passed</code>，空则走 5 维全 True。</p></div>
+                <p><code>change_minimality</code>（改动是否最小化）有两种裁判模式（<code>scorers.py:166</code>）：默认 <code>heuristic</code> 纯算数（实际 hunk 数 vs golden hunk 数的超出比例），或 <code>haiku</code> 让便宜 LLM 当裁判。而 haiku 模式最能体现工程化的谨慎——它有<strong>三层回退</strong>：</p>
+<pre><code class="language-python"># eval/scorers.py:177  _haiku_minimality_judge
+def _haiku_minimality_judge(self, state, gt) -> float:
+    try:
+        from ai_trust_toolkit.llm import get_llm
+        from langchain_core.messages import HumanMessage, SystemMessage
+    except ImportError:
+        return self._score_minimality_heuristic_fallback(state, gt)   # 回退①:没装 langchain
+    if not self._minimality_prompt:
+        return self._score_minimality_heuristic_fallback(state, gt)   # 回退②:prompt 文件缺失
+    llm = get_llm("haiku")
+    try:
+        resp = llm.invoke([SystemMessage(...), HumanMessage(...)])
+        return _extract_score_from_text(str(resp.content))
+    except Exception:
+        return self._score_minimality_heuristic_fallback(state, gt)   # 回退③:LLM 调用失败</code></pre>
+                <div class="anno">⚠️ 边界/易错点：注意这三个 <code>return fallback</code>（<code>scorers.py:182 / 190 / 213</code>）。<b>LLM-as-judge 是"锦上添花"，绝不能因为它挂了就让整个评测崩</b>——没装依赖、prompt 文件不在、模型调用抛异常，任一环节出问题都<b>静默退回纯算数</b>，评测照跑。这就是可信工程化的一贯做派：越是"可选增强"的东西，越要保证它失败时系统不受影响。</div>
+                <div class="tip"><strong>为什么默认是 heuristic 不是 haiku？</strong> heuristic 零 LLM 调用、零成本、结果确定——适合 CI 高频跑。haiku 模式每条样本多花约 500 token，判得更准但引入了成本和（哪怕已被 FakeLLM 摁住的）不确定性，留给"想更细看改动质量"时手动开。默认省钱、按需增强。</div>
             </div>
         </section>
 
@@ -207,18 +323,80 @@ report.print_summary()              # 漂亮打印各维通过率
 # CI 里用阈值判定，不达标就退出码非 0
 if not report.meets_thresholds(EvalThresholds(top1=0.5, top3=0.7)):
     raise SystemExit(1)</code></pre>
+                <p>现在看 <code>run_eval</code> 的真实实现（<code>runner.py:17</code>）——它跟具体 agent 完全解耦，你只要把编译好的 graph 传进来。核心是这段并发跑批：</p>
+<pre><code class="language-python"># eval/runner.py:42
+semaphore = asyncio.Semaphore(concurrency)          # 控制同时跑几条(默认 1=串行)
+
+async def _run_one(idx: int, sample: EvalSample) -> EvalScore:
+    async with semaphore:                           # 拿到令牌才开跑
+        try:
+            initial = initial_state_builder(sample)         # sample.input → 初始 state
+            config  = config_builder(sample, idx)           # 每条一个独立 thread_id
+            final   = await graph.ainvoke(initial, config=config)   # 真跑图
+            return scorer.score(sample_id=sample.id, final_state=final,
+                                ground_truth=sample.ground_truth)   # 打分
+        except Exception as e:
+            err_score = EvalScore(sample_id=sample.id)
+            err_score.error = f"{type(e).__name__}: {e}"    # 挂了只记这条的 error
+            return err_score
+
+scores = await asyncio.gather(*[_run_one(i, s) for i, s in enumerate(samples)])</code></pre>
+                <div class="baby"><span class="t">👶 三行看懂控制流</span>(1) <code>gather</code> 把 N 条样本<strong>同时</strong>发起；(2) 每条进 <code>_run_one</code> 前先 <code>async with semaphore</code> 抢令牌——令牌数 = <code>concurrency</code>，所以最多 N 条一起跑、多了排队，防止把下游打爆；(3) 每条被一整个 <code>try/except</code> 包住，<strong>一条炸了只把异常记进这条自己的 <code>EvalScore.error</code>，其余照跑</strong>——绝不会一条烂样本掀翻整场评测。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 190" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <rect x="10" y="80" width="90" height="40" rx="7" fill="rgba(6,182,212,.1)" stroke="#06b6d4"/>
+                        <text x="55" y="96" fill="#67e8f9" text-anchor="middle" font-weight="700">load_jsonl</text>
+                        <text x="55" y="111" fill="#94a3b8" text-anchor="middle">N 条样本</text>
+                        <path d="M100 100 L128 100" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ar2)"/>
+                        <rect x="130" y="76" width="96" height="48" rx="7" fill="rgba(245,158,11,.09)" stroke="#f59e0b"/>
+                        <text x="178" y="94" fill="#fbbf24" text-anchor="middle" font-weight="700">Semaphore</text>
+                        <text x="178" y="109" fill="#94a3b8" text-anchor="middle">concurrency 个令牌</text>
+                        <path d="M226 88 L256 56" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <path d="M226 100 L256 100" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <path d="M226 112 L256 144" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <g>
+                          <rect x="258" y="36" width="150" height="34" rx="6" fill="rgba(52,211,153,.07)" stroke="#34d399"/>
+                          <rect x="258" y="83" width="150" height="34" rx="6" fill="rgba(52,211,153,.07)" stroke="#34d399"/>
+                          <rect x="258" y="130" width="150" height="34" rx="6" fill="rgba(239,68,68,.08)" stroke="#ef4444"/>
+                        </g>
+                        <text x="333" y="57" fill="#e2e8f0" text-anchor="middle">ainvoke→score ✅</text>
+                        <text x="333" y="104" fill="#e2e8f0" text-anchor="middle">ainvoke→score ✅</text>
+                        <text x="333" y="151" fill="#fca5a5" text-anchor="middle">炸了→记 error，不影响别人</text>
+                        <path d="M408 53 L440 90" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <path d="M408 100 L440 100" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <path d="M408 147 L440 110" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar2)"/>
+                        <rect x="442" y="78" width="96" height="44" rx="7" fill="rgba(139,92,246,.1)" stroke="#8b5cf6"/>
+                        <text x="490" y="96" fill="#c4b5fd" text-anchor="middle" font-weight="700">gather</text>
+                        <text x="490" y="111" fill="#94a3b8" text-anchor="middle">EvalReport</text>
+                        <text x="300" y="184" fill="#94a3b8" text-anchor="middle">每条样本一个 try/except → 单条失败隔离，整场评测不崩</text>
+                        <defs><marker id="ar2" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：run_eval 的控制流——Semaphore 限并发、gather 聚合、单条 try/except 隔离故障。</div>
+                </div>
                 <div class="example"><span class="t">📝 举个例子：一次跑批的输入→输出</span>
                 输入：<code>data/eval_samples.jsonl</code>（比如 20 条 golden 样本）+ <code>build_rca_graph()</code> + <code>FiveDimScorer()</code><br>
                 → <code>run_eval</code> 并发把 20 题各喂进图跑一遍、逐题打 5 维分 → 汇总<br>
                 输出（<code>report.print_summary()</code>）：<code>top1=0.85 top3=0.95 confidence=0.80 specialists=0.90 keywords=0.70</code> → 对照阈值 <code>top1≥0.5, top3≥0.7…</code> 全过 → <code>meets_thresholds() = True</code> → CI 退出码 0，放行合并。</div>
-                <p>关键细节：用 <code>asyncio.Semaphore</code> 控制并发（<code>runner.py:42</code>）；<strong>单条样本挂了不影响整体</strong>——异常被捕获记进那条的 <code>EvalScore.error</code>（<code>runner.py:55</code>）。整套评测走 FakeLLM，所以几秒跑完、结果可复现。</p>
+                <div class="anno">⚠️ 设计取舍④：<code>concurrency</code> 默认 <b>1（串行）</b>（<code>runner.py:24</code>）。为什么不默认拉满？因为评测最看重"<b>结果可复现</b>"——串行跑，节点里的共享 mock、日志顺序、资源占用都最稳定、最好排查；想加速再显式调大。默认求稳、按需提速，是评测工具的合理默认值。而且 <code>config_builder</code> 给每条样本一个独立 <code>thread_id=f"eval-{id}-{idx}"</code>（<code>runner.py:75</code>），并发时各自的 checkpoint 记忆互不串。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
             <div class="section-header"><span class="section-number">L06</span><h1>阈值与 CI 阻断：不达标合不了</h1></div>
             <div class="card">
-                <p><code>EvalThresholds</code>（<code>schemas.py:98</code>）定义每一维的及格线，默认：top1=0.5、top3=0.7、confidence=0.7、specialists=0.7、keywords=0.6。<code>report.meets_thresholds()</code>（<code>schemas.py:222</code>）任一维不达标就返回 False。</p>
+                <p><code>EvalThresholds</code>（<code>schemas.py:98</code>）定义每一维的及格线，默认：top1=0.5、top3=0.7、confidence=0.7、specialists=0.7、keywords=0.6。跑完得到的 <code>EvalReport</code> 会先把每条样本的布尔汇总成"通过率"，再逐维对照阈值：</p>
+<pre><code class="language-python"># eval/schemas.py:172  某一维的通过率 = 这一维为 True 的样本数 / 总样本数
+def rate(self, dim: str) -> float:
+    attr_name = {"top1":"top1_hit", "top3":"top3_hit", "confidence":"confidence_meets",
+                 "specialists":"specialists_meets", "keywords":"keywords_meets"}[dim]
+    return sum(1 for s in self.scores if getattr(s, attr_name)) / len(self.scores)
+
+# eval/schemas.py:222  任何一维通过率低于阈值 → 整体不达标
+def meets_thresholds(self, thresholds: EvalThresholds) -> bool:
+    s = self.summary()
+    return all(s[dim] &gt;= getattr(thresholds, dim)
+               for dim in ("top1","top3","confidence","specialists","keywords"))</code></pre>
+                <div class="baby"><span class="t">👶 关键区别：这里比的是"通过率"不是"单条对错"</span><code>rate("top1")</code> 算的是"20 条样本里有几条 top1 命中"，比如 17/20 = 0.85。<code>meets_thresholds</code> 用 <code>all(...)</code> 要求<strong>五维的通过率都过线</strong>，只要有一维（比如 keywords 掉到 0.55 &lt; 0.6）没过，整个函数返回 False，CI 就 <code>SystemExit(1)</code> 拦下合并。注意它是<strong>群体通过率</strong>的门槛，不是"每条样本都必须满分"——允许个别难题失手，但整体水平不能滑坡。</div>
                 <p>这个能力被接进了 CI 流水线（Day 18 细讲）——有一道专门的闸门 <code>ci-gate-eval</code>：</p>
                 <div class="gate-ci">
                     <span class="big">🚫</span>
@@ -239,7 +417,24 @@ if not report.meets_thresholds(EvalThresholds(top1=0.5, top3=0.7)):
             <div class="card">
                 <p>除了 CI 里用 golden set 的"离线评测"，框架还有两个进阶能力：</p>
                 <h3>ObservableScorer — 在线评测（scorers.py:381）</h3>
-                <p>golden set 需要人工标答案，成本高、覆盖有限。<code>ObservableScorer</code> <strong>不依赖标准答案</strong>，纯从线上真实调用的 envelope 信号统计：成功率分布、延迟/成本的百分位、SLO 违约率。它回答的是"线上整体健康吗"，而不是"这道题对不对"。</p>
+                <p>golden set 需要人工标答案，成本高、覆盖有限。<code>ObservableScorer</code> <strong>不依赖标准答案</strong>（也 <strong>不调 LLM</strong>，纯统计），从线上真实调用的 envelope 信号算 5 个 SLO 维度。默认阈值写在 <code>OBSERVABLE_SLO_DEFAULTS</code>（<code>scorers.py:372</code>），看它怎么判"违约"：</p>
+<pre><code class="language-python"># eval/scorers.py:372  在线 SLO 默认阈值
+OBSERVABLE_SLO_DEFAULTS = {
+    "success_rate": 0.85,        # status="success" 占比 · 跌破触红
+    "critic_end_rate": 0.10,     # Critic 拦下(不敢下结论)占比 · 涨过触红
+    "p99_latency_ms": 30000.0,   # 延迟 p99 · 涨过触红
+    "p99_cost_usd": 0.50,        # 成本 p99 · 涨过触红
+    "failure_no_LLM_rate": 0.02, # 预算/限流类硬失败占比
+}
+
+# eval/scorers.py:441  score_aggregate 里判一维是否违约(以成功率为例)
+success_rate = status_distribution.get("success", 0.0)
+if success_rate &lt; self.slos["success_rate"]:
+    severity = "red" if success_rate &lt; self.slos["success_rate"] - 0.1 else "yellow"
+    breaches.append(SloBreach(dim="success_rate", actual=success_rate,
+                              threshold=self.slos["success_rate"], severity=severity))</code></pre>
+                <div class="baby"><span class="t">👶 大白话</span>它把一批线上 case 的 envelope 拿来做统计：成功率、Critic 拦截率、延迟 p99、成本 p99、硬失败率。每一维跟阈值比，超标就往 <code>breaches</code> 里塞一条 <code>SloBreach</code>，还分 <strong>yellow（黄，轻微超）</strong> 和 <strong>red（红，超得离谱）</strong> 两档严重度。空 case 列表直接返回全 0（<code>scorers.py:403</code>），不会除零崩。</div>
+                <div class="anno">⚠️ 设计取舍⑤：<code>ObservableScorer</code> 的类注释里明确写着 <b>"SHALL NOT 调 LLM（纯 statistics）"</b>（<code>scorers.py:382</code>）。为什么定死不许？因为在线评测要对<b>海量</b>线上 case 跑、要频繁跑，一旦引入 LLM 判分，成本和延迟都会失控，还会把"评测"本身变成一个可能出错的推理过程。这里的取舍是：<b>golden set 离线评测用 LLM 也行（量小），在线评测只准用确定性统计（量大）</b>。</div>
                 <h3>RegressionDetector — 回归检测</h3>
                 <p>对比"这次评测"和"历史基线"，自动找出<strong>哪一维退步了</strong>。配合仓库里的 <code>eval-replay</code> skill（Day 19）：给一个线上出问题的 case_id，能拉出历史输入重放、对比 5 维评分、定位是哪一维掉了。</p>
                 <div class="glossary"><b>离线 vs 在线评测</b>：离线 = 拿固定考卷考（可控、可复现、进 CI）；在线 = 观察真实流量表现（覆盖真实分布、发现考卷没覆盖的问题）。两者互补——离线保下限，在线抓意外。</div>
