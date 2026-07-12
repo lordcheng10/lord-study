@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 58 · Kubernetes 基础：集装箱码头调度 — Agent 开发转行路线</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}.example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}.example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.qa p{margin:5px 0}.qa .q{color:#c084fc;font-weight:600}.qa .a{color:var(--text-secondary)}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}.anno b{color:var(--accent-orange)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}.journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}.journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}.journey .st.on{background:linear-gradient(135deg,#f59e0b,#0ea5e9);color:#fff;border-color:transparent;font-weight:700}.journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}.svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .xlink{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#f59e0b,#0ea5e9);color:#fff;font-weight:700;font-size:13px;padding:10px 14px;border-radius:10px;text-decoration:none;margin:10px 0}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}.ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}.ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#0ea5e9);">AGT</div>
+            <h2>Day 58</h2>
+            <p class="version">Kubernetes 基础 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要编排</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Pod</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Deployment</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Service</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 一份最小 YAML</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · kubectl 常用命令</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="agent-career-tutorial.html" class="nav-link">📋 返回 68 天总表</a></li>
+            <li><a href="agent-career-day57.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 57 Docker</a></li>
+            <li><a href="agent-career-day59.html" class="nav-link" style="color:var(--accent-green);">Day 59 CI/CD&IaC &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 58 / 共 68 天 · 阶段 11 部署</span>
+            <h1 class="part-title">Kubernetes 基础：集装箱的码头调度中心</h1>
+            <p class="part-desc">昨天(Day 57)你学会了把 Agent 打成一个集装箱(Docker 镜像)。可线上要抗流量,得同时跑几十个一样的箱子,还要它们挂了自动重启、升级时不停机——手动管这么多箱子会累死人。今天认识 <strong>Kubernetes(简称 K8s)</strong>:集装箱的「码头调度中心」,用 <strong>Pod / Deployment / Service</strong> 三个核心概念自动编排一大群容器。零基础不用深钻,今天目标是<strong>看懂轮廓、能讲清这三个词、看得懂一份最小 YAML</strong>;明天(Day 59)学怎么用 CI/CD 把「改代码 → 打镜像 → 上 K8s」这条流水线自动化。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在阶段 11（部署 D57-61）的位置</div>
+            <div class="steps">
+                <span class="st">D57 Docker</span><span class="sep">→</span>
+                <span class="st on">D58 K8s 基础</span><span class="sep">→</span>
+                <span class="st">D59 CI/CD&IaC</span><span class="sep">→</span>
+                <span class="st">D60 云上部署</span><span class="sep">→</span>
+                <span class="st">D61 AI 网关</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比兜住今天（今天全程沿用「集装箱码头」的世界观）</span>
+        管理一堆容器 = <strong>运营一个繁忙的集装箱码头</strong>。<strong>K8s</strong> = 码头的<strong>自动调度中心</strong>(总控室);<strong>Pod</strong> = 码头上一个能落地干活的最小箱位(通常就装一个容器);<strong>Deployment</strong> = 一张下给调度中心的「订单」(我要一直保证有 3 个这样的箱子在跑,坏了立刻补);<strong>Service</strong> = 码头门口那个固定的收货地址/前台(不管里面箱子怎么增减换新,外面永远认这一个地址);<strong>kubectl</strong> = 你对调度中心下命令的对讲机。K8s 最迷人的地方:你只说「我想要什么状态」,它自己想办法一直维持——像一个不知疲倦的码头主管。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要编排：一个箱子好管，一百个就乱了</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>用户多了,一个容器扛不住,你手动 <code>docker run</code> 起 10 个。结果:半夜有个容器崩了没人管、升级得手动一个个停再起(中间服务中断)、流量该发给哪个箱子还得自己配……人肉运维彻底忙不过来。</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>容器编排(orchestration) = 用一个大脑自动管理成百上千个容器:自动重启挂掉的、自动多起几个扛流量、升级时逐个替换不停机、自动分配流量。</strong>K8s 就是业界最主流的这个「大脑」。你从「一个个手动搬箱子的工人」升级成「给调度中心下订单的主管」。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 540 155" width="100%" style="max-width:540px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="270" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">手动管容器 vs 交给 K8s 调度中心</text>
+                        <rect x="30" y="34" width="230" height="106" rx="10" fill="rgba(239,68,68,.08)" stroke="#ef4444"/>
+                        <text x="145" y="56" fill="#f87171" text-anchor="middle" font-weight="700">😵 人肉运维</text>
+                        <text x="145" y="78" fill="#94a3b8" text-anchor="middle">崩了要半夜爬起来重启</text>
+                        <text x="145" y="98" fill="#94a3b8" text-anchor="middle">升级得手动停再起</text>
+                        <text x="145" y="120" fill="#94a3b8" text-anchor="middle">扩容一个个 docker run</text>
+                        <rect x="280" y="34" width="230" height="106" rx="10" fill="rgba(14,165,233,.08)" stroke="#0ea5e9"/>
+                        <text x="395" y="56" fill="#38bdf8" text-anchor="middle" font-weight="700">🤖 K8s 自动编排</text>
+                        <text x="395" y="78" fill="#94a3b8" text-anchor="middle">崩了自动重启 / 自愈</text>
+                        <text x="395" y="98" fill="#94a3b8" text-anchor="middle">滚动升级不停机</text>
+                        <text x="395" y="120" fill="#94a3b8" text-anchor="middle">改个数字就扩缩容</text>
+                    </svg>
+                    <div class="cap">图注：K8s 的核心是「声明式」——你声明想要的状态，它负责一直维持，出偏差自动纠。</div>
+                </div>
+                <div class="baby"><span class="t">👶 我一定要学 K8s 吗?好难的样子。</span>作为转行者,<strong>你现在不需要会「搭 K8s 集群」,只需要「看得懂、会用别人搭好的」。</strong>因为云厂商都提供托管 K8s(明天/后天会讲),你多数时候只写几行 YAML 声明「我要跑什么、几份」。今天的目标就是把 Pod/Deployment/Service 这三个词讲明白——面试问到能答上,就够了。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Pod：码头上最小的一个箱位</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Docker 里最小单位是「容器」,可 K8s 里到处说「Pod」,这俩啥关系?</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>Pod 是 K8s 调度的最小单位,里面通常就装一个容器(偶尔几个紧密配合的容器共处一个 Pod)。</strong>K8s 不直接管容器,而是管 Pod。就像码头不按「单件货」调度,而按「一个箱位」调度——箱位里一般放一个集装箱。<strong>可以先粗略理解成:一个 Pod ≈ 一个正在跑的容器。</strong></div>
+                <div class="baby"><span class="t">👶 为什么不直接管容器,要多套一层 Pod?</span>因为有时候两个容器必须「同生共死、共享网络」——比如主程序容器 + 一个帮它收集日志的小容器(边车/sidecar)。把它俩放同一个 Pod,K8s 就把它们当一个整体调度、放到同一台机器上。<strong>90% 的场景一个 Pod 就一个容器,你先这么记,遇到 sidecar 再深究。</strong></div>
+                <div class="example"><span class="t">📝 举个例子：Pod 是「会飘的」</span>
+                Pod 有个重要特性:<strong>随时可能被销毁重建</strong>(节点故障、升级、扩缩容)。重建后 IP 会变。所以你<strong>不能直接把某个 Pod 的 IP 记下来去访问它</strong>——这正是下面要讲 Service 的原因:需要一个「不变的门牌号」挡在飘忽的 Pod 前面。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Deployment：一张「保证有 N 份在跑」的订单</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Pod 会崩、会飘。我想要「永远有 3 个我的 Agent 在跑,崩一个立刻补一个,升级时别停机」——总不能自己盯着手动补吧?</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>Deployment = 你下给 K8s 的一张订单:「给我一直保持 N 个一模一样的 Pod 在跑」。</strong>K8s 会不停地对比「现在有几个」和「你要几个」,少了自动补、多了自动删、你改镜像版本它就滚动替换。这就是 K8s 的灵魂——<strong>声明式:你说想要的结果,它负责达成并维持。</strong>像给码头主管下单:「这条线永远配 3 个箱子,坏了你自己补,别来烦我。」</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 540 165" width="100%" style="max-width:540px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="270" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">Deployment：声明 replicas=3，K8s 自动维持</text>
+                        <rect x="180" y="30" width="180" height="38" rx="8" fill="rgba(245,158,11,.14)" stroke="#f59e0b"/>
+                        <text x="270" y="49" fill="#fbbf24" text-anchor="middle" font-weight="700">Deployment 订单</text>
+                        <text x="270" y="63" fill="#94a3b8" text-anchor="middle">replicas: 3（我要 3 份）</text>
+                        <rect x="40" y="96" width="130" height="34" rx="8" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="105" y="117" fill="#38bdf8" text-anchor="middle">Pod ✅</text>
+                        <rect x="205" y="96" width="130" height="34" rx="8" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="270" y="117" fill="#38bdf8" text-anchor="middle">Pod ✅</text>
+                        <rect x="370" y="96" width="130" height="34" rx="8" fill="rgba(239,68,68,.12)" stroke="#ef4444" stroke-dasharray="4"/>
+                        <text x="435" y="113" fill="#f87171" text-anchor="middle">Pod ✖ 崩了</text>
+                        <text x="435" y="127" fill="#4ade80" text-anchor="middle">→ 自动补一个</text>
+                        <path d="M240 68 L110 94" stroke="#0ea5e9" stroke-width="1.2" marker-end="url(#k8)"/>
+                        <path d="M270 68 L270 94" stroke="#0ea5e9" stroke-width="1.2" marker-end="url(#k8)"/>
+                        <path d="M300 68 L430 94" stroke="#0ea5e9" stroke-width="1.2" marker-end="url(#k8)"/>
+                        <defs><marker id="k8" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#0ea5e9"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：崩一个，K8s 立刻拉起新的补齐到 3 个——「自愈」。想扩容？把 3 改成 10 就行。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：扩容和升级有多简单</span>
+                流量涨了要扩容:<code>kubectl scale deployment my-agent --replicas=10</code>(从 3 变 10);<br>
+                发新版本:把 Deployment 里的镜像从 <code>my-agent:v1</code> 改成 <code>:v2</code>,K8s 自动<strong>滚动升级</strong>(先起一个新版、确认健康、再干掉一个旧版,逐个替换,全程服务不中断)。<strong>这就是「声明式」的爽点:你改数字/版本,脏活它全包。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Service：一个永远不变的收货地址</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Pod 会飘、IP 会变、数量会增减。前端/别的服务想调用你的 Agent,总不能每次去查「现在哪几个 Pod 活着、IP 多少」吧?太折腾。</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>Service = 挡在一堆飘忽 Pod 前面的一个「固定门牌号 + 自动分流」。</strong>外面只认这一个稳定地址,Service 自动把请求分发给背后当前活着的 Pod(负载均衡)。Pod 换了、多了、少了,外面无感。就像码头前台:货找前台一个地址就行,前台自己知道现在哪个箱位能收货,你不用管里面怎么倒腾。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 540 160" width="100%" style="max-width:540px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="270" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">Service：稳定入口，自动把流量分给活着的 Pod</text>
+                        <rect x="20" y="70" width="90" height="40" rx="8" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="65" y="94" fill="#4ade80" text-anchor="middle" font-weight="700">用户/前端</text>
+                        <rect x="185" y="66" width="150" height="48" rx="8" fill="rgba(245,158,11,.14)" stroke="#f59e0b"/>
+                        <text x="260" y="86" fill="#fbbf24" text-anchor="middle" font-weight="700">Service 前台</text>
+                        <text x="260" y="104" fill="#94a3b8" text-anchor="middle">固定地址 + 分流</text>
+                        <path d="M110 90 L183 90" stroke="#22c55e" stroke-width="1.6" marker-end="url(#s8)"/>
+                        <rect x="410" y="34" width="110" height="32" rx="6" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="465" y="55" fill="#38bdf8" text-anchor="middle">Pod A</text>
+                        <rect x="410" y="74" width="110" height="32" rx="6" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="465" y="95" fill="#38bdf8" text-anchor="middle">Pod B</text>
+                        <rect x="410" y="114" width="110" height="32" rx="6" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="465" y="135" fill="#38bdf8" text-anchor="middle">Pod C</text>
+                        <path d="M335 84 L408 50" stroke="#f59e0b" stroke-width="1.2" marker-end="url(#s8)"/>
+                        <path d="M335 90 L408 90" stroke="#f59e0b" stroke-width="1.2" marker-end="url(#s8)"/>
+                        <path d="M335 96 L408 130" stroke="#f59e0b" stroke-width="1.2" marker-end="url(#s8)"/>
+                        <defs><marker id="s8" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：Service 靠「标签(label)」认领它该管哪些 Pod——谁贴了 app=my-agent 的标签，它就把流量分给谁。</div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：那外面的真实用户,怎么从公网访问到 Service?</p>
+                    <p class="a">👨‍🏫 老师：Service 有几种类型。集群内部互相调用用 <code>ClusterIP</code>(只在集群里可见);要暴露到公网,常用 <code>LoadBalancer</code>(云厂商给你分一个公网负载均衡),或者用 <strong>Ingress</strong>(更高级的入口,能按域名/路径分流、配 HTTPS)。<strong>这一层再往上,就是我们 Day 61 要讲的「AI 网关」——在入口统一做限流、鉴权、多模型路由、token 计量。</strong>今天你只要知道「Service = 稳定入口」这个概念就够,别被这些类型名吓到。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>一份最小 YAML：把三者串起来看</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Pod、Deployment、Service 各自懂了,可它们在真实文件里长啥样、怎么拼一起?</div>
+                <div class="essence"><span class="t">💡 本质</span>K8s 里你不写代码,而是写 <strong>YAML 声明文件</strong>(还记得 Day 57 的 compose 也是 YAML 吗)——「我想要什么」写清楚,交给 K8s。下面一个 Deployment + 一个 Service,就能把昨天打的 <code>my-agent:v1</code> 镜像跑成 3 份、对外提供稳定访问。<strong>读的时候对照右边注释,抓住关键几行就行。</strong></div>
+<pre><code class="language-yaml"># deploy.yaml —— 上半段是 Deployment（订单），下半段是 Service（前台）
+apiVersion: apps/v1
+kind: Deployment              # 这是一张「Deployment 订单」
+metadata:
+  name: my-agent             # 订单名字
+spec:
+  replicas: 3                # ★ 我要一直保持 3 个 Pod 在跑
+  selector:
+    matchLabels: { app: my-agent }   # 这张订单管理「贴了 app=my-agent 标签」的 Pod
+  template:                  # 下面是「每个 Pod 长啥样」的模板
+    metadata:
+      labels: { app: my-agent }      # 给 Pod 贴标签（Service 靠它认领）
+    spec:
+      containers:
+      - name: agent
+        image: my-agent:v1   # ★ 用昨天打的镜像（换成 :v2 就是升级）
+        ports:
+        - containerPort: 8000
+        env:
+        - name: LLM_API_KEY  # 密钥用环境变量注入（真项目从 Secret 取，不写明文）
+          value: "sk-xxx"
+---                          # YAML 里用 --- 分隔两个对象
+apiVersion: v1
+kind: Service                # 这是「Service 前台」
+metadata:
+  name: my-agent-svc
+spec:
+  selector: { app: my-agent }        # ★ 把流量分给贴了这个标签的所有 Pod
+  ports:
+  - port: 80                 # 前台对外的端口
+    targetPort: 8000         # 转发到 Pod 里容器的 8000（对应 Day57 的服务端口）</code></pre>
+                <div class="anno">带 ★ 的三行是重点：<b>replicas</b>（要几份）、<b>image</b>（跑哪个镜像）、<b>selector/labels</b>（Service 靠标签认领 Pod）。其余字段用时查文档，<b>别背</b>。密钥在真实项目里用 K8s 的 <b>Secret</b> 存，不像这里写明文——概念先记住即可。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>kubectl：对调度中心喊话的对讲机</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>YAML 写好了,怎么让它生效?线上出问题了,怎么查是哪个 Pod、看它的日志?</div>
+                <div class="essence"><span class="t">💡 本质</span><strong><code>kubectl</code>(读作 "kube control")是你和 K8s 对话的命令行工具</strong>——所有「应用配置、看状态、查日志、扩缩容」都靠它。就一把对讲机,记住五六个高频命令就能应付日常。</div>
+<pre><code class="language-bash">kubectl apply -f deploy.yaml    # 应用上一讲的 YAML：让 K8s 照单执行（最常用）
+kubectl get pods                # 看现在有哪些 Pod、是否 Running（数箱子）
+kubectl get deploy,svc          # 看 Deployment 和 Service 的状态
+kubectl logs my-agent-xxxx      # 看某个 Pod 的日志（对应 Day55 可观测！）
+kubectl describe pod my-agent-xxxx   # Pod 起不来时，看详细事件排查原因
+kubectl scale deploy my-agent --replicas=10   # 扩容到 10 份
+kubectl rollout undo deploy my-agent          # 新版本有问题？一键回滚到上一版</code></pre>
+                <table class="ttable">
+                    <tr><th>命令</th><th>大白话</th><th>什么时候用</th></tr>
+                    <tr><td><code>apply -f</code></td><td>照这份 YAML 去做</td><td>部署 / 更新配置</td></tr>
+                    <tr><td><code>get pods</code></td><td>数一数箱子、看死活</td><td>日常巡检</td></tr>
+                    <tr><td><code>logs</code></td><td>看某箱子的日志</td><td>排查报错</td></tr>
+                    <tr><td><code>scale</code></td><td>改份数</td><td>扩容 / 缩容</td></tr>
+                    <tr><td><code>rollout undo</code></td><td>回退上一版</td><td>发版翻车急救</td></tr>
+                </table>
+                <div class="example"><span class="t">📝 举个例子：一次典型的线上排查</span>
+                用户说服务 502。你 <code>kubectl get pods</code> 发现有个 Pod 状态是 <code>CrashLoopBackOff</code>(反复崩溃重启)→ <code>kubectl logs</code> 看它日志,发现是漏了环境变量导致启动就报错 → 补上 Secret 重新 <code>apply</code>。<strong>K8s 的自愈救了大局(其他 2 个 Pod 还在扛),你从容修复,不用半夜手忙脚乱。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 10 分钟</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么需要容器编排?K8s 靠什么理念工作?(声明式:你说想要的状态,它维持)</li>
+                    <li>Pod 是什么?为什么 Pod 会「飘」、IP 会变?</li>
+                    <li>Deployment 解决什么?<code>replicas</code> 是啥?扩容和滚动升级怎么做?</li>
+                    <li>Service 为什么必要?它怎么找到该管哪些 Pod?(靠标签 label)</li>
+                    <li>一份最小 YAML 里最关键的三行是什么?</li>
+                    <li><code>kubectl</code> 的 apply / get pods / logs / scale / rollout undo 各干嘛?</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 10 分钟：读懂并「讲出」一份 YAML</h3>
+                <p>不用真装 K8s(集群较重)。今天的动手是<strong>「读」和「讲」</strong>——这才是转行阶段真正要练的:</p>
+<pre><code class="language-bash"># 1) 把上面 L05 的 deploy.yaml 抄下来，逐行对着注释，用大白话讲给自己听：
+#    「这张订单要 3 个 Pod，跑 my-agent:v1 镜像，Service 靠 app=my-agent 标签
+#     把 80 端口的流量分给这 3 个 Pod 的 8000 端口。」
+
+# 2) 想真上手体验的（可选）：本地装一个迷你 K8s，如 minikube 或 kind
+minikube start                     # 本地起一个单节点迷你集群
+kubectl apply -f deploy.yaml       # 部署上去
+kubectl get pods                   # 看 3 个 Pod 是否都 Running
+kubectl scale deploy my-agent --replicas=5   # 试试扩容，再 get pods 看变化
+minikube stop                      # 玩完关掉</code></pre>
+                <p>面试自测:合上笔记,用「集装箱码头」的比喻,把 Pod / Deployment / Service 三个词一口气讲清楚。讲得出,今天就过关了。</p>
+                <div class="tip"><strong>明日预告 · Day 59</strong>:现在你会写 Dockerfile、会写 K8s YAML 了,可每次改完代码都要手动「打镜像 → 推仓库 → apply 到 K8s」,又慢又容易出错。明天学 <strong>CI/CD & IaC</strong>:用 <strong>GitHub Actions</strong> 把「提交代码 → 自动测试 → 自动打镜像 → 自动部署」串成一条流水线;再用 <strong>Terraform</strong> 把「云上要建哪些资源」也写成代码。让机器替你干重复的部署活。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="agent-career-day57.html" style="color:var(--accent-cyan);">&larr; Day 57 · Docker 打包</a>
+                <a href="agent-career-day59.html" style="color:var(--accent-green);">Day 59 · CI/CD & IaC &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+    document.addEventListener('DOMContentLoaded',function(){hljs.highlightAll();
+     var links=document.querySelectorAll('.nav-link[data-section]'),secs=document.querySelectorAll('section[id]'),t=document.getElementById('sidebarToggle'),s=document.getElementById('sidebar');
+     if(t&&s)t.addEventListener('click',function(){s.classList.toggle('open')});
+     var set=function(id){links.forEach(function(a){a.classList.toggle('active',a.dataset.section===id)})};
+     var ob=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)set(e.target.id)})},{rootMargin:'-40% 0px -55% 0px'});
+     secs.forEach(function(x){ob.observe(x)});});
+    </script>
+</body>
+</html>

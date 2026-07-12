@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 57 · Docker：把 Agent 装进集装箱 — Agent 开发转行路线</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
+    <style>
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}.example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}.example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}.qa p{margin:5px 0}.qa .q{color:#c084fc;font-weight:600}.qa .a{color:var(--text-secondary)}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}.anno b{color:var(--accent-orange)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}.journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}.journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}.journey .st.on{background:linear-gradient(135deg,#f59e0b,#0ea5e9);color:#fff;border-color:transparent;font-weight:700}.journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}.svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .xlink{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#f59e0b,#0ea5e9);color:#fff;font-weight:700;font-size:13px;padding:10px 14px;border-radius:10px;text-decoration:none;margin:10px 0}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}.ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}.ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#0ea5e9);">AGT</div>
+            <h2>Day 57</h2>
+            <p class="version">Docker 打包 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要 Docker</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 镜像 vs 容器</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Dockerfile 逐行</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · build & run</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 打包 Agent 服务</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 瘦身 & compose</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="agent-career-tutorial.html" class="nav-link">📋 返回 68 天总表</a></li>
+            <li><a href="agent-career-day56.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 56 成本治理&缓存</a></li>
+            <li><a href="agent-career-day58.html" class="nav-link" style="color:var(--accent-green);">Day 58 K8s 基础 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 57 / 共 68 天 · 阶段 11 部署</span>
+            <h1 class="part-title">Docker：把 Agent 装进集装箱</h1>
+            <p class="part-desc">阶段 10 你让 Agent 可信、可观测、省钱了,可它现在还只活在你的笔记本上。今天进入部署篇第一课——<strong>Docker</strong>:把你的 Agent 服务连同 Python、依赖包、配置,统统打包成一个标准「集装箱」,做到「在我电脑上能跑,搬到任何服务器上也一模一样能跑」,彻底告别「在我这儿是好的呀」的甩锅现场。学完你能把 Day 09 写的 FastAPI 服务打成镜像一键跑起来;明天(Day 58)学怎么用 K8s 同时调度一大堆这样的集装箱。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在阶段 11（部署 D57-61）的位置</div>
+            <div class="steps">
+                <span class="st on">D57 Docker</span><span class="sep">→</span>
+                <span class="st">D58 K8s 基础</span><span class="sep">→</span>
+                <span class="st">D59 CI/CD&IaC</span><span class="sep">→</span>
+                <span class="st">D60 云上部署</span><span class="sep">→</span>
+                <span class="st">D61 AI 网关</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比兜住今天（今天全程沿用「海运集装箱」的世界观）</span>
+        部署一个程序 = <strong>把货物海运到世界各地</strong>。<strong>Docker 镜像(image)</strong> = 一个装好货、封好口的<strong>标准集装箱</strong>(里面塞好了程序 + Python + 所有依赖);<strong>容器(container)</strong> = 用这个集装箱在某个港口<strong>实际卸货运行</strong>的一份实例;<strong>Dockerfile</strong> = 装箱说明书(告诉工人先放什么、再放什么);<strong>镜像仓库(registry)</strong> = 集装箱码头(存放和分发箱子)。集装箱的伟大之处:不管箱里装的是家具还是电器,轮船、吊车、卡车都用同一套标准搬运——Docker 让所有程序都能被同一套方式部署。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么要 Docker：告别「在我这儿是好的」</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>你本地跑得好好的 Agent,发给同事或部到服务器上,立马报错:Python 版本不对、少装了某个包、系统缺个字体库……来回折腾一整天。这就是经典的「环境不一致」地狱。</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>Docker 把「程序 + 它需要的一切环境」一起打包,搬到哪里都自带环境,不再依赖目标机器装了啥。</strong>就像海运集装箱:发货前把货和填充物一起封进标准箱,不管到哪个港口,吊车都能原样搬下来,里面的东西一点没变。<strong>一次打包,处处运行(build once, run anywhere)。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 540 160" width="100%" style="max-width:540px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="270" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">没 Docker：环境各异会翻车　｜　有 Docker：自带环境，一致</text>
+                        <rect x="30" y="34" width="230" height="110" rx="10" fill="rgba(239,68,68,.08)" stroke="#ef4444"/>
+                        <text x="145" y="56" fill="#f87171" text-anchor="middle" font-weight="700">❌ 只发代码</text>
+                        <text x="145" y="80" fill="#94a3b8" text-anchor="middle">我的电脑：Python 3.11 ✅</text>
+                        <text x="145" y="100" fill="#94a3b8" text-anchor="middle">服务器：Python 3.8 ❌</text>
+                        <text x="145" y="124" fill="#f87171" text-anchor="middle">「在我这儿是好的呀」</text>
+                        <rect x="280" y="34" width="230" height="110" rx="10" fill="rgba(14,165,233,.08)" stroke="#0ea5e9"/>
+                        <text x="395" y="56" fill="#38bdf8" text-anchor="middle" font-weight="700">✅ 发整个集装箱</text>
+                        <text x="395" y="80" fill="#94a3b8" text-anchor="middle">箱里已含 Python+依赖</text>
+                        <text x="395" y="100" fill="#94a3b8" text-anchor="middle">任何机器卸下来都一样</text>
+                        <text x="395" y="124" fill="#38bdf8" text-anchor="middle">一次打包，处处运行</text>
+                    </svg>
+                    <div class="cap">图注：Docker 解决的不是「代码对不对」，而是「环境一不一致」——这是部署最大的一类坑。</div>
+                </div>
+                <div class="baby"><span class="t">👶 Docker 和虚拟机(VM)有啥不一样?</span>虚拟机是「连整台电脑(含操作系统)一起虚拟」,又大又慢,像给每件货配一整艘船;Docker 容器<strong>共享宿主机的操作系统内核,只打包程序和依赖</strong>,轻量得多,秒级启动,像共用一艘船、各占一个标准箱位。所以 Docker 能在一台机器上同时跑几十个容器。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>镜像 vs 容器：模具和产品</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>刚学 Docker 最容易懵的两个词:image(镜像)和 container(容器),到处都在说,分不清谁是谁。</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>镜像 = 封好的集装箱(静态的、只读的模板);容器 = 用这个箱子在港口实际卸货运行的一份实例(动态的、在跑的)。</strong>一个镜像可以启动出好多个容器,就像同一张图纸(还记得 Day05 的 class/object 吗?)造出好多台机器。<strong>镜像是「死的模具」,容器是「活的产品」。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 540 150" width="100%" style="max-width:540px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="270" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">一个镜像 → 启动出多个容器（各自独立运行）</text>
+                        <rect x="200" y="30" width="140" height="44" rx="8" fill="rgba(245,158,11,.14)" stroke="#f59e0b"/>
+                        <text x="270" y="50" fill="#fbbf24" text-anchor="middle" font-weight="700">📦 镜像 image</text>
+                        <text x="270" y="67" fill="#94a3b8" text-anchor="middle">封好的模板（只读）</text>
+                        <rect x="40" y="104" width="130" height="40" rx="8" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="105" y="128" fill="#38bdf8" text-anchor="middle" font-weight="700">🚢 容器 1（运行中）</text>
+                        <rect x="205" y="104" width="130" height="40" rx="8" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="270" y="128" fill="#38bdf8" text-anchor="middle" font-weight="700">🚢 容器 2（运行中）</text>
+                        <rect x="370" y="104" width="130" height="40" rx="8" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="435" y="128" fill="#38bdf8" text-anchor="middle" font-weight="700">🚢 容器 3（运行中）</text>
+                        <path d="M240 74 L110 102" stroke="#0ea5e9" stroke-width="1.3" marker-end="url(#d7)"/>
+                        <path d="M270 74 L270 102" stroke="#0ea5e9" stroke-width="1.3" marker-end="url(#d7)"/>
+                        <path d="M300 74 L430 102" stroke="#0ea5e9" stroke-width="1.3" marker-end="url(#d7)"/>
+                        <defs><marker id="d7" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#0ea5e9"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：想加机器抗流量？用同一个镜像多起几个容器就行——明天 K8s 干的就是这件事。</div>
+                </div>
+                <div class="example"><span class="t">📝 举个例子：命令里体会两者的关系</span>
+                <code>docker build → 得到一个镜像</code>(封箱);<br>
+                <code>docker run 镜像名 → 启动一个容器</code>(卸货运行);<br>
+                <code>docker ps → 看现在有哪些容器在跑</code>(哪些箱子正在被使用)。<strong>build 是名词工厂,run 是动词现场。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Dockerfile：一份装箱说明书</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>镜像里到底该装什么、按什么顺序装?总不能手动一件件塞。需要一份可复现的「说明书」。</div>
+                <div class="essence"><span class="t">💡 本质</span><strong>Dockerfile 就是「装箱说明书」:一行一条指令,从上到下告诉 Docker「先拿个什么底座、再拷贝代码、再装依赖、最后启动命令怎么写」。</strong>照着它,任何人任何时候都能构建出一模一样的镜像。像宜家家具的图解说明:第一步、第二步……照做就还原。</div>
+<pre><code class="language-dockerfile"># Dockerfile —— 每一行是一条「装箱指令」，从上往下执行
+FROM python:3.11-slim          # 1) 底座：一个已装好 Python 3.11 的精简系统
+WORKDIR /app                   # 2) 在箱子里建个 /app 文件夹当工作台
+COPY requirements.txt .        # 3) 先只拷贝依赖清单（为了利用缓存，见下讲）
+RUN pip install -r requirements.txt   # 4) 照清单装依赖（Day05 的 -r 还记得吗）
+COPY . .                       # 5) 再把项目所有代码拷进箱子
+EXPOSE 8000                    # 6) 声明：这个服务对外用 8000 端口
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+                               # 7) 箱子启动时默认跑的命令（启动 FastAPI 服务）</code></pre>
+                <table class="ttable">
+                    <tr><th>指令</th><th>大白话</th></tr>
+                    <tr><td><code>FROM</code></td><td>用哪个现成底座开始(别从零造系统)</td></tr>
+                    <tr><td><code>WORKDIR</code></td><td>进到箱内哪个文件夹干活</td></tr>
+                    <tr><td><code>COPY</code></td><td>把宿主机的文件拷进箱子</td></tr>
+                    <tr><td><code>RUN</code></td><td>构建镜像时执行的命令(如装依赖)</td></tr>
+                    <tr><td><code>EXPOSE</code></td><td>声明对外端口(文档作用为主)</td></tr>
+                    <tr><td><code>CMD</code></td><td>容器启动时默认跑的命令</td></tr>
+                </table>
+                <div class="qa">
+                    <p class="q">👶 小白：为什么不直接 <code>COPY . .</code> 一步拷完,还要先单独拷 requirements.txt?</p>
+                    <p class="a">👨‍🏫 老师：为了「省构建时间」!Docker 是<strong>一层一层缓存</strong>的:只要 requirements.txt 没变,「装依赖」那层就直接复用缓存,不用重装(装依赖往往最慢)。如果你把代码和依赖清单一起拷,那改一行代码就会让「装依赖」那层缓存失效,每次都得重装几分钟。<strong>先拷不常变的(依赖清单),后拷常变的(代码)</strong>——这是 Dockerfile 的黄金顺序,下一讲还会碰到。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>build & run：封箱与卸货</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>写好 Dockerfile 了,怎么真的把它变成一个能跑的服务?</div>
+                <div class="essence"><span class="t">💡 本质</span>两个核心动作:<strong><code>docker build</code> = 照说明书封箱(生成镜像);<code>docker run</code> = 把箱子拉到港口卸货运行(启动容器)。</strong>再加个端口映射,就能从你电脑的浏览器访问箱子里的服务。</div>
+<pre><code class="language-bash"># 1) 封箱：照当前目录的 Dockerfile 构建镜像，起名 my-agent，版本 v1
+docker build -t my-agent:v1 .
+#         └ -t 给镜像起名字:标签      └ . 表示「用当前目录的 Dockerfile」
+
+# 2) 卸货运行：用镜像启动一个容器
+docker run -p 8000:8000 my-agent:v1
+#          └ -p 宿主机端口:容器端口  把箱内 8000 接到你电脑的 8000
+
+# 现在浏览器打开 http://localhost:8000/docs 就能访问箱子里的 FastAPI 了！
+
+# 常用查看命令：
+docker images        # 看有哪些镜像（有哪些箱子模板）
+docker ps            # 看正在运行的容器（哪些箱子在跑）
+docker logs 容器ID   # 看某个容器的日志（对应 Day55 的可观测）
+docker stop 容器ID   # 停掉一个容器</code></pre>
+                <div class="baby"><span class="t">👶 <code>-p 8000:8000</code> 两个 8000 啥区别?</span>冒号<strong>左边是你电脑(宿主机)的端口,右边是箱子内部的端口</strong>。它俩不一定相同:<code>-p 9000:8000</code> 意思是「箱子里服务在 8000,我想从电脑的 9000 访问它」。集装箱是封闭的,不做端口映射,外面根本连不进箱里——这是新手最常见的「服务起来了却访问不到」的原因。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>实战：把一个 Agent 服务打成镜像</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>道理都懂,拿自己的 Agent 试试呢?尤其它还要读 API key,这种秘密怎么进箱子又不泄露?</div>
+                <div class="essence"><span class="t">💡 本质</span>把 Day 09 的 FastAPI Agent 服务 + 一个 requirements.txt + 一个 Dockerfile 放一起,就能打包。<strong>关键铁律:API key 等秘密绝不写死进镜像</strong>(镜像会被分发,等于把钥匙贴门上),而是<strong>运行时用环境变量传进去</strong>。就像集装箱可以标准运输,但贵重钥匙你随身带、到港口再交。</div>
+<pre><code class="language-python"># main.py —— 一个最小 Agent 服务（复习 Day09 FastAPI）
+import os
+from fastapi import FastAPI
+app = FastAPI()
+
+API_KEY = os.environ.get("LLM_API_KEY")   # ✅ 从环境变量读，不写死在代码里
+
+@app.get("/ask")
+def ask(q: str):
+    # 这里正常调你的 Agent；演示就直接回显
+    return {"question": q, "answer": f"（用 key 尾号 …{str(API_KEY)[-4:]} 生成的回答）"}
+
+@app.get("/health")     # 健康检查接口：K8s / 负载均衡靠它判断「箱子还活着吗」
+def health():
+    return {"status": "ok"}</code></pre>
+<pre><code class="language-bash"># 构建 + 运行，运行时用 -e 把 key 作为环境变量注入（不进镜像）
+docker build -t my-agent:v1 .
+docker run -p 8000:8000 -e LLM_API_KEY="sk-你的密钥" my-agent:v1
+#                        └ -e 名=值：运行时才把秘密塞进箱子
+
+# 验证：另开一个终端
+curl "http://localhost:8000/health"          # → {"status":"ok"}
+curl "http://localhost:8000/ask?q=你好"        # → 看到回答</code></pre>
+                <div class="example"><span class="t">📝 举个例子：新增的 /health 为什么重要</span>
+                线上环境(负载均衡、K8s)会每隔几秒 <code>GET /health</code> 一次,如果连不上就认为这个箱子挂了,自动重启或不再往它发请求。<strong>「健康检查接口 + 环境变量传密钥」是容器化服务的两个标配,面试和实战都常考。</strong></div>
+                <div class="baby"><span class="t">👶 别忘了 .dockerignore</span>建一个 <code>.dockerignore</code> 文件(用法像 .gitignore),写上 <code>.venv</code>、<code>__pycache__</code>、<code>.env</code>、<code>.git</code>——避免把本地虚拟环境、密钥文件、一堆缓存也拷进镜像,既让镜像变小,又防止 <code>.env</code> 里的密钥意外进箱。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>镜像瘦身 + docker compose 一瞥</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>随手一打,镜像动不动 1~2 GB,推送慢、启动慢、还占空间。而且真实项目往往不止一个箱子(比如 Agent 服务 + Redis 缓存 + 向量库),一个个手动 run 太累。</div>
+                <div class="essence"><span class="t">💡 本质</span>两个进阶点:<strong>① 瘦身</strong>——用 <code>-slim</code> 或 <code>alpine</code> 小底座、只拷必要文件、用 <code>.dockerignore</code>,让箱子尽量轻;<strong>② docker compose</strong>——用一个 <code>docker-compose.yml</code> 文件描述「我要几个箱子、怎么连」,一句 <code>docker compose up</code> 全部起来。就像一次运输多个集装箱,用一张总清单统一调度,不用一个个喊吊车。</div>
+                <table class="ttable">
+                    <tr><th>瘦身招数</th><th>效果</th></tr>
+                    <tr><td>底座用 <code>python:3.11-slim</code> 而非完整版</td><td>基础镜像小几百 MB</td></tr>
+                    <tr><td>先拷 requirements、后拷代码(上一讲)</td><td>改代码不用重装依赖,构建快</td></tr>
+                    <tr><td>写好 <code>.dockerignore</code></td><td>不把 .venv/缓存/.git 拷进去</td></tr>
+                    <tr><td>多阶段构建(multi-stage)</td><td>构建用的工具不进最终镜像,进阶再学</td></tr>
+                </table>
+<pre><code class="language-bash"># docker-compose.yml（示意）：一次描述「Agent 服务 + Redis 缓存」两个箱子
+# services:
+#   agent:
+#     build: .                    # 用当前目录 Dockerfile 构建
+#     ports: ["8000:8000"]
+#     environment: [LLM_API_KEY]  # 从外部传密钥
+#   cache:
+#     image: redis:7              # 直接用现成 Redis 镜像（给 Day56 的缓存用）
+
+docker compose up      # 一句话把上面所有箱子一起起来，它们还能互相通信
+docker compose down    # 一句话全部停掉并清理</code></pre>
+                <div class="anno">compose 语法细节<b>别背</b>，用时查文档。今天记住两句话就够：镜像要尽量<b>瘦</b>（slim 底座 + dockerignore + 分层缓存）；多个箱子用 <b>compose</b> 一张清单统一起停。这也是 Day56 的缓存(Redis)、向量库落地时的常见搭法。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 10 分钟</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Docker 到底解决了什么问题?和虚拟机有什么区别?</li>
+                    <li>镜像和容器什么关系?(模具 vs 产品,一个镜像可起多个容器)</li>
+                    <li>Dockerfile 里 <code>FROM/COPY/RUN/CMD/EXPOSE</code> 各干嘛?为什么先拷 requirements 再拷代码?</li>
+                    <li><code>docker build</code> 和 <code>docker run</code> 分别做什么?<code>-p</code> 和 <code>-e</code> 是干嘛的?</li>
+                    <li>API key 这种秘密该怎么进容器?为什么不能写死在镜像里?</li>
+                    <li>怎么让镜像更小?docker compose 解决什么场景?</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 10 分钟：把一个最小服务打成镜像跑起来</h3>
+                <p>建一个文件夹,放三个文件,然后 build + run:</p>
+<pre><code class="language-bash"># 1) main.py（3 行的 FastAPI）
+# from fastapi import FastAPI
+# app = FastAPI()
+# @app.get("/health")
+# def health(): return {"status": "ok"}
+
+# 2) requirements.txt
+# fastapi
+# uvicorn
+
+# 3) Dockerfile
+# FROM python:3.11-slim
+# WORKDIR /app
+# COPY requirements.txt .
+# RUN pip install -r requirements.txt
+# COPY . .
+# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# 然后在该文件夹里执行：
+docker build -t hello-agent:v1 .        # 封箱
+docker run -p 8000:8000 hello-agent:v1  # 卸货运行
+# 浏览器开 http://localhost:8000/health → 看到 {"status":"ok"} 就成功了！</code></pre>
+                <p>还没装 Docker?去装 <strong>Docker Desktop</strong>(Mac/Windows 一键装,自带图形界面能看到你的镜像和容器)。装不了也没关系,把上面三个文件和命令读懂、能讲出每行在干嘛,就达标了。</p>
+                <div class="tip"><strong>明日预告 · Day 58</strong>:你会打一个集装箱了。可线上要抗流量,得同时跑几十个一模一样的箱子,还要它们挂了自动重启、能滚动升级不停机——手动管这么多箱子会累死。明天学 <strong>Kubernetes(K8s)</strong>:集装箱的「码头调度中心」,用 Pod / Deployment / Service 三个核心概念,帮你自动编排一大群容器。零基础只要懂个大概轮廓就行。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="agent-career-day56.html" style="color:var(--accent-cyan);">&larr; Day 56 · 成本治理 & 缓存</a>
+                <a href="agent-career-day58.html" style="color:var(--accent-green);">Day 58 · Kubernetes 基础 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+    document.addEventListener('DOMContentLoaded',function(){hljs.highlightAll();
+     var links=document.querySelectorAll('.nav-link[data-section]'),secs=document.querySelectorAll('section[id]'),t=document.getElementById('sidebarToggle'),s=document.getElementById('sidebar');
+     if(t&&s)t.addEventListener('click',function(){s.classList.toggle('open')});
+     var set=function(id){links.forEach(function(a){a.classList.toggle('active',a.dataset.section===id)})};
+     var ob=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)set(e.target.id)})},{rootMargin:'-40% 0px -55% 0px'});
+     secs.forEach(function(x){ob.observe(x)});});
+    </script>
+</body>
+</html>
