@@ -3,233 +3,310 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 17 · Knowledge 知识与 RAG — CrewAI 源码学习</title>
+    <title>Day 17 · 异步任务 async_execution — CrewAI 60 天源码深度</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        .flow2{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:14px 4px;font-size:12px}
-        .flow2 .n{border:1px solid var(--border-color);border-radius:8px;padding:8px 11px;background:var(--bg-secondary);text-align:center}
-        .flow2 .n b{display:block;color:#06b6d4;font-size:11px} .flow2 .a{color:var(--text-muted);font-weight:800}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
-        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
-        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #fb923c;background:rgba(251,146,60,.08);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#fdba74;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
         .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
-        .journey .st.on{background:linear-gradient(135deg,#06b6d4,#3b82f6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .st.on{background:linear-gradient(135deg,#ff5a50,#f59e0b);color:#fff;border-color:transparent;font-weight:700}
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
     <nav class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#3b82f6);">17</div>
+            <div class="logo" style="background:linear-gradient(135deg,#ff5a50,#f59e0b);">17</div>
             <h2>Day 17</h2>
-            <p class="version">Knowledge 知识与 RAG · 8 讲</p>
+            <p class="version">异步任务 · 8 讲</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 知识 vs 记忆</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三层架构</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 知识源与切块</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 各种文件源</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 存储与 RAG 检索</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 挂到 Agent/Crew</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 检索注入 prompt</a></li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要异步</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · async_execution 字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · execute_async 开线程</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Future 装结果与异常</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Crew 攒批与收割</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 最多一个异步收尾</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 原生 async 那条路</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="crewai-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 Memory</a></li>
-            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="crewai-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 Events &rarr;</a></li>
+            <li><a href="crewai-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 context 依赖</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 条件任务 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 17 / 共 20 天 · 第 4 周 记忆/知识/生态</span>
-            <h1 class="part-title">Knowledge 知识与 RAG</h1>
-            <p class="part-desc">给 Agent 灌外部资料（文档/PDF/网页），让它基于你的知识库回答。今天讲知识源、切块、向量库检索，以及如何把 RAG 知识接给 Agent。</p>
+            <span class="part-label">Day 17 / 共 60 天 · 阶段3 Task 深入</span>
+            <h1 class="part-title">异步任务：让互不依赖的任务并行跑</h1>
+            <p class="part-desc">到现在任务都是一个接一个排队跑。但有些任务互不依赖——"查天气"和"查股价"完全可以<strong>同时</strong>进行。<code>async_execution=True</code> 就让任务并行。今天拆开它的实现：<code>execute_async</code> 怎么开一个后台线程、<code>Future</code> 怎么装结果/异常、Crew 的顺序循环怎么"攒一批异步任务，遇到同步任务前先收割"、以及为什么源码规定"crew 最多以一个异步任务收尾"。源码在 <code>task.py</code> 和 <code>crew.py</code>。</p>
         </div>
 
-        <!-- 全程进度定位条 -->
         <div class="journey">
-            <div class="jt">📍 你在第 4 周（记忆/知识/生态）的位置 · 今天：Knowledge</div>
+            <div class="jt">📍 你在 60 天里的位置（阶段3：Task 深入 · 共 6 天）</div>
             <div class="steps">
-                <span class="st">Memory 记忆（D16）</span><span class="sep">·</span>
-                <span class="st on">Knowledge 知识（D17）</span><span class="sep">·</span>
-                <span class="st">Events 事件（D18）</span><span class="sep">·</span>
-                <span class="st">脚手架 YAML（D19）</span><span class="sep">·</span>
-                <span class="st">测试收官（D20）</span>
+                <span class="st">阶段2 Agent</span><span class="sep">→</span>
+                <span class="st">D13 Task 模型</span><span class="sep">→</span>
+                <span class="st">D14 输出与护栏</span><span class="sep">→</span>
+                <span class="st">D15 结构化输出</span><span class="sep">→</span>
+                <span class="st">D16 context 依赖</span><span class="sep">→</span>
+                <span class="st on">D17 异步任务</span><span class="sep">→</span>
+                <span class="st">D18 条件任务</span><span class="sep">→</span>
+                <span class="st">阶段4 Crew</span>
             </div>
         </div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>知识 vs 记忆（先分清）</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：排队跑太慢，但它们本可以同时跑</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 场景：你让 Agent 回答"我们公司的产品参数"</span>
-                你做了个客服 Agent，用户问"你们 X 型号的续航是多久？"。可这型号是你们上个月才发布的新品，<strong>大模型训练时根本没见过</strong>——它只能瞎猜或说"抱歉我不知道"。你手上明明有产品手册 PDF，怎么让 Agent 用上它？</div>
-                <div class="essence"><span class="t">💡 一句话本质：Knowledge = 给 Agent"开卷考试"（RAG）</span>
-                <strong>Knowledge 就像考试时允许你带一箱参考书进考场。</strong>大模型脑子里只有训练时背下的公开知识（闭卷），<strong>不知道你的私有文档、也不知道最新资料</strong>。Knowledge 把你的资料切块、向量化存起来，Agent 答题前<strong>先从"参考书"里翻出最相关的几页、塞进提示词</strong>再作答。这正是 Day 01 讲过的 <strong>RAG</strong>。</div>
-                <div class="baby"><span class="t">💬 对话体：Memory 和 Knowledge 到底有啥区别？</span>
-                <strong>问：</strong>都是 RAG 向量检索，为啥要分两个东西？<br>
-                <strong>答：</strong>来源不同。<strong>Memory 是"你自己的日记"</strong>——干活过程中一点点记下来的经历（"上次这客户嫌贵"）；<strong>Knowledge 是"别人给你的教科书"</strong>——你开工前就塞给它的外部资料（产品手册 PDF）。<br>
-                <strong>问：</strong>一句话记住？<br>
-                <strong>答：</strong><strong>Memory 记"我经历过什么"，Knowledge 记"我读过什么"。</strong>考试时，前者是你的错题本，后者是允许带进考场的参考书。</div>
-                <ul>
-                    <li><strong>记忆（Memory，Day 16）</strong>：Agent 在运行中<strong>自己积累的经历</strong>（做过什么、学到什么）。</li>
-                    <li><strong>知识（Knowledge，今天）</strong>：你<strong>外部灌给它的资料</strong>（产品手册、公司文档、PDF、网页）。</li>
-                </ul>
-                <div class="baby"><span class="t">用人打比方</span>
-                <strong>记忆</strong> = 员工干活过程中记住的事（"上次这个客户投诉过 X"）。<strong>知识</strong> = 你发给员工的<strong>参考资料</strong>（产品说明书、公司规章）。员工回答问题时，既靠自己的经历（记忆），也翻参考资料（知识）。<strong>两者都用 RAG（向量检索）技术，但来源不同：记忆是内生的、知识是外灌的。</strong>代码在 <code>knowledge/</code> 目录。</div>
+                <div class="ask"><span class="t">🤔 痛点</span>你有 3 个任务：查天气、查股价、查新闻——彼此毫无关系。顺序跑要等 3 次 LLM/网络往返（假设各 10 秒 = 30 秒）。但它们本可以<strong>同时</strong>发起，10 秒就都回来了。LLM 任务大部分时间在"等网络返回"（I/O 等待），排队跑纯属浪费。</div>
+                <div class="essence"><span class="t">💡 一句话本质：async_execution = "这个任务不用等它，先往下派活"</span>标记 <code>async_execution=True</code> 的任务，Crew 不会站在原地等它跑完，而是<strong>开个后台线程让它跑着</strong>，自己继续派发后面的任务。等到真需要它的结果时，再回头"收割"。多个异步任务就这样同时在跑。</div>
+                <div class="baby"><span class="t">🍳 生活类比：一边烧水一边切菜</span>做饭时你不会"烧水→干等水开→再切菜"，而是<strong>点上火烧水（异步任务派出去），趁这功夫切菜（继续派别的活），水开了再回来用</strong>。<code>async_execution</code> 就是"点火后不干等"，<code>future.result()</code>（L04）就是"回头看水开没开"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>三层架构</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>async_execution 字段</h1></div>
             <div class="card">
-                <div class="flow2">
-                    <span class="n"><b>Knowledge</b>集合入口</span><span class="a">→</span>
-                    <span class="n"><b>KnowledgeSource</b>加载+切块</span><span class="a">→</span>
-                    <span class="n"><b>KnowledgeStorage</b>嵌入+向量库+检索</span>
-                </div>
-                <p><code>Knowledge</code>（<code>knowledge/knowledge.py:88</code>，<code>query</code> 方法 <code>:135</code>、<code>add_sources</code> <code>:154</code>）是入口，管理多个 <code>KnowledgeSource</code>（各种资料源），底层用 <code>KnowledgeStorage</code>（默认 ChromaDB 向量库）。</p>
-                <div class="svgbox">
-                    <svg viewBox="0 0 900 250" width="100%" style="max-width:900px;display:block;margin:0 auto" font-family="system-ui,sans-serif">
-                        <!-- 离线建库背景 -->
-                        <rect x="8" y="30" width="600" height="86" rx="10" fill="rgba(6,182,212,.06)" stroke="#06b6d4" stroke-dasharray="4 3"/>
-                        <text x="20" y="22" fill="#06b6d4" font-size="13" font-weight="700">① 建库（挂 knowledge_sources 时做一次）</text>
-                        <!-- 在线检索背景 -->
-                        <rect x="8" y="158" width="884" height="80" rx="10" fill="rgba(59,130,246,.06)" stroke="#3b82f6" stroke-dasharray="4 3"/>
-                        <text x="20" y="150" fill="#3b82f6" font-size="13" font-weight="700">② 检索注入（Agent 每次执行任务时）</text>
-                        <!-- 建库四步 -->
-                        <g font-size="12.5">
-                            <rect x="20" y="52" width="128" height="52" rx="8" fill="#26323a" stroke="#06b6d4"/><text x="84" y="74" fill="#fff" text-anchor="middle" font-weight="700">资料源</text><text x="84" y="92" fill="#bbb" text-anchor="middle" font-size="10">PDF/文本/CSV</text>
-                            <rect x="168" y="52" width="110" height="52" rx="8" fill="#26323a" stroke="#06b6d4"/><text x="223" y="74" fill="#fff" text-anchor="middle" font-weight="700">切块</text><text x="223" y="92" fill="#bbb" text-anchor="middle" font-size="10">Source·:16</text>
-                            <rect x="298" y="52" width="110" height="52" rx="8" fill="#26323a" stroke="#06b6d4"/><text x="353" y="74" fill="#fff" text-anchor="middle" font-weight="700">嵌入</text><text x="353" y="92" fill="#bbb" text-anchor="middle" font-size="10">Embed</text>
-                            <rect x="428" y="52" width="160" height="52" rx="8" fill="#3a2a4a" stroke="#f472b6"/><text x="508" y="74" fill="#fff" text-anchor="middle" font-weight="700">📚 向量库</text><text x="508" y="92" fill="#bbb" text-anchor="middle" font-size="10">Storage(ChromaDB):22</text>
-                            <path d="M148 78 L168 78" stroke="#06b6d4" stroke-width="2" marker-end="url(#k1)"/>
-                            <path d="M278 78 L298 78" stroke="#06b6d4" stroke-width="2" marker-end="url(#k1)"/>
-                            <path d="M408 78 L428 78" stroke="#06b6d4" stroke-width="2" marker-end="url(#k1)"/>
-                        </g>
-                        <!-- 在线三步 -->
-                        <g font-size="12.5">
-                            <rect x="20" y="178" width="150" height="46" rx="8" fill="#2a2a3a" stroke="#3b82f6"/><text x="95" y="198" fill="#fff" text-anchor="middle" font-weight="700">任务/问题</text><text x="95" y="214" fill="#bbb" text-anchor="middle" font-size="10">LLM 改写成 query</text>
-                            <rect x="230" y="178" width="170" height="46" rx="8" fill="#2a2a3a" stroke="#3b82f6"/><text x="315" y="198" fill="#fff" text-anchor="middle" font-weight="700">query 检索相关片段</text><text x="315" y="214" fill="#bbb" text-anchor="middle" font-size="10">search·:59 (top-k)</text>
-                            <rect x="460" y="178" width="200" height="46" rx="8" fill="#264a3a" stroke="#34d399"/><text x="560" y="198" fill="#fff" text-anchor="middle" font-weight="700">拼进 Agent 提示词</text><text x="560" y="214" fill="#bbb" text-anchor="middle" font-size="10">"Additional Information:"</text>
-                            <path d="M170 201 L230 201" stroke="#3b82f6" stroke-width="2" marker-end="url(#k2)"/>
-                            <path d="M400 201 L460 201" stroke="#3b82f6" stroke-width="2" marker-end="url(#k2)"/>
-                        </g>
-                        <!-- 向量库 → 检索 连线 -->
-                        <path d="M508 104 Q508 150 315 178" stroke="#888" stroke-width="1.5" stroke-dasharray="3 3" fill="none" marker-end="url(#k3)"/>
-                        <defs>
-                            <marker id="k1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#06b6d4"/></marker>
-                            <marker id="k2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#3b82f6"/></marker>
-                            <marker id="k3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#888"/></marker>
-                        </defs>
-                    </svg>
-                    <div class="cap">Knowledge 全流程：青色"建库"（资料→切块→嵌入→向量库），蓝色"检索注入"（每次执行把命中片段拼进 Agent 提示词）。这就是 RAG 在 CrewAI 里的样子。</div>
-                </div>
-                <div class="anno">读法：<b>Knowledge=总管、Source=资料源（负责把 PDF/文本读进来并切块）、Storage=向量库（负责嵌入和检索）。</b>三层各司其职：加载 → 切块 → 向量化存储 → 检索。这是标准的 RAG 管道结构。</div>
-                <div class="baby"><span class="t">🎵 记忆口诀：RAG 六字诀"读、切、嵌、存、检、答"</span>
-                <strong>读</strong>（把 PDF/文本读进来）→ <strong>切</strong>（切成小块）→ <strong>嵌</strong>（每块变成向量）→ <strong>存</strong>（存进向量库）→ <strong>检</strong>（拿问题去检索最相关的块）→ <strong>答</strong>（把命中片段塞进提示词让 LLM 作答）。<strong>前四步"读切嵌存"是建库（做一次），后两步"检答"是每次提问都走。</strong>背下这六个字，你就记住了整个 RAG 流程——今天讲的所有代码都只是在实现这六个字。</div>
-                <div class="anno">❗ <b>常见误解</b>：以为"挂了知识库，Agent 就把整份文档背下来了"。<b>错——它只在每次回答前临时检索出最相关的几段来看，看完就'忘'（不进模型参数）。</b>所以文档更新了，重新建库即可，不用"重新训练"模型。这正是 RAG 相比"微调模型"最省事的地方。</div>
+                <p>字段本身很朴素（<span class="fileref">task.py:165</span>），就一个布尔开关，默认同步：</p>
+<pre><code class="language-python"># task.py:165
+async_execution: bool | None = Field(
+    description="Whether the task should be executed asynchronously or not.",
+    default=False,
+)</code></pre>
+                <p>真正的差异在<strong>执行入口</strong>——Task 有三个：同步 <code>execute_sync</code>（D13 讲过）、线程异步 <code>execute_async</code>、原生异步 <code>aexecute_sync</code>：</p>
+                <table class="ttable">
+                    <thead><tr><th>入口</th><th>行 file:line</th><th>怎么跑</th><th>返回</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>execute_sync</code></td><td>task.py:572</td><td>当前线程直接跑，跑完才返回</td><td><code>TaskOutput</code></td></tr>
+                        <tr><td><code>execute_async</code></td><td>task.py:596</td><td>开一个后台<strong>线程</strong>跑</td><td><code>Future[TaskOutput]</code>（占位凭据）</td></tr>
+                        <tr><td><code>aexecute_sync</code></td><td>task.py:627</td><td>原生 <code>async/await</code>（不开线程）</td><td>协程 → <code>TaskOutput</code></td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">大白话：三扇门通同一个厨房</span>三个入口最后都走进 <code>_execute_core</code>/<code>_aexecute_core</code> 那个"大厨房"（D13）。区别只是<strong>你站在门口等（sync）、还是拿张取餐号先走（async 的 Future）、还是用协程挂起（aexecute）</strong>。核心执行逻辑是同一套。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>知识源与切块</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>execute_async：开一个后台线程</h1></div>
             <div class="card">
-                <p>抽象基类 <code>BaseKnowledgeSource</code>（<code>base_knowledge_source.py:16</code>）定义切块参数和方法：</p>
-<pre><code class="language-python">chunk_size = 4000        # 每块字符数
-chunk_overlap = 200      # 相邻块重叠字符数
-# _chunk_text (:43) 固定字符窗口滑动切块
-return [text[i:i+chunk_size]
-        for i in range(0, len(text), chunk_size - chunk_overlap)]</code></pre>
-                <div class="baby"><span class="t">为什么要"切块"？为什么块之间要"重叠"？</span>
-                <strong>切块</strong>：一份长文档（几万字）不能整个喂给模型（太长、检索不精准）。切成小块（4000 字），每块单独向量化——检索时能精准定位到相关的那一小块。<strong>重叠</strong>：如果硬切，一句话可能被切成两半（前半在块1、后半在块2），检索时哪块都不完整。<strong>让相邻块重叠 200 字，保证跨边界的内容不被割裂。</strong>这是 RAG 切块的经典技巧。</div>
+                <p><code>execute_async</code>（<span class="fileref">task.py:596</span>）的实现——它当场返回一个空的 <code>Future</code>（取餐号），真正的活丢给一个后台线程：</p>
+<pre><code class="language-python"># task.py:596
+def execute_async(self, agent=None, context=None, tools=None) -> Future[TaskOutput]:
+    """Execute the task asynchronously."""
+    future: Future[TaskOutput] = Future()          # ① 造一个空的"结果占位凭据"
+    ctx = contextvars.copy_context()               # ② 拷贝当前上下文变量
+    threading.Thread(
+        daemon=True,                               # ③ 守护线程（主程序退出它也退）
+        target=ctx.run,                            # ④ 在拷贝的上下文里运行
+        args=(self._execute_task_async, agent, context, tools, future),
+    ).start()                                      # ⑤ 立刻启动、立刻返回
+    return future                                  # ⑥ 把取餐号交给调用方（此时活还没跑完）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>future = Future()</code><span>一个空的"未来结果"容器。现在是空的，等线程跑完往里塞结果。调用方拿着它，需要时再 <code>.result()</code> 取（L04）。</span></div>
+                    <div class="r"><code>contextvars.copy_context()</code><span>★关键细节：把当前线程的<strong>上下文变量</strong>（比如"当前 task id"、事件作用域）拷一份带进新线程。否则新线程看不到主线程的上下文，事件/日志会错乱。</span></div>
+                    <div class="r"><code>daemon=True</code><span>守护线程：主流程结束时它不会拖住进程退出。</span></div>
+                    <div class="r"><code>target=ctx.run</code><span>让线程<strong>在拷贝的上下文里</strong>执行 <code>_execute_task_async</code>——保证异步任务和主线程"看到同一套上下文变量"。</span></div>
+                    <div class="r"><code>.start(); return future</code><span>启动后<strong>立刻返回</strong>取餐号，不等活干完。这就是"异步"——派出去就走。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用线程 + contextvars.copy_context？</span>
+                LLM 任务是 <strong>I/O 密集</strong>（大部分时间在等网络），Python 的线程虽有 GIL，但等 I/O 时会释放 GIL，所以<strong>多线程对 I/O 并行是有效的</strong>。用线程而非多进程，省去了进程间通信/序列化的开销。而 <code>copy_context()</code> 是必须的——CrewAI 大量用 contextvar 传"当前任务/事件作用域"（D13 的 <code>set_current_task_id</code>），不拷贝上下文，子线程里发的事件就找不到归属。<strong>用最轻的并发手段（线程）+ 一次上下文拷贝，换来 I/O 任务的并行。</strong></div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>各种文件源</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>Future：结果和异常都往里装</h1></div>
             <div class="card">
-                <p>具体知识源（都实现 <code>load_content</code>）：</p>
-                <ul>
-                    <li><code>StringKnowledgeSource</code>：直接切一段字符串。</li>
-                    <li><code>PDFKnowledgeSource</code>：用 pdfplumber 逐页抽取文本。</li>
-                    <li>CSV / Excel / JSON / TextFile 各自实现。</li>
-                    <li><code>CrewDoclingSource</code>（<code>crew_docling_source.py:82</code>）：特殊——用 docling 的 <strong>HierarchicalChunker 做语义切块</strong>（而非固定字符窗口），支持 PDF/DOCX/MD/HTML/URL。</li>
-                </ul>
-                <div class="baby"><span class="t">"语义切块"比"固定字符切块"好在哪？</span>
-                固定字符切块可能把一个完整的段落/章节从中间切开。<strong>语义切块（HierarchicalChunker）按文档的结构（标题、段落、列表）来切</strong>——每块是一个语义完整的单元。检索时召回的块更连贯、更有意义。<strong>处理结构化文档（有标题层级的 PDF/Markdown）时，语义切块效果明显更好。</strong>普通文本用固定切块够了。</div>
+                <p>后台线程实际跑的是 <code>_execute_task_async</code>（<span class="fileref">task.py:612</span>）。它跑完把结果塞进 Future，出错就把异常塞进去：</p>
+<pre><code class="language-python"># task.py:612
+def _execute_task_async(self, agent, context, tools, future: Future[TaskOutput]) -> None:
+    """Execute the task asynchronously with context handling."""
+    try:
+        self.start_time = datetime.datetime.now()
+        result = self._execute_core(agent, context, tools)   # ★还是走同一个大厨房
+        future.set_result(result)                            # 成功：结果装进 Future
+    except Exception as e:
+        future.set_exception(e)                              # 失败：异常也装进 Future</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 800 230" width="100%" style="max-width:800px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="400" y="16" fill="#fdba74" text-anchor="middle" font-weight="700">数据结构：Future = 一张"取餐号"，晚点凭它取结果或接异常</text>
+                        <rect x="30" y="40" width="200" height="50" rx="8" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="130" y="60" fill="#fcd34d" text-anchor="middle">主线程 execute_async()</text>
+                        <text x="130" y="80" fill="#cbd5e1" text-anchor="middle">拿到 Future（空）→ 继续派活</text>
+                        <path d="M230 65 L300 65" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <rect x="300" y="40" width="220" height="50" rx="8" fill="rgba(96,165,250,.1)" stroke="#60a5fa"/>
+                        <text x="410" y="60" fill="#93c5fd" text-anchor="middle">后台线程 _execute_task_async</text>
+                        <text x="410" y="80" fill="#cbd5e1" text-anchor="middle">跑 _execute_core（真干活）</text>
+                        <path d="M410 90 L410 118" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <rect x="250" y="118" width="150" height="40" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="325" y="142" fill="#86efac" text-anchor="middle">成功 → set_result</text>
+                        <rect x="420" y="118" width="150" height="40" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="495" y="142" fill="#fca5a5" text-anchor="middle">出错 → set_exception</text>
+                        <path d="M325 158 L325 176 L560 176 L560 176" stroke="#22c55e" stroke-width="1.2"/>
+                        <path d="M495 158 L495 176" stroke="#ef4444" stroke-width="1.2"/>
+                        <rect x="560" y="118" width="210" height="58" rx="8" fill="var(--bg-card,#1e293b)" stroke="#f59e0b"/>
+                        <text x="665" y="140" fill="#fcd34d" text-anchor="middle">future.result()</text>
+                        <text x="665" y="160" fill="#cbd5e1" text-anchor="middle">取结果 / 或重新抛出异常</text>
+                        <path d="M400 138 L558 140" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#a)"/>
+                        <text x="400" y="205" fill="#94a3b8" text-anchor="middle">关键：异常不会在后台线程"消失"，而是被装进 Future，等 result() 时原样抛给主线程</text>
+                        <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：Future 同时承载"成功结果"和"失败异常"。<code>result()</code> 时若是异常，会在主线程重新抛出——异步任务的错误不会被悄悄吞掉。</div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么异常也要 set_exception？</span>后台线程里抛的异常，主线程<strong>是接不到的</strong>（默认会在子线程里静默消失）。<code>future.set_exception(e)</code> 把异常存进 Future，等主线程调 <code>future.result()</code> 时<strong>重新抛出</strong>。这样异步任务失败了，主流程照样能感知、能报错——错误不会被"异步"这层给吃掉。这是异步编程里最容易踩的坑，源码用 try/except 兜住了。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>存储与 RAG 检索</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>Crew 怎么攒批与收割</h1></div>
             <div class="card">
-                <p>默认 <code>KnowledgeStorage</code>（<code>knowledge_storage.py:22</code>）基于 ChromaDB：</p>
-                <ul>
-                    <li><code>_init_client</code>（<code>:37</code>）：用 <code>build_embedder</code> 构造嵌入函数、建专属 Chroma collection（前缀 <code>knowledge_&lt;name&gt;</code>）。</li>
-                    <li><code>save</code>（<code>:105</code>）：把文本块交给 client 嵌入 + upsert。</li>
-                    <li><code>search</code>（<code>:59</code>）：RAG 检索——多个 query 交向量库做相似度检索，受 <code>limit</code>（默认 5）和 <code>score_threshold</code>（默认 0.6）约束。</li>
-                </ul>
-                <div class="anno">读法：<b>知识块被向量化存进 ChromaDB；查询时把问题也向量化，找最相似的块。</b><code>score_threshold=0.6</code> 过滤掉不够相关的（相似度低于 0.6 的不返回）——保证喂给 Agent 的是真正相关的知识，不是勉强凑数的。</div>
+                <p>Crew 的顺序执行循环（<span class="fileref">crew.py:1543</span>）里，异步任务和同步任务走不同分支。核心策略是"<strong>异步任务先攒着，遇到同步任务前必须先把攒的收割掉</strong>"：</p>
+<pre><code class="language-python"># crew.py:1543（顺序执行循环，节选异步相关）
+futures: list[tuple[Task, Future[TaskOutput], int]] = []
+for task_index, task in enumerate(tasks):
+    ...
+    if task.async_execution:
+        context = self._get_context(task, [last_sync_output] if last_sync_output else [])
+        future = task.execute_async(agent=..., context=context, tools=...)
+        futures.append((task, future, task_index))       # ① 异步：派出去，攒进 futures
+    else:
+        if futures:                                       # ② 遇到同步任务，先收割前面攒的异步
+            task_outputs.extend(self._process_async_tasks(futures, was_replayed))
+            futures.clear()
+        context = self._get_context(task, task_outputs)
+        task_output = task.execute_sync(agent=..., context=context, tools=...)  # ③ 同步：原地等
+        task_outputs.append(task_output)
+        ...
+if futures:                                               # ④ 循环结束，收割剩余异步
+    task_outputs.extend(self._process_async_tasks(futures, was_replayed))</code></pre>
+                <p>"收割"就是 <code>_process_async_tasks</code>（<span class="fileref">crew.py:1918</span>）——挨个 <code>future.result()</code> 阻塞等结果：</p>
+<pre><code class="language-python"># crew.py:1918
+def _process_async_tasks(self, futures, was_replayed=False) -> list[TaskOutput]:
+    task_outputs = []
+    for future_task, future, task_index in futures:
+        task_output = future.result()          # ★阻塞：等这个异步任务真跑完
+        task_outputs.append(task_output)
+        self._process_task_result(future_task, task_output)
+        self._store_execution_log(future_task, task_output, task_index, was_replayed)
+    return task_outputs</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 820 210" width="100%" style="max-width:820px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="410" y="16" fill="#fdba74" text-anchor="middle" font-weight="700">控制流：攒批 → 遇同步先收割 → 结尾再收割</text>
+                        <rect x="20" y="40" width="120" height="34" rx="7" fill="rgba(96,165,250,.12)" stroke="#60a5fa"/>
+                        <text x="80" y="62" fill="#93c5fd" text-anchor="middle">异步A 派出</text>
+                        <rect x="150" y="40" width="120" height="34" rx="7" fill="rgba(96,165,250,.12)" stroke="#60a5fa"/>
+                        <text x="210" y="62" fill="#93c5fd" text-anchor="middle">异步B 派出</text>
+                        <text x="145" y="92" fill="#94a3b8" text-anchor="middle">A、B 同时在后台跑（futures=[A,B]）</text>
+                        <path d="M270 57 L320 57" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <rect x="320" y="40" width="150" height="34" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="395" y="62" fill="#fcd34d" text-anchor="middle">遇到同步任务C</text>
+                        <path d="M395 74 L395 100" stroke="#f59e0b" stroke-width="1.4" marker-end="url(#o)"/>
+                        <rect x="300" y="100" width="190" height="34" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="395" y="122" fill="#86efac" text-anchor="middle">先收割 A、B（result()）</text>
+                        <path d="M490 117 L540 117" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <rect x="540" y="100" width="150" height="34" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="615" y="122" fill="#fcd34d" text-anchor="middle">C 才开始同步跑</text>
+                        <text x="410" y="170" fill="#94a3b8" text-anchor="middle">为什么？C 可能要用 A、B 的产出当上下文——不收割就拿不到它们的结果。</text>
+                        <text x="410" y="192" fill="#94a3b8" text-anchor="middle">顺序被保证：同步任务永远看得到它之前所有（含异步）任务的产出。</text>
+                        <defs>
+                            <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                            <marker id="o" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：连续的异步任务同时在后台跑；一旦碰到同步任务（或循环结束），就阻塞等把攒着的异步全收割回来，再往下走。</div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么同步任务前"必须"收割？</span>因为同步任务的 <code>_get_context</code>（D16）要用 <code>task_outputs</code>——里面得包含前面异步任务的产出。如果不先收割，异步任务的结果还没进 <code>task_outputs</code>，同步任务就会拿到不完整的上下文。所以"遇到同步任务 = 一个同步屏障（barrier），先把前面的异步都等回来"。这保证了<strong>数据依赖的正确性优先于并行</strong>。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>挂到 Agent/Crew</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>边界：crew 最多以一个异步任务收尾</h1></div>
             <div class="card">
-                <ul>
-                    <li><strong>Crew</strong>：字段 <code>knowledge_sources</code>/<code>knowledge</code>（<code>crew.py:340/358</code>），<code>create_crew_knowledge()</code>（<code>crew.py:675</code>）构建 <code>Knowledge(collection_name="crew")</code> 并加载源。</li>
-                    <li><strong>Agent</strong>：<code>set_knowledge()</code>（<code>agent/core.py:408</code>）构建 <code>Knowledge(collection_name=self.role)</code>——每个 agent 有自己的知识库（按 role 命名）。</li>
-                </ul>
-<pre><code class="language-python">from crewai.knowledge.source.pdf_knowledge_source import PDFKnowledgeSource
-
-pdf_source = PDFKnowledgeSource(file_paths=["产品手册.pdf"])
-agent = Agent(role="客服", goal="...", knowledge_sources=[pdf_source])
-# 现在这个客服 agent 回答问题时会自动查产品手册</code></pre>
-                <div class="example"><span class="t">📝 挂一个 PDF 源 → 提问 → 答案带私有知识</span>
-                产品手册 PDF 里有一句：<code>X 型号续航 18 小时</code>。<br>
-                用户问客服 Agent：<code>你们 X 型号能用多久？</code><br>
-                没挂知识时 → <code>抱歉，我没有该型号的具体信息……</code>（🤷 大模型没见过新品）<br>
-                挂了 <code>PDFKnowledgeSource</code> 后 → 检索命中手册片段，提示词里带上 <code>Additional Information: X 型号续航 18 小时</code> → Agent 答：<code>X 型号续航约 18 小时。</code>（✅ 用上了你的私有资料）</div>
-                <div class="baby"><span class="t">Crew 级 vs Agent 级知识</span>
-                <strong>Crew 级</strong>：整个团队共享的知识（公司通用文档）。<strong>Agent 级</strong>：某个 agent 专属的知识（客服 agent 有产品手册，法务 agent 有合同模板）。<strong>按需分配——不用给每个 agent 灌所有资料，各自拿自己领域的。</strong>这和 Day 16 记忆的 scope 分层思路一致。</div>
+                <p>有个看似奇怪的规定：一个 crew 结尾<strong>最多只能有一个</strong>连续的异步任务。校验器 <code>validate_end_with_at_most_one_async_task</code>（<span class="fileref">crew.py:753</span>）：</p>
+<pre><code class="language-python"># crew.py:753
+@model_validator(mode="after")
+def validate_end_with_at_most_one_async_task(self) -> Self:
+    """Validates that the crew ends with at most one asynchronous task."""
+    final_async_task_count = 0
+    for task in reversed(self.tasks):          # 从最后一个任务往前数
+        if task.async_execution:
+            final_async_task_count += 1
+        else:
+            break                              # 一碰到同步任务就停
+    if final_async_task_count > 1:
+        raise PydanticCustomError(
+            "async_task_count",
+            "The crew must end with at most one asynchronous task.", {})
+    return self</code></pre>
+                <div class="walk">
+                    <div class="r"><code>reversed(self.tasks)</code><span>从末尾往前遍历，数"结尾连续有几个异步任务"，一遇到同步就 break。</span></div>
+                    <div class="r"><code>final_async_task_count > 1 → 报错</code><span>结尾连续 2 个及以上异步任务 → 不允许。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：为什么结尾多个异步会被禁止？</span>
+                回看 L05：异步任务的收割<strong>由后面的同步任务（或循环结尾的兜底）触发</strong>。如果结尾是<strong>多个</strong>异步任务、后面又没有同步任务来当"屏障"，那这多个异步任务的产出<strong>谁都不会去用它当上下文</strong>——而 crew 的最终产出取"最后一个有效产出"（<code>_create_crew_output</code>，D19 细讲）。多个并行的收尾任务，哪个算"最终结果"就<strong>不确定</strong>了。所以框架强制：要么结尾是同步任务（明确的最终产出），要么结尾只有一个异步任务（那就是它）。<strong>这是为了让"crew 的最终输出"有确定的语义。</strong></div>
+                <div class="anno">💡 相关约束还有：<code>ConditionalTask 不能是 async</code>（<span class="fileref">crew.py:800</span>，D18 主题）、以及 D16 提过的"异步任务的 context 不能夹未被同步隔开的异步任务"（<span class="fileref">crew.py:814</span>）。这些校验共同保证异步的收割时机永远清晰。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>检索注入 prompt</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>原生 async：aexecute_sync 那条路</h1></div>
             <div class="card">
-                <p>任务执行时，<code>handle_knowledge_retrieval</code>（<code>agent/utils.py:119</code>）是关键——它做三件事：</p>
-<pre><code class="language-python"># 1. 用 LLM 把任务改写成检索 query（agent._get_knowledge_search_query, core.py:1300）
-# 2. 查询 agent 和 crew 的知识库
-# 3. 用 extract_knowledge_context 把命中片段追加到 task_prompt：
-agent_knowledge_snippets = query_func([agent.knowledge_search_query], ...)
-if agent_knowledge_snippets:
-    task_prompt += extract_knowledge_context(agent_knowledge_snippets)  # 前缀 "Additional Information: "</code></pre>
-                <div class="anno">读法：<b>第 1 步很妙——不是直接拿任务描述去检索，而是<strong>先用 LLM 把任务改写成一个更适合检索的 query</strong>。</b>然后查知识库、把命中的知识片段（带"Additional Information:"前缀）拼进 prompt。于是 Agent 看到任务时，prompt 里已经带上了相关资料。</div>
-                <div class="baby"><span class="t">为什么要"用 LLM 改写检索 query"？</span>
-                任务描述可能很长、很啰嗦，直接拿去做向量检索效果不好。<strong>先让 LLM 提炼出"这个任务的核心检索意图"</strong>（比如任务是"写一篇关于我们新产品定价策略的分析"，改写成检索 query "产品定价策略"），检索更精准。<strong>这是 RAG 的进阶技巧——query 改写（query rewriting）提升检索质量。</strong>和 Day 16 RecallFlow 的 analyze_query 一个思路。</div>
+                <p>除了"开线程"的 <code>execute_async</code>，Task 还有一条<strong>原生 async/await</strong> 的路：<code>aexecute_sync</code>（<span class="fileref">task.py:627</span>）→ <code>_aexecute_core</code>（<span class="fileref">task.py:637</span>）：</p>
+<pre><code class="language-python"># task.py:627
+async def aexecute_sync(self, agent=None, context=None, tools=None) -> TaskOutput:
+    """Execute the task asynchronously using native async/await."""
+    self.start_time = datetime.datetime.now()
+    return await self._aexecute_core(agent, context, tools)
+
+# task.py:637（_aexecute_core 骨架）
+async def _aexecute_core(self, agent, context, tools) -> TaskOutput:
+    ...
+    result = await agent.aexecute_task(task=self, context=context, tools=tools)  # await 而非开线程
+    ...
+    pydantic_output, json_output = await self._aexport_output(result)  # 连解析也用 async 版
+    ...</code></pre>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：线程版 execute_async vs 原生 async aexecute_sync，为什么两套都有？</span>
+                <strong>execute_async（线程）</strong>：适合 Crew 那种<strong>同步主流程</strong>里插并行——主流程是普通函数，不能 <code>await</code>，就用线程把异步任务甩出去、拿 Future。<strong>aexecute_sync（原生 async）</strong>：适合调用方本身就在 <code>asyncio</code> 事件循环里（比如 web 服务、<code>kickoff_async</code>）——直接 <code>await</code>，不额外开线程，更省资源、更符合 async 生态。注意 <code>_aexecute_core</code> 连输出解析都用了 <code>await self._aexport_output</code>（<span class="fileref">task.py:1134</span>），全程不阻塞事件循环。<strong>同一套核心逻辑，包了两种并发外壳，适配"同步宿主"和"异步宿主"两种调用环境。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：那我平时到底用哪个？</p>
+                    <p class="a">👨‍🏫 老师：绝大多数情况你<strong>根本不直接调这些</strong>——你只在 Task 上设 <code>async_execution=True</code>，剩下的由 Crew 的执行循环（L05）决定调 <code>execute_async</code> 还是 <code>aexecute_sync</code>（同步 kickoff 用前者，<code>kickoff_async</code> 走后者，D22 细讲）。你要关心的只是"这个任务能不能和别的并行"，把它标成异步即可。</p>
+                </div>
             </div>
         </section>
 
@@ -238,25 +315,34 @@ if agent_knowledge_snippets:
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>知识和记忆的区别？（外灌资料 vs 内生经历）</li>
-                    <li>三层架构（Knowledge/Source/Storage）各干什么？</li>
-                    <li>为什么要切块？块之间为什么重叠？语义切块好在哪？</li>
-                    <li>score_threshold 过滤什么？</li>
-                    <li>为什么"用 LLM 改写检索 query"？</li>
+                    <li>为什么 LLM 任务适合并行？（I/O 密集，大部分时间在等）</li>
+                    <li><code>execute_async</code> 为什么要 <code>contextvars.copy_context()</code>？</li>
+                    <li><code>Future</code> 除了装结果，还装什么？为什么异常要 <code>set_exception</code>？</li>
+                    <li>Crew 为什么"遇到同步任务前必须先收割异步"？（同步屏障，保证上下文完整）</li>
+                    <li>为什么规定"crew 最多以一个异步任务收尾"？</li>
+                    <li>线程版 <code>execute_async</code> 和原生 <code>aexecute_sync</code> 分别适合什么调用环境？</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=lib/crewai/src/crewai/knowledge
-sed -n '16,60p' $P/source/base_knowledge_source.py    # 切块
-sed -n '22,110p' $P/storage/knowledge_storage.py | head -40   # 存储+检索
-grep -n 'handle_knowledge_retrieval\|_get_knowledge_search_query' \
-  lib/crewai/src/crewai/agent/utils.py lib/crewai/src/crewai/agent/core.py | head</code></pre>
-                <div class="tip"><strong>明天预告 · Day 18</strong>：<strong>Events 事件系统</strong>——贯穿全框架的事件总线。前面反复出现的 <code>XxxStartedEvent</code>/<code>XxxCompletedEvent</code> 都走它。看它如何解耦日志、遥测、监听器，以及怎么写自定义监听器。</div>
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+# 1. 字段 + 三个执行入口
+sed -n '165,168p;572,635p' $P/task.py
+
+# 2. 后台线程真身
+sed -n '612,626p' $P/task.py
+
+# 3. Crew 攒批 + 收割
+sed -n '1543,1588p' $P/crew.py
+sed -n '1918,1931p' $P/crew.py
+
+# 4. "最多一个异步收尾"校验
+sed -n '753,771p' $P/crew.py</code></pre>
+                <div class="tip"><strong>明日预告 · Day 18</strong>：本阶段收官——<strong>条件任务 ConditionalTask</strong>。有些任务只在"上一步结果满足某条件"时才跑（比如"分数低于 60 才触发补救任务"）。明天看它怎么继承 Task、<code>should_execute</code> 怎么判断、跳过时怎么生成一个空 TaskOutput 占位、以及为什么它不能当第一个任务、不能是异步。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="crewai-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 Memory</a>
-                <a href="crewai-day18.html" style="color:var(--accent-green);">Day 18 · Events &rarr;</a>
+                <a href="crewai-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 context 依赖</a>
+                <a href="crewai-day18.html" style="color:var(--accent-green);">Day 18 · 条件任务 &rarr;</a>
             </div>
         </section>
     </main>

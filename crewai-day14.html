@@ -3,257 +3,400 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 14 · 工具体系 — CrewAI 源码学习</title>
+    <title>Day 14 · TaskOutput 与护栏 guardrail — CrewAI 60 天源码深度</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
-        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
-        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #fb923c;background:rgba(251,146,60,.08);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#fdba74;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
         .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
-        .journey .st.on{background:linear-gradient(135deg,#8b5cf6,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .st.on{background:linear-gradient(135deg,#ff5a50,#f59e0b);color:#fff;border-color:transparent;font-weight:700}
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
-        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
-        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
         .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
-        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
         .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
     <nav class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">14</div>
+            <div class="logo" style="background:linear-gradient(135deg,#ff5a50,#f59e0b);">14</div>
             <h2>Day 14</h2>
-            <p class="version">工具体系 · 8 讲</p>
+            <p class="version">TaskOutput 与护栏 · 8 讲</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · BaseTool 抽象</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · args_schema 自动生成</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · @tool 装饰器</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · run 与用量上限</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 描述重写喂给 LLM</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两条调用路径</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 用量记录与缓存</a></li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 产出为何要"三副面孔"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · TaskOutput 全字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · summary/json/__str__</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 护栏是什么</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 字符串护栏→LLM 裁判</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 带反馈重试循环</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · (bool,Any) 契约 + 边界</a></li>
             <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="crewai-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 状态</a></li>
-            <li><a href="crewai-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="crewai-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 LLM &rarr;</a></li>
+            <li><a href="crewai-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 Task 模型</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 结构化输出 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 Flow / 工具 / LLM</span>
-            <h1 class="part-title">工具体系</h1>
-            <p class="part-desc">工具是 Agent 的"双手"。今天读 <code>tools/base_tool.py</code>：工具怎么定义、参数 schema 如何从函数签名自动生成、@tool 装饰器、以及工具被 Agent 调用的两条路径。</p>
+            <span class="part-label">Day 14 / 共 60 天 · 阶段3 Task 深入</span>
+            <h1 class="part-title">TaskOutput 与护栏：产出的"三副面孔"和它的质检员</h1>
+            <p class="part-desc">昨天 <code>_execute_core</code> 结尾把 Agent 的返回包成了一个 <code>TaskOutput</code>，还偷偷跑了 <code>_guardrails</code>。今天正式拆这两块：<strong>TaskOutput</strong>——同一份产出为什么要保留 raw / pydantic / json_dict 三副面孔；<strong>guardrail（护栏）</strong>——任务产出后如何被"质检"，不合格怎么带着反馈让 Agent 重做，以及一句话描述的护栏怎么摇身变成一个 LLM 裁判。源码在 <code>tasks/task_output.py</code>、<code>task.py</code>、<code>tasks/llm_guardrail.py</code>、<code>utilities/guardrail.py</code>。</p>
         </div>
 
-        <!-- 全程进度定位条 -->
         <div class="journey">
-            <div class="jt">📍 你在整门课的位置（第 3 周 Flow / 工具 / LLM 主线）</div>
+            <div class="jt">📍 你在 60 天里的位置（阶段3：Task 深入 · 共 6 天）</div>
             <div class="steps">
-                <span class="st">Flow 编排</span><span class="sep">·</span>
-                <span class="st">Flow 装饰器</span><span class="sep">·</span>
-                <span class="st">Flow 状态持久化</span><span class="sep">·</span>
-                <span class="st on">工具体系（今天）</span><span class="sep">·</span>
-                <span class="st">LLM 抽象</span><span class="sep">·</span>
-                <span class="st">Memory</span>
+                <span class="st">阶段2 Agent</span><span class="sep">→</span>
+                <span class="st">D13 Task 模型</span><span class="sep">→</span>
+                <span class="st on">D14 输出与护栏</span><span class="sep">→</span>
+                <span class="st">D15 结构化输出</span><span class="sep">→</span>
+                <span class="st">D16 context 依赖</span><span class="sep">→</span>
+                <span class="st">D17 异步任务</span><span class="sep">→</span>
+                <span class="st">D18 条件任务</span><span class="sep">→</span>
+                <span class="st">阶段4 Crew</span>
             </div>
         </div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>BaseTool 抽象基类</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：产出到底是字符串、对象还是字典？</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 场景：你问 Agent"北京今天几度、顺便算下 128×97"</span>
-                大模型很会"说话"，但它<strong>不会真的去查实时天气、也不会精确算数</strong>（它只是根据训练数据"猜"一个像样的答案，可能编个气温、算错乘法）。它没有连网的手、也没有计算器。<strong>怎么让"只会说话"的模型真的去查、去算？</strong></div>
-                <div class="essence"><span class="t">💡 一句话本质：Tool = 给 LLM 装上"手脚"（一个它能调用的函数）</span>
-                工具就是一个<strong>普通函数</strong> + 一份"说明书"（名字/描述/参数格式）。把说明书给 LLM，它就知道"有个查天气的函数、要传城市名"；它想用时吐出一个"调用请求"，框架真去执行函数、把结果还给它。<strong>LLM 负责"决定用哪个工具、填什么参数"，工具负责"真的去干活"。</strong></div>
-                <div class="baby"><span class="t">🔧 生活类比：Tool = 给 LLM 配一把"瑞士军刀"</span>
-                LLM 光靠脑子（训练知识）能想、能说，但<strong>手无寸铁</strong>——查不了实时天气、算不了精确乘法、连不上你的数据库。工具就像给它配一把<strong>瑞士军刀</strong>：一把上面有"查天气刀""计算器刀""调 API 刀"。<strong>LLM 是那个会思考的大脑，工具是它伸出去的手。</strong>今天整节课的世界观就是"给只会动脑的大脑装上手脚"。</div>
-                <p><code>BaseTool(BaseModel, ABC)</code>（<code>tools/base_tool.py:103</code>）是所有工具的父类，核心字段（<code>:139-191</code>）：</p>
-<pre><code class="language-python">name: str              # 工具名
-description: str        # 告诉 LLM 何时/为何用它
-args_schema            # 参数的 Pydantic schema
-result_as_answer: bool  # 结果是否直接作为最终答案
-max_usage_count: int    # 用量上限
-# 子类必须实现抽象方法 _run（base_tool.py:375）</code></pre>
-                <div class="anno">读法：<b>一个工具 = 名字 + 描述 + 参数 schema + 执行逻辑（<code>_run</code>）。</b>这和 OpenHands Day 12 讲的"工具三件套"一模一样——name/description 给 LLM 看，args_schema 定参数，_run 真正干活。天下工具一个样。</div>
-                <div class="svgbox">
-                    <svg viewBox="0 0 900 250" width="100%" style="max-width:900px;display:block;margin:0 auto" font-family="system-ui,sans-serif">
-                        <text x="20" y="22" fill="#8b5cf6" font-size="13" font-weight="700">一个 Tool 从"定义"到"被 LLM 调用"的完整链路</text>
-                        <!-- Tool 定义 -->
-                        <rect x="20" y="45" width="180" height="120" rx="10" fill="#2a2a3a" stroke="#8b5cf6"/>
-                        <text x="110" y="66" fill="#fff" text-anchor="middle" font-size="12.5" font-weight="700">① Tool 定义</text>
-                        <text x="34" y="88" fill="#bbb" font-size="11">name: get_weather</text>
-                        <text x="34" y="106" fill="#bbb" font-size="11">description: 查天气</text>
-                        <text x="34" y="124" fill="#bbb" font-size="11">args_schema: {city}</text>
-                        <text x="34" y="142" fill="#bbb" font-size="11">_run(city): 真去查</text>
-                        <!-- 转 schema -->
-                        <rect x="250" y="60" width="160" height="90" rx="10" fill="#26323a" stroke="#38bdf8"/>
-                        <text x="330" y="100" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">② 转成 LLM</text>
-                        <text x="330" y="120" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">function schema</text>
-                        <!-- LLM 决策 -->
-                        <rect x="460" y="60" width="170" height="90" rx="10" fill="#3a2a4a" stroke="#f472b6"/>
-                        <text x="545" y="94" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">③ LLM 决定调用</text>
-                        <text x="545" y="116" fill="#f472b6" text-anchor="middle" font-size="11">吐出 {city:"北京"}</text>
-                        <!-- 执行返回 -->
-                        <rect x="680" y="60" width="190" height="90" rx="10" fill="#20323a" stroke="#34d399"/>
-                        <text x="775" y="94" fill="#fff" text-anchor="middle" font-size="12" font-weight="700">④ 执行 _run 返回</text>
-                        <text x="775" y="116" fill="#34d399" text-anchor="middle" font-size="11">"北京 26℃" → 还给 LLM</text>
-                        <path d="M200 105 L250 105" stroke="#38bdf8" stroke-width="2" marker-end="url(#t1)"/>
-                        <path d="M410 105 L460 105" stroke="#f472b6" stroke-width="2" marker-end="url(#t2)"/>
-                        <path d="M630 105 L680 105" stroke="#34d399" stroke-width="2" marker-end="url(#t3)"/>
-                        <!-- 回环 -->
-                        <path d="M775 150 Q775 210 545 210 Q400 210 545 150" stroke="#888" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#t4)"/>
-                        <text x="450" y="228" fill="#888" font-size="11" text-anchor="middle">结果回喂 LLM，它据此继续回答用户</text>
-                        <defs>
-                            <marker id="t1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#38bdf8"/></marker>
-                            <marker id="t2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f472b6"/></marker>
-                            <marker id="t3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#34d399"/></marker>
-                            <marker id="t4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#888"/></marker>
-                        </defs>
-                    </svg>
-                    <div class="cap">工具定义（name/description/args_schema/_run）→ 转成 LLM 能读的 function schema → LLM 决定调用并填参数 → 框架执行 _run、把结果回喂 LLM。</div>
-                </div>
-                <div class="qa">
-                    <p class="q">👶 小白：给 Agent 装了工具，是不是它就"变聪明"了、能自己查天气算数了？</p>
-                    <p class="a">👨‍🏫 老师：工具不会让大脑更聪明，只是给它<strong>加了副手脚</strong>。就像给一个记性好但没手机的人配一把带计算器的瑞士军刀——他还是那个脑子，只是现在能真的按计算器、真的查东西了。查天气的活是那把"刀"（函数 <code>_run</code>）干的，不是模型自己算出来的。</p>
-                    <p class="q">👶 小白：那 LLM 怎么知道自己有哪几把刀、每把怎么用？</p>
-                    <p class="a">👨‍🏫 老师：靠工具的"说明书"——name（刀叫啥）+ description（啥时候用这把刀）+ args_schema（要递什么参数）。框架把这份说明书塞进给模型的提示里，它才知道"哦，我有一把查天气的刀，用它得递个城市名"。<strong>说明书写得含糊，模型就会用错刀或填错参数</strong>——所以 @tool 强制你写清 docstring 和类型注解。</p>
-                </div>
+                <div class="ask"><span class="t">🤔 痛点</span>Agent 干完活，返回的可能是一段纯文本、也可能是一段 JSON、还可能被你要求成一个 Pydantic 对象。下游想拿"给人看的文本"、想拿"能 <code>.model_dump()</code> 的对象"、想直接 <code>json.dumps</code>——如果只给一种形态，另外两种就得各自现场转换，到处是 <code>if isinstance(...)</code>。</div>
+                <div class="essence"><span class="t">💡 一句话本质：TaskOutput = 一份产出的三副面孔</span>CrewAI 把同一份结果<strong>同时</strong>存成三种形态：<code>raw</code>（原始文本，永远有）、<code>pydantic</code>（模型对象，配了才有）、<code>json_dict</code>（字典，配了才有），再加一个 <code>output_format</code> 标签告诉你"这次主推哪副面孔"。下游按需取用，不用自己转。</div>
+                <div class="baby"><span class="t">🎭 生活类比：一个人的三种证件照</span>同一个人，有<strong>生活照</strong>（raw，谁都能看）、<strong>标准证件照</strong>（pydantic，正式场合用）、<strong>电子档 JSON</strong>（json_dict，系统对接用）。TaskOutput 就是把这三张照片一次拍好放同一个信封里，用 <code>output_format</code> 贴张便签写"这次主要用哪张"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>args_schema 自动从函数签名生成</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>TaskOutput 全字段</h1></div>
             <div class="card">
-                <p>你没提供 args_schema 时，<code>_default_args_schema</code>（<code>base_tool.py:200</code>）用 <code>inspect.signature(cls._run)</code> 读取 <code>_run</code> 的参数类型注解，自动 <code>create_model</code> 生成 Pydantic schema。</p>
-                <div class="baby"><span class="t">"从函数签名自动生成 schema"是什么魔法？</span>
-                你写 <code>def _run(self, city: str, days: int) -> str:</code>，框架用 Python 的<strong>反射（inspect）</strong>读出"有两个参数：city 是字符串、days 是整数"，自动生成对应的参数 schema。<strong>你不用手写一份重复的参数定义——函数签名就是唯一的真相来源。</strong>（呼应 eino 的 InferTool、OpenHands 工具从类型推断——同一招。）这个 schema 最终会告诉 LLM"调这个工具要填哪些参数"。</div>
+                <p>看 <code>TaskOutput</code> 的字段声明（<span class="fileref">tasks/task_output.py:14</span>）：</p>
+<pre><code class="language-python"># tasks/task_output.py:14
+class TaskOutput(BaseModel):
+    """Class that represents the result of a task."""
+    description: str = Field(description="Description of the task")
+    name: str | None = Field(default=None)
+    expected_output: str | None = Field(default=None)
+    summary: str | None = Field(default=None)          # 自动从 description 截取
+    raw: str = Field(default="")                        # ★永远有：原始文本
+    pydantic: BaseModel | None = Field(default=None)    # 配了 output_pydantic 才有
+    json_dict: dict[str, Any] | None = Field(default=None)  # 配了 output_json 才有
+    agent: str = Field(description="Agent that executed the task")
+    output_format: OutputFormat = Field(default=OutputFormat.RAW)  # 主推哪副面孔
+    messages: list[LLMMessage] = Field(default_factory=list)</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 800 270" width="100%" style="max-width:800px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="400" y="16" fill="#fdba74" text-anchor="middle" font-weight="700">数据结构：一个 TaskOutput 的三副面孔 + 一张标签</text>
+                        <rect x="300" y="30" width="200" height="34" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="400" y="52" fill="#fcd34d" text-anchor="middle" font-weight="700">TaskOutput 实例</text>
+                        <rect x="30" y="100" width="220" height="70" rx="10" fill="rgba(148,163,184,.1)" stroke="#94a3b8"/>
+                        <text x="140" y="122" fill="#e2e8f0" text-anchor="middle" font-weight="700">raw（永远有）</text>
+                        <text x="140" y="142" fill="#cbd5e1" text-anchor="middle">"三大风险：1.汇率 2..."</text>
+                        <text x="140" y="160" fill="#94a3b8" text-anchor="middle">给人看 / 兜底</text>
+                        <rect x="290" y="100" width="220" height="70" rx="10" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="400" y="122" fill="#6ee7b7" text-anchor="middle" font-weight="700">pydantic（可选）</text>
+                        <text x="400" y="142" fill="#cbd5e1" text-anchor="middle">Report(risks=[...])</text>
+                        <text x="400" y="160" fill="#94a3b8" text-anchor="middle">强类型对象</text>
+                        <rect x="550" y="100" width="220" height="70" rx="10" fill="rgba(96,165,250,.1)" stroke="#60a5fa"/>
+                        <text x="660" y="122" fill="#93c5fd" text-anchor="middle" font-weight="700">json_dict（可选）</text>
+                        <text x="660" y="142" fill="#cbd5e1" text-anchor="middle">{"risks":[...]}</text>
+                        <text x="660" y="160" fill="#94a3b8" text-anchor="middle">系统对接</text>
+                        <path d="M400 64 L140 98" stroke="#94a3b8" stroke-width="1.2"/>
+                        <path d="M400 64 L400 98" stroke="#34d399" stroke-width="1.2"/>
+                        <path d="M400 64 L660 98" stroke="#60a5fa" stroke-width="1.2"/>
+                        <rect x="230" y="200" width="340" height="46" rx="10" fill="var(--bg-card,#1e293b)" stroke="#f59e0b"/>
+                        <text x="400" y="220" fill="#fcd34d" text-anchor="middle" font-weight="700">output_format 标签</text>
+                        <text x="400" y="238" fill="#cbd5e1" text-anchor="middle">RAW / JSON / PYDANTIC —— 告诉下游主推哪副面孔</text>
+                    </svg>
+                    <div class="cap">图注：raw 是地基（总在），pydantic / json_dict 按配置生成，output_format 是"用哪张"的指路牌。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么三种都存，不只存一种再转？</span>
+                朴素做法是只存一份（比如只存 pydantic），下游要 json 就 <code>.model_dump()</code>、要文本就 <code>str()</code>。但问题是：<strong>并非每个任务都配了 pydantic 模型</strong>，很多任务只有裸文本；而且转换可能有损（模型 → 文本回不去）。CrewAI 选择在产出时就把<strong>能得到的形态都存好</strong>，<code>raw</code> 作为永远存在的地基，pydantic/json_dict 有就填、没有就是 None。代价是稍微多占点内存，换来的是下游"取哪副面孔都不用现算、也不会失败"。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>@tool 装饰器：快速造工具</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>summary / json / __str__：三个便利出口</h1></div>
             <div class="card">
-                <p><code>@tool</code>（<code>base_tool.py:676</code>）让你把普通函数一键变工具：</p>
-<pre><code class="language-python">@tool
-def greet(name: str) -> str:
-    '''Greet someone.'''      # ← docstring 成为工具 description
-    return f"Hello, {name}!"
-# 参数 name: str → 自动生成 args_schema</code></pre>
-                <div class="anno">读法：<b><code>_make_tool</code>（<code>base_tool.py:708</code>）强制要求函数有 docstring（当描述）和类型注解，再从签名生成 args_schema。</b>支持 <code>@tool</code>、<code>@tool("名字")</code>、<code>@tool(result_as_answer=True)</code> 三种写法。</div>
-                <div class="example"><span class="t">📝 最小例子：自定义一个"加法工具"，输入 → _run → 输出</span>
-                定义：<code>@tool</code> 装饰 <code>def add(a: int, b: int) -> str: """把两个整数相加。""" return str(a+b)</code><br>
-                框架自动生成的说明书（喂给 LLM）：名字 <code>add</code>、描述"把两个整数相加。"、参数 <code>{a:int, b:int}</code>。<br>
-                LLM 决定调用：吐出 <code>add(a=128, b=97)</code> → 框架执行 <code>_run</code> → 输出 <code>"225"</code> → 回喂 LLM。<br>
-                （注意：<code>a: int, b: int</code> 决定了 args_schema，docstring 决定了 description——都是"唯一真相"，你不用再手写一遍。）</div>
-                <div class="baby"><span class="t">🛠️ 如果让你自己实现"给 LLM 用工具"，会多痛苦？</span>
-                没有框架时，你得手动干这一堆：① 用文字把每个函数的名字/作用/参数写进 prompt；② 求模型"请按 JSON 格式回答要调哪个函数"；③ 自己解析它吐出来的文本、<code>json.loads</code> 参数、还得处理它偶尔格式写错；④ 找到对应函数、传参执行；⑤ 把返回值再拼成一段文字塞回下一轮 prompt……<strong>每加一个工具都要重写一遍这套胶水代码。</strong>@tool + BaseTool 就是把这一整套自动化了——你只写函数本体，说明书、schema、解析、回喂全由框架代劳。这就是"工具体系"存在的意义。</div>
-                <div class="baby"><span class="t">为什么强制要 docstring 和类型注解？</span>
-                因为 docstring 会变成"给 LLM 的工具说明"、类型注解会变成"参数 schema"。<strong>没有它们，LLM 就不知道这工具干嘛、参数怎么填。</strong>框架强制你写，其实是逼你把工具描述清楚——这直接影响 LLM 用好这个工具的能力（Day 12 OpenHands 讲过 description 写好坏很关键）。<strong>好的约束引导你写出 LLM 友好的工具。</strong></div>
+                <p>TaskOutput 还有三个贴心方法。先看 <code>summary</code>——它在对象造好后自动从描述截前 10 个词（<span class="fileref">tasks/task_output.py:50</span>）：</p>
+<pre><code class="language-python"># tasks/task_output.py:50
+@model_validator(mode="after")
+def set_summary(self) -> TaskOutput:
+    excerpt = " ".join(self.description.split(" ")[:10])
+    self.summary = f"{excerpt}..."
+    return self</code></pre>
+                <p>再看 <code>json</code> 属性和 <code>__str__</code>（<span class="fileref">tasks/task_output.py:61</span>、<span class="fileref">tasks/task_output.py:99</span>）：</p>
+<pre><code class="language-python"># tasks/task_output.py:61
+@property
+def json(self) -> str | None:
+    if self.output_format != OutputFormat.JSON:
+        raise ValueError("Invalid output format requested. ...set the output_json...")
+    return json.dumps(self.json_dict)
+
+# tasks/task_output.py:99
+def __str__(self) -> str:
+    if self.pydantic:   return str(self.pydantic)     # 优先对象
+    if self.json_dict:  return str(self.json_dict)    # 再 json
+    return self.raw                                   # 最后兜底文本</code></pre>
+                <div class="walk">
+                    <div class="r"><code>set_summary</code><span>自动生成一句"摘要"（描述前 10 词 + "..."），用于日志/事件里简短标识这个产出，不用你手写。</span></div>
+                    <div class="r"><code>json 属性</code><span><b>边界</b>：只有 <code>output_format == JSON</code> 才允许取，否则主动 <code>raise ValueError</code> 并提示你"去设置 output_json"。宁可报错也不返回可能误导的空值。</span></div>
+                    <div class="r"><code>__str__ 优先级</code><span>把 TaskOutput 当字符串用时（<code>print(output)</code>），按 pydantic → json_dict → raw 的优先级挑"最结构化的那副面孔"来展示。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 小抄：拿产出的正确姿势</span><code>output.raw</code> 取文本（永远安全）；<code>output.pydantic</code> 取对象（配了才非 None）；<code>output.to_dict()</code> 取字典（优先 json_dict、退而 pydantic.model_dump）；<code>str(output)</code> 打印最结构化的一副。<strong>别用 <code>output.json</code> 除非你确定设了 output_json——它会抛异常。</strong></div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>run 与用量上限</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>护栏是什么：产出后的质检员</h1></div>
             <div class="card">
-                <p>对外统一入口是 <code>run</code>（<code>base_tool.py:314</code>），它先校验参数、检查用量、再调 <code>_run</code>：</p>
-<pre><code class="language-python">def run(self, *args, **kwargs):
-    if not args:
-        kwargs = self._validate_kwargs(kwargs)   # 用 args_schema 校验参数
-    limit_error = self._claim_usage()            # 原子计数，超 max_usage_count 返回错误
-    if limit_error: return limit_error
-    result = self._run(*args, **kwargs)          # 真正执行
-    return result</code></pre>
-                <div class="anno">读法：<b><code>run</code> 是"带护栏的执行"——先校验参数合法、再检查没超用量上限、才真正 <code>_run</code>。</b><code>max_usage_count</code> 防止 Agent 反复滥用同一个工具（比如无限调搜索）。参数校验则保证 LLM 传的参数符合 schema。</div>
-                <div class="glossary"><b>为什么要 max_usage_count？</b> Agent 可能陷入"反复调同一工具却不推进"的循环。用量上限是针对单个工具的"刹车"——补充了 Day 07 的 max_iter（整体循环上限）。<strong>多层限制，防失控。</strong></div>
+                <div class="ask"><span class="t">🤔 痛点</span>LLM 会"胡说"或不守规矩：你要 3 条要点它给 5 条、你要纯 JSON 它前面加一句"好的，这是您要的"、你要中文它蹦英文。任务产出后如果不检查就往下传，错误会污染整条流水线。</div>
+                <div class="essence"><span class="t">💡 本质：guardrail = 产出后的质检员 + 退货重做</span>护栏是一个"检查产出合不合格"的函数：<strong>合格</strong>就放行（可顺手修正内容）；<strong>不合格</strong>就带着"哪里不对"的反馈，让 Agent 重做，最多重试 N 次。它把"人肉复查+打回重写"这套流程自动化了。</div>
+                <p>护栏在 <code>Task</code> 上有两个字段：单个 <code>guardrail</code> 和一串 <code>guardrails</code>（<span class="fileref">task.py:246</span>、<span class="fileref">task.py:257</span>），还有重试次数 <code>guardrail_max_retries</code>（<span class="fileref">task.py:273</span>，默认 3）。它可以是<strong>一个函数</strong>，也可以是<strong>一句话描述</strong>：</p>
+<pre><code class="language-python"># 用法示例（两种写法）
+# ① 写个函数：返回 (是否通过, 结果或错误说明)
+def no_english(output: TaskOutput) -> tuple[bool, Any]:
+    if any(c.isalpha() and c.isascii() for c in output.raw):
+        return (False, "输出里不能出现英文字母")
+    return (True, output.raw)
+Task(..., guardrail=no_english)
+
+# ② 写一句话，让 LLM 当裁判（见 L05）
+Task(..., guardrail="输出必须是纯中文，且不超过 100 字", agent=writer)</code></pre>
+                <div class="baby"><span class="t">大白话</span>护栏就像工厂流水线末端的<strong>质检员</strong>：合格盖章放行，不合格贴张"哪不合格"的纸条打回车间重做。重做还不合格？最多打回三次（<code>guardrail_max_retries</code>），再不行就报警停线。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>描述重写：把 schema 喂给 LLM</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>一句话护栏怎么变成 LLM 裁判</h1></div>
             <div class="card">
-                <p><code>_generate_description</code>（<code>base_tool.py:482</code>）把工具描述重写成带 JSON schema 的格式：</p>
-<pre><code class="language-python">self.description = (
-    f"Tool Name: {sanitize_tool_name(self.name)}\n"
-    f"Tool Arguments: {args_json}\n"         # ← 参数结构
-    f"Tool Description: {self.description}")</code></pre>
-                <div class="anno">读法：<b>工具最终给 LLM 看的描述里，<strong>包含了参数的 JSON schema</strong>——这样 LLM 就知道"这工具叫什么、参数有哪些、什么类型"，才能正确地调用它。</b>这份描述会进 Agent 的系统提示（文本 ReAct 模式）或转成 OpenAI function schema（原生模式，L06）。</div>
+                <p>当你把 <code>guardrail</code> 写成字符串时，Task 的 after 校验器会把它包装成一个 <code>LLMGuardrail</code>（<span class="fileref">task.py:377</span>）：</p>
+<pre><code class="language-python"># task.py:377
+@model_validator(mode="after")
+def ensure_guardrail_is_callable(self) -> Task:
+    if callable(self.guardrail):
+        self._guardrail = self.guardrail            # 本来就是函数：直接用
+    elif isinstance(self.guardrail, str):           # 是字符串：包成 LLM 裁判
+        from crewai.tasks.llm_guardrail import LLMGuardrail
+        if self.agent is None:
+            raise ValueError("Agent is required to use LLMGuardrail")
+        if not isinstance(self.agent.llm, BaseLLM):
+            raise ValueError("Agent must have a BaseLLM instance to use LLMGuardrail")
+        self._guardrail = cast(
+            GuardrailCallable,
+            LLMGuardrail(description=self.guardrail, llm=self.agent.llm),
+        )
+    return self</code></pre>
+                <p>而 <code>LLMGuardrail</code> 本身，就是"拿另一个 Agent 当裁判"：把你的产出和规则一起丢给 LLM，让它判合不合格（<span class="fileref">tasks/llm_guardrail.py:69</span>、<span class="fileref">tasks/llm_guardrail.py:98</span>）：</p>
+<pre><code class="language-python"># tasks/llm_guardrail.py:69
+def _validate_output(self, task_output: TaskOutput) -> LiteAgentOutput:
+    agent = Agent(role="Guardrail Agent", goal="Validate the output of the task",
+                  backstory="You are a expert at validating the output of a task...",
+                  llm=self.llm)
+    query = f"""
+    Ensure the following task result complies with the given guardrail.
+    Task result: {task_output.raw}
+    Guardrail: {self.description}
+    - Confirm if the Task result complies with the guardrail.
+    - If not, provide clear feedback explaining what is wrong ...
+    """
+    kickoff_result = agent.kickoff(query, response_format=LLMGuardrailResult)  # ★结构化返回
+    ...
+
+# tasks/llm_guardrail.py:98
+def __call__(self, task_output: TaskOutput) -> tuple[bool, Any]:
+    result = self._validate_output(task_output)
+    if result.pydantic.valid:
+        return True, task_output.raw           # 合格：放行原文
+    return False, result.pydantic.feedback     # 不合格：返回 LLM 给的反馈</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Agent(role="Guardrail Agent")</code><span>临时造一个"质检员 Agent"，用你任务 agent 同一个 LLM。</span></div>
+                    <div class="r"><code>response_format=LLMGuardrailResult</code><span>★让裁判返回结构化结果 <code>{valid: bool, feedback: str}</code>——不是让它自由发挥，而是逼它给出"过/不过 + 理由"。</span></div>
+                    <div class="r"><code>return (True, raw) / (False, feedback)</code><span>把裁判结论翻译成统一的 <code>(bool, Any)</code> 契约（L07 详谈）：过就放行原文，不过就把理由传回去当重试反馈。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么允许"一句话护栏"，而不是逼你写函数？</span>
+                很多校验规则（"要礼貌"、"不能有推测性表述"、"必须引用来源"）根本<strong>无法用简单代码判断</strong>——它们需要语义理解。CrewAI 的选择是：能用代码判的（长度、格式、关键词）你写函数（快、免费、确定）；判不了的语义规则，写一句话交给 LLM 当裁判。<strong>代价</strong>是字符串护栏每次校验要多花一次 LLM 调用（钱+延迟），而且裁判自己也可能出错；<strong>收益</strong>是能表达任意复杂的语义约束。所以源码强制字符串护栏必须有 agent 且 agent 有 LLM——没有裁判就没法评。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>两条调用路径（呼应 Day 07）</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>带反馈的重试循环：不合格怎么打回重做</h1></div>
             <div class="card">
-                <p>Day 07 讲过 Agent 执行有两种模式，工具调用也对应两条路径：</p>
-                <ul>
-                    <li><strong>路径 A（原生 function-calling）</strong>：<code>convert_tools_to_openai_schema</code>（<code>utilities/agent_utils.py:154</code>）把工具转成 OpenAI schema、建立"函数名→tool.run"映射（<code>available_functions</code>）。LLM 返回 tool_call 后，<code>LLM._handle_tool_call</code>（<code>llm.py:1734</code>）从映射取函数、<code>json.loads</code> 参数、调用。</li>
-                    <li><strong>路径 B（文本解析 ReAct）</strong>：<code>ToolUsage</code> 类（<code>tools/tool_usage.py:76</code>）负责——<code>parse_tool_calling</code> 解析文本、<code>_use</code>（<code>:469</code>）执行（先查缓存、可重试解析）。</li>
-                </ul>
-                <div class="glossary"><b>统一转换 <code>CrewStructuredTool</code></b>：<code>BaseTool.to_structured_tool()</code>（<code>:393</code>）把工具转成内部统一执行的 <code>CrewStructuredTool</code>（替代 langchain 的 StructuredTool）。无论哪条路径，最终都执行到工具的 <code>run</code>。<strong>两条路径同一个工具定义——现代模型走 A（可靠），老模型走 B（兜底），和 Day 07 一致。</strong></div>
+                <p>护栏真正的执行在 <code>_invoke_guardrail_function</code>（<span class="fileref">task.py:1246</span>）。这是今天的心脏——一个"校验→不过就带反馈重跑→再校验"的循环：</p>
+<pre><code class="language-python"># task.py:1246（骨架）
+def _invoke_guardrail_function(self, task_output, agent, tools, guardrail, guardrail_index=None):
+    current_retry_count = ...                       # 该护栏已重试几次
+    max_attempts = self.guardrail_max_retries + 1   # 允许尝试的总次数
+
+    for attempt in range(max_attempts):
+        guardrail_result = process_guardrail(       # ★跑一次质检（L07）
+            output=task_output, guardrail=guardrail, retry_count=current_retry_count,
+            event_source=self, from_task=self, from_agent=agent)
+
+        if guardrail_result.success:                # 通过！
+            if guardrail_result.result is None:
+                raise Exception("Task guardrail returned None as result. ...")
+            if isinstance(guardrail_result.result, str):
+                task_output.raw = guardrail_result.result           # 护栏可顺手改文本
+                task_output.pydantic, task_output.json_dict = self._export_output(...)
+            elif isinstance(guardrail_result.result, TaskOutput):
+                task_output = guardrail_result.result               # 或直接换整个产出
+            return task_output
+
+        if attempt >= self.guardrail_max_retries:   # 重试用尽 → 放弃报错
+            raise Exception(f"Task failed guardrail validation after "
+                            f"{self.guardrail_max_retries} retries. Last error: ...")
+
+        self.retry_count += 1
+        context = I18N_DEFAULT.errors("validation_error").format(  # ★把错误塞进上下文
+            guardrail_result_error=guardrail_result.error, task_output=task_output.raw)
+        result = agent.execute_task(task=self, context=context, tools=tools)  # 带反馈重做
+        task_output = TaskOutput(...raw=result...)  # 重新包装，进下一轮 for 再校验</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 780 300" width="100%" style="max-width:780px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="390" y="16" fill="#fdba74" text-anchor="middle" font-weight="700">控制流：护栏的"质检 → 打回重做"循环</text>
+                        <rect x="300" y="34" width="180" height="30" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="390" y="53" fill="#fcd34d" text-anchor="middle">拿到 task_output</text>
+                        <path d="M390 64 L390 82" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <rect x="290" y="82" width="200" height="30" rx="6" fill="var(--bg-card,#1e293b)" stroke="#a855f7"/>
+                        <text x="390" y="101" fill="#d8b4fe" text-anchor="middle">process_guardrail 质检</text>
+                        <path d="M390 112 L390 128" stroke="#94a3b8" stroke-width="1.2"/>
+                        <rect x="300" y="128" width="180" height="26" rx="6" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
+                        <text x="390" y="146" fill="#cbd5e1" text-anchor="middle">success ?</text>
+                        <text x="590" y="126" fill="#22c55e">通过</text>
+                        <rect x="540" y="132" width="220" height="30" rx="6" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="650" y="151" fill="#86efac" text-anchor="middle">放行（可改写 raw/换产出）→ return</text>
+                        <path d="M480 141 L538 145" stroke="#22c55e" stroke-width="1.2" marker-end="url(#g)"/>
+                        <text x="200" y="126" fill="#f87171">不过</text>
+                        <rect x="30" y="132" width="230" height="30" rx="6" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="145" y="151" fill="#fca5a5" text-anchor="middle">重试用尽? → raise 报错停止</text>
+                        <path d="M300 141 L262 145" stroke="#f87171" stroke-width="1.2" marker-end="url(#r)"/>
+                        <path d="M145 162 L145 190" stroke="#f59e0b" stroke-width="1.4" marker-end="url(#o)"/>
+                        <rect x="30" y="190" width="230" height="46" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="145" y="210" fill="#fcd34d" text-anchor="middle">还有次数：把错误塞进 context</text>
+                        <text x="145" y="226" fill="#fcd34d" text-anchor="middle">agent.execute_task 带反馈重做</text>
+                        <path d="M260 213 L500 213 L500 116 L440 112" stroke="#f59e0b" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#o)"/>
+                        <text x="470" y="252" fill="#94a3b8">↑ 重做的新产出回到质检，进下一轮 for</text>
+                        <defs>
+                            <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                            <marker id="g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                            <marker id="r" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f87171"/></marker>
+                            <marker id="o" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：通过就（可改写后）放行；不过且有次数，就把"错在哪"塞进上下文让 Agent 重做，新产出再回炉质检。</div>
+                </div>
+                <div class="essence"><span class="t">💡 关键：重试不是"再赌一次"，而是"带着错误再来"</span>普通重试是同样的输入再跑一遍（结果大概率还错）。护栏重试把 <code>guardrail_result.error</code>（哪里不合格）拼进 <code>context</code> 再让 Agent 做——Agent 这次知道"上次错在没用中文"，命中率大增。<strong>这就是"反馈式重试"</strong>，和 D09 输出解析失败后回喂错误、人给 AI 打回意见是同一套思路。</div>
+                <div class="example"><span class="t">📝 真实值走一遍（护栏="必须纯中文"，max_retries=3）</span>
+                第 1 次：产出含英文 → 不过，error="含英文字母" → 塞进 context → 重做。<br>
+                第 2 次：还夹了个"OK" → 不过 → 再塞反馈 → 重做。<br>
+                第 3 次：纯中文 → 通过 → <code>return task_output</code>。<br>
+                若三次都不过：<code>raise Exception("Task failed guardrail validation after 3 retries...")</code>。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>用量记录与缓存</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>(bool, Any) 契约与边界</h1></div>
             <div class="card">
-                <p><code>ToolsHandler</code>（<code>agents/tools_handler.py:15</code>）是工具使用的回调处理器。<code>on_tool_use</code>（<code>:26</code>）记录 <code>last_used_tool</code>，并按 <code>cache_function</code> 决定是否缓存 (工具名, 输入)→输出：</p>
-<pre><code class="language-python">if self.cache and should_cache and calling.tool_name != CacheTools().name:
-    self.cache.add(tool=calling.tool_name, input=input_str, output=output)</code></pre>
-                <div class="baby"><span class="t">工具缓存为什么有用？</span>
-                Agent 可能在推理中<strong>用相同参数重复调同一个工具</strong>（比如反复查同一个网址）。缓存后，第二次直接返回上次的结果——<strong>省时间、省钱（尤其工具调用花钱时，如付费 API）、结果也一致</strong>。<code>cache_function</code> 让你自定义"什么情况该缓存"（有些实时数据不该缓存）。这是 Crew 的 <code>cache=True</code>（Day 04）在工具层的落地。</div>
+                <p>所有护栏——无论函数还是 LLM——都必须返回 <code>(bool, Any)</code> 元组。<code>process_guardrail</code> 把这个元组转成结构化的 <code>GuardrailResult</code>（<span class="fileref">utilities/guardrail.py:123</span>、<span class="fileref">utilities/guardrail.py:105</span>）：</p>
+<pre><code class="language-python"># utilities/guardrail.py:123
+def process_guardrail(output, guardrail, retry_count, ...) -> GuardrailResult:
+    if not isinstance(output, (TaskOutput, LiteAgentOutput)):
+        raise TypeError("Output must be a TaskOutput or LiteAgentOutput")
+    ...
+    crewai_event_bus.emit(event_source, started_event)   # 发"护栏开始"事件
+    result = guardrail(output)                            # ★调护栏，拿 (bool, Any)
+    guardrail_result = GuardrailResult.from_tuple(result) # 转结构化
+    crewai_event_bus.emit(event_source, LLMGuardrailCompletedEvent(...))  # 发"护栏完成"事件
+    return guardrail_result
+
+# utilities/guardrail.py:105
+@classmethod
+def from_tuple(cls, result: tuple[bool, Any | str]) -> Self:
+    success, data = result
+    return cls(success=success,
+               result=data if success else None,     # 成功：data 是结果
+               error=data if not success else None)   # 失败：data 是错误说明</code></pre>
+                <div class="walk">
+                    <div class="r"><code>(bool, Any) 契约</code><span>第一位是"过没过"，第二位一物两用：过了它是"结果"，没过它是"错误说明"。<code>from_tuple</code> 按 success 把第二位分流到 result 或 error。</span></div>
+                    <div class="r"><code>两个 emit</code><span>护栏前后各发一个事件（开始/完成），这样监控/遥测能看到每次质检的过程（D26 事件系统）。护栏不是黑盒。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍③：为什么护栏用元组契约而不是抛异常表示不通过？</span>
+                "不通过"可以用抛异常表达，但那样护栏就无法<strong>携带反馈信息</strong>（异常里塞字符串很别扭），也无法表达"通过并顺手修正了内容"这种情况。用 <code>(bool, Any)</code>：布尔说过没过，Any 那一格<strong>过了装修正后的结果、没过装反馈</strong>——一个契约覆盖三种意图（放行/放行并改写/打回带反馈）。这比异常灵活得多，也让重试循环能统一处理。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：护栏通过时返回 None 会被<strong>主动判为非法</strong></span>
+                回看 L06：<code>if guardrail_result.result is None: raise Exception("Task guardrail returned None as result. This is not allowed.")</code>。为什么？因为护栏声明"通过"（success=True）却没给出结果，是<strong>自相矛盾</strong>——下游拿什么当产出？框架宁可当场报错，也不让一个"空的通过"悄悄污染后续。这和 D13 的 fail-fast 一脉相承：矛盾状态越早暴露越好。另一处边界：字符串护栏必须配 agent 且 agent 有 <code>BaseLLM</code>，否则 <code>ensure_guardrail_is_callable</code> 在构造时就报错——没裁判就没法评。</div>
+                <div class="anno">💡 <code>guardrails</code>（复数）会覆盖 <code>guardrail</code>（单数）：<code>ensure_guardrails_is_list_of_callables</code>（<span class="fileref">task.py:398</span>）末尾一旦发现有复数护栏，就把单数 <code>guardrail</code> 和 <code>_guardrail</code> 清空。多个护栏时按顺序逐个跑（都要过）。</div>
             </div>
         </section>
 
         <section id="l08" class="section">
             <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
             <div class="card highlight-card">
-                <div class="baby"><span class="t">🎯 记忆口诀：工具四件套 +「大脑 vs 手脚」</span>
-                <strong>「名、述、参、行」</strong>——一个工具 = <strong>名</strong>字（name）+ 描<strong>述</strong>（description，给 LLM 看何时用）+ <strong>参</strong>数 schema（args_schema）+ 执<strong>行</strong>逻辑（_run）。再配一句世界观：<strong>「LLM 动脑决定用哪把刀，工具伸手真去砍」</strong>——大脑负责选择与填参，手脚负责干活。背下这两句，BaseTool 一整章就串起来了。</div>
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>BaseTool 的核心组成？和 OpenHands 的工具三件套像吗？</li>
-                    <li>args_schema 怎么从函数签名自动生成？</li>
-                    <li>@tool 为什么强制要 docstring 和类型注解？</li>
-                    <li>run 里的用量上限、参数校验各防什么？</li>
-                    <li>工具调用的两条路径？为什么要缓存？</li>
+                    <li>TaskOutput 为什么要 raw / pydantic / json_dict 三副面孔？哪副永远有？</li>
+                    <li><code>str(output)</code> 和 <code>output.json</code> 分别怎么工作？后者什么时候会抛异常？</li>
+                    <li>护栏解决什么问题？合格/不合格分别怎么处理？</li>
+                    <li>一句话字符串护栏是怎么变成 LLM 裁判的？它为什么要求 agent 有 LLM？</li>
+                    <li>护栏重试为什么比普通重试聪明？（把错误反馈塞进 context）</li>
+                    <li>护栏的 <code>(bool, Any)</code> 契约里，第二格分别代表什么？</li>
+                    <li>护栏"通过却返回 None"会怎样？（主动报错）</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
+                <h3>✋ 10 分钟动手</h3>
 <pre><code class="language-bash">P=lib/crewai/src/crewai
-sed -n '103,220p' $P/tools/base_tool.py | head -50    # BaseTool + args_schema
-sed -n '676,720p' $P/tools/base_tool.py               # @tool
-sed -n '154,220p' $P/utilities/agent_utils.py         # 转 OpenAI schema
-sed -n '15,60p' $P/agents/tools_handler.py            # 用量+缓存</code></pre>
-                <div class="tip"><strong>明天预告 · Day 15</strong>：<strong>LLM 抽象</strong>——读 <code>llm.py</code>：litellm 如何统一上百种模型、原生 SDK + litellm 双轨设计、function calling 支持、流式处理。</div>
+# 1. TaskOutput 三副面孔 + 便利方法
+sed -n '14,105p' $P/tasks/task_output.py
+
+# 2. 字符串护栏 → LLMGuardrail
+sed -n '377,396p' $P/task.py
+sed -n '49,120p' $P/tasks/llm_guardrail.py
+
+# 3. 带反馈重试循环
+sed -n '1246,1353p' $P/task.py
+
+# 4. (bool,Any) 契约 → GuardrailResult
+sed -n '105,187p' $P/utilities/guardrail.py</code></pre>
+                <div class="tip"><strong>明日预告 · Day 15</strong>：今天 <code>_export_output</code> 一闪而过。明天专讲<strong>结构化输出</strong>——<code>output_pydantic</code> / <code>output_json</code> 到底怎么把 LLM 吐的文本"翻译"成 Pydantic 对象或字典：<code>convert_to_model</code> 的 JSON 解析、部分 JSON 兜底、以及 <code>response_model</code> 走原生 provider 结构化输出的那条更快的路。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="crewai-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 状态</a>
-                <a href="crewai-day15.html" style="color:var(--accent-green);">Day 15 · LLM 抽象 &rarr;</a>
+                <a href="crewai-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 Task 模型</a>
+                <a href="crewai-day15.html" style="color:var(--accent-green);">Day 15 · 结构化输出 &rarr;</a>
             </div>
         </section>
     </main>
