@@ -3,26 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 10 · 节点执行与并行 — LangGraph 源码学习</title>
+    <title>Day 10 · 多字段状态与并行写 — LangGraph 60 天源码深度</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -31,6 +29,21 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -38,163 +51,264 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">10</div>
             <h2>Day 10</h2>
-            <p class="version">节点执行与并行 · 8 讲</p>
+            <p class="version">多字段状态与并行写 · 7 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 同步屏障回顾</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · PregelRunner</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Read 读输入</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Write 攒输出</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 并行为何安全</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Send 动态并发</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 重试与错误</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第2周收官</a></li>
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 并行写的核心难题</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 超步：先收集后合并</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · LastValue 并行写报错</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 累加通道接住多值</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · _add_schema 对齐通道</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 真实多字段图（bench）</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 边界 + 小结</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="langgraph-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 编译</a></li>
-            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 检查点 &rarr;</a></li>
+            <li><a href="langgraph-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 累加通道</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 输入输出 schema &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 10 / 共 20 天 · 第 2 周收官</span>
-            <h1 class="part-title">节点执行与并行</h1>
-            <p class="part-desc">同一超步里多个节点怎么并行跑？为什么并行不会互相踩踏？Send 又怎么实现 map-reduce 动态并发？今天收官 Pregel 引擎。</p>
+            <span class="part-label">Day 10 / 共 60 天 · 阶段2 状态与数据流</span>
+            <h1 class="part-title">多字段状态与并行写</h1>
+            <p class="part-desc">前三天把单个 reducer / 单个通道拆透了。今天把它们放到"多字段 + 多节点并行"的真实场景里：当多个节点<strong>在同一步同时往同一个字段写</strong>时，到底发生什么？为什么有的字段能合并、有的却报错？我们对照 <code>LastValue</code> 与 <code>BinaryOperatorAggregate</code> 的 <code>update</code>，再看 <code>_add_schema</code> 怎么把多份 schema 的同名字段"对齐"成一个通道，最后用官方 <code>bench/pydantic_state.py</code> 的真实并行图收尾。</p>
         </div>
 
-        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
-        <div class="steps"><span class="st">编译图</span><span class="sep">→</span><span class="st on">节点·并行</span><span class="sep">→</span><span class="st">Checkpoint</span><span class="sep">→</span><span class="st">Saver·threads</span></div></div>
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段2：状态与数据流 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">阶段1 入门</span><span class="sep">→</span>
+                <span class="st">D07 reducers</span><span class="sep">→</span>
+                <span class="st">D08 add_messages</span><span class="sep">→</span>
+                <span class="st">D09 累加通道</span><span class="sep">→</span>
+                <span class="st on">D10 并行写</span><span class="sep">→</span>
+                <span class="st">D11 输入输出</span><span class="sep">→</span>
+                <span class="st">D12 Pydantic</span><span class="sep">→</span>
+                <span class="st">阶段3 控制流</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        想象三位同事<strong>同时</strong>往同一块公告栏（一个字段）贴便条。如果这块栏的规矩是"<strong>只能贴一张，多了不知道听谁的</strong>"（<code>LastValue</code>），三张一起来它就<strong>直接罢工报错</strong>，逼你说清规矩；如果规矩是"<strong>来几张都往下摞</strong>"（累加通道），它就把三张<strong>按合并规则叠成一张</strong>。而 LangGraph 保证：不是谁先贴谁覆盖谁，而是<strong>先把这一轮所有便条收齐，再一次性按规矩合并</strong>——这就是超步（super-step）的批量语义。今天讲透这套并发写规则。</div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>同步屏障回顾</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：并行写为什么危险</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点</span>有时候一个节点跑完，才知道"接下来要并行处理 N 份数据"——而 N 是运行时才定的（比如用户一次问了 5 个问题）。<strong>编译期固定的边只能连到确定的节点，没法表达"运行时才知道要拆几路并行"。自己在节点里开线程？那又回到了竞态和快照隔离的老问题。</strong></div>
-                <div class="essence"><span class="t">💡 本质</span>LangGraph 用 <code>Send(node, arg)</code>（<code>types.py:664</code>）解决动态并发：节点返回一批 <code>Send</code>，引擎下一超步就为<strong>每个 Send 各起一个并行任务</strong>（都跑同一节点、各带各的数据），跑完结果用 reducer 汇聚——经典的 map→reduce。因为仍走 BSP 的"快照读 + 攒写入"，这些并行任务<strong>照样不用你操心加锁</strong>。<br><strong>Send 就像生活中老板把一摞材料分给多个实习生同时处理：</strong>要几个实习生、临时按材料份数定，谁也不干扰谁，最后收齐钉成一摞。</div>
-                <p>Day 06 讲过：一个超步内被选中的节点<strong>并行执行</strong>，但都读同一份"步初快照"，写入攒到步末统一提交。今天看这在代码里怎么落地。</p>
-                <div class="baby"><span class="t">一句话回顾 BSP</span>
-                同一超步的节点像一排同时起跑的选手：<strong>都从同一起跑线（步初状态快照）出发，各跑各的，谁也看不到别人这一步的中途结果；全部到达终点（步末），才统一结算成绩（apply_writes）。</strong>这样并行才安全——没有"我读到你写一半的数据"这种竞态。今天看这个"同时起跑、统一结算"在 PregelRunner 里怎么实现。</div>
+                <div class="ask"><span class="t">🤔 痛点</span>很多图会<strong>扇出（fan-out）</strong>：一个节点后面接多个并行节点（比如同时查数据库、查缓存、查日志），它们各自产出结果，最后<strong>扇入（fan-in）</strong>汇到下游。问题是——如果这几个并行节点都想往同一个字段写（比如都往 <code>results</code> 追加、或都想更新 <code>status</code>），它们几乎是"同时"完成的，<strong>谁的写入算数？会不会互相覆盖丢数据？顺序乱不乱？</strong>在多线程里这是经典的"竞态"噩梦。</div>
+                <div class="essence"><span class="t">💡 本质：LangGraph 用"超步 + 通道合并"根除竞态</span>它<strong>不让节点直接改共享状态</strong>。节点只是"提交写入请求"，本超步内所有请求先被<strong>收集成一个列表</strong>，等这一步的节点全跑完，才由每个通道的 <code>update(该字段的所有写入)</code> 一次性合并。于是"并发写"退化成了"给通道传一个列表"——竞态被通道的合并逻辑吸收了。字段能不能接住多值，全看它配的是哪种通道。</div>
+                <div class="baby"><span class="t">大白话</span>节点之间从不"抢着改同一个变量"，而是各写各的小纸条投进信箱，超步结束时信箱管理员（通道）按规矩统一处理。<strong>没有共享可变状态，就没有竞态。</strong>这也是它叫 Pregel（图计算的 BSP 模型）的原因，阶段4 会深入。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>PregelRunner</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>超步语义：update 收到的是"一个列表"</h1></div>
             <div class="card">
-                <p><code>PregelRunner</code>（<code>pregel/_runner.py</code>）负责并行跑本超步的所有任务。<code>tick()</code> 内部：为每个任务建一个可等待单元，用 asyncio（异步）或线程池（同步）并发执行，边完成边 yield 结果给外层流式输出（Day 08 的 <code>for _ in runner.tick(...)</code>）。</p>
-                <div class="anno">读法：<b>PregelRunner 是"这一超步的并行执行器"：拿到本步任务列表，并发跑，哪个先完成就先吐结果。</b>同步图用线程池、异步图用 asyncio——同一套调度逻辑两种后端。</div>
+                <p>前几天你已经反复见到线索：无论 <code>LastValue.update</code> 还是 <code>BinaryOperatorAggregate.update</code>，参数都叫 <code>values</code>（复数、列表）。这不是巧合——它就是"本超步内该字段收到的所有写入"。</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 230" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一个超步内，并行写如何被"先收集后合并"</text>
+                        <rect x="40" y="40" width="110" height="30" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="95" y="59" fill="#c7d2fe" text-anchor="middle">节点A 写 x=+3</text>
+                        <rect x="40" y="80" width="110" height="30" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="95" y="99" fill="#c7d2fe" text-anchor="middle">节点B 写 x=+5</text>
+                        <rect x="40" y="120" width="110" height="30" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="95" y="139" fill="#c7d2fe" text-anchor="middle">节点C 写 x=+2</text>
+                        <rect x="220" y="70" width="150" height="60" rx="8" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="295" y="94" fill="#fbbf24" text-anchor="middle" font-weight="700">收集本步写入</text>
+                        <text x="295" y="112" fill="#94a3b8" text-anchor="middle">x → values=[3,5,2]</text>
+                        <rect x="430" y="70" width="160" height="60" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="510" y="90" fill="#86efac" text-anchor="middle" font-weight="700">通道 update(values)</text>
+                        <text x="510" y="108" fill="#94a3b8" text-anchor="middle">累加通道 → 10</text>
+                        <text x="510" y="122" fill="#94a3b8" text-anchor="middle">LastValue → 报错!</text>
+                        <path d="M150 55 L218 88" stroke="#94a3b8" stroke-width="1"/><path d="M150 95 L218 100" stroke="#94a3b8" stroke-width="1"/><path d="M150 135 L218 112" stroke="#94a3b8" stroke-width="1"/>
+                        <path d="M370 100 L428 100" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a10)"/>
+                        <text x="310" y="170" fill="#94a3b8" text-anchor="middle">关键：节点并行跑完 → 写入攒成列表 → 一次性交给通道合并</text>
+                        <text x="310" y="192" fill="#f87171" text-anchor="middle">字段能否接住多值，取决于它是哪种通道（L03/L04 对照）</text>
+                        <defs><marker id="a10" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：同一超步的并行写被批量收集成 values 列表，再整体喂给通道。合并逻辑决定结果。</div>
+                </div>
+                <div class="anno">"超步（super-step）"= 图执行的一轮。一轮里所有该跑的节点<b>并行跑</b>，跑完统一把写入合并进通道，再进入下一轮。这是阶段4 Pregel 引擎的核心，这里先建立直觉：<b>并行写不是即时生效的，是本轮末尾批量合并的。</b></div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>Read 读输入</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>LastValue：并行写直接报错（这是特性）</h1></div>
             <div class="card">
-                <p>节点执行前，<code>PregelNode</code> 通过 <code>ChannelRead</code>（<code>pregel/_read.py</code>）从<strong>步初快照</strong>读取它订阅的通道值，组成输入。</p>
-                <div class="anno">读法：<b>节点不直接访问全局状态，而是通过 ChannelRead 从"步初快照"读它声明的 <code>channels</code>（Day 09 编译时定的）。</b>读的是快照 → 本步内别的节点写什么都影响不到我 → 快照隔离（Day 06）。</div>
+                <p>D07 见过 <code>LastValue.update</code>，现在从"并行写"视角重看它（<span class="fileref">channels/last_value.py:56</span>）：</p>
+<pre><code class="language-python"># channels/last_value.py:56
+    def update(self, values):
+        if len(values) == 0:
+            return False
+        if len(values) != 1:                              # ★本步收到超过 1 个写入
+            msg = create_error_message(
+                message=f"At key '{self.key}': Can receive only one value per step. "
+                        "Use an Annotated key to handle multiple values.",
+                error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+            )
+            raise InvalidUpdateError(msg)                 # 直接抛错，并教你怎么修
+        self.value = values[-1]
+        return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>len(values) != 1 → raise</code><span>★核心：<code>LastValue</code>（没写 reducer 的字段）<b>只接受本步恰好 1 个写入</b>。两个并行节点同时写它，<code>values</code> 长度是 2，它无法决定"覆盖成谁"，于是抛 <code>InvalidUpdateError</code>。</span></div>
+                    <div class="r"><code>错误码 INVALID_CONCURRENT_GRAPH_UPDATE</code><span>专门的错误码，表明这是"并发更新冲突"，不是随便一个异常。可观测系统能据此归类。</span></div>
+                    <div class="r"><code>提示文案</code><span>报错还顺手教你：<b>"Use an Annotated key to handle multiple values."</b>——想并行写？给这个字段加个 reducer（变成累加通道）就行。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么并行写覆盖字段是"报错"而不是"随便留一个"？</span>
+                最省事的实现是"多个值就留最后一个"（悄悄丢掉其余）。但那样会<strong>静默丢数据</strong>：你两个节点都算出了结果，其中一个被无声吞掉，你还以为都保存了。LangGraph 选择<strong>响亮地报错</strong>，逼你显式表态："这个字段到底该覆盖（那就别并行写它）还是该合并（那就给它加 reducer）"。<strong>把"歧义"变成"编译/运行期的明确错误"，而不是"运行时的隐秘数据丢失"</strong>——这是它对正确性的执念，和 D08"删不存在 ID 就报错"一脉相承。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>Write 攒输出</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>累加通道：从容接住多值</h1></div>
             <div class="card">
-                <p>节点跑完，<code>ChannelWrite</code> 不直接改通道，而是把写入交给注入的 write 函数 → 攒进 <code>task.writes</code>（pending writes，Day 08 的 <code>put_writes</code>）。</p>
-<pre><code class="language-python"># 节点返回 {"count": 5} → writers 拆成写入条目 → 交给 write 函数
-# write 函数把它 append 到 task.writes，不碰真正的通道
-# 超步末 after_tick → apply_writes 才统一提交（Day 08）</code></pre>
-                <div class="anno">读法：<b>写入被"缓冲"起来（task.writes），不立即生效。</b>Read（读步初快照）+ Write（攒到步末）配合，就实现了"读写解耦、快照隔离"。<strong>这就是 Day 06 说的"actor 只跟通道打交道、不互相直接调用"的物理实现。</strong></div>
+                <p>换成有 reducer 的字段（累加通道），同样的并行写就能合并。重看 D09 的 <code>update</code>（<span class="fileref">channels/binop.py:123</span>）：</p>
+<pre><code class="language-python"># channels/binop.py:123（聚焦多值循环）
+    def update(self, values):
+        if not values:
+            return False
+        if self.value is MISSING:
+            self.value = values[0]
+            values = values[1:]
+        seen_overwrite = False
+        for value in values:                 # ★本步的每个并行写入，依次叠进来
+            ...
+            if not seen_overwrite:
+                self.value = self.operator(self.value, value)
+        return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>for value in values</code><span>和 LastValue 最本质的区别：它<b>不嫌 values 多</b>，反而正好遍历它们、逐个用 operator 合并。三个并行节点写 <code>[3,5,2]</code>，它累加成 10；三个节点各返回一段消息列表，<code>add_messages</code> 把它们按 ID 合并成一条完整历史。</span></div>
+                    <div class="r"><code>合并顺序</code><span>回顾 D09 L07 的边界：这里是按 values 顺序叠的，所以并行字段的 reducer 最好可交换（加、并集、字典合并），避免顺序影响结果。</span></div>
+                </div>
+                <table class="ttable">
+                    <thead><tr><th>字段写法</th><th>底层通道</th><th>同一步 3 个并行写</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>status: str</code></td><td>LastValue</td><td>❌ <code>InvalidUpdateError</code>（收到 3 个值）</td></tr>
+                        <tr><td><code>total: Annotated[int, operator.add]</code></td><td>累加</td><td>✓ 三值相加</td></tr>
+                        <tr><td><code>logs: Annotated[list, operator.add]</code></td><td>累加</td><td>✓ 三段列表拼接</td></tr>
+                        <tr><td><code>messages: Annotated[list, add_messages]</code></td><td>累加</td><td>✓ 按 ID 合并去重</td></tr>
+                    </tbody>
+                </table>
+                <div class="essence"><span class="t">💡 一句话决策</span><strong>"这个字段会被多个并行节点写吗？"</strong>——会，就<strong>必须</strong>给它加 reducer（否则 LastValue 报错）；不会，用默认 LastValue 挺好（还能帮你抓到"意外的并发写"这种 bug）。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>并行为何安全</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>_add_schema：多份 schema 的同名字段如何对齐成一个通道</h1></div>
             <div class="card">
-                <p>把 L03/L04 合起来看，同一超步 A、B 两节点并行：</p>
-                <ul>
-                    <li>A、B 都从<strong>同一份步初快照</strong>读输入（互不影响）。</li>
-                    <li>A、B 的写入各自<strong>攒进自己的 pending writes</strong>（不直接改通道）。</li>
-                    <li>步末 <code>apply_writes</code> 按<strong>确定顺序</strong>合并所有写入（reducer 处理"两个都写了 messages"的情况）。</li>
-                </ul>
-                <div class="ask"><span class="t">💥 错误驱动：如果没有快照隔离会出什么事故</span>
-                假设去掉"攒写入"，让并行节点直接改同一个 <code>state</code> 字典：A 读到 <code>count=0</code> 准备写 <code>1</code>，同一时刻 B 也读到 <code>count=0</code> 准备写 <code>1</code>——两个本该让 count 变成 2 的写入，<strong>结果 count 只剩 1（后写的覆盖了先写的）</strong>。这就是经典的"更新丢失"竞态。正因为会出这种事故，Pregel 才坚持"读快照 + 攒写入 + 步末统一合并"。</div>
-                <div class="baby"><span class="t">🙋 第一人称：我是一个 task，走一遍超步</span>
-                「我被 Plan 选中了 → 我从<strong>步初快照</strong>读到我要的通道值（这一刻的值冻结着，我读得很安心）→ 我算完，把结果<strong>交给 write 函数攒起来</strong>，并没有真去改通道 → 我和同批的兄弟 task 都跑完后，引擎在步末<strong>按固定顺序把我们的写入统一提交</strong> → 谁该在下一步被触发，看提交后哪些通道版本涨了。」</div>
-                <div class="baby"><span class="t">为什么这样就不会出 bug？</span>
-                传统并行编程最怕"竞态"：A 读的时候 B 正在改，读到半拉子数据。<strong>这就像考试：每人发一张一模一样的卷子（步初快照）各自答，谁也偷看不到别人答一半的卷面；全部交卷后老师统一批改登分（apply_writes）——顺序固定、结果可复现。</strong><strong>Pregel 用两招根除竞态：①都读同一份不变的快照（读的时候没人在改）；②写入先攒着、步末按固定顺序统一提交（合并顺序确定 → 结果可复现）。</strong>于是你写并行节点时<strong>完全不用加锁、不用管线程安全</strong>——引擎的 BSP 模型替你保证了正确性。<strong>这是 LangGraph 相比"手写 async 编排"最大的安全红利。</strong></div>
+                <p>多字段状态里还有个隐蔽问题：一个字段名可能出现在多个 schema 里（状态 schema、输入 schema、某节点的私有输入 schema……D11 细讲）。这些"同名字段"必须映射到<strong>同一个通道对象</strong>，否则并行写就乱套了。负责登记、对齐的是 <code>_add_schema</code>（<span class="fileref">graph/state.py:342</span>）：</p>
+<pre><code class="language-python"># graph/state.py:342
+    def _add_schema(self, schema, /, allow_managed=True):
+        if schema not in self.schemas:
+            _warn_invalid_state_schema(schema)
+            channels, managed, type_hints = _get_channels(schema)   # D07 的读取逻辑
+            ...
+            self.schemas[schema] = {**channels, **managed}
+            for key, channel in channels.items():
+                if key in self.channels:                    # 这个字段名之前登记过？
+                    if self.channels[key] != channel:       # ★类型不一致？
+                        if isinstance(channel, LastValue):
+                            pass                            # 新的是 LastValue → 宽容放过
+                        else:
+                            raise ValueError(
+                                f"Channel '{key}' already exists with a different type"
+                            )
+                else:
+                    self.channels[key] = channel            # 首次见到 → 登记</code></pre>
+                <div class="walk">
+                    <div class="r"><code>if schema not in self.schemas</code><span>同一个 schema 只处理一次（去重），避免重复登记。</span></div>
+                    <div class="r"><code>key in self.channels</code><span>这个字段名之前已被别的 schema 登记过通道了。现在要检查两次的通道类型是否<b>一致</b>。</span></div>
+                    <div class="r"><code>self.channels[key] != channel</code><span>★靠通道的 <code>__eq__</code> 判断（D09 L06 讲过累加通道怎么比、lambda 为什么宽容）。不一致意味着"同一个字段在两处定义成了不同合并规则"——这是矛盾。</span></div>
+                    <div class="r"><code>isinstance(channel, LastValue): pass</code><span>★宽容特例：如果<b>新出现的</b>是个默认 LastValue（很可能是某个只声明了类型、没写 reducer 的 schema），就放过、保留已登记的那个。因为 LastValue 是"没特别要求"的默认值，不该覆盖掉别处更明确的 reducer。</span></div>
+                    <div class="r"><code>else: raise</code><span>否则（两个都是明确的、不同的通道）直接报错——不允许一个字段名对应两套冲突的合并逻辑。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么对 LastValue 冲突"宽容"、对其它冲突"严格"？</span>
+                LastValue 是"我没意见、用默认"的信号；而写了 reducer 的通道是"我明确要这样合并"的信号。当两者撞在同一字段名上，<strong>让"有明确意见的"赢、"没意见的"让路</strong>是最符合直觉的。但如果两个字段都"有明确意见"却又不同（比如一处 <code>operator.add</code>、另一处 <code>add_messages</code>），那就是真矛盾，必须报错。<strong>宽容处理"默认 vs 明确"，严格处理"明确 vs 明确"</strong>——分寸拿捏得很细。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>Send 动态并发（map-reduce）</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>真实多字段并行图：bench/pydantic_state.py</h1></div>
             <div class="card">
-                <p><code>Send(node, arg)</code>（Day 04 见过）实现运行时动态并发：一个节点返回一批 Send，下一超步为<strong>每个 Send 各起一个任务</strong>并行跑同一节点（PUSH 任务，Day 08 L03）。</p>
-<pre><code class="language-python">def fan_out(state):
-    # 运行时才知道要拆几路 → 动态生成 N 个并行任务
-    return [Send("worker", {"item": x}) for x in state["items"]]</code></pre>
-                <div class="svgbox">
-                <svg viewBox="0 0 640 240" width="100%" role="img" aria-label="Send 扇出到多个并行任务再汇聚">
-                    <text x="320" y="22" text-anchor="middle" fill="#e5e5e5" font-size="13" font-weight="bold">Send：一个节点扇出 N 个并行任务</text>
-                    <rect x="40" y="96" width="110" height="46" rx="8" fill="#2a2a3a" stroke="#6366f1"/><text x="95" y="118" text-anchor="middle" fill="#e5e5e5" font-size="12">fan_out</text><text x="95" y="134" text-anchor="middle" fill="#bbb" font-size="10">返回 3 个 Send</text>
-                    <!-- fan out -->
-                    <rect x="300" y="46" width="120" height="40" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/><text x="360" y="70" text-anchor="middle" fill="#e5e5e5" font-size="11">worker(item0)</text>
-                    <rect x="300" y="99" width="120" height="40" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/><text x="360" y="123" text-anchor="middle" fill="#e5e5e5" font-size="11">worker(item1)</text>
-                    <rect x="300" y="152" width="120" height="40" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/><text x="360" y="176" text-anchor="middle" fill="#e5e5e5" font-size="11">worker(item2)</text>
-                    <line x1="150" y1="112" x2="298" y2="66" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a10)"/>
-                    <line x1="150" y1="119" x2="298" y2="119" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a10)"/>
-                    <line x1="150" y1="126" x2="298" y2="172" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a10)"/>
-                    <!-- reduce -->
-                    <rect x="510" y="96" width="100" height="46" rx="8" fill="#2a2a3a" stroke="#38bdf8"/><text x="560" y="118" text-anchor="middle" fill="#e5e5e5" font-size="11">汇聚通道</text><text x="560" y="134" text-anchor="middle" fill="#bbb" font-size="10">reducer 合并</text>
-                    <line x1="420" y1="66" x2="508" y2="112" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#a10b)"/>
-                    <line x1="420" y1="119" x2="508" y2="119" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#a10b)"/>
-                    <line x1="420" y1="172" x2="508" y2="126" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#a10b)"/>
-                    <text x="225" y="216" text-anchor="middle" fill="#8b5cf6" font-size="11">map：拆成 3 路并行</text>
-                    <text x="490" y="216" text-anchor="middle" fill="#38bdf8" font-size="11">reduce：结果汇总</text>
-                    <defs>
-                      <marker id="a10" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b5cf6"/></marker>
-                      <marker id="a10b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#38bdf8"/></marker>
-                    </defs>
-                </svg>
-                <div class="cap">节点返回一批 Send → 引擎为每个 Send 起一个并行 task（PUSH）→ 结果汇聚进通道</div>
+                <p>官方性能基准里有个真实的多字段、含并行分支的图（<span class="fileref">bench/pydantic_state.py:249</span>）。它同时演示了多个 reducer 字段 + 扇出扇入：</p>
+<pre><code class="language-python"># bench/pydantic_state.py:249（结构节选）
+builder = StateGraph(State)
+builder.add_edge(START, "one")
+builder.add_node("one",  partial(read_write, "messages", ["trigger_events", "primary_issue_medium"]))
+builder.add_edge("one", "two")
+builder.add_node("two",  partial(read_write, "trigger_events", ["autoresponse", "issue"]))
+builder.add_edge("two", "three")     # ★扇出：two 后面同时接 three 和 four
+builder.add_edge("two", "four")
+builder.add_node("three", ...)
+builder.add_node("four",  ...)
+builder.add_node("five",  ...)
+builder.add_edge(["three", "four"], "five")   # ★扇入：three 和 four 都完成后才进 five
+builder.add_edge("five", "six")</code></pre>
+                <p>而它的 State 里，不同字段配了不同 reducer（<span class="fileref">bench/pydantic_state.py:14</span>）：</p>
+<pre><code class="language-python"># bench/pydantic_state.py:14（字段节选）
+class State(BaseModel):
+    messages: Annotated[list, operator.add] = Field(default_factory=list)        # 列表累加
+    trigger_events: Annotated[list, operator.add] = Field(default_factory=list)  # 列表累加
+    primary_issue_medium: Annotated[str, lambda x, y: y or x] = Field(default="email")  # "有新值用新的"
+    autoresponse: Annotated[dict | None, lambda _, y: y] = Field(default=None)   # 永远覆盖
+    slack_participants: Annotated[dict, operator.or_] = Field(default_factory=dict)  # 字典合并
+    bot_id: str | None = Field(default=None)                                     # 没 reducer → LastValue</code></pre>
+                <div class="walk">
+                    <div class="r"><code>two → three / two → four</code><span>扇出：<code>two</code> 之后 <code>three</code> 和 <code>four</code> 在<b>同一超步并行跑</b>。它们分别写不同字段（three 写 <code>relevant_rules</code>，four 写 <code>categorizations/responses/memory_docs</code>），所以不冲突。</span></div>
+                    <div class="r"><code>["three","four"] → five</code><span>扇入：<code>five</code> 用列表形式声明"等 three 和 four 都完成才触发"。这就是"同步屏障"（阶段5 讲 NamedBarrierValue）。</span></div>
+                    <div class="r"><code>不同字段不同 reducer</code><span>★这才是"多字段状态"的精髓：一个 State 里，<b>每个字段按自己的语义各配一种合并规则</b>——列表累加、字典合并、覆盖、默认覆盖，混搭自如。</span></div>
+                    <div class="r"><code>lambda x, y: y or x</code><span>一个务实的小 reducer："有新值 y 就用 y，否则保留旧值 x"。注意它恰好 2 个位置参数，满足 D07 <code>_is_field_binop</code> 的签名校验。</span></div>
                 </div>
-                <div class="example"><span class="t">📝 例子：老板分材料给实习生</span>
-                <code>state["items"]</code> 有 10 份材料。<code>fan_out</code> 返回 <code>[Send("worker", {"item": x}) for x in items]</code> → 10 个 Send。下一超步引擎<strong>同时起 10 个 worker 任务</strong>（各处理一份），全跑完后 10 份结果用 reducer（如 <code>operator.add</code>）汇进同一个通道。<strong>就像老板把 10 份材料分给 10 个实习生同时处理，收齐后钉成一摞——比一个人顺着处理 10 遍快一个数量级。</strong></div>
-                <div class="baby"><span class="t">Send = 运行时决定的"分身术"</span>
-                普通边在编译时就固定了（a→b）。<strong>但有时并发数量要运行时才知道</strong>——比如"把用户给的 N 个问题各查一遍"，N 是动态的。<code>Send</code> 让你在节点里<strong>返回一批 Send，引擎下一步就为每个 Send 起一个并行任务</strong>（都跑 worker 节点、各带各的数据）。这就是经典的 <strong>map（拆成 N 路并行）→ reduce（结果汇总进通道，用 reducer 合并）</strong>。<strong>Send 是 LangGraph 做"动态扇出"的唯一正道，比自己在节点里开线程干净得多。</strong></div>
+                <div class="example"><span class="t">📝 关键结论</span>在这张图里，<code>three</code> 和 <code>four</code> 并行，但它们写的是<strong>不同字段</strong>，所以哪怕都用 LastValue 也不冲突。<strong>只有当多个并行节点写同一字段时，才必须用累加通道。</strong>这是最容易被误解的点——"并行"本身不危险，"并行写同一个 LastValue 字段"才危险。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>重试与错误</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>边界：输出通道过滤 + 今日小结</h1></div>
             <div class="card">
-                <p>任务可配 <code>RetryPolicy</code>：节点抛异常时按策略重试（指数退避）。若最终失败，异常向上抛出中断整个执行——但因为<strong>上一超步的检查点已存</strong>（Day 08），修好后可从该检查点恢复，不用从头跑。</p>
-                <div class="anno">读法：<b>节点级重试（RetryPolicy）应对瞬时错误；超步级检查点应对彻底失败——从最近检查点恢复。</b>两层容错。<strong>这正是"持久执行"的价值：长流程中途挂了，不用推倒重来。</strong></div>
-            </div>
-        </section>
+                <p>多字段状态还牵涉"哪些字段算最终输出"。编译时 <code>output_channels</code> 会<strong>过滤掉托管值</strong>（<span class="fileref">graph/state.py:1256</span>）：</p>
+<pre><code class="language-python"># graph/state.py:1256
+        output_channels = (
+            "__root__"
+            if len(self.schemas[self.output_schema]) == 1
+            and "__root__" in self.schemas[self.output_schema]
+            else [
+                key
+                for key, val in self.schemas[self.output_schema].items()
+                if not is_managed_value(val)      # ★托管值不算对外输出
+            ]
+        )</code></pre>
+                <div class="anno">这里先埋个伏笔：输出到底包含哪些字段，由 <code>output_schema</code> 决定；而"托管值"这类框架内部字段会被排除。<b>D11 就专门讲输入/输出 schema 与私有中间字段</b>——今天先知道"不是所有字段都会出现在最终输出里"。</div>
+                <div class="pitfall"><span class="t">⚠️ 最常见的三个并行写误区</span>
+                ① <strong>"我节点里 return 了，就立刻生效"</strong>——错，本超步末尾才合并（L02）。② <strong>"并行节点写同名 LastValue 字段"</strong>——直接 <code>InvalidUpdateError</code>，要么别并行写它、要么加 reducer（L03）。③ <strong>"给并行字段用了顺序敏感的 reducer"</strong>——结果随执行顺序漂移、不可复现（D09 L07）。记住这三条，90% 的状态诡异问题能自查。</div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>并行写为什么在 LangGraph 里不产生竞态？（节点不改共享状态，写入先收集成列表，超步末尾由通道统一合并）</li>
+                        <li><code>update(values)</code> 的 values 是什么？（本超步该字段收到的所有写入）</li>
+                        <li>并行写同一个 LastValue 字段会怎样？为什么这么设计？（报 <code>InvalidUpdateError</code>；宁可响亮报错也不静默丢数据）</li>
+                        <li>怎么让一个字段支持并行写？（加 reducer，变成累加通道）</li>
+                        <li><code>_add_schema</code> 遇到同名字段通道类型冲突时，什么时候宽容、什么时候报错？（新的是 LastValue 就让路；两个都明确且不同则报错）</li>
+                        <li>"并行"本身危险吗？（不，"并行写同一 LastValue 字段"才危险；写不同字段无碍）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读并行冲突的两处 update 对照
+sed -n '56,67p' libs/langgraph/langgraph/channels/last_value.py
+sed -n '123,144p' libs/langgraph/langgraph/channels/binop.py
 
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>第 2 周收官 🎓</h1></div>
-            <div class="card highlight-card">
-                <h3>🧠 第 2 周（Pregel 引擎）你已掌握</h3>
-                <ul>
-                    <li><strong>Day 06</strong> Pregel/BSP 三阶段超步、快照隔离、版本号触发</li>
-                    <li><strong>Day 07</strong> Channels：LastValue/BinaryOperatorAggregate/Topic/NamedBarrierValue</li>
-                    <li><strong>Day 08</strong> 驱动循环：tick(Plan)→runner(Exec)→after_tick(Update+检查点)</li>
-                    <li><strong>Day 09</strong> 编译：状态键→通道、节点→PregelNode、边→写触发通道</li>
-                    <li><strong>Day 10</strong> 并行执行、Read/Write 解耦、Send 动态并发、两层容错</li>
-                </ul>
-                <p style="margin-top:10px;">你现在完全理解了 LangGraph 的执行引擎：<strong>为什么能并行且安全、为什么能存档恢复、边和状态底层到底是什么</strong>。第 3 周进入建立在"每步存检查点"之上的杀手级能力——持久化、时间旅行、人在环。</p>
-            </div>
-            <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
-ls $P/                     # _runner.py _read.py _loop.py _algo.py ...
-grep -n 'class PregelRunner' $P/_runner.py
-grep -n 'class ChannelRead\|class ChannelWrite' $P/_read.py</code></pre>
-                <div class="tip"><strong>明天预告 · Day 11（第3周开始）</strong>：<strong>Checkpoint 检查点</strong>——Day 08 那行"每步存检查点"存的到底是什么？读 <code>libs/checkpoint/</code> 的 Checkpoint 数据结构：channel_values、versions_seen、pending_writes。</div>
-            </div>
-            <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="langgraph-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 编译</a>
-                <a href="langgraph-day11.html" style="color:var(--accent-green);">Day 11 · Checkpoint 检查点 &rarr;</a>
+# 2. 读通道对齐逻辑
+sed -n '342,372p' libs/langgraph/langgraph/graph/state.py
+
+# 3. 读真实多字段并行图
+sed -n '249,297p' libs/langgraph/bench/pydantic_state.py</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 11</strong>：今天末尾提到 <code>output_schema</code> 会过滤字段。明天讲清楚输入 schema / 输出 schema / 状态 schema 三者的关系——怎么让图"只接收某些字段、只对外暴露某些字段"，中间那些"私有工作字段"怎么藏起来，以及托管值为什么禁止出现在输入输出里。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langgraph-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 累加通道</a>
+                    <a href="langgraph-day11.html" style="color:var(--accent-green);">Day 11 · 输入/输出 schema &rarr;</a>
+                </div>
             </div>
         </section>
     </main>

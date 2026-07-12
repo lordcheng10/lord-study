@@ -3,26 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 13 · 时间旅行与断点 — LangGraph 源码学习</title>
+    <title>Day 13 · 普通边 vs 条件边 — LangGraph 60 天源码课</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -31,6 +29,20 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fileref{display:inline-block;font-family:monospace;font-size:11px;background:rgba(139,92,246,.12);color:#c4b5fd;border:1px solid rgba(139,92,246,.3);border-radius:5px;padding:1px 7px;margin:0 2px}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -38,181 +50,304 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">13</div>
             <h2>Day 13</h2>
-            <p class="version">时间旅行与断点 · 8 讲</p>
+            <p class="version">普通边 vs 条件边 · 7 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 时间旅行</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 定位历史点</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 从历史点重跑</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · update_state 改写</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · fork 分叉</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 断点 interrupt_before</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 断点恢复</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 图为什么要"边"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · add_edge 走读</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 多入边 waiting_edges</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · add_conditional_edges</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · branches 存哪 & BranchSpec</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 三种边的控制流对比</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="langgraph-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 Saver</a></li>
-            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="langgraph-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 人在环 &rarr;</a></li>
+            <li><a href="langgraph-day12.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 12 Pydantic State</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day14.html" class="nav-link" style="color:var(--accent-green);">Day 14 Branch 源码 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 持久化与人在环</span>
-            <h1 class="part-title">时间旅行与断点</h1>
-            <p class="part-desc">既然每步都存了检查点、还能 list 出历史（Day 12），那就能"读档到任意一步重新出发"。今天看时间旅行（time travel）和执行断点（breakpoint）。</p>
+            <span class="part-label">Day 13 / 共 60 天 · 阶段3 控制流</span>
+            <h1 class="part-title">普通边 vs 条件边</h1>
+            <p class="part-desc">阶段 2 我们把"状态怎么存、怎么合并"讲透了。可一张图光有节点还不会动——<strong>边（edge）决定"下一步走谁"</strong>。今天开阶段 3 控制流：先分清两种边——写死的<strong>普通边 add_edge</strong> 和 跑时才决定的<strong>条件边 add_conditional_edges</strong>，并看它们在 <code>StateGraph</code> 里到底存进了哪个数据结构。</p>
         </div>
 
-        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
-        <div class="steps"><span class="st">Saver·threads</span><span class="sep">→</span><span class="st on">时间旅行</span><span class="sep">→</span><span class="st">人在环</span><span class="sep">→</span><span class="st">记忆·序列化</span></div></div>
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置（阶段3 · 控制流 D13-18）</div>
+        <div class="steps">
+            <span class="st">阶段2 状态收尾</span><span class="sep">→</span>
+            <span class="st on">D13 边</span><span class="sep">→</span>
+            <span class="st">D14 Branch</span><span class="sep">→</span>
+            <span class="st">D15 Command</span><span class="sep">→</span>
+            <span class="st">D16 Send</span><span class="sep">→</span>
+            <span class="st">D17 递归上限</span><span class="sep">→</span>
+            <span class="st">D18 START/END</span>
+        </div></div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天（地铁世界观，本阶段沿用）</span>
+        把图想成<strong>地铁网</strong>：节点是站台，边是轨道。<strong>普通边</strong>=固定轨道，A 站发车必到 B 站，写死了、不看乘客；<strong>条件边</strong>=一个<strong>道岔（扳道员）</strong>，列车到了岔口，扳道员看一眼"车上装的是什么货"（当前 state），临时决定拨去 X 线还是 Y 线。<strong>多入边</strong>=两条轨道并进一站，要等两趟车都到齐才发下一班（汇合等待）。记住"固定轨道 / 扳道员 / 汇合等待"这三样，今天全通。</div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>时间旅行是什么</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>图为什么非要有"边"？</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点：想调试"如果那步换个决定会怎样"</span>Agent 在第 3 步做了个糟糕决策，后面全跑歪了。普通程序你只能改代码、<strong>从头再跑一遍</strong>——但 LLM 有随机性，重跑未必复现同一场景。你真正想要的是：<strong>回到第 3 步那一刻、只改那一个决定、其余不变地往下看</strong>。</div>
-                <div class="essence"><span class="t">💡 本质：checkpoint 链让"回到过去 + 重放"成为可能</span>因为每步都存了完整快照、还靠 parents 串成链（Day 11），任意一个历史检查点都能被精确定位并加载。<strong>时间旅行 = 挑一个历史 checkpoint 当起点重新 tick</strong>；改写状态再重放就 fork 出一条"平行宇宙"，原历史不受影响。</div>
-                <p>时间旅行 = <strong>回到某个历史检查点，从那里重新执行</strong>（可选：改一下状态再重跑）。用途：调试、"如果当时选另一条路会怎样"、从错误决策点纠偏。</p>
-                <div class="baby"><span class="t">游戏读档 + 改档重打</span>
-                Day 11 说检查点像游戏存档。<strong>时间旅行就是"读取第 3 关的存档，重新从第 3 关打"——不是从头，也不是接着最新进度。</strong>更强的是：读档后你还能<strong>修改存档里的数据</strong>（比如给自己加满血）再重打（改写状态）。对 Agent 来说：LLM 在第 3 步做了个糟糕决策 → 回到第 3 步、手动改掉那个决策 → 让它从这里重新往下跑。<strong>这在传统"一次性跑完"的程序里根本做不到，是 LangGraph 检查点机制的独特红利。</strong></div>
+                <div class="ask"><span class="t">🤔 痛点：我有一堆节点函数，谁先跑、跑完去哪？</span>Day 03~12 我们会写节点了，可如果只有节点、没有边，引擎根本不知道<strong>执行顺序</strong>和<strong>分支逻辑</strong>。真实 Agent 里到处是"如果工具调用成功就去汇总、失败就重试""置信度不够就打回专家再查一遍"——这些"下一步走谁"的判断，必须有地方描述。</div>
+                <div class="essence"><span class="t">💡 本质：边 = 把节点之间的"跳转关系"声明成数据</span>LangGraph 不让你在节点函数里写 <code>if ...: goto B</code>（那样跳转逻辑散落各处、没法画图、没法校验）。而是让你<strong>在建图阶段把跳转关系登记进 builder 的几个集合/字典里</strong>，编译时统一编译成 Pregel 的触发通道。这样跳转关系是"可检视的数据"，能画流程图、能静态校验"有没有孤儿节点"。</div>
+                <p>LangGraph 提供三类"连线"能力，今天全部覆盖：</p>
+                <table class="ttable">
+                    <thead><tr><th>API</th><th>决定下一步的时机</th><th>典型用途</th><th>存进哪</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>add_edge(A, B)</code></td><td><strong>建图时写死</strong></td><td>A 完了固定去 B</td><td><code>self.edges</code>（集合）</td></tr>
+                        <tr><td><code>add_edge([A,B], C)</code></td><td>写死 + <strong>汇合等待</strong></td><td>A、B 都完了才去 C</td><td><code>self.waiting_edges</code></td></tr>
+                        <tr><td><code>add_conditional_edges(A, fn)</code></td><td><strong>运行时算</strong></td><td>看 state 决定去 X/Y/END</td><td><code>self.branches</code>（字典）</td></tr>
+                    </tbody>
+                </table>
+                <div class="anno">说明：这三者<b>不是互斥</b>的——同一个节点可以既有普通出边、又挂条件边。它们最终都会在 <code>compile()</code> 时统一转成 Pregel 节点的"触发订阅关系"（阶段 4 会拆）。今天先看"建图时它们各自被存到哪、怎么存"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>定位历史点</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>add_edge：最简单的固定轨道</h1></div>
             <div class="card">
-                <p>用 Day 12 的 <code>get_state_history</code> 列出所有历史检查点，每个 <code>StateSnapshot</code>（<code>langgraph/types.py</code> <code>class StateSnapshot</code> L643）的 <code>config</code> 里带一个 <code>checkpoint_id</code>——这就是"存档编号"：</p>
-                <div class="svgbox">
-                <svg viewBox="0 0 600 200" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
-                    <text x="10" y="18" fill="#bbb" font-size="12">原时间线：ckpt0 → ckpt1 → ckpt2 → ckpt3（最新）</text>
-                    <!-- 原链 -->
-                    <g>
-                    <rect x="20" y="35" width="56" height="30" rx="7" fill="#2a2a3a" stroke="#6366f1"/><text x="48" y="55" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt0</text>
-                    <rect x="130" y="35" width="56" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/><text x="158" y="55" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt1</text>
-                    <rect x="240" y="35" width="56" height="30" rx="7" fill="#2a2a3a" stroke="#6366f1"/><text x="268" y="55" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt2</text>
-                    <rect x="350" y="35" width="56" height="30" rx="7" fill="#2a2a3a" stroke="#6366f1"/><text x="378" y="55" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt3</text>
-                    <line x1="76" y1="50" x2="130" y2="50" stroke="#6366f1" stroke-width="1.5"/>
-                    <line x1="186" y1="50" x2="240" y2="50" stroke="#6366f1" stroke-width="1.5"/>
-                    <line x1="296" y1="50" x2="350" y2="50" stroke="#6366f1" stroke-width="1.5"/>
-                    </g>
-                    <text x="158" y="82" fill="#34d399" font-size="10" text-anchor="middle">↓ 选 ckpt1 回到过去</text>
-                    <!-- update_state 后 fork -->
-                    <line x1="158" y1="65" x2="158" y2="120" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4 3"/>
-                    <rect x="130" y="120" width="70" height="32" rx="7" fill="#2a2a3a" stroke="#34d399"/><text x="165" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">改写状态</text>
-                    <line x1="200" y1="136" x2="250" y2="136" stroke="#34d399" stroke-width="1.5"/>
-                    <rect x="250" y="120" width="70" height="32" rx="7" fill="#2a2a3a" stroke="#34d399"/><text x="285" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt2'（分叉）</text>
-                    <text x="360" y="140" fill="#f59e0b" font-size="10">新分支，原链保留</text>
-                    <text x="10" y="188" fill="#bbb" font-size="11">parents 指回 ckpt1 → 同一 thread 里出现平行宇宙</text>
-                </svg>
-                <div class="cap">回到 ckpt1、改写、再重放 → fork 出一条不影响原历史的新分支</div>
+                <p>先看普通边。源码在 <span class="fileref">graph/state.py:915</span>，这里裁掉文档字符串看核心：</p>
+<pre><code class="language-python"># graph/state.py:915
+def add_edge(self, start_key: str | list[str], end_key: str) -> Self:
+    if self.compiled:
+        logger.warning("Adding an edge to a graph that has already been compiled. ...")
+
+    if isinstance(start_key, str):                       # 单个起点
+        if start_key == END:
+            raise ValueError("END cannot be a start node")     # ← 边界①
+        if end_key == START:
+            raise ValueError("START cannot be an end node")     # ← 边界②
+        # 只对非 StateGraph 生效的一条老校验（这里略）
+        self.edges.add((start_key, end_key))             # ← 核心：存进 set
+        return self
+    # ...（start_key 是 list 的情况见 L03）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self.compiled 警告</code><span>图一旦 <code>compile()</code> 过，再加边<b>不会生效</b>。它不报错、只 warning——避免你以为改了其实没改。这是"编译快照"式设计：编译那一刻把 builder 冻结成运行时对象。</span></div>
+                    <div class="r"><code>start_key == END</code><span><b>边界①</b>：<code>END</code> 是"终点虚拟节点"，不能当起点——从终点还往外发车没有意义。</span></div>
+                    <div class="r"><code>end_key == START</code><span><b>边界②</b>：<code>START</code> 是"起点虚拟节点"，不能当别人的终点——没人能"回到起点之前"。</span></div>
+                    <div class="r"><code>self.edges.add((start,end))</code><span>核心就一行：把 <code>(起点, 终点)</code> 这个二元组塞进一个 <b>set</b>。<code>edges</code> 的类型在 <span class="fileref">state.py:201</span> 声明为 <code>set[tuple[str, str]]</code>。</span></div>
                 </div>
-<pre><code class="language-python">history = list(graph.get_state_history(cfg))   # 新→旧
-target = history[3]        # 想回到的那一步
-target_cfg = target.config # {"configurable": {"thread_id":..., "checkpoint_id":"xxx"}}</code></pre>
-                <div class="anno">读法：<b>每个历史检查点都有唯一 <code>checkpoint_id</code>；带着它的 config 就是"指向那一步的地址"。</b>Day 11 说过 checkpoint_id 单调递增可排序，所以历史是有序时间线。</div>
+                <div class="example"><span class="t">📝 真实值</span>
+                <code>builder.add_edge("retrieve", "generate")</code> 执行后，<code>self.edges</code> = <code>{("retrieve","generate")}</code>。再来一句 <code>add_edge(START,"retrieve")</code>，就变成 <code>{("retrieve","generate"), ("__start__","retrieve")}</code>——注意 <code>START</code> 的真身是字符串 <code>"__start__"</code>（Day 18 细讲）。</div>
+                <div class="tradeoff"><span class="t">💐 设计取舍①：边为什么用 <code>set</code> 而不是 <code>list</code>？</span>
+                因为边是<strong>无序且不该重复</strong>的关系。用 <code>set</code>：① 重复 <code>add_edge("a","b")</code> 两次自动去重，不会出现两条一模一样的轨道；② 成员判断 O(1)，编译时校验"这条边在不在"很快；③ 语义上"边的集合"本就是数学里的集合。代价是<strong>丢失插入顺序</strong>——但边本来就不该依赖声明顺序执行（顺序由 state 依赖决定，不由你写代码的先后决定），所以这个代价正好不痛。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>从历史点重跑</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>多入边：waiting_edges 与"汇合等待"</h1></div>
             <div class="card">
-                <p>把带 <code>checkpoint_id</code> 的 config 传给 invoke，图就从那一步的状态继续（而不是从最新）：</p>
-<pre><code class="language-python">graph.invoke(None, target_cfg)   # input=None：不给新输入，纯从该检查点续跑</code></pre>
-                <div class="anno">读法：<b>invoke 时 config 带了 checkpoint_id → 恢复阶段（Day 11 L07）加载的是<strong>那一个</strong>检查点而非最新 → 从那步的下一步开始跑。</b>input 传 None 表示"不加新输入，就从存档点继续"。</div>
-                <div class="baby"><span class="t">🎮 第一人称之旅：假如"你"是一次被时间旅行的运行</span>
-                ① 我本来一路跑到了 ckpt3（最新），停在那儿。<br>
-                ② 主人翻出历史，说"回到 ckpt1 那一刻"——他拿着我 ckpt1 的存档编号（checkpoint_id）叫 <code>invoke(None, 那个config)</code>。<br>
-                ③ 引擎<b>没读最新的 ckpt3</b>，而是把 ckpt1 的整份状态灌回我身上——我瞬间"失忆"回到第 1 关刚打完的样子。<br>
-                ④ 然后我从 ckpt1 的<b>下一步</b>重新往下跑。<b>就像生活中读取旧存档重打这一关</b>——ckpt3 那条线还在硬盘上，没被我抹掉。</div>
+                <p><code>add_edge</code> 的第一个参数还能是<strong>一个列表</strong>——表示"这些节点<strong>全部</strong>完成后，才执行终点"。看 <span class="fileref">graph/state.py:956</span>：</p>
+<pre><code class="language-python"># graph/state.py:956
+for start in start_key:                        # start_key 是 list
+    if start == END:
+        raise ValueError("END cannot be a start node")
+    if start not in self.nodes:
+        raise ValueError(f"Need to add_node `{start}` first")   # ← 边界：节点得先存在
+if end_key == START:
+    raise ValueError("START cannot be an end node")
+if end_key != END and end_key not in self.nodes:
+    raise ValueError(f"Need to add_node `{end_key}` first")
+
+self.waiting_edges.add((tuple(start_key), end_key))     # ← 存进另一个 set</code></pre>
+                <div class="walk">
+                    <div class="r"><code>start not in self.nodes</code><span>多入边校验更严：每个起点<b>必须已经 add_node</b>。为什么单起点那版不强制？因为单边常用来接 <code>START</code>（虚拟节点、不在 nodes 里），列表版则明确是"真实节点汇合"。</span></div>
+                    <div class="r"><code>tuple(start_key)</code><span>把起点列表转成<b>元组</b>再存——因为要放进 <code>set</code>，而 <code>set</code> 的元素必须可哈希，<code>list</code> 不可哈希、<code>tuple</code> 可以。一个很典型的"可哈希化"技巧。</span></div>
+                    <div class="r"><code>self.waiting_edges</code><span>和普通 <code>edges</code> <b>分开存</b>：普通边是"或"关系（任一上游好了就能触发下游？不——普通边是一对一），而 waiting_edges 是"与"关系（全部上游完成才触发）。语义不同，所以两个容器。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 190" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="280" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：普通边 vs 多入边（汇合等待）</text>
+                        <!-- normal edge -->
+                        <rect x="30" y="45" width="70" height="30" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="65" y="64" fill="#c7d2fe" text-anchor="middle">A</text>
+                        <rect x="160" y="45" width="70" height="30" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="195" y="64" fill="#c7d2fe" text-anchor="middle">B</text>
+                        <path d="M100 60 L158 60" stroke="#6366f1" stroke-width="1.6" marker-end="url(#a13)"/>
+                        <text x="130" y="98" fill="#94a3b8" text-anchor="middle">普通边：A 完立刻发 B</text>
+                        <!-- waiting edge -->
+                        <rect x="320" y="30" width="70" height="28" rx="6" fill="rgba(34,197,94,.12)" stroke="#22c55e"/><text x="355" y="48" fill="#86efac" text-anchor="middle">X</text>
+                        <rect x="320" y="72" width="70" height="28" rx="6" fill="rgba(34,197,94,.12)" stroke="#22c55e"/><text x="355" y="90" fill="#86efac" text-anchor="middle">Y</text>
+                        <rect x="470" y="51" width="70" height="30" rx="6" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/><text x="505" y="70" fill="#fbbf24" text-anchor="middle">Z</text>
+                        <path d="M390 44 L468 62" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a13g)"/>
+                        <path d="M390 86 L468 70" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a13g)"/>
+                        <text x="430" y="130" fill="#94a3b8" text-anchor="middle">多入边 [X,Y]→Z：X 和 Y 都完，才发 Z</text>
+                        <text x="430" y="148" fill="#f87171" text-anchor="middle">少一个没到 → Z 一直等（barrier）</text>
+                        <defs>
+                            <marker id="a13" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#6366f1"/></marker>
+                            <marker id="a13g" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：普通边是"点到点直达"；多入边是"汇合屏障"，等齐所有上游才放行——底层靠 Day 32 的 NamedBarrierValue 通道实现。</div>
+                </div>
+                <div class="pitfall"><span class="t">🚫 坑：多入边不是"任一到就走"，是"全部到才走"</span>新手常把 <code>add_edge(["a","b"], "c")</code> 误当成"a 或 b 完成就去 c"。实际是<strong>与（AND）语义</strong>：只要 <code>b</code> 这一路没被触发（比如条件边没选中它），<code>c</code> 会<strong>永远等下去</strong>，表现为"图卡住不动"。要"任一到就走"，得用普通边分别连、或用条件边。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>update_state 改写状态</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>add_conditional_edges：运行时才决定的扳道员</h1></div>
             <div class="card">
-                <p><code>update_state</code>（<code>main.py</code>）在恢复前手动修改状态——本质是<strong>写一个 source="update" 的新检查点</strong>（Day 11 metadata）：</p>
-<pre><code class="language-python">graph.update_state(target_cfg, {"messages": [AIMessage("改后的决策")]})
-# 走的是 reducer！所以 add_messages 是追加，不是覆盖（Day 03）
-graph.invoke(None, new_cfg)   # 从改写后的状态继续</code></pre>
-                <div class="baby"><span class="t">改写也走 reducer（重要细节）</span>
-                <code>update_state</code> 提供的更新<strong>不是简单粗暴地覆盖</strong>，而是像节点返回值一样<strong>经过 apply_writes → reducer 合并</strong>（Day 08）。所以对 messages（用 add_messages）来说，update_state 是<strong>追加</strong>一条，不是替换整个历史。<strong>要理解这点才不会踩坑：想替换就得用支持覆盖的 reducer 或专门手段。</strong>这保证了手动改写和正常执行的语义一致。</div>
+                <p>条件边是控制流的灵魂。源码 <span class="fileref">graph/state.py:969</span>，核心逻辑其实只有最后几行：</p>
+<pre><code class="language-python"># graph/state.py:969
+def add_conditional_edges(self, source: str, path, path_map=None) -> Self:
+    if self.compiled:
+        logger.warning("Adding an edge to a graph that has already been compiled. ...")
+
+    # find a name for the condition
+    path = coerce_to_runnable(path, name=None, trace=True)     # ① 把普通函数包成 Runnable
+    name = path.name or "condition"                            # ② 给这条分支起个名
+    if name in self.branches[source]:                          # ③ 同名分支不能重复挂
+        raise ValueError(
+            f"Branch with name `{path.name}` already exists for node `{source}`"
+        )
+    self.branches[source][name] = BranchSpec.from_path(path, path_map, True)  # ④ 存！
+    if schema := self.branches[source][name].input_schema:     # ⑤ 顺手登记推断出的输入 schema
+        self._add_schema(schema)
+    return self</code></pre>
+                <div class="walk">
+                    <div class="r"><code>coerce_to_runnable(path)</code><span>你传进来的 <code>path</code> 可能是普通函数、lambda、也可能已是 Runnable。这里统一"强制转成 Runnable"，后面就能一视同仁地 <code>.invoke()</code> 它。<b>归一化</b>是框架内部反复出现的手法。</span></div>
+                    <div class="r"><code>name = path.name or "condition"</code><span>每条分支要有名字，默认取函数名，取不到就叫 <code>"condition"</code>。名字用来<b>防重复</b>和<b>画图标注</b>。</span></div>
+                    <div class="r"><code>if name in self.branches[source]</code><span><b>边界</b>：同一个源节点挂两条<b>同名</b>条件边会报错。因为 <code>branches[source]</code> 是以名字为 key 的字典，同名会互相覆盖——干脆早失败。想挂多条，函数得起不同名字。</span></div>
+                    <div class="r"><code>BranchSpec.from_path(path, path_map, True)</code><span>把"路由函数 + 路径映射表"打包成一个 <b>BranchSpec</b>（Day 14 主角）。第三个参数 <code>True</code> = 要顺便推断输入 schema。</span></div>
+                    <div class="r"><code>self._add_schema(schema)</code><span>如果路由函数标注了它想读哪种状态，就把这个 schema 也登记进图——保证路由函数拿得到它声明的字段。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：条件边存的是"一个会算下一步的函数"，不是"一条固定线"</span>普通边存的是死数据 <code>("a","b")</code>；条件边存的是<strong>一段可执行逻辑</strong>（<code>path</code> 函数）+ 一张<strong>返回值→节点名的翻译表</strong>（<code>path_map</code>）。运行到 <code>source</code> 时，引擎调用 <code>path(state)</code>，拿返回值去表里查该去哪个节点。这就是"运行时决定"的由来。</div>
+                <div class="example"><span class="t">📝 真实值：一个典型条件边</span>
+<pre style="margin:6px 0"><code class="language-python">def route(state) -> str:
+    return "tools" if state["messages"][-1].tool_calls else "end"
+
+builder.add_conditional_edges("agent", route, {"tools": "tools", "end": END})</code></pre>
+                执行后 <code>self.branches["agent"]["route"]</code> = 一个 <code>BranchSpec</code>，其 <code>ends = {"tools":"tools", "end":"__end__"}</code>。运行时若模型这轮发起了工具调用，<code>route</code> 返回 <code>"tools"</code>，查表得去 <code>tools</code> 节点；否则返回 <code>"end"</code>，查表得去 <code>__end__</code> 结束。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>fork 分叉</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>branches 存哪 & BranchSpec 长啥样</h1></div>
             <div class="card">
-                <p>从历史检查点 update_state 会产生一个<strong>新分支</strong>：原时间线保留，新检查点的 <code>parents</code> 指向那个历史点。于是同一 thread 下可以有多条"平行宇宙"。</p>
-                <div class="example"><span class="t">📝 例子：把整套时间旅行串起来跑一遍</span>
-<pre><code class="language-python">cfg = {"configurable": {"thread_id": "debug-1"}}
-graph.invoke(input, cfg)                       # 正常跑完，留下一串检查点
-
-hist = list(graph.get_state_history(cfg))      # 列出历史（新→旧）
-bad  = hist[3]                                 # 定位到"决策变糟"那一步
-
-# 从那一步改写决策 → fork 出新分支（不动原历史）
-forked_cfg = graph.update_state(bad.config,
-                {"messages": [AIMessage("换个更好的决策")]})
-graph.invoke(None, forked_cfg)                 # 从分叉点继续，看新结果
-# 原 hist[3] 那条线依然在，可随时对比两条宇宙</code></pre></div>
-                <div class="ask"><span class="t">💬 小白 vs 老师：回到过去改一下，会不会把"未来"删掉？</span>
-                👶 <b>小白</b>：我回到 ckpt1 改了决策，那原来 ckpt2、ckpt3 是不是就没了？<br>
-                👨‍🏫 <b>老师</b>：不会！<b>时间旅行不销毁历史</b>。改写会新生成一份 ckpt2'，它的 parents 指向 ckpt1，于是<b>分叉</b>出一条新线；原来的 ckpt2→ckpt3 那条线原封不动还在。<b>就像生活中的游戏——读旧档改个选择重打，会开出一条新剧情线，但老存档并没被覆盖，你随时能切回去对比两个结局。</b></div>
-                <div class="anno">读法：<b>时间旅行不销毁历史——从旧点出发会 fork 出新分支（Day 11 的 parents 链记录父子关系）。</b>可以对比"原路线"和"改写后路线"的不同结果。适合 A/B 探索、Agent 决策对比。</div>
-                <div class="anno">⚠️ <b>常见误解</b>：小白常以为 update_state 是"覆盖式改状态"。其实它<b>走 reducer</b>（Day 08）——对 messages 这种用 add_messages 的字段是<b>追加</b>而非替换（Day 04 已强调过一次，这里再踩一遍坑）。</div>
+                <p>条件边不像普通边塞进一个扁平 set，而是存进一个<strong>两层字典</strong>。声明在 <span class="fileref">graph/state.py:203</span>：</p>
+<pre><code class="language-python"># graph/state.py:201-203
+edges: set[tuple[str, str]]                       # 普通边：扁平集合
+nodes: dict[str, StateNodeSpec[Any, ContextT]]
+branches: defaultdict[str, dict[str, BranchSpec]] # 条件边：源节点 → {分支名 → BranchSpec}</code></pre>
+                <div class="walk">
+                    <div class="r"><code>defaultdict[str, dict]</code><span>外层 key 是<b>源节点名</b>，value 是"该节点上所有分支"的字典。用 <code>defaultdict</code> 是为了 <code>self.branches[source][name]=...</code> 时，即使 <code>source</code> 从没出现过也不用先手动建空字典——第一次访问自动生成，代码干净。</span></div>
+                    <div class="r"><code>内层 dict[str, BranchSpec]</code><span>一个源节点可以挂<b>多条</b>条件边（不同名字），所以内层还是字典。</span></div>
+                </div>
+                <p>再看被存进去的 <code>BranchSpec</code> 本体，它是个 <code>NamedTuple</code>，<span class="fileref">graph/_branch.py:83</span>：</p>
+<pre><code class="language-python"># graph/_branch.py:83
+class BranchSpec(NamedTuple):
+    path: Runnable[Any, Hashable | list[Hashable]]   # 路由函数（已归一成 Runnable）
+    ends: dict[Hashable, str] | None                 # 返回值 → 目标节点名 的翻译表
+    input_schema: type[Any] | None = None            # 路由函数想读的状态 schema</code></pre>
+                <div class="walk">
+                    <div class="r"><code>path</code><span>那段"算下一步走谁"的可执行逻辑。</span></div>
+                    <div class="r"><code>ends</code><span>翻译表。你传的 <code>path_map={"tools":"tools","end":END}</code> 会被规整进这里；不传的话它可能是 <code>None</code>（那时 <code>path</code> 必须直接返回真实节点名，见 Day 14）。</span></div>
+                    <div class="r"><code>input_schema</code><span>从路由函数的类型标注推断出来的输入类型，可空。它让路由函数能声明"我只关心状态里这几个字段"。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 210" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="280" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：三种边分别落进 builder 的三个容器</text>
+                        <rect x="20" y="34" width="160" height="70" rx="8" fill="rgba(99,102,241,.08)" stroke="#6366f1"/>
+                        <text x="100" y="52" fill="#c7d2fe" text-anchor="middle" font-weight="700">self.edges</text>
+                        <text x="100" y="70" fill="#94a3b8" text-anchor="middle" font-size="10">set[tuple[str,str]]</text>
+                        <text x="100" y="88" fill="#cbd5e1" text-anchor="middle" font-size="10">{("a","b"),("__start__","a")}</text>
+                        <rect x="200" y="34" width="160" height="70" rx="8" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="280" y="52" fill="#86efac" text-anchor="middle" font-weight="700">self.waiting_edges</text>
+                        <text x="280" y="70" fill="#94a3b8" text-anchor="middle" font-size="10">set[tuple[tuple,str]]</text>
+                        <text x="280" y="88" fill="#cbd5e1" text-anchor="middle" font-size="10">{(("x","y"),"z")}</text>
+                        <rect x="380" y="34" width="160" height="70" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="460" y="52" fill="#fbbf24" text-anchor="middle" font-weight="700">self.branches</text>
+                        <text x="460" y="70" fill="#94a3b8" text-anchor="middle" font-size="10">dict[src, dict[name, spec]]</text>
+                        <text x="460" y="88" fill="#cbd5e1" text-anchor="middle" font-size="10">{"agent":{"route":Spec}}</text>
+                        <rect x="330" y="135" width="230" height="60" rx="8" fill="var(--bg-card,#1e293b)" stroke="#f59e0b"/>
+                        <text x="445" y="153" fill="#fbbf24" text-anchor="middle" font-weight="700">BranchSpec</text>
+                        <text x="445" y="170" fill="#cbd5e1" text-anchor="middle" font-size="10">path=route  ends={"tools":"tools",...}</text>
+                        <text x="445" y="185" fill="#cbd5e1" text-anchor="middle" font-size="10">input_schema=None</text>
+                        <path d="M460 104 L445 133" stroke="#f59e0b" stroke-width="1.3" marker-end="url(#a13o)"/>
+                        <text x="150" y="160" fill="#94a3b8" text-anchor="middle" font-size="11">编译时（Day 19+）</text>
+                        <text x="150" y="178" fill="#94a3b8" text-anchor="middle" font-size="11">三者统一转成 Pregel</text>
+                        <text x="150" y="196" fill="#94a3b8" text-anchor="middle" font-size="11">节点的触发订阅关系</text>
+                        <defs><marker id="a13o" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#f59e0b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：建图阶段三种边各自落进独立容器；真正"变成能跑的跳转"是在 <code>compile()</code>（阶段 4 Pregel）。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💐 设计取舍②：为什么条件边要独立成 branches，而不塞进 edges？</span>
+                因为二者<strong>信息量根本不同</strong>。普通边只需存"从哪到哪"两个字符串；条件边要存<strong>一个函数 + 一张映射表 + 一个 schema</strong>，是个复合对象。硬塞进 <code>set[tuple]</code> 表达不了。分开存还有个好处：编译和画图时能分别处理——普通边画实线箭头，条件边画虚线菱形岔口。用一个统一容器反而会让两种截然不同的语义纠缠不清。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>断点 interrupt_before / after</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>三种边的控制流全景对比</h1></div>
             <div class="card">
-                <p>编译时可设静态断点，让图在某节点<strong>前/后暂停</strong>（Day 08 tick 里的 interrupt 检查）：</p>
-<pre><code class="language-python">graph = builder.compile(
-    checkpointer=InMemorySaver(),
-    interrupt_before=["tools"],   # 执行 tools 节点前暂停
-)
-graph.invoke(input, cfg)   # 跑到 tools 前停下、返回；状态已存检查点</code></pre>
-                <div class="baby"><span class="t">断点 = 让程序在指定地方"停下等你"</span>
-                和调试器打断点一个意思：<strong>图跑到 tools 节点前会自动暂停、把控制权交还给你</strong>（invoke 返回，此刻状态已存进检查点）。你可以检查状态、审批、甚至 update_state 改点东西，再让它继续。<strong>最经典的用途：工具调用前让人类审批（"AI 要执行删库操作，批准吗？"）。</strong>断点靠的还是检查点机制——能停能存能续，全是一套东西。</div>
+                <p>把今天三种连线放一起，从"何时决定、几个下游、等不等"三个维度对照：</p>
+                <table class="ttable">
+                    <thead><tr><th>维度</th><th>add_edge 单</th><th>add_edge 列表</th><th>add_conditional_edges</th></tr></thead>
+                    <tbody>
+                        <tr><td>下一步谁决定</td><td>建图写死</td><td>建图写死</td><td>运行时函数算</td></tr>
+                        <tr><td>下游数量</td><td>1 个</td><td>1 个</td><td>1 或多个（可扇出）</td></tr>
+                        <tr><td>是否等待</td><td>否</td><td><strong>是，等齐全部上游</strong></td><td>否（各自触发）</td></tr>
+                        <tr><td>能去 END 吗</td><td>能</td><td>能</td><td>能（返回值映射到 END）</td></tr>
+                        <tr><td>存储容器</td><td><code>edges</code></td><td><code>waiting_edges</code></td><td><code>branches</code></td></tr>
+                    </tbody>
+                </table>
+                <div class="qa">
+                    <p class="q">👶 小白：既然条件边最灵活，那我全用条件边不就行了？</p>
+                    <p class="a">👨‍🏫 老师：不建议。① <strong>可读性</strong>：固定顺序用普通边，一眼看懂"A→B→C"；全写成条件边，读者得去读每个路由函数才知道流程，图退化成"随便跳"。② <strong>可视化</strong>：普通边能画确定的实线；条件边没有类型标注时（Day 14 会讲），画图工具只能画"可能去任意节点"的乱麻。③ <strong>校验</strong>：普通边能静态查孤儿节点，条件边的目标是运行时才知道的。<strong>原则：能写死就写死，只在真需要"看数据分流"时才用条件边。</strong></p>
+                </div>
+                <div class="example"><span class="t">📝 真实值：一个 ReAct 图同时用到三种</span>
+<pre style="margin:6px 0"><code class="language-python">builder.add_edge(START, "agent")                       # 固定入口（普通边）
+builder.add_conditional_edges("agent", route, {          # 看有没有工具调用（条件边）
+    "tools": "tools", "end": END,
+})
+builder.add_edge("tools", "agent")                       # 工具跑完固定回 agent（普通边）</code></pre>
+                这就是最经典的 ReAct 循环骨架：固定进 <code>agent</code>；<code>agent</code> 用条件边决定"还要调工具 or 收工"；工具跑完固定回 <code>agent</code> 再想。<strong>循环</strong>正是靠 <code>tools→agent</code> 这条回边形成的（Day 17 会讲怎么防它转成死循环）。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>断点恢复</h1></div>
-            <div class="card">
-                <p>暂停后，再次 <code>invoke(None, cfg)</code> 即从断点继续（可先 update_state 改状态）：</p>
-<pre><code class="language-python">state = graph.get_state(cfg)          # 看看停在哪、state.next 是啥
-# ...（人类审批 / 修改）...
-graph.invoke(None, cfg)               # 继续执行</code></pre>
-                <div class="anno">读法：<b>断点暂停 → 检查/干预 → invoke(None) 续跑，是"人在环"的静态版本。</b>Day 14 讲的 <code>interrupt()</code> 是更灵活的<strong>动态</strong>版本（在节点内部任意位置暂停并向人类要输入）。二者都建立在检查点之上。</div>
-            </div>
-        </section>
-
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 + 明日预告</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>时间旅行是什么？靠什么实现？</li>
-                    <li>怎么定位到某个历史检查点？（checkpoint_id）</li>
-                    <li>update_state 为什么"走 reducer"很重要？</li>
-                    <li>从历史点改写会 fork 出什么？</li>
-                    <li>interrupt_before/after 怎么用？和 Day 14 的动态 interrupt 区别？</li>
+                    <li>为什么跳转逻辑不写在节点里，而要登记成"边数据"？（可检视、可画图、可静态校验）</li>
+                    <li>三种边分别存进哪个容器？（<code>edges</code> / <code>waiting_edges</code> / <code>branches</code>）</li>
+                    <li>普通边为什么用 <code>set</code>？（无序、去重、O(1) 判断，且边不该依赖声明顺序）</li>
+                    <li>多入边是"或"还是"与"语义？（与：等齐所有上游才发；少一路就永远卡住）</li>
+                    <li><code>add_conditional_edges</code> 核心做了什么？（归一化 path→BranchSpec，按 <code>branches[源][名]</code> 存）</li>
+                    <li>BranchSpec 三个字段？（<code>path</code> 路由函数 / <code>ends</code> 翻译表 / <code>input_schema</code>）</li>
                 </ul>
-                <div class="baby"><span class="t">🎯 一句话复述 + 记忆口诀</span>
-                一句话：<b>时间旅行就像生活中读旧游戏存档——挑一个历史检查点重新开打，改个决定还能分叉出平行剧情，老线不丢。</b><br>
-                口诀：<b>"历史列一串，编号定一点；带 id 再 invoke，改写就分叉。"</b></div>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=libs/langgraph/langgraph/pregel
-grep -n 'def get_state_history\|def update_state\|interrupt_before' $P/main.py | head</code></pre>
-                <div class="tip"><strong>明天预告 · Day 14</strong>：<strong>人在环（Human-in-the-loop）</strong>——动态 <code>interrupt()</code> 怎么在节点内部暂停、向人类要输入，<code>Command(resume=...)</code> 怎么把人的回答送回去继续。这是 Agent 落地最关键的能力之一。</div>
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 add_edge 与 add_conditional_edges 全文
+sed -n '915,1017p' libs/langgraph/langgraph/graph/state.py
+
+# 2. 看三个容器的类型声明
+sed -n '200,210p' libs/langgraph/langgraph/graph/state.py
+
+# 3. 看 BranchSpec 定义
+sed -n '83,120p' libs/langgraph/langgraph/graph/_branch.py
+
+# 4. 亲手建个带三种边的小图，打印它的容器
+python - <<'PY'
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+class S(TypedDict): x: int
+g = StateGraph(S)
+g.add_node("a", lambda s: s); g.add_node("b", lambda s: s)
+g.add_edge(START, "a")
+g.add_conditional_edges("a", lambda s: "b" if s["x"]>0 else "end", {"b":"b","end":END})
+print("edges:", g.edges)
+print("branches:", dict(g.branches))
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：今天我们只看到条件边被存成 <code>BranchSpec</code>，还没看它<strong>运行时到底怎么把返回值变成"写哪个通道"</strong>。Day 14 钻进 <code>_branch.py</code> 的 <code>run / _route / _finish</code>，逐行看扳道员如何工作、如何做类型推断、如何处理"返回列表就一次扇出多个下游"。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="langgraph-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 Saver</a>
-                <a href="langgraph-day14.html" style="color:var(--accent-green);">Day 14 · 人在环 &rarr;</a>
+                <a href="langgraph-day12.html" style="color:var(--accent-cyan);">&larr; Day 12 Pydantic State</a>
+                <a href="langgraph-day14.html" style="color:var(--accent-green);">Day 14 · Branch 路由源码 &rarr;</a>
             </div>
         </section>
     </main>
