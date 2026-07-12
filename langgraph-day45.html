@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 45 · durability 模式 sync/async/exit — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">45</div>
+            <h2>Day 45</h2>
+            <p class="version">durability 模式 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 落盘的代价</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 三档定义</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 默认与传参</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · do_checkpoint 闸门</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · exit 模式退出才存</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · sync/async 的差别</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 选型 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day44.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 44 时间旅行</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day46.html" class="nav-link" style="color:var(--accent-green);">Day 46 replay 与幂等 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 45 / 共 60 天 · 阶段 7 中断与人在环</span>
+            <h1 class="part-title">durability：写得多勤、写得多稳，你自己拍板</h1>
+            <p class="part-desc">中断、恢复、时间旅行全靠"每步落盘"。但落盘不是免费的——每个超步都往数据库写一次，慢且贵。<code>durability</code> 给你三档旋钮：<code>"sync"</code>（每步同步写完再走，最稳最慢）、<code>"async"</code>（边写边跑，默认，平衡）、<code>"exit"</code>（只在图结束时写一次，最快最省但中途崩了没档）。今天看这三档在主循环里到底改变了什么。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 7 · 中断与人在环（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D41 interrupt原理</span><span class="sep">→</span>
+                <span class="st">D42 Command恢复</span><span class="sep">→</span>
+                <span class="st">D43 静态断点</span><span class="sep">→</span>
+                <span class="st">D44 时间旅行</span><span class="sep">→</span>
+                <span class="st on">D45 durability</span><span class="sep">→</span>
+                <span class="st">D46 replay幂等</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：每步都写数据库，慢在哪、值不值</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>我的图有 20 个超步，用 PostgresSaver。开着 checkpoint 后明显变慢——每个超步结束都要往 Postgres 写一次（序列化、网络往返、事务提交）。可我这个图<strong>不需要中断、也不做时间旅行</strong>，只是想要"万一崩了能恢复"。为了这点保险，20 次数据库写值得吗？能不能少写点？</div>
+                <div class="essence"><span class="t">💡 本质：持久化频率是一个可调的"安全 vs 性能"旋钮</span>落盘越勤 → 崩溃时丢的进度越少（安全），但写得越多（慢）。落盘越懒 → 越快，但崩了丢得越多。LangGraph 把这个权衡交给你，三档：<br>• <code>"sync"</code>：每超步<strong>同步</strong>写——写完落盘确认了才开始下一步。最稳，崩溃只会丢"正在跑的那一步"。<br>• <code>"async"</code>（默认）：每超步<strong>异步</strong>写——一边把上一步往盘上写、一边已经跑下一步。近乎每步都存，但把写的耗时和计算重叠了。<br>• <code>"exit"</code>：<strong>只在图退出（结束/中断/报错）时</strong>写一次。跑得最快，但中途崩溃=从头再来（没中间档）。<br><b>类比</b>：写文档的自动保存。sync=每敲一个字存一次（绝不丢，但卡）；async=后台每几秒悄悄存（几乎不丢、不卡）；exit=只在关闭时存（最快，但没保存就崩了全没）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>三档的类型定义与官方说明</h1></div>
+            <div class="card">
+                <p>类型定义在 <span class="fileref">types.py:87-88</span>，就一行字面量：</p>
+<pre><code class="language-python"># types.py:87
+Durability = Literal["sync", "async", "exit"]
+"""Durability mode for the graph execution."""</code></pre>
+                <p>官方对三档的一句话说明（stream 文档 <span class="fileref">main.py:2705-2711</span>）：</p>
+<pre><code class="language-python"># main.py:2705
+    durability: The durability mode for the graph execution, defaults to "async".
+        Options are:
+        - "sync":  Changes are persisted synchronously before the next step starts.
+        - "async": Changes are persisted asynchronously while the next step executes.
+        - "exit":  Changes are persisted only when the graph exits.</code></pre>
+                <table class="ttable">
+                    <tr><th>档位</th><th>什么时候写</th><th>崩溃能恢复到</th><th>速度</th></tr>
+                    <tr><td><code>sync</code></td><td>每超步，同步（写完才继续）</td><td>上一个完成的超步</td><td>最慢</td></tr>
+                    <tr><td><code>async</code>（默认）</td><td>每超步，异步（与下一步并行）</td><td>上一个完成的超步（几乎）</td><td>中</td></tr>
+                    <tr><td><code>exit</code></td><td>只在图退出时一次</td><td>什么都没有→从头</td><td>最快</td></tr>
+                </table>
+                <div class="anno">还有个历史遗留参数 <code>checkpoint_during</code>（布尔）已废弃（<span class="fileref">main.py:2727-2735</span>）：<code>True</code> 映射到 <code>"async"</code>、<code>False</code> 映射到 <code>"exit"</code>。新代码统一用 <code>durability</code>。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>默认 async，且可逐次运行覆盖</h1></div>
+            <div class="card">
+                <p>默认值和读取逻辑在 <span class="fileref">main.py:2602-2603</span>：</p>
+<pre><code class="language-python"># main.py:2602
+        if durability is None:
+            durability = config.get(CONF, {}).get(CONFIG_KEY_DURABILITY, "async")</code></pre>
+                <p>没有 checkpointer 时给 durability 会警告（<span class="fileref">main.py:2802-2804</span>）：</p>
+<pre><code class="language-python"># main.py:2802
+            if checkpointer is None and durability is not None:
+                warn("`durability` has no effect when no checkpointer is present.", ...)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>durability is None → "async"</code><span>你不传就是 <b>async</b>。这是"既要几乎每步可恢复、又不想太慢"的合理默认。</span></div>
+                    <div class="r"><code>从 config 读</code><span>也能通过 config 的 <code>CONFIG_KEY_DURABILITY</code> 设——方便统一配置或子图继承。</span></div>
+                    <div class="r"><code>无 checkpointer 就警告</code><span>durability 只管"往 checkpointer 写多勤"。<b>没 checkpointer 就无处可写</b>，此时设 durability 毫无意义，框架好心提醒你。</span></div>
+                    <div class="r"><code>逐次可传</code><span>同一个编译好的 app，这次 <code>stream(..., durability="sync")</code>、下次 <code>"exit"</code> 都行——按业务重要性临场调。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>do_checkpoint：这一档到底存不存</h1></div>
+            <div class="card">
+                <p>每次要落盘时，主循环先算一个布尔 <code>do_checkpoint</code>（<span class="fileref">_loop.py:1132-1135</span>），它是三档差异的<strong>总闸门</strong>：</p>
+<pre><code class="language-python"># _loop.py:1132
+        # do checkpoint?
+        do_checkpoint = self._checkpointer_put_after_previous is not None and (
+            exiting or self.durability != "exit"
+        )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_checkpointer_put_after_previous is not None</code><span>前提：得<b>有 checkpointer</b>（这个函数是它的写入句柄）。没有就永远不存。</span></div>
+                    <div class="r"><code>exiting</code><span>如果<b>正在退出</b>（图跑完/中断/报错）——不管哪一档都要存。这保证 exit 模式"退出时那一次"能落盘。</span></div>
+                    <div class="r"><code>or self.durability != "exit"</code><span>核心：只要<b>不是 exit 档</b>（即 sync 或 async），每个超步都 <code>do_checkpoint=True</code>，正常落盘。</span></div>
+                    <div class="r"><code>合起来</code><span>翻译：<b>exit 档 → 只有退出时才存；sync/async 档 → 每步都存</b>。一个布尔表达式区分了"存不存"这一层。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：exit 与 sync/async 的分界是"存不存"，sync 与 async 的分界是"等不等"</span>durability 其实是两个正交问题合成的：<br>① <strong>要不要每步存？</strong>——exit 说"不，只退出存"；sync/async 说"要，每步存"。这一层由 <code>do_checkpoint</code> 决定（本讲）。<br>② <strong>存的时候要不要等它写完？</strong>——sync 说"等"，async 说"不等，边写边跑"。这一层由 L06 的 future 等待决定。<br>看懂这两层，三档就不再是三个孤立的魔法词，而是 2×2 里有意义的三个组合。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 500 250" width="100%" style="max-width:500px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="250" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：三档 = 两个正交问题的组合</text>
+                        <text x="250" y="42" fill="#94a3b8" text-anchor="middle">纵轴：每步都存吗？　横轴：存时要等写完吗？</text>
+                        <line x1="90" y1="70" x2="90" y2="230" stroke="#475569"/>
+                        <line x1="90" y1="150" x2="470" y2="150" stroke="#475569"/>
+                        <text x="70" y="110" fill="#64748b" text-anchor="end">每步存</text>
+                        <text x="70" y="195" fill="#64748b" text-anchor="end">只退出存</text>
+                        <text x="200" y="248" fill="#64748b" text-anchor="middle">不等(异步)</text>
+                        <text x="380" y="248" fill="#64748b" text-anchor="middle">等(同步)</text>
+                        <rect x="120" y="82" width="140" height="52" rx="8" fill="rgba(245,158,11,.15)" stroke="#f59e0b"/>
+                        <text x="190" y="104" fill="#fbbf24" text-anchor="middle" font-weight="700">async（默认）</text>
+                        <text x="190" y="122" fill="#94a3b8" text-anchor="middle">每步存 + 不等</text>
+                        <rect x="300" y="82" width="140" height="52" rx="8" fill="rgba(239,68,68,.15)" stroke="#ef4444"/>
+                        <text x="370" y="104" fill="#f87171" text-anchor="middle" font-weight="700">sync</text>
+                        <text x="370" y="122" fill="#94a3b8" text-anchor="middle">每步存 + 等</text>
+                        <rect x="120" y="162" width="320" height="52" rx="8" fill="rgba(34,197,94,.13)" stroke="#22c55e"/>
+                        <text x="280" y="184" fill="#4ade80" text-anchor="middle" font-weight="700">exit</text>
+                        <text x="280" y="202" fill="#94a3b8" text-anchor="middle">不每步存（"等不等"无意义 → 占整行）</text>
+                    </svg>
+                    <div class="cap">图注：exit 在"不每步存"这一行（等不等不适用）；async/sync 都每步存，只差"等不等落盘"。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>exit 模式：把落盘攒到退出那一刻</h1></div>
+            <div class="card">
+                <p>exit 档下，中间超步都<strong>不存</strong>，直到图退出时在"消音器"里统一落盘（<span class="fileref">_loop.py:1324-1334</span>，还记得吗，这就是 D41 见过的 <code>_suppress_interrupt</code>）：</p>
+<pre><code class="language-python"># _loop.py:1324
+        if self.durability == "exit" and (
+            not self.is_nested                               # ① 顶层图
+            or exc_value is not None                          # ② 或子图出错/中断
+            or all(NS_END not in part for part in self.checkpoint_ns)  # ③ 或独立 checkpointer 子图
+        ):
+            self._put_exit_delta_writes()                     # 补落"增量通道"的写
+            self._put_checkpoint(self.checkpoint_metadata)    # 落最终 checkpoint
+            self._put_pending_writes()                        # 落待写</code></pre>
+                <div class="walk">
+                    <div class="r"><code>durability == "exit"</code><span>只有 exit 档走这里——因为 sync/async 中间步已经存过了，退出时不必特意补。</span></div>
+                    <div class="r"><code>__exit__ 时机</code><span>这段在主循环上下文管理器的 <code>__exit__</code> 里。图无论正常结束、还是中断/报错退出，都会经过这，保证 exit 档"退出时那一次"必然发生。</span></div>
+                    <div class="r"><code>三种触发条件</code><span>顶层图退出必存；子图带错误/中断退出也存（否则错误现场丢了）；带独立 checkpointer 的子图也存。覆盖了各种退出路径。</span></div>
+                    <div class="r"><code>三个 _put_*</code><span>一次性把最终 checkpoint + delta 写 + pending 写全落盘。退出前的最后一份完整现场。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：exit 档下中途崩溃 = 白跑，且中断/时间旅行基本失效</span>exit 只在<strong>退出时</strong>存。如果图跑到第 10 步进程被 kill（OOM、断电、部署重启），前 9 步<strong>一份档都没有</strong>——恢复只能从头再来。更关键：既然中间不落盘，<strong>静态断点、时间旅行的"逐步历史"在 exit 档下就没有了</strong>（get_state_history 看不到中间步）。所以 exit 适合：<strong>短、快、不需要中途恢复/观察</strong>的一次性任务（如一个无中断的批处理）。只要你的图用到 interrupt/断点/时间旅行，就<strong>别用 exit</strong>。注意 interrupt 触发退出时那次会存（因为 exiting 为真），所以"用 exit + interrupt"能停一次，但停之前的中间步历史是缺的。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>sync vs async：差别在"等不等上一次写完"</h1></div>
+            <div class="card">
+                <p>落盘不是直接调 <code>put</code>，而是提交到线程池，串成一条链（<span class="fileref">_loop.py:1200-1209</span>）：</p>
+<pre><code class="language-python"># _loop.py:1200
+            # if there's a previous checkpoint save in progress, wait for it
+            # ensuring checkpointers receive checkpoints in order
+            self._put_checkpoint_fut = self.submit(
+                self._checkpointer_put_after_previous,
+                getattr(self, "_put_checkpoint_fut", None),   # ← 上一次写的 future
+                self.checkpoint_config,
+                copy_checkpoint(self.checkpoint),
+                self.checkpoint_metadata,
+                new_versions,
+            )</code></pre>
+                <p>而 <code>_checkpointer_put_after_previous</code>（<span class="fileref">_loop.py:1530-1547</span>）保证"按顺序写"：</p>
+<pre><code class="language-python"># _loop.py:1530
+    def _checkpointer_put_after_previous(self, prev, config, checkpoint, metadata, new_versions):
+        if self._delta_write_futs:
+            futs, self._delta_write_futs = self._delta_write_futs, []
+            concurrent.futures.wait(futs)
+        try:
+            if prev is not None:
+                prev.result()                                  # ① 等上一次写完
+        finally:
+            cast(BaseCheckpointSaver, self.checkpointer).put(  # ② 再写这一次
+                config, checkpoint, metadata, new_versions)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>submit(...)</code><span>把"写这份 checkpoint"提交给执行器，拿到一个 <code>future</code>（写操作的凭据），存进 <code>_put_checkpoint_fut</code>。</span></div>
+                    <div class="r"><code>把上次的 fut 传进去</code><span>每次写都<b>携带上一次写的 future</b>。函数内部 <code>prev.result()</code> 会阻塞到上一次写完——保证 checkpointer 收到的顺序严格是 step1, step2, step3……不乱序。</span></div>
+                    <div class="r"><code>prev.result()</code><span>等上一次真正落盘完成再执行本次 <code>put</code>。这是"有序写"的关键，无论 sync/async 都要保序。</span></div>
+                    <div class="r"><code>sync 与 async 的区别</code><span>在<b>主循环等不等这个 fut</b>：<b>async</b>——提交完就往下跑下一超步，写在后台并行进行（快）；<b>sync</b>——提交后立即等 fut 完成、确认落盘了才进下一步（稳）。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么落盘要串成 future 链保序，而不是各写各的？</span>看似"每步各自 submit 一个写、谁先写完算谁"更简单、更并行。<b>但那会毁掉恢复的正确性</b>：如果 step3 的写比 step2 先落盘（线程调度谁快说不准），此刻崩溃，checkpointer 里就有 step3 却缺 step2——恢复读到一个"跳步"的残缺历史，父子链断裂。所以源码让每次写<strong>携带上一次写的 future 并 <code>prev.result()</code> 等它先完成</strong>，强制 checkpointer 严格按 step1→step2→step3 收档。代价是写与写之间被串行化（不能任意乱序并行），但换来"存档链永远连续、恢复永远读到完整前缀"。注意这不影响 async 的性能优势——串行的是"写与写"，而"写"仍与"下一步计算"并行，计算才是耗时大头。</div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么默认是 async 而不是最稳的 sync？</span>因为 <strong>async 在绝大多数场景下"安全性几乎等于 sync，但快得多"</strong>。关键洞察：async 也是<strong>每步都写</strong>的，只是"写"和"下一步计算"并行——由于有 <code>prev.result()</code> 保序，checkpoint 落盘顺序和 sync 完全一致。唯一差别是：async 下，"第 N 步写盘"可能和"第 N+1 步计算"同时进行，若正好在这个重叠窗口崩溃，可能丢的是第 N 步的档（而 sync 会确保第 N 步落定才算第 N+1 步）。但这个窗口极短，且节点计算（调模型）通常远比写盘慢，重叠几乎总能让写先完成。于是 async 用"一个极窄的丢档窗口"换来"写盘耗时被计算完全掩盖"的吞吐。只有当你要求"绝对不丢任何一步、宁可慢"（如金融强一致场景）才值得上 sync。这是"默认给 95% 场景的最优解、极端场景留后门"的务实取舍。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>选型指南 + 今日小结</h1></div>
+            <div class="card">
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 230" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：三档在超步时间线上的落盘节奏</text>
+                        <!-- sync -->
+                        <text x="40" y="52" fill="#f87171" font-weight="700">sync</text>
+                        <rect x="80" y="38" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="115" y="54" fill="#c4b5fd" text-anchor="middle">step1</text>
+                        <rect x="152" y="38" width="30" height="24" rx="4" fill="rgba(239,68,68,.2)" stroke="#ef4444"/><text x="167" y="54" fill="#f87171" text-anchor="middle">存</text>
+                        <rect x="184" y="38" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="219" y="54" fill="#c4b5fd" text-anchor="middle">step2</text>
+                        <rect x="256" y="38" width="30" height="24" rx="4" fill="rgba(239,68,68,.2)" stroke="#ef4444"/><text x="271" y="54" fill="#f87171" text-anchor="middle">存</text>
+                        <text x="440" y="54" fill="#94a3b8">计算与存交替，存完才下一步</text>
+                        <!-- async -->
+                        <text x="40" y="112" fill="#fbbf24" font-weight="700">async</text>
+                        <rect x="80" y="98" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="115" y="114" fill="#c4b5fd" text-anchor="middle">step1</text>
+                        <rect x="152" y="98" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="187" y="114" fill="#c4b5fd" text-anchor="middle">step2</text>
+                        <rect x="224" y="98" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="259" y="114" fill="#c4b5fd" text-anchor="middle">step3</text>
+                        <rect x="152" y="126" width="30" height="18" rx="4" fill="rgba(245,158,11,.25)" stroke="#f59e0b"/><text x="167" y="139" fill="#fbbf24" text-anchor="middle" font-size="9">存1</text>
+                        <rect x="224" y="126" width="30" height="18" rx="4" fill="rgba(245,158,11,.25)" stroke="#f59e0b"/><text x="239" y="139" fill="#fbbf24" text-anchor="middle" font-size="9">存2</text>
+                        <text x="440" y="114" fill="#94a3b8">存在后台并行(与下一步重叠)</text>
+                        <!-- exit -->
+                        <text x="40" y="186" fill="#4ade80" font-weight="700">exit</text>
+                        <rect x="80" y="172" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="115" y="188" fill="#c4b5fd" text-anchor="middle">step1</text>
+                        <rect x="152" y="172" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="187" y="188" fill="#c4b5fd" text-anchor="middle">step2</text>
+                        <rect x="224" y="172" width="70" height="24" rx="4" fill="rgba(99,102,241,.15)" stroke="#8b5cf6"/><text x="259" y="188" fill="#c4b5fd" text-anchor="middle">step3</text>
+                        <rect x="296" y="172" width="40" height="24" rx="4" fill="rgba(34,197,94,.25)" stroke="#22c55e"/><text x="316" y="188" fill="#4ade80" text-anchor="middle">存</text>
+                        <text x="440" y="188" fill="#94a3b8">全程不存，退出才存一次</text>
+                        <line x1="80" y1="210" x2="336" y2="210" stroke="#475569"/><text x="208" y="224" fill="#64748b" text-anchor="middle">时间 →</text>
+                    </svg>
+                    <div class="cap">图注：sync 存挡在计算之间；async 存与下一步并行；exit 全程不存、末尾一次。</div>
+                </div>
+                <div class="baby"><span class="t">🍼 怎么选（大白话）</span>
+                    <b>用 async（默认）</b>：绝大多数带 checkpointer 的应用——要中断、要恢复、要时间旅行，又不想太慢。<br>
+                    <b>用 sync</b>：状态极其宝贵、绝不允许丢任何一步，宁慢求稳（如涉及资金、法务的强一致流程）。<br>
+                    <b>用 exit</b>：短平快的一次性任务，<strong>不需要</strong>中途恢复/中断/历史，只想跑得最快（如离线批量处理）。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：async 是异步写，那我用同步的 invoke() 也能用 async 档吗？会不会要 asyncio？</p>
+                    <p class="a">👨‍🏫 能用，不需要你写 asyncio。这里的"async"指的是<b>写盘操作被提交到线程池后台执行</b>（<code>submit</code> 到 executor），主循环不阻塞地继续算下一步——靠的是<b>线程</b>而非 asyncio 协程。所以同步 <code>invoke()</code> 也享受 async 档的并行写盘。真正的异步图（<code>ainvoke</code>）则用异步版 <code>_checkpointer_put_after_previous</code>（<span class="fileref">_loop.py:1783</span>），道理一样，只是等待用 <code>await</code>。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>durability 三档分别什么时候写？（sync 每步同步 / async 每步异步 / exit 只退出时）</li>
+                        <li>默认是哪档、为什么？（async；每步都存但写盘与计算重叠，安全近似 sync 却快）</li>
+                        <li>do_checkpoint 这个布尔区分了什么？（exit vs 非exit：中间步存不存）</li>
+                        <li>sync 和 async 的真正区别在哪？（主循环等不等落盘 future：sync 等、async 不等）</li>
+                        <li>为什么多次落盘要传上一次的 future？（prev.result() 保证 checkpointer 按超步顺序收到）</li>
+                        <li>exit 档为什么不能配中断/时间旅行？（中间步没落盘，历史缺失、崩溃从头）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读三档的分岔点
+sed -n '2602,2603p' libs/langgraph/langgraph/pregel/main.py    # 默认 async
+sed -n '1132,1135p' libs/langgraph/langgraph/pregel/_loop.py   # do_checkpoint 闸门
+sed -n '1530,1547p' libs/langgraph/langgraph/pregel/_loop.py   # 有序写 / prev.result
+# 2. 对比三档产生的历史档数
+python - <<'PY'
+from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import InMemorySaver
+from typing_extensions import TypedDict
+class S(TypedDict):
+    x: int
+def build():
+    g=StateGraph(S)
+    g.add_node("a",lambda s:{"x":s["x"]+1}); g.add_node("b",lambda s:{"x":s["x"]+1})
+    g.add_edge(START,"a"); g.add_edge("a","b"); g.add_edge("b",END)
+    return g.compile(checkpointer=InMemorySaver())
+for mode in ["sync","async","exit"]:
+    app=build(); cfg={"configurable":{"thread_id":"t"}}
+    app.invoke({"x":0}, cfg, durability=mode)
+    print(mode, "历史档数:", len(list(app.get_state_history(cfg))))
+    # 你会看到 exit 档的历史档数明显更少
+PY</code></pre>
+                    <div class="tip"><strong>明天预告 · Day 46</strong>：本阶段收官。中断/时间旅行都涉及"重跑"——从存档恢复会<strong>重新执行</strong>已跑过的部分。那如何保证"重跑一遍结果不出错、副作用不翻倍"？看 <code>_replay.py</code> 的重放控制、以及 <code>put_writes</code> 的幂等去重如何做到"至少执行一次，效果等价恰好一次"。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langgraph-day44.html" style="color:var(--accent-cyan);">&larr; Day 44 时间旅行</a>
+                    <a href="langgraph-day46.html" style="color:var(--accent-green);">Day 46 · replay 与幂等 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

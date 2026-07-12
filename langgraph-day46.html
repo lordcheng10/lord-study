@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 46 · replay 与幂等 — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">46</div>
+            <h2>Day 46</h2>
+            <p class="version">replay 与幂等 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 恢复=重放的隐患</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · is_replaying 标志</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 复用已成功的写</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 跳过失败/中断的写</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · put_writes 去重</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 子图 ReplayState</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 幂等心法 + 阶段收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day45.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 45 durability</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day47.html" class="nav-link" style="color:var(--accent-green);">Day 47 @entrypoint/@task &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 46 / 共 60 天 · 阶段 7 中断与人在环</span>
+            <h1 class="part-title">replay 与幂等：重跑一遍，为什么结果不会乱</h1>
+            <p class="part-desc">阶段 7 收官。前面反复出现一个词——<strong>重跑</strong>：interrupt 恢复要重跑节点、时间旅行要从旧档重放、崩溃恢复要重放已完成的超步。重跑的最大风险是<strong>做重复的事</strong>：同一个写被应用两遍、reducer 累加两次、状态翻倍。今天看 LangGraph 如何用一套"重放 + 幂等"机制，做到<strong>"至少执行一次，但效果等价于恰好一次"</strong>。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 7 · 中断与人在环（6 天）—— 收官日</div>
+            <div class="steps">
+                <span class="st">D41 interrupt原理</span><span class="sep">→</span>
+                <span class="st">D42 Command恢复</span><span class="sep">→</span>
+                <span class="st">D43 静态断点</span><span class="sep">→</span>
+                <span class="st">D44 时间旅行</span><span class="sep">→</span>
+                <span class="st">D45 durability</span><span class="sep">→</span>
+                <span class="st on">D46 replay幂等</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：恢复时前面的节点会不会又跑一遍？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>一个超步里有节点 A、B、C 并行。A、B 都跑完了、C 还在跑时进程崩了。恢复时，框架读回这个超步的存档——问题来了：A、B 明明跑完了，恢复会不会<strong>把 A、B 再跑一遍</strong>？如果 A 里写了 <code>count += 1</code>（reducer 累加），重跑就变成加两次，状态就错了！</div>
+                <div class="essence"><span class="t">💡 本质：区分"结果已存的" vs "确实要重跑的"</span>LangGraph 的策略很聪明：崩溃时，<strong>已完成任务的写（A、B 的产出）早已通过 put_writes 落进了 pending_writes</strong>（D45 讲的每步存）。恢复时，框架<strong>不重新执行 A、B</strong>，而是把它们存好的写<strong>直接复原</strong>到内存里——等于"认账"它们已经干完了。只有真正没完成的 C（写为空）才重新执行。这样：完成的不重做，没完成的补上，合起来效果 = 每个任务恰好执行一次。<br><b>类比</b>：搬家搬到一半停电。来电后你不会把已经搬上车的箱子<strong>再搬一遍</strong>——你看一眼清单（pending_writes），已装车的打勾跳过，只搬还在地上的。清单就是幂等的钥匙。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>is_replaying：这一 tick 是"重放"还是"新算"</h1></div>
+            <div class="card">
+                <p>核心开关是 <code>is_replaying</code>，在 loop 初始化时按"有没有指定 checkpoint_id"决定（<span class="fileref">_loop.py:315</span>）：</p>
+<pre><code class="language-python"># _loop.py:173
+    is_replaying: bool
+# _loop.py:315
+        self.is_replaying = CONFIG_KEY_CHECKPOINT_ID in config[CONF]</code></pre>
+                <p>它只在<strong>第一个 tick</strong> 为真，之后立刻关掉（<span class="fileref">_loop.py:715-716</span>，在 after_tick 里）：</p>
+<pre><code class="language-python"># _loop.py:715
+        # only replay (re-execute) done tasks on the first tick
+        self.is_replaying = False</code></pre>
+                <div class="walk">
+                    <div class="r"><code>CONFIG_KEY_CHECKPOINT_ID in config</code><span>恢复/时间旅行时，config 里会带上"要从哪份 checkpoint 起"的 id → <code>is_replaying=True</code>。全新运行没这个 id → False。</span></div>
+                    <div class="r"><code>只第一个 tick 为真</code><span>关键：重放只发生在<b>恢复后的第一步</b>——那一步要"消化"存档里已完成的写。从第二步起就是全新计算了。</span></div>
+                    <div class="r"><code>after_tick 里置 False</code><span>第一个超步处理完，立刻 <code>is_replaying = False</code>。注释写得明白："only replay done tasks on the first tick"。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：重放是"一次性的开机自检"</span>恢复不是"把整段历史重跑一遍"，而是只在<strong>接续点那一步</strong>做一次特殊处理：把已完成的写复原、把没完成的补跑。过了这一步，图就回到正常前进模式。所以"重放"开销极小——不是重演历史，是接上断点。</div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么重放只在第一个 tick、而不是整个恢复过程持续？</span>因为"需要甄别已完成 vs 未完成"的<strong>只有接续点那一步</strong>。恢复时框架从某个 checkpoint 起步，那份 checkpoint 里可能夹着"半完成的超步"（部分任务写了、部分没写，如 L01 的 A/B 完成 C 未完成）——只有这一步要做"复原完成的、重跑未完成的"精细活。一旦这步理清、状态归位，<strong>后面全是从干净状态出发的全新计算</strong>，和首次运行没区别，再带着 replay 标志只会徒增判断开销、甚至误把新产出的写当成"旧的已完成写"跳过。所以 <code>after_tick</code> 里第一步一结束就 <code>is_replaying=False</code>，把特殊模式的作用域<strong>精确限制在唯一需要它的那一步</strong>。这是"特殊逻辑作用域最小化"的典范——能用普通路径的地方绝不让特殊标志多停留一个 tick。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>复用已成功的写：不重跑，直接认账</h1></div>
+            <div class="card">
+                <p>tick 开始时，如果<strong>不是重放</strong>且有遗留写，就把它们复原到任务上（<span class="fileref">_loop.py:661-664</span>）：</p>
+<pre><code class="language-python"># _loop.py:661
+        # if there are pending writes from a previous loop, apply them
+        if not self.is_replaying and self.checkpoint_pending_writes:
+            self._reapply_writes_to_succeeded_nodes(self.tasks)
+            self._resume_error_handlers_if_applicable()</code></pre>
+                <p>复原逻辑 <span class="fileref">_loop.py:736-749</span>：</p>
+<pre><code class="language-python"># _loop.py:736
+    def _reapply_writes_to_succeeded_nodes(self, tasks) -> None:
+        """Restore successful channel writes from checkpoint to in-memory tasks.
+        Skips control signals (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME)
+        so that failed/interrupted tasks remain with empty writes and will be
+        re-executed (or routed to error handlers) by the runner."""
+        for tid, k, v in self.checkpoint_pending_writes:
+            if k in (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME):
+                continue                                    # ① 控制信号跳过
+            if task := tasks.get(tid):
+                task.writes.append((k, v))                  # ② 普通写复原到任务</code></pre>
+                <div class="walk">
+                    <div class="r"><code>遍历 pending_writes</code><span>存档里记着"上次各任务写了什么"。逐条看。</span></div>
+                    <div class="r"><code>if k in (ERROR,..,INTERRUPT,RESUME): continue</code><span><b>只复原"普通通道写"</b>，跳过控制信号。为什么？下一讲专门说——这是"完成的复用、没完成的重跑"的分界线。</span></div>
+                    <div class="r"><code>task.writes.append((k,v))</code><span>把普通写<b>塞回任务的 writes</b>。有 writes 的任务，runner 视为"已完成"，<b>不会再执行它</b>。</span></div>
+                    <div class="r"><code>runner 只跑空 writes 的任务</code><span>关键机制：runner 只执行 <code>not t.writes</code> 的任务。复原了写 = 非空 = 跳过；A、B 因此不重跑。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用"writes 非空就跳过"来表达"已完成"，而不是单独存一个 completed 标记？</span><b>朴素做法</b>：给每个任务存个 <code>done: bool</code>。<b>问题</b>：done 和 writes 是两份信息，得同步维护，还可能不一致（标了 done 但 writes 没存）。<b>源码做法</b>：<strong>"有没有写"本身就是"完成没完成"的唯一真相</strong>——任务完成必然产出写（哪怕是 <code>NO_WRITES</code> 哨兵，见 D41 runner），写落了盘就是"干完了"的铁证。恢复时把写复原 → 任务自动"变成已完成态"。用同一份数据（writes）同时表达"产出了什么"和"完成没有"，消除了双写不一致的可能。runner 的判据 <code>not t.writes</code> 简单到无懈可击。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>为什么跳过 ERROR/INTERRUPT/RESUME？</h1></div>
+            <div class="card">
+                <p>上一讲那句 <code>if k in (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME): continue</code> 是幂等的<strong>灵魂</strong>。函数注释（<span class="fileref">_loop.py:739-743</span>）解释了动机：</p>
+                <div class="baby"><span class="t">🍼 翻译那段注释</span>"跳过控制信号（ERROR/INTERRUPT/RESUME），好让<strong>失败或被中断的任务保持空 writes</strong>，这样它们会被 runner <strong>重新执行</strong>（或路由到错误处理器）。"</div>
+                <div class="walk">
+                    <div class="r"><code>普通写 → 复原 → 跳过重跑</code><span>成功完成的任务，产出的是普通通道写。复原它 = 认账已完成 = 不重跑。（L03）</span></div>
+                    <div class="r"><code>INTERRUPT 写 → 不复原</code><span>被中断的任务，存档里是 <code>(INTERRUPT, ...)</code>（D41）。<b>故意不复原</b> → 该任务 writes 仍为空 → runner <b>重新执行它</b>。这正是 D42 说的"恢复时节点从头重跑"！中断任务必须重跑，才能让 interrupt() 这次拿到恢复值、走完后续逻辑。</span></div>
+                    <div class="r"><code>ERROR 写 → 不复原</code><span>失败的任务，存的是 <code>(ERROR, 异常)</code>。不复原 → 空 writes → 重跑（给它再来一次的机会，或交给错误处理器）。</span></div>
+                    <div class="r"><code>RESUME 写 → 不复原</code><span>恢复值是要被 interrupt() <b>重新消费</b>的（D42 的 get_null_resume），不能当"已完成的普通产出"复原掉。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：一条 continue 划出了"重放"与"重跑"的分水岭</span>同样是 pending_writes 里的记录，<strong>普通写</strong>代表"已成功的成果"→ 复原、不重跑；<strong>控制信号</strong>（ERROR/INTERRUPT/RESUME）代表"未了结的状态"→ 不复原、逼其重跑。幂等的精髓不是"什么都不重跑"，而是<strong>精确区分哪些该重跑、哪些不该</strong>。成功的绝不重做（防翻倍），失败/中断的必须重做（才能推进）。一行 <code>if...continue</code> 把这两类干净利落地分开。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>put_writes：存的时候就去重</h1></div>
+            <div class="card">
+                <p>幂等的另一半在写入端。<code>put_writes</code>（<span class="fileref">_loop.py:415-437</span>）存写时会<strong>清掉同一任务的旧写</strong>再存新的：</p>
+<pre><code class="language-python"># _loop.py:415
+    def put_writes(self, task_id: str, writes: WritesT) -> None:
+        if not writes:
+            return
+        # deduplicate writes to special channels, last write wins
+        if all(w[0] in WRITES_IDX_MAP for w in writes):
+            writes = list({w[0]: w for w in writes}.values())   # ① 特殊通道去重
+        if task_id == NULL_TASK_ID:
+            ...  # null 任务的写是累积的（如多个 RESUME）
+        else:
+            # remove existing writes for this task
+            self.checkpoint_pending_writes = [
+                w for w in self.checkpoint_pending_writes if w[0] != task_id  # ② 先删旧
+            ]
+            writes_to_save = writes                                          # ③ 再存新</code></pre>
+                <div class="walk">
+                    <div class="r"><code>WRITES_IDX_MAP 去重</code><span>特殊通道（ERROR/RESUME 等）的写"最后一次为准"——用字典按通道名去重，同通道只留最后一条。</span></div>
+                    <div class="r"><code>remove existing for this task</code><span><b>关键</b>：普通任务存写前，先把 pending_writes 里<b>该 task_id 的旧写全清掉</b>。所以一个任务重跑并重新 put_writes 时，不会新旧并存、不会累积两份。</span></div>
+                    <div class="r"><code>NULL_TASK_ID 累积</code><span>例外：null 任务（如恢复值）的写是<b>累积</b>的——因为可能要攒多个 RESUME 值。用不同策略。</span></div>
+                </div>
+                <div class="anno">回顾 D35 L05：InMemorySaver 的 <code>put_writes</code> 还有一层"普通写 <code>(task_id, idx)</code> 已存在则跳过、负数特殊写允许覆盖"的幂等（<span class="fileref">checkpoint/memory/__init__.py:494</span>）。<strong>两层幂等</strong>：loop 层 <code>put_writes</code> 管"内存 pending 的新旧替换"，checkpointer 层 <code>put_writes</code> 管"落盘时按 (task,idx) 去重"。双保险。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 210" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：崩溃恢复的第一个 tick（幂等重放）</text>
+                        <rect x="20" y="40" width="150" height="60" rx="9" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="95" y="60" fill="#4ade80" text-anchor="middle" font-weight="700">读回 pending_writes</text>
+                        <text x="95" y="80" fill="#94a3b8" text-anchor="middle">A:普通写 B:普通写</text>
+                        <text x="95" y="94" fill="#94a3b8" text-anchor="middle">C: (无，未完成)</text>
+                        <rect x="200" y="30" width="180" height="38" rx="9" fill="rgba(99,102,241,.1)" stroke="#8b5cf6"/>
+                        <text x="290" y="47" fill="#c4b5fd" text-anchor="middle" font-weight="700">A/B 普通写 → 复原</text>
+                        <text x="290" y="62" fill="#94a3b8" text-anchor="middle">writes 非空 → runner 跳过</text>
+                        <rect x="200" y="78" width="180" height="38" rx="9" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="290" y="95" fill="#f87171" text-anchor="middle" font-weight="700">C 无写 → 不复原</text>
+                        <text x="290" y="110" fill="#94a3b8" text-anchor="middle">writes 空 → runner 重跑</text>
+                        <rect x="200" y="126" width="180" height="38" rx="9" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="290" y="143" fill="#fbbf24" text-anchor="middle" font-weight="700">INTERRUPT/ERROR</text>
+                        <text x="290" y="158" fill="#94a3b8" text-anchor="middle">跳过 → 逼其重跑</text>
+                        <rect x="420" y="70" width="170" height="60" rx="9" fill="rgba(6,182,212,.1)" stroke="#06b6d4"/>
+                        <text x="505" y="92" fill="#67e8f9" text-anchor="middle" font-weight="700">结果</text>
+                        <text x="505" y="112" fill="#94a3b8" text-anchor="middle">每任务恰好一次</text>
+                        <text x="505" y="126" fill="#94a3b8" text-anchor="middle">效果等价</text>
+                        <path d="M170 70 L198 55" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#d)"/>
+                        <path d="M170 80 L198 95" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#d)"/>
+                        <path d="M380 49 L418 88" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#d)"/>
+                        <path d="M380 97 L418 100" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#d)"/>
+                        <path d="M380 145 L418 112" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#d)"/>
+                        <defs><marker id="d" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：A/B 已完成（有写）→ 复原跳过；C 未完成 + 中断/错误 → 空写重跑。合起来"恰好一次"。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>子图的重放：ReplayState 再看一眼</h1></div>
+            <div class="card">
+                <p>D44 已见过 <code>ReplayState</code>（<span class="fileref">_replay.py:14</span>），这里从"幂等"角度再理解它。子图重放的难点：同一个逻辑子图在循环里会跑多次，重放时该给它<strong>哪一份</strong>存档？</p>
+<pre><code class="language-python"># _replay.py:34
+    def _is_first_visit(self, checkpoint_ns: str) -> bool:
+        # "sub_node:task_id" -> "sub_node"  剥掉 task_id 后缀
+        stable_ns = (checkpoint_ns.rsplit(NS_END, 1)[0]
+                     if NS_END in checkpoint_ns else checkpoint_ns)
+        if stable_ns in self._visited_ns:
+            return False                          # 已访问过 → 不是第一次
+        self._visited_ns.add(stable_ns)
+        return True                               # 第一次 → 记下</code></pre>
+                <div class="walk">
+                    <div class="r"><code>rsplit(NS_END,1)[0]</code><span>把 <code>"sub:task123"</code> 里的 task_id 后缀剥掉，还原成稳定的逻辑名 <code>"sub"</code>——这样循环里每轮虽 task_id 不同，仍认得出"是同一个子图"。</span></div>
+                    <div class="r"><code>_visited_ns 集合</code><span>记"哪些子图已经做过一次性回溯了"。第一次访问 → 加进集合、返回 True；再访问 → 已在集合、返回 False。</span></div>
+                    <div class="r"><code>第一次取旧档、之后取新档</code><span>配合 <code>get_checkpoint</code>（D44 L07）：第一次回到"重放点之前"的档；之后用正常最新档。保证循环里子图<b>只回溯一次</b>，不会每轮都拽回远古。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：幂等只保护"框架管理的通道写"，管不了你的外部副作用</span>贯穿 D42、D44、D46 的铁律，这里正式点破：LangGraph 的幂等作用于<strong>通道写</strong>（状态更新）——它能保证 A 的 <code>{"count": +1}</code> 不被应用两遍。但你在节点里手写的<strong>外部副作用</strong>——发邮件、调支付、写外部数据库、发 MQ 消息——框架<strong>看不见也管不着</strong>。恢复重跑一个"interrupt 之前发过邮件"的节点，邮件会<strong>再发一遍</strong>。正确姿势：① 把副作用放在 interrupt <strong>之后</strong>（interrupt 前的代码才会重放）；② 或副作用自带幂等键（如支付用唯一 idempotency-key）；③ 或用 <code>@task</code>（D47-48，其结果会被 checkpoint 缓存，重放时不重执行）把副作用包起来。别指望框架替你的副作用兜底。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>幂等心法 + 阶段 7 收官</h1></div>
+            <div class="card">
+                <div class="essence"><span class="t">💡 一句话总结幂等机制</span>崩溃/中断/时间旅行都要"重放接续点那一步"。框架靠三件事保证"至少一次执行、效果等价恰好一次"：① <strong>已完成任务的普通写被复原</strong>（writes 非空 → 不重跑，L03）；② <strong>中断/失败任务的控制信号不复原</strong>（writes 空 → 重跑，L04）；③ <strong>put_writes 存时清旧存新去重</strong>（不累积，L05）。子图另有 ReplayState 管"回溯一次"（L06）。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 190" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="280" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：pending_writes 里两类记录的命运</text>
+                        <rect x="30" y="36" width="230" height="140" rx="9" fill="rgba(34,197,94,.06)" stroke="#22c55e"/>
+                        <text x="145" y="58" fill="#4ade80" text-anchor="middle" font-weight="700">普通通道写</text>
+                        <text x="145" y="82" fill="#94a3b8" text-anchor="middle">(task_id, "count", 5)</text>
+                        <text x="145" y="104" fill="#94a3b8" text-anchor="middle">= 已成功的成果</text>
+                        <text x="145" y="132" fill="#4ade80" text-anchor="middle" font-weight="700">→ 复原到任务</text>
+                        <text x="145" y="152" fill="#94a3b8" text-anchor="middle">writes 非空 → 不重跑</text>
+                        <rect x="300" y="36" width="230" height="140" rx="9" fill="rgba(239,68,68,.06)" stroke="#ef4444"/>
+                        <text x="415" y="58" fill="#f87171" text-anchor="middle" font-weight="700">控制信号</text>
+                        <text x="415" y="82" fill="#94a3b8" text-anchor="middle">(task_id, INTERRUPT, ..)</text>
+                        <text x="415" y="100" fill="#94a3b8" text-anchor="middle">(task_id, ERROR, ..)</text>
+                        <text x="415" y="118" fill="#94a3b8" text-anchor="middle">(NULL, RESUME, ..)</text>
+                        <text x="415" y="144" fill="#f87171" text-anchor="middle" font-weight="700">→ 跳过不复原</text>
+                        <text x="415" y="164" fill="#94a3b8" text-anchor="middle">writes 空 → 重跑</text>
+                    </svg>
+                    <div class="cap">图注：同在 pending_writes，普通写=复原跳过，控制信号=跳过重跑。这就是 _reapply 那句 continue 的全部意义。</div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：整个阶段 7 讲的中断、恢复、时间旅行、durability、幂等，能不能串成一句话？</p>
+                    <p class="a">👨‍🏫 能：<b>因为每一步都可以落盘成 checkpoint（D45 决定多勤），图就能在任意点暂停（D41 interrupt / D43 静态断点）、把答案喂回去继续（D42 Command）、翻看或修改任意历史点（D44 时间旅行），而这一切"停了再续、回到过去再跑"之所以不会把状态搞乱，是因为重放时严格区分"已完成的复用、未完成的重跑"（D46 幂等）。</b>一句话：<b>持久化是地基，中断/时间旅行是能力，幂等是让这些能力安全的保险丝。</b></p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>恢复时为什么已完成的节点不会重跑？（其普通写被复原、writes 非空，runner 只跑空 writes 的任务）</li>
+                        <li>is_replaying 什么时候为真、持续多久？（config 带 checkpoint_id 时为真，只第一个 tick）</li>
+                        <li>_reapply 为什么跳过 ERROR/INTERRUPT/RESUME？（让失败/中断任务保持空 writes 从而重跑）</li>
+                        <li>为什么"writes 非空"就能表示"已完成"？（写是完成的唯一真相，避免双标记不一致）</li>
+                        <li>put_writes 如何防止写累积？（普通任务存新写前先删该 task_id 的旧写）</li>
+                        <li>幂等保护不了什么？（节点里手写的外部副作用——发邮件、扣款，需自行幂等或放 interrupt 后）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读幂等三处核心
+sed -n '661,664p' libs/langgraph/langgraph/pregel/_loop.py     # 复原触发
+sed -n '736,749p' libs/langgraph/langgraph/pregel/_loop.py     # 复原+跳过控制信号
+sed -n '415,437p' libs/langgraph/langgraph/pregel/_loop.py     # put_writes 去重
+# 2. 验证"中断恢复不重复副作用"——反例(它会重复!)
+python - <<'PY'
+from langgraph.graph import StateGraph, START
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import interrupt, Command
+from typing_extensions import TypedDict
+hits=[]
+class S(TypedDict):
+    x: int
+def node(s):
+    hits.append("side-effect")   # 假装这是"发邮件"，放在 interrupt 之前
+    ans = interrupt("确认?")
+    return {"x": 1}
+g=StateGraph(S); g.add_node("n",node); g.add_edge(START,"n")
+app=g.compile(checkpointer=InMemorySaver())
+cfg={"configurable":{"thread_id":"t"}}
+list(app.stream({"x":0}, cfg))            # 停，副作用已发生 1 次
+list(app.stream(Command(resume="ok"), cfg))  # 恢复→节点重跑，副作用又发生
+print("副作用次数:", len(hits))            # 2 !! 证明 interrupt 前的副作用会重放
+PY</code></pre>
+                    <div class="tip"><strong>阶段 7 完结 · 明天进入阶段 8</strong>：Day 47 讲<strong>函数式 API</strong>——用 <code>@entrypoint</code> / <code>@task</code> 装饰器写图，不用显式建 StateGraph。而上面动手题里"副作用重放"的痛点，正是 <code>@task</code> 要解决的（task 结果会被缓存，重放时不重执行）。承上启下，敬请期待。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langgraph-day45.html" style="color:var(--accent-cyan);">&larr; Day 45 durability</a>
+                    <a href="langgraph-day47.html" style="color:var(--accent-green);">Day 47 · @entrypoint / @task &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
