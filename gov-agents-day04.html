@@ -30,6 +30,13 @@
         .chain .step { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:8px 12px; font-size:12px; }
         .chain .step b { color:var(--accent-green); }
         .chain .a { color:var(--accent-purple); font-weight:800; }
+        /* 数据结构字段表 */
+        .fields { border:1px solid var(--border-color); border-radius:10px; overflow:hidden; margin:10px 0; }
+        .fields .fr { display:grid; grid-template-columns:190px 1fr; gap:0; border-bottom:1px solid var(--border-color); }
+        .fields .fr:last-child { border-bottom:none; }
+        .fields .fk { background:var(--bg-secondary); padding:8px 12px; font-family:'SF Mono',monospace; font-size:12px; color:var(--accent-cyan); }
+        .fields .fv { padding:8px 12px; font-size:12.5px; color:var(--text-secondary); }
+        @media(max-width:768px){ .fields .fr{grid-template-columns:1fr} }
         /* ===== 改进版通用组件（与 Day01/02 一致） ===== */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
@@ -58,18 +65,20 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">04</div>
             <h2>Day 04</h2>
-            <p class="version">Supervisor 模式与多 Agent 协作 · 8 讲</p>
+            <p class="version">Supervisor 模式与多 Agent 协作 · 10 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
+            <li class="nav-group-title">本日 10 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是 Supervisor 模式</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 为何不用 supervisor-py</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 为何不用 langgraph-supervisor</a></li>
             <li><a href="#l03" class="nav-link" data-section="l03">L03 · 两种 supervisor 全景</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 图内分派 supervisor_node</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 跨 agent 路由 router</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · scope guard 只决策不执行</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · handoff 与 route_chain</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SupervisorState 三字段</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · supervisor_node 走读</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · auto_configure 把图连起来</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · RouteDecision + route() 五步</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · critic 校验与 scope guard</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · handoff 与 route_chain</a></li>
+            <li><a href="#l10" class="nav-link" data-section="l10">L10 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="gov-agents-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 LangGraph</a></li>
             <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -82,7 +91,7 @@
         <div class="part-header">
             <span class="part-label">Day 04 / 共 20 天 · 第 1 周 建立心智</span>
             <h1 class="part-title">Supervisor 模式与多 Agent 协作</h1>
-            <p class="part-desc">昨天(Day 03)你会读单个 Agent 的流程图了；今天往上一层：一个任务来了，谁来干？多个 Agent / 多个专家怎么配合？今天讲"主管调度"模式，并厘清本框架里两种容易混淆的 supervisor，为 Day 05 解剖真实 Agent 铺路。</p>
+            <p class="part-desc">昨天(Day 03)你会读单个 Agent 的流程图了；今天往上一层：一个任务来了，谁来干？多个 Agent / 多个专家怎么配合？今天不只讲概念——我们把本框架里两个真实的 supervisor 打开，逐行读它们的源码：状态怎么定义、循环怎么防死、决策怎么被校验、失败怎么优雅降级。这是 Day 05 解剖真实 Agent 前必须打牢的一块地基。</p>
         </div>
 
         <div class="journey">
@@ -97,12 +106,13 @@
         </div>
 
         <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天（延续「盖楼/物业」世界观）</span>
-        Supervisor 就像装修工地的<strong>领班/工头</strong>：他自己不砌墙、不刷漆，只干三件事——<strong>接活、判断这道活该派给哪个工种师傅、收结果</strong>；师傅之间不越级私聊，全走工头。本框架里有<strong>两个"工头"别搞混</strong>：① <strong>图内 supervisor_node</strong> = 一户装修内部的<strong>施工领班</strong>（真派真监工，活是它带着干的）；② <strong>跨 agent router</strong> = 物业大厅的<strong>问询导览员</strong>（你说句人话，它只告诉你"该去几号窗口找哪位"，<strong>绝不替你去办</strong>）。记住"领班真干、导览只指路"，今天就通了。</div>
+        Supervisor 就像装修工地的<strong>领班/工头</strong>：他自己不砌墙、不刷漆，只干三件事——<strong>接活、判断这道活该派给哪个工种师傅、收结果</strong>；师傅之间不越级私聊，全走工头。本框架里有<strong>两个"工头"别搞混</strong>：① <strong>图内 supervisor_node</strong> = 一户装修内部的<strong>施工领班</strong>（真派真监工，活是它带着干的）；② <strong>跨 agent router</strong> = 物业大厅的<strong>问询导览员</strong>（你说句人话，它只告诉你"该去几号窗口找哪位"，<strong>绝不替你去办</strong>）。记住"领班真干、导览只指路"，今天我们就把这两个工头的源码翻个底朝天。</div>
 
         <section id="l01" class="section">
             <div class="section-header"><span class="section-number">L01</span><h1>什么是 Supervisor 模式</h1></div>
             <div class="card">
-                <p><strong>Supervisor（主管）模式</strong>是多智能体协作最经典的一种结构：设一个"中央主管"，它负责接任务、判断该派给哪个"下属"去做、收集结果，下属之间不直接对话，全部经过主管。</p>
+                <div class="ask"><span class="t">🤔 先想一个问题</span>假设你手上有 4 个专家 Agent（trace/metric/deploy/log），来了一句"支付超时怎么回事"。<strong>让 4 个专家互相 @、自己商量谁先上</strong>行不行？行，但你很快会发现：没人知道全局进度、两个专家可能同时得出矛盾结论、出了错找不到"是谁决定这么干的"。这就是"去中心化"的代价。</div>
+                <p><strong>Supervisor（主管）模式</strong>就是对上面问题的经典答案：设一个"中央主管"，它负责接任务、判断该派给哪个"下属"去做、收集结果，<strong>下属之间不直接对话，全部经过主管</strong>。</p>
                 <div class="super">
                     <div class="hub">Supervisor 主管<small>接任务 · 决定派给谁 · 汇总</small></div>
                     <div class="fan">↙ &nbsp; ↓ &nbsp; ↓ &nbsp; ↘</div>
@@ -111,16 +121,22 @@
                         <div class="w">worker C</div><div class="w">worker D</div>
                     </div>
                 </div>
-                <p>对比另一种"去中心化"结构（每个 agent 都能直接叫别的 agent），主管模式的好处是：<strong>调度逻辑集中、可控、可观测</strong>——你永远知道现在是谁在干、为什么派给它。缺点是主管可能成为瓶颈。本框架选了主管模式，因为可信/可控是第一优先级。</p>
+                <div class="essence"><span class="t">💡 本质</span>主管模式把"调度逻辑"<strong>集中到一个点</strong>——你永远知道现在是谁在干、为什么派给它、走了几步。代价是主管可能成为瓶颈。本框架选主管模式，因为它的第一优先级是<strong>可信 / 可控 / 可观测</strong>，而不是极致并发。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
             <div class="section-header"><span class="section-number">L02</span><h1>为什么不用官方的 langgraph-supervisor 库</h1></div>
             <div class="card">
-                <p>LangChain 官方出过一个 <code>langgraph-supervisor</code> 库。但本框架<strong>默认不用它</strong>——<code>README.md:302-307</code> 和 <code>docs/architecture.md:65</code> 明确说明：官方后来自己都建议改用"<strong>用 tools 直接实现 supervisor</strong>"的模式，所以仓里只在 <code>third_party/langgraph-supervisor-py</code> 保留一份副本供参考。</p>
-                <div class="note"><strong>这给你一个重要认知</strong>：AI/Agent 领域演进极快，"官方推荐"半年就可能翻篇。本框架的应对是 Day 01 讲过的分层——把易变的东西（supervisor 实现方式）放在能替换的位置，而把稳定的可信能力（toolkit）攥在自己手里。所以本框架的 supervisor 是<strong>自己实现</strong>的，不绑定那个三方库。</div>
-                <p>于是问题变成：本框架自己怎么实现 supervisor？答案是——<strong>它有两种，分别解决两个不同层面的问题</strong>。这是今天最容易搞混、也最该厘清的地方。</p>
+                <p>LangChain 官方出过一个 <code>langgraph-supervisor</code> 库。但本框架<strong>默认不用它，选择完全自实现</strong>。理由直接写在源码的模块 docstring 里——<code>dispatch.py:11-13</code>：</p>
+<pre><code class="language-python">"""supervisor_node · 自实 LLM dispatch · zero deps on `langgraph-supervisor` lib
+...
+revise 2026-05-22:
+- LLM default 走 toolkit get_llm("haiku") · 不强 import langchain_anthropic
+- 完全自实 · 不依赖 langgraph-supervisor lib(v0.1 不稳 + venv 未装)
+"""</code></pre>
+                <p>逐句读：<strong>"v0.1 不稳"</strong>——那个库当时还是 0.1 版本，行为不稳定；<strong>"venv 未装"</strong>——环境里根本没装它，硬依赖会让整个包 import 就炸。所以框架的选择是：<strong>用最原始的 LangGraph <code>StateGraph</code> 自己拼一个 supervisor</strong>，只有 100 多行，行为完全可控。</p>
+                <div class="note"><strong>这给你一个重要认知</strong>：AI/Agent 领域演进极快，"官方推荐"半年就翻篇。本框架的应对是 Day 01 讲过的分层——把易变的东西（supervisor 实现方式）放在能替换的位置，稳定的可信能力（toolkit）攥在自己手里。于是问题变成：框架自己怎么实现？答案是——<strong>它有两种，分别解决两个不同层面的问题</strong>。这是今天最容易搞混、也最该厘清的地方。</div>
             </div>
         </section>
 
@@ -134,7 +150,7 @@
                         <ul>
                             <li>解决："<strong>一个 agent 内部</strong>，下一步该调哪个 specialist（专家）"</li>
                             <li>是 LangGraph 图里的<strong>一个节点</strong></li>
-                            <li>真的会去执行被选中的专家</li>
+                            <li>真的会去执行被选中的专家（跑完再回到它）</li>
                             <li>用在：单个复杂 agent 的图内调度</li>
                         </ul>
                     </div>
@@ -143,13 +159,13 @@
                         <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 8px;">app：<code>apps/supervisor-router-agent</code></p>
                         <ul>
                             <li>解决："<strong>一句话任务</strong>，该路由到平台上哪个 agent"</li>
-                            <li>是一个独立的 <strong>agent/服务</strong></li>
+                            <li>是一个独立的 <strong>agent/服务</strong>，<strong>没有 LangGraph 图</strong></li>
                             <li><strong>只出决策、不真执行</strong>（scope guard）</li>
                             <li>用在：工程师说人话，帮他选对入口</li>
                         </ul>
                     </div>
                 </div>
-                <div class="tip"><strong>一句话区分</strong>：①是"<em>图内、选专家、真跑</em>"；②是"<em>进程外、选 agent、只给建议不跑</em>"。下面两讲分别看它们的代码。</div>
+                <div class="tip"><strong>一句话区分</strong>：①是"<em>图内、选专家、真跑</em>"；②是"<em>进程外、选 agent、只给建议不跑</em>"。L04-L06 拆①的源码，L07-L08 拆②的源码。</div>
                 <div class="qa">
                     <p class="q">👶 小白：都叫 supervisor，我还是分不清什么时候是哪个……</p>
                     <p class="a">👨‍🏫 老师：用工地类比。① <strong>施工领班</strong>站在<strong>一户装修工地内部</strong>，手里是这户的专家名单（trace/metric/deploy/log 师傅），他喊"下一个上 trace 师傅"，师傅<strong>真的上去干</strong>——所以它是图里的一个节点，会执行。② <strong>大厅导览员</strong>面对<strong>整个小区几十户</strong>，你问"我这需求找谁"，他答"去 risk-reviewer 那户"，但<strong>他不会拉着你去敲门</strong>。看它在"一户内"还是"跨户"、"真干"还是"只指路"，就分清了。</p>
@@ -158,71 +174,248 @@
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>① 图内分派：supervisor_node</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>① 图内 supervisor 的黑板：SupervisorState 三字段</h1></div>
             <div class="card">
-                <p>代码在 <code>packages/ai-trust-toolkit-starter-supervisor/.../dispatch.py</code>。核心是 <code>supervisor_node(state, specialists, llm, max_iter=10)</code>（<code>dispatch.py:82</code>）：给 LLM 一份 specialist 名单 + 当前对话，让它输出"下一个调谁"或"给最终答案"。</p>
-<pre><code class="language-python"># LLM 被要求只输出这两种 JSON 之一：
-{"next": "trace_specialist"}      # 还要继续，调这个专家
-{"final_answer": "根因是..."}      # 够了，收尾</code></pre>
-                <p>配套的 <code>route_after_supervisor()</code>（<code>dispatch.py:186</code>）就是 Day 03 学的<strong>条件边路由函数</strong>——把 LLM 的决策翻译成"图里下一步走哪个节点"。<code>max_iter</code> 防止 LLM 反复横跳陷入死循环（<code>dispatch.py:103-115</code>）。默认它用 <code>get_llm("haiku")</code>——用便宜的 Haiku 做调度决策，省钱。</p>
-                <p>组装出来的图长这样：<code>START → supervisor → 条件分派 → {各 specialist / END}</code>，specialist 干完再回到 supervisor 让它决定下一步。这就是 <code>auto_configure_supervisor()</code> 自动搭好的骨架（要求必须开 Critic，否则 raise）。</p>
+                <p>要读懂图内 supervisor，先看它读写的"黑板"（回忆 Day 03 的 State）。它定义在 <code>state.py:24</code>，只有<strong>三个字段</strong>：</p>
+<pre><code class="language-python">class SupervisorState(TypedDict, total=False):          # state.py:24
+    # LangGraph messages reducer · 累积对话
+    messages: Annotated[list[Any], add_messages]        # state.py:34
+    # supervisor 调度历史 · ["rca", "trace", "rca"] 形式
+    dispatch_history: list[str]                          # state.py:37
+    # 终止时填 · None 表示仍在 dispatch loop
+    final_answer: str | None                             # state.py:39</code></pre>
+                <div class="fields">
+                    <div class="fr"><div class="fk">messages</div><div class="fv">对话历史。用 LangGraph 自带的 <code>add_messages</code> 作 Reducer（Day 03 学过），新消息自动<strong>追加</strong>而非覆盖。</div></div>
+                    <div class="fr"><div class="fk">dispatch_history</div><div class="fv">主管走过哪些专家，形如 <code>["rca","trace","rca"]</code>。它是<strong>防死循环</strong>和<strong>给 Critic 排查路由</strong>的依据。</div></div>
+                    <div class="fr"><div class="fk">final_answer</div><div class="fv"><code>None</code> = 还在调度循环里；一旦被填上字符串，就代表主管决定收尾，图要走向 END。</div></div>
+                </div>
+                <p><code>total=False</code> 表示这三个字段都是可选的（黑板一开始可以是空的，节点逐步往上写）。source 里还有一段很务实的<strong>兜底</strong>（<code>state.py:15-21</code>）：如果环境没装 langgraph，就退化成一个只做 append 的 <code>add_messages</code> 假实现，保证这个 schema"光 import 也不炸"。</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 210" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">SupervisorState：一块被主管和专家轮流写的黑板</text>
+                        <rect x="40" y="34" width="540" height="46" rx="8" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
+                        <text x="60" y="54" fill="#67e8f9" font-weight="700">messages</text>
+                        <text x="60" y="70" fill="#94a3b8">[Human "支付超时?", AI "已查 trace…", …]  ← add_messages 追加</text>
+                        <rect x="40" y="90" width="540" height="46" rx="8" fill="rgba(139,92,246,.08)" stroke="#8b5cf6"/>
+                        <text x="60" y="110" fill="#c4b5fd" font-weight="700">dispatch_history</text>
+                        <text x="60" y="126" fill="#94a3b8">["rca", "trace", "rca"]   ← 走过谁 · 防死循环 / 给 Critic 看</text>
+                        <rect x="40" y="146" width="540" height="46" rx="8" fill="rgba(34,197,94,.07)" stroke="#22c55e"/>
+                        <text x="60" y="166" fill="#34d399" font-weight="700">final_answer</text>
+                        <text x="60" y="182" fill="#94a3b8">None = 循环未结束  ·  "根因是数据库连接池打满" = 收尾 → END</text>
+                    </svg>
+                    <div class="cap">图注：三字段各司其职——messages 是内容、dispatch_history 是轨迹、final_answer 是终止信号。</div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么钦定这个统一 state？</span>starter 包的 PKG 说明里写得很直白：<strong>"钦定 state-based(messages + dispatch_history + final_answer)· 减少 12 agent 之间 pattern 漂移"</strong>。如果每个 agent 自己发明状态字段名，12 个 agent 就有 12 种写法，读代码、调路由、写 Critic 全得重新适应。统一 schema 是用一点"灵活性"换"全平台一致可读"。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>② 跨 agent 路由：router</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>① 图内分派核心：supervisor_node 逐段走读</h1></div>
             <div class="card">
-                <p>代码在 <code>apps/supervisor-router-agent/supervisor_router/core.py</code>。它<strong>没有 LangGraph 图</strong>，就是一个 <code>route(task, tier)</code> 函数（<code>core.py:53</code>），5 步走完：</p>
-                <div class="flow-chart">
-                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>list_agents()</h4><p>拿到平台上有哪些 agent（优先查门户 registry，失败用本地 mock，5 分钟缓存）。</p></div></div>
-                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>get_llm("haiku")</h4><p>用便宜模型做决策。</p></div></div>
-                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>渲染 prompt → LLM</h4><p>把任务 + agent 名单塞进模板，让 LLM 选。</p></div></div>
-                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>正则抓 JSON → 构建 RouteDecision</h4><p>拿到 <code>{agent_id, confidence, reasoning, fallback_alternatives}</code>。</p></div></div>
-                    <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>_critic_validate</h4><p>校验：选的 agent 不在名单里 → 退回 unsure；置信度低于阈值(默认0.5) → 也退回 unsure，把原选放候选。</p></div></div>
-                </div>
-                <p>返回的 <code>RouteDecision</code>（<code>core.py:38</code>）包含：选了哪个 agent、置信度、理由、<strong>建议命令</strong>、备选方案，以及 token/耗时。关键设计：<strong>任何一步失败都优雅返回 "unsure"，绝不抛异常</strong>（<code>_unsure</code>, <code>core.py:130</code>）——路由器自己挂了也不能拖垮调用方。</p>
-                <div class="example"><span class="t">📝 举个例子：导览员怎么应答两种问法</span>
-                输入 <code>route("帮我看下这个 PR 的上线风险")</code><br>
-                → 高置信 → <code>RouteDecision{agent_id:"risk-reviewer", confidence:0.86, suggested_command:"agentctl invoke risk-reviewer ...", alternatives:["doc-checker"]}</code><br>
-                <br>
-                输入 <code>route("今天天气怎么样")</code>（平台没这类 agent）<br>
-                → <code>_critic_validate</code> 发现选出的 agent 不在名单 / 置信度低于阈值(默认 0.5) → 优雅退回 <code>RouteDecision{agent_id:"unsure", ...}</code>，把原选放进候选。<strong>它宁可说"不确定"，也不硬塞一个错窗口。</strong>
-                </div>
-                <div class="svgbox">
-                    <svg viewBox="0 0 620 170" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
-                        <rect x="20" y="66" width="120" height="40" rx="8" fill="var(--bg-card,#1e293b)" stroke="#8b5cf6"/>
-                        <text x="80" y="82" fill="#c4b5fd" text-anchor="middle">一句话任务</text>
-                        <text x="80" y="97" fill="#94a3b8" text-anchor="middle">"审下这个PR风险"</text>
-                        <rect x="200" y="60" width="150" height="52" rx="10" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
-                        <text x="275" y="80" fill="#67e8f9" text-anchor="middle" font-weight="700">router 导览员</text>
-                        <text x="275" y="96" fill="#94a3b8" text-anchor="middle">Haiku 选 + Critic 校验</text>
-                        <path d="M140 86 L196 86" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a4)"/>
-                        <!-- 只出决策 -->
-                        <rect x="420" y="20" width="180" height="46" rx="9" fill="rgba(34,197,94,.07)" stroke="#22c55e"/>
-                        <text x="510" y="40" fill="#34d399" text-anchor="middle" font-weight="700">✓ RouteDecision（建议）</text>
-                        <text x="510" y="56" fill="#94a3b8" text-anchor="middle">该找 risk-reviewer · 命令是…</text>
-                        <rect x="420" y="104" width="180" height="46" rx="9" fill="rgba(239,68,68,.06)" stroke="#ef4444" stroke-dasharray="4 3"/>
-                        <text x="510" y="124" fill="#f87171" text-anchor="middle" font-weight="700">🚫 绝不替你真的去调</text>
-                        <text x="510" y="140" fill="#94a3b8" text-anchor="middle">scope guard · 零副作用</text>
-                        <path d="M350 78 Q390 50 418 44" fill="none" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a4)"/>
-                        <path d="M350 98 Q390 120 418 126" fill="none" stroke="#ef4444" stroke-width="1.3"/>
-                        <defs><marker id="a4" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker></defs>
-                    </svg>
-                    <div class="cap">图注：router 只吐"该找谁 + 命令怎么写"，把执行权留给人——这就是 scope guard。</div>
-                </div>
-                <div class="anno">⚠️ 小白常误以为"路由器选好 agent 后会顺手把它调了"。<b>其实它只出决策、绝不执行</b>：一个错误决策若自动触发一串真实操作（回滚、重启），后果不可控。把"决策"与"执行"分开，正是可信 Agent 系统的通用安全原则（见 L06）。</div>
+                <p>代码在 <code>packages/ai-trust-toolkit-starter-supervisor/.../dispatch.py</code>。它的活就一件：<strong>看当前黑板，让便宜 LLM 决定"下一个调谁"或"给最终答案"</strong>。我们分四段读。</p>
+
+                <h3>① 主管给 LLM 的"任务书"（dispatch.py:29）</h3>
+<pre><code class="language-python">def _build_supervisor_system_prompt(specialist_names: list[str]) -> str:
+    names_str = ", ".join(f'"{n}"' for n in specialist_names)
+    return (
+        "你是一个 supervisor 节点 · ... 输出 JSON。可选 specialist:[" + names_str + "]。\n"
+        'JSON 输出格式(只输出 JSON · 不附其他文本):\n'
+        '  - 继续调度 specialist:{"next": "&lt;specialist_name&gt;"}\n'
+        '  - 终止 + 给最终答案:{"final_answer": "..."}\n'
+        "调度策略:\n"
+        "- 若 dispatch_history 已含同一 specialist 多次且无新信息 · 终止 final_answer")</code></pre>
+                <p>大白话：主管<strong>严格约束 LLM 只能输出两种 JSON 之一</strong>——要么 <code>{"next":"trace"}</code>（继续，调这个专家），要么 <code>{"final_answer":"..."}</code>（够了，收尾）。它还把"同一个专家反复调又没新信息就该收尾"这条软规则写进了提示词，从源头减少打转。</p>
+
+                <h3>② 防死循环的硬闸门（dispatch.py:100-115）</h3>
+<pre><code class="language-python">dispatch_history = state.get("dispatch_history", [])
+# 防无限循环 · max_iter 兜底
+if len(dispatch_history) >= max_iter:                 # dispatch.py:103
+    log.warning("supervisor max_iter=%d reached · 强制 final_answer", max_iter)
+    return {
+        "final_answer": f"达到最大调度次数(max_iter={max_iter})· 强制终止 · ...",
+        "next": END_MARKER,                            # dispatch.py:26 END_MARKER="__END__"
+    }</code></pre>
+                <p>这是<strong>今天第一个关键的边界处理</strong>：上面提示词那条软规则是"劝"LLM 别打转，但 LLM 不一定听话。所以这里有一道<strong>硬闸门</strong>：调度历史长度一旦到 <code>max_iter</code>（默认 10），不管 LLM 想怎样，直接强制填 <code>final_answer</code> 收尾。<strong>"劝 + 硬拦"双保险</strong>，是所有 LLM 循环控制的标准姿势。</p>
+
+                <h3>③ 便宜 LLM 出决策，异步优先（dispatch.py:117-146）</h3>
+<pre><code class="language-python">if llm is None:
+    from ai_trust_toolkit.llm import get_llm
+    actual_llm = get_llm("haiku")            # 默认用便宜的 Haiku 做调度 · dispatch.py:121
+specialist_names = sorted(specialists.keys())      # 排序 → 提示词稳定 · 可缓存
+...
+ainvoke = getattr(actual_llm, "ainvoke", None)
+if ainvoke is not None and callable(ainvoke):
+    response = await ainvoke(full_messages)   # 有异步就走异步 · dispatch.py:144
+else:
+    response = actual_llm.invoke(full_messages)</code></pre>
+                <p>两个细节：（1）默认 <code>get_llm("haiku")</code>——<strong>调度只是"选下一步"，不需要贵模型</strong>，用便宜的 Haiku 省钱（这是全框架的成本纪律，Day 11 细讲）。（2）<code>sorted(specialists.keys())</code> 把专家名排序，保证同一批专家生成的提示词字节完全一致——这对<strong>prompt 缓存命中</strong>很重要。</p>
+
+                <h3>④ 解析结果 + 三种出路（dispatch.py:158-183）</h3>
+<pre><code class="language-python">parsed = _parse_dispatch_response(content)
+# 优先看 final_answer
+if "final_answer" in parsed and parsed["final_answer"]:
+    return {"final_answer": str(parsed["final_answer"]), "next": END_MARKER}
+next_name = parsed.get("next")
+if next_name in specialists:
+    return {"next": next_name}                        # 正常：派给这个专家
+# LLM 给了 next 但不在名单 · 视为终止（不硬塞一个不存在的专家）
+log.warning("supervisor LLM 返 next=%r 不在 specialists ...", next_name)
+return {"final_answer": f"supervisor 选择无效 specialist={next_name!r} ...", "next": END_MARKER}</code></pre>
+                <p>三条出路：有 <code>final_answer</code> → 收尾；<code>next</code> 在名单里 → 派专家；<strong>LLM 幻觉出一个不存在的专家名 → 不冒险执行，直接当收尾处理</strong>（第 3 条又是一处边界防御）。</p>
+
+                <div class="essence"><span class="t">💡 设计取舍②：解析为什么要"三级容错，且最后兜底也返回 final_answer"？</span>看 <code>_parse_dispatch_response</code>（<code>dispatch.py:45</code>）：它先试直接 <code>json.loads</code>，失败再试剥掉 markdown <code>```json``` </code>包裹（<code>:59</code>），再失败就正则抓第一个 <code>{...}</code>（<code>:69</code>）。<strong>连这些都失败呢？</strong>它不抛异常，而是返回 <code>{"final_answer": "supervisor 输出非 JSON · 原文:…"}</code>（<code>:79</code>）。为什么？因为这是<strong>循环里的节点</strong>——若解析失败就抛异常，整个图崩；若返回 <code>next</code> 又可能无限打转。<strong>兜底成"终止"是最安全的选择：宁可给个不完美的收尾，也不让图崩或死循环。</strong></p></div>
+                <div class="anno">⚠️ 易错点：很多人以为"LLM 输出 JSON 就直接 json.loads 一下"。真实 LLM 常在 JSON 外面裹一层解释文字或 markdown 代码块，直接 loads 必挂。<b>生产级解析永远是"多级容错 + 失败兜底"</b>，dispatch 和后面的 router 都是这个套路。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>scope guard：只决策，不执行</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>① 把节点接成图：auto_configure_supervisor</h1></div>
             <div class="card">
-                <p>这是 router 一个刻意的、重要的约束：<strong>它只告诉你"应该调 X agent、命令大概这么写"，但绝不替你真的去调</strong>。为什么？</p>
+                <p>光有 <code>supervisor_node</code> 还不是一张图。<code>auto_config.py:37</code> 的 <code>auto_configure_supervisor()</code> 一行把整张图连好：</p>
+<pre><code class="language-python">def auto_configure_supervisor(app, *, specialists, llm=None,
+                              enable_critic=True, max_iter=10):
+    if not enable_critic:                              # auto_config.py:65 红线
+        raise ValueError("R-STARTER-SUPERVISOR-2 红线 · critic 不可关 ...")
+    if not specialists:
+        raise ValueError("specialists dict 不能为空 · 至少 1 个 specialist")
+
+    builder = StateGraph(SupervisorState)
+    builder.add_node("supervisor", _supervisor)        # 主管节点
+    for name, runnable in specialists.items():
+        builder.add_node(name, runnable)
+        builder.add_edge(name, "supervisor")           # 专家跑完 → 回主管
+    builder.add_edge(START, "supervisor")              # 入口
+    # 主管出口是条件边：路由到某专家，或到 END
+    conditional_map = {name: name for name in specialists}
+    conditional_map[END_MARKER] = END                  # __END__ → LangGraph END
+    builder.add_conditional_edges("supervisor", route_after_supervisor, conditional_map)
+    return builder.compile()</code></pre>
+                <p>逐行翻译：建一张以 <code>SupervisorState</code> 为黑板的图 → 加主管节点 → 每个专家加成节点，并且<strong>专家跑完统一回到主管</strong>（<code>add_edge(name,"supervisor")</code>，这就是"下属不互相对话、全走主管"的代码化身）→ 入口连到主管 → 主管的出口是一条<strong>条件边</strong>，<code>route_after_supervisor</code> 返回的字符串（专家名或 <code>__END__</code>）在 <code>conditional_map</code> 里查到下一站。</p>
+                <p>那个条件路由函数极短（<code>dispatch.py:186</code>）：</p>
+<pre><code class="language-python">def route_after_supervisor(state) -> str:
+    next_name = state.get("next")
+    if next_name is None or next_name == END_MARKER:
+        return END_MARKER            # 走向 END
+    return str(next_name)            # 走向某个专家</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 210" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">图内 supervisor 是一台"回到自己"的状态机</text>
+                        <rect x="30" y="80" width="70" height="40" rx="8" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
+                        <text x="65" y="104" fill="#cbd5e1" text-anchor="middle">START</text>
+                        <rect x="150" y="72" width="130" height="56" rx="10" fill="rgba(139,92,246,.1)" stroke="#8b5cf6"/>
+                        <text x="215" y="94" fill="#c4b5fd" text-anchor="middle" font-weight="700">supervisor</text>
+                        <text x="215" y="112" fill="#94a3b8" text-anchor="middle">Haiku 出 next / final</text>
+                        <path d="M100 100 L146 100" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#a4)"/>
+                        <rect x="360" y="30" width="120" height="34" rx="8" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
+                        <text x="420" y="52" fill="#67e8f9" text-anchor="middle">specialist trace</text>
+                        <rect x="360" y="74" width="120" height="34" rx="8" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
+                        <text x="420" y="96" fill="#67e8f9" text-anchor="middle">specialist metric</text>
+                        <rect x="360" y="118" width="120" height="34" rx="8" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
+                        <text x="420" y="140" fill="#67e8f9" text-anchor="middle">specialist …</text>
+                        <path d="M280 92 Q320 60 358 50" fill="none" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#a4)"/>
+                        <path d="M280 100 L358 92" fill="none" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#a4)"/>
+                        <path d="M280 112 Q320 140 358 134" fill="none" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#a4)"/>
+                        <!-- back to supervisor -->
+                        <path d="M360 140 Q250 185 215 130" fill="none" stroke="#22c55e" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+                        <text x="250" y="182" fill="#34d399" text-anchor="middle">专家跑完 → 回主管</text>
+                        <rect x="520" y="74" width="70" height="40" rx="8" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="555" y="98" fill="#34d399" text-anchor="middle">END</text>
+                        <path d="M280 84 Q400 -6 555 72" fill="none" stroke="#ef4444" stroke-width="1.2"/>
+                        <text x="470" y="20" fill="#f87171" text-anchor="middle">final_answer → END</text>
+                        <defs>
+                          <marker id="a4" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#8b5cf6"/></marker>
+                          <marker id="ag" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：START→supervisor→（条件边）→某专家→回 supervisor→…→final_answer→END。专家永远不直连专家。</div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍③：为什么 <code>enable_critic=False</code> 要直接 raise，而不是"默认关掉"？</span>看 <code>auto_config.py:65</code>——只要有人想关掉 Critic，这个函数<strong>立刻抛 ValueError 拒绝组装</strong>，注释标着"红线 · critic 不可关"。这是"<strong>把安全约束写死在代码里、让它无法被绕过</strong>"的思路：可信 Agent 的防幻觉不是"可选项"，而是组装时的硬前置。同样地，<code>specialists</code> 为空也直接 raise——一个连专家都没有的主管毫无意义，早失败好过运行时诡异行为。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>② 跨 agent 路由：RouteDecision 与 route() 五步</h1></div>
+            <div class="card">
+                <p>换到第二个"工头"——大厅导览员。代码在 <code>apps/supervisor-router-agent/supervisor_router/core.py</code>。它<strong>没有 LangGraph 图</strong>，就是一个函数 <code>route(task, tier)</code>。先看它的产物数据结构 <code>RouteDecision</code>（<code>core.py:37</code>）：</p>
+<pre><code class="language-python">@dataclass(frozen=True)                     # core.py:37 · 冻结 = 不可变
+class RouteDecision:
+    agent_id: str | None                    # 选中的 agent · None = 不确定
+    confidence: float                        # 置信度 0~1
+    args_hint: dict[str, str]                # 建议参数
+    reasoning: str                           # 为什么这么选
+    suggested_command: str                   # 建议的 shell 命令
+    fallback_alternatives: list[str]         # 备选 agent
+    token_usage: dict | None = None          # 花了多少 token / 钱（可观测）
+    tier_used: str = DEFAULT_TIER
+    latency_ms: int = 0</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍④：为什么用 <code>@dataclass(frozen=True)</code>？</span>frozen 让这个决策<strong>一旦生成就不可改</strong>。路由决策是要被<strong>记录、审计、回放</strong>的东西——如果它能被下游随手改字段，"当时到底建议了什么"就成了糊涂账。冻结 = 决策留痕不可篡改。这和 Day 04 后面的 <code>HandoffSignal</code> 用同样的 frozen 取舍。</div>
+                <p>再看主函数 <code>route()</code>（<code>core.py:53</code>）的五步骨架（已裁剪 try/except 细节）：</p>
+<pre><code class="language-python">def route(task, *, tier=None) -> RouteDecision:
+    if not task or not task.strip():                    # core.py:59 空任务早返回
+        return RouteDecision(agent_id=None, confidence=0.0, reasoning="task 空 · 给个具体任务", ...)
+    registry = list_agents()                             # ① 拿 agent 名单 · core.py:74
+    if not registry:
+        return _unsure("registry 空 ...", ...)
+    try:
+        from ai_trust_toolkit.llm import get_llm
+        llm = get_llm(tier=actual_tier)                  # ② 便宜模型 · core.py:86
+    except Exception as e:
+        return _unsure(f"LLM 不可用 ... {e}", ...)        #    AC-1.5 挂了不抛
+    system, user = _render_prompts(task, registry)       # ③ 渲染 prompt · core.py:93
+    response = llm.invoke([SystemMessage(...), HumanMessage(...)])  # 调 LLM
+    parsed = _extract_json(raw)                          # ④ 正则抓 JSON · core.py:115
+    if parsed is None:
+        return _unsure("LLM 输出非 JSON · skip", ...)
+    decision = _build_decision(parsed, registry, ...)    # ⑤ 组装 RouteDecision
+    decision = _critic_validate(decision, registry)      #    再 critic 校验
+    return decision</code></pre>
+                <div class="flow-chart">
+                    <div class="flow-step"><div class="flow-number">1</div><div class="flow-content"><h4>list_agents()</h4><p>平台上有哪些 agent（优先查门户 registry，失败用本地 mock）。空 → 直接 unsure。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">2</div><div class="flow-content"><h4>get_llm(haiku)</h4><p>便宜模型做决策。初始化失败（没 key / import 错）→ 优雅 unsure，不抛。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">3</div><div class="flow-content"><h4>渲染 prompt → invoke</h4><p>把任务 + agent 名单塞进 Jinja2 模板让 LLM 选。网络/限流错 → 优雅 unsure。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">4</div><div class="flow-content"><h4>正则抓 JSON</h4><p><code>_extract_json</code> 抓第一个 <code>{...}</code>（<code>core.py:175</code>）。抓不到 → unsure。</p></div></div>
+                    <div class="flow-step"><div class="flow-number">5</div><div class="flow-content"><h4>_build_decision + _critic_validate</h4><p>组装 RouteDecision，再过一道 critic 校验（下一讲）。</p></div></div>
+                </div>
+                <div class="anno">⚠️ 注意每一步都包在 <code>try/except</code> 里，<b>任何异常都转成"优雅 unsure"而不是抛出去</b>——这是 L08 要讲的核心设计，也是路由器和图内主管最大的行为差异。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>② critic 校验 + 优雅降级 + scope guard</h1></div>
+            <div class="card">
+                <p>route() 拿到 LLM 给的 <code>RouteDecision</code> 后<strong>不直接信</strong>，要过一道 <code>_critic_validate</code>（<code>core.py:278</code>）。这是路由器的"防幻觉"：</p>
+<pre><code class="language-python">def _critic_validate(decision, registry) -> RouteDecision:
+    if decision.agent_id is None:
+        return decision                                  # 已经是 unsure · 直接返
+    valid_ids = {a.agent_id for a in registry}
+    if decision.agent_id not in valid_ids:               # ① LLM 编了个不存在的 agent
+        log.warning("LLM 选 %r 不在 registry · fallback unsure", decision.agent_id)
+        return RouteDecision(agent_id=None, confidence=0.0,
+            reasoning=f"LLM 选 {decision.agent_id} 不在 registry · fallback unsure", ...)
+    min_conf = float(os.getenv("PORTAL_SUPERVISOR_MIN_CONFIDENCE", "0.5"))
+    if decision.confidence &lt; min_conf:                   # ② 置信度太低
+        return RouteDecision(agent_id=None, confidence=decision.confidence,
+            reasoning=f"confidence {decision.confidence:.2f} &lt; {min_conf} · 不自信 · 工程师手挑",
+            fallback_alternatives=[decision.agent_id] + decision.fallback_alternatives, ...)
+    return decision                                      # 通过</code></pre>
+                <p>两道校验：① LLM<strong>幻觉出一个不在名单里的 agent</strong> → 退回 unsure；② <strong>置信度低于阈值（默认 0.5）</strong> → 也退回 unsure。<strong>注意第②处的细节</strong>：低置信时它把 LLM 原本想选的 agent 放进 <code>fallback_alternatives</code> 的<strong>第一位</strong>，而不是丢掉——这样工程师看到"不确定，但我猜是 risk-reviewer"，可以手动挑回。</p>
+                <div class="essence"><span class="t">💡 设计取舍⑤：低置信为什么"降级为不确定但保留猜测"而非"直接给答案"？</span>路由器宁可说"我不确定，候选可能是它"，也<strong>不硬塞一个自己都没把握的窗口</strong>——因为塞错窗口会让工程师白跑一趟、甚至误触发下游。但完全丢掉 LLM 的猜测又太浪费。把猜测降级进 fallback，是"<strong>诚实 + 不浪费信息</strong>"的平衡。</div>
+                <p>再看那个反复出现的 <code>_unsure</code>（<code>core.py:130</code>）——它是所有失败路径的统一出口：</p>
+<pre><code class="language-python">def _unsure(reason, tier, start, latency=None) -> RouteDecision:
+    return RouteDecision(agent_id=None, confidence=0.0, args_hint={},
+        reasoning=reason, suggested_command="", fallback_alternatives=[],
+        tier_used=tier, latency_ms=latency if latency is not None else ...)</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍⑥（关键）：为什么 route() 任何一步失败都返回 unsure，而不抛异常？</span>源码在 <code>route()</code> 的 docstring 里写死了："<strong>任何阶段挂 SHALL 返 unsure 不抛</strong>"。为什么？因为路由器是<strong>被别人调用的服务</strong>——CLI、门户、其他 agent 都靠它。如果它遇到"没 API key""网络抖动""LLM 抽风"就抛异常，会<strong>把调用方一起拖崩</strong>。让它"永远返回一个合法的 RouteDecision（哪怕是 unsure）"，调用方的代码就永远好写：拿到决策看一眼 <code>agent_id</code> 是不是 None 即可，不用到处包 try。<strong>这就是"优雅降级 > 抛异常"在服务边界上的体现。</strong></div>
+                <div class="example"><span class="t">📝 举个例子：导览员怎么应答两种问法</span>
+                输入 <code>route("帮我看下这个 PR 的上线风险")</code> → 高置信 → <code>RouteDecision{agent_id:"risk-reviewer", confidence:0.86, suggested_command:"agentctl invoke risk-reviewer ...", fallback_alternatives:["doc-checker"]}</code><br><br>
+                输入 <code>route("今天天气怎么样")</code>（平台没这类 agent）→ LLM 可能瞎选一个 → <code>_critic_validate</code> 发现不在名单 / 置信度 &lt; 0.5 → 返回 <code>RouteDecision{agent_id:None, confidence:0.0, fallback_alternatives:["原来那个瞎选的"]}</code>。<strong>它宁可说"不确定"，也不硬塞一个错窗口。</strong>
+                </div>
+                <p>最后一块拼图是 <strong>scope guard（范围守卫）</strong>：<code>core.py:1-15</code> 的模块 docstring 明确写"<strong>不真执行下游 agent(scope guard)</strong>"。route() 只吐"该找谁 + 命令怎么写"，<strong>绝不替你真的去调</strong>。</p>
                 <div class="constraint-grid">
                     <div class="constraint-group forbidden">
                         <h4>🚫 如果 router 自动执行下游</h4>
                         <ul>
-                            <li>一个决策错误会级联触发一串真实操作</li>
+                            <li>一个决策错误会级联触发一串真实操作（回滚、重启）</li>
                             <li>权限/审计边界模糊，谁为副作用负责？</li>
                             <li>成本不可控，一句话可能烧一大笔</li>
                         </ul>
@@ -231,30 +424,41 @@
                         <h4>✅ 只出决策的好处</h4>
                         <ul>
                             <li>人（或上层）看过决策再决定要不要执行</li>
-                            <li>决策可解释、可审计、可回放</li>
+                            <li>决策可解释、可审计、可回放（配合 frozen）</li>
                             <li>路由器本身零副作用、极安全</li>
                         </ul>
                     </div>
                 </div>
-                <p>这个"scope guard（范围守卫）"思想在框架里到处都是——比如 Day 15 会讲的 <code>spec-executor</code> 只往 <code>agent/*</code> 分支提交、绝不碰 main。<strong>把"决策"和"执行"分开，是可信 Agent 系统的一条通用安全原则。</strong></p>
+                <p style="margin-top:12px;">这个思想在框架里到处都是——Day 15 会讲的 <code>spec-executor</code> 只往 <code>agent/*</code> 分支提交、绝不碰 main。<strong>把"决策"和"执行"分开，是可信 Agent 系统的一条通用安全原则。</strong></p>
             </div>
         </section>
 
-        <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>handoff 与 route_chain：多步接力</h1></div>
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>handoff 与 route_chain：多步接力</h1></div>
             <div class="card">
-                <p>有时一个任务要好几个 agent 接力完成。框架用两个东西支持：</p>
-                <h3>HandoffSignal（交接信号）</h3>
-                <p>定义在 <code>ai_trust_toolkit/handoff.py:14</code>，是个很简单的数据类：一个 agent 干完，可以在返回结果上挂一个"建议下一个谁接手"的信号，但<strong>同样只是建议</strong>——由 supervisor 决定要不要真交接（又是 scope guard）。</p>
-<pre><code class="language-python">@dataclass(frozen=True)
+                <p>有时一个任务要好几个 agent 接力完成。框架用两个东西支持，且<strong>依然遵守 scope guard——只建议、不自动执行</strong>。</p>
+                <h3>HandoffSignal（交接信号 · handoff.py:14）</h3>
+<pre><code class="language-python">@dataclass(frozen=True)                   # handoff.py:14
 class HandoffSignal:
-    next_agent_hint: str | None   # None = 这条链结束
-    context_for_next: dict        # 传给下一棒的上下文
-    chain_id: str                 # 同一条链共享的 ID
-    reason: str</code></pre>
-                <p><code>chain_id</code> 把一条接力链上的多次调用串起来，便于在门户里回放整条链。telemetry 会自动把它上报，业务无需手动处理。</p>
-                <h3>route_chain（多步规划）</h3>
-                <p><code>core.py:322</code> 的 <code>route_chain(task, max_steps=5)</code> 让 LLM 一次性规划出 2-5 步的 agent 调用链：</p>
+    next_agent_hint: str | None           # canonical agent_id · None = 链终止
+    context_for_next: dict | None         # 传给下一棒的上下文
+    chain_id: str | None                  # 整条链共享的 ULID
+    reason: str                           # 给 supervisor 看的理由</code></pre>
+                <p>逐字段：一个 agent 干完，可以在返回结果上挂这个信号——<code>next_agent_hint</code> 是"建议下一个谁接手"（<code>None</code> 表示这条链到此结束）；<code>context_for_next</code> 是传给下一棒的数据；<code>reason</code> 是理由，比如"verify fail · 需 prod pod 兜底"。<strong>但这同样只是建议</strong>，由 supervisor 决定要不要真交接（又是 scope guard）。</p>
+                <p><code>chain_id</code> 值得单独说：它由 <code>new_chain_id()</code>（<code>handoff.py:31</code>）生成，而这个函数<strong>直接复用了 envelope 的 <code>new_case_id()</code></strong>（同一套 ULID 生成器）。为什么？docstring 说得清楚：让 chain_id 和门户里 invocation 的 case_id <strong>格式一致，串库时无需额外校验</strong>。一个 26 字符、按时间可排序的 ID，把一条接力链的多次调用串起来。</p>
+                <h3>route_chain（多步规划 · core.py:322）</h3>
+                <p><code>route_chain(task, max_steps=5)</code> 让 LLM 一次性规划出 2-5 步的 agent 调用链。它的循环体（<code>core.py:392-402</code>）藏着两处边界防御：</p>
+<pre><code class="language-python">decisions = []
+for step in steps_raw[:max_steps]:            # AC-3.4：超出 max_steps 直接截断
+    if not isinstance(step, dict):
+        break                                 # AC-3.3：半途冒出非法项 → 截断，保留前几步
+    d = _build_decision_from_step(step, registry, ...)
+    d = _critic_validate(d, registry)         # 每一步都过 critic
+    if d.agent_id is None:
+        break                                 # AC-3.3：某步选了名单外 agent → 截断
+    decisions.append(d)
+return decisions</code></pre>
+                <p>大白话：<strong>规划不是"要么全成功要么全失败"</strong>。若第 3 步 LLM 选了个不存在的 agent，它<strong>不会丢掉前 2 步</strong>，而是"截断"——保留已经合法的前缀，把断掉的地方给你看。这比"全砍掉重来"友好得多。另外 <code>max_steps==1</code> 时（<code>core.py:341</code>）它直接退化成单步 <code>route()</code>，保持向后兼容。</p>
                 <div class="chain">
                     <span class="step">任务</span><span class="a">→</span>
                     <span class="step"><b>1.</b> requirement-discoverer</span><span class="a">→</span>
@@ -263,32 +467,46 @@ class HandoffSignal:
                     <span class="step"><b>4.</b> release-coordinator</span>
                 </div>
                 <p>依然是<strong>只规划、不执行</strong>——打印出计划 + 共享 chain_id 给你看。上面这条链其实就是 Day 15/20 要讲的平台"自我开发"闭环。</p>
+                <div class="qa">
+                    <p class="q">👶 小白：图内主管的 max_iter 和 route_chain 的 max_steps 是一回事吗？</p>
+                    <p class="a">👨‍🏫 老师：像但不同。<strong>max_iter</strong>（图内）管的是"运行时真跑了多少步"，防止专家被反复调进死循环；<strong>max_steps</strong>（router）管的是"一次性规划出几步计划"，且这计划<strong>不真跑</strong>只打印。前者是执行护栏，后者是规划上限——正好对应两个工头"真干 vs 只指路"的本质差异。</p>
+                </div>
             </div>
         </section>
 
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+        <section id="l10" class="section">
+            <div class="section-header"><span class="section-number">L10</span><h1>今日小结 + 动手</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>Supervisor 模式的核心结构是什么？（中央主管调度，下属不直接对话）</li>
-                    <li>为什么不用 langgraph-supervisor 库？（官方已转向 tools 模式，框架自实现以保持可控）</li>
-                    <li>两种 supervisor 分别是什么？（图内 supervisor_node 选专家真跑 vs 跨 agent router 选 agent 只建议）</li>
-                    <li>scope guard 是什么？为什么重要？（只决策不执行，把决策与执行分开，安全可审计）</li>
-                    <li>handoff 和 chain_id 干嘛的？（多 agent 接力的建议信号 + 串起整条链）</li>
+                    <li>Supervisor 模式的核心结构？（中央主管调度，下属不直接对话、全走主管）</li>
+                    <li>为什么不用 langgraph-supervisor 库？（v0.1 不稳 + venv 未装，框架自实现只 100 多行、完全可控）</li>
+                    <li>SupervisorState 哪三字段、各管什么？（messages 内容 / dispatch_history 轨迹 / final_answer 终止信号）</li>
+                    <li>supervisor_node 怎么防死循环？（提示词软劝 + max_iter 硬拦 + 解析失败兜底成 final_answer）</li>
+                    <li>route() 为什么任何失败都返回 unsure 不抛异常？（服务边界优雅降级，不拖垮调用方）</li>
+                    <li>_critic_validate 怎么防路由幻觉？（不在名单 / 低置信 → 退回 unsure，低置信时把猜测留进 fallback）</li>
+                    <li>scope guard 是什么？为什么重要？（只决策不执行，可解释可审计可回放）</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash"># 看图内 supervisor 的分派协议
-sed -n '82,130p' packages/ai-trust-toolkit-starter-supervisor/src/*/dispatch.py
+                <h3>✋ 动手：跟着真源码读一遍</h3>
+<pre><code class="language-bash"># ① 图内 supervisor 的三段核心：任务书 / max_iter / 三种出路
+sed -n '29,42p;100,115p;158,194p' packages/ai-trust-toolkit-starter-supervisor/src/*/dispatch.py
 
-# 看跨 agent router 的 route() 与优雅降级
-sed -n '37,146p' apps/supervisor-router-agent/supervisor_router/core.py
+# ② 三字段黑板 + 一行组装成图（含 enable_critic 红线）
+sed -n '24,41p' packages/ai-trust-toolkit-starter-supervisor/src/*/state.py
+sed -n '37,124p' packages/ai-trust-toolkit-starter-supervisor/src/*/auto_config.py
 
-# （若已启用）用 CLI 试试路由决策
+# ③ 跨 agent router 的 RouteDecision / route() 五步 / critic 校验 / 优雅降级
+sed -n '37,146p;278,319p' apps/supervisor-router-agent/supervisor_router/core.py
+
+# ④ handoff 数据结构 + route_chain 的截断逻辑
+sed -n '14,39p' packages/ai-trust-toolkit/src/ai_trust_toolkit/handoff.py
+sed -n '322,402p' apps/supervisor-router-agent/supervisor_router/core.py
+
+# ⑤（若已启用）用 CLI 试试路由决策
 uv run supervisor-router "帮我看下这个 PR 的上线风险" --chain</code></pre>
-                <div class="tip"><strong>明天预告 · Day 05</strong>：第 1 周收官。我们把前面所有概念落到"一个真实 Agent 的标准目录结构"上——state / builder / nodes / specialists / prompts / tools / server 各是什么、彼此怎么配合。这是 Day 14 逐文件精读 sre-rca 的地图。</div>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：第 1 周收官。今天读的图内 supervisor 是"多专家怎么被调度"，明天把镜头拉到"<strong>一个真实 Agent 的标准目录长什么样</strong>"——state / builder / nodes / specialists / prompts / tools / server 各是什么、怎么配合。这是 Day 14 逐文件精读 sre-rca 的地图。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="gov-agents-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 LangGraph 入门</a>
