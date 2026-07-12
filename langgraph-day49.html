@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 49 · 子图基础：add_node(子图) 与状态共享 — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">49</div>
+            <h2>Day 49</h2>
+            <p class="version">子图基础 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要子图</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 图就是 Runnable</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 自动探测子图</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 状态按 key 名共享</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 子图独立命名空间</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · get_subgraphs + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day48.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 48 func→pregel</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day50.html" class="nav-link" style="color:var(--accent-green);">Day 50 子图隔离/stream &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 49 / 共 60 天 · 阶段 8 函数式 API 与子图</span>
+            <h1 class="part-title">子图基础：一张图，能当另一张图的节点</h1>
+            <p class="part-desc">前面的图都是"一层的"：节点是函数。今天我们让节点<strong>本身也是一张图</strong>——这就是子图（subgraph）。你会惊讶地发现：LangGraph 几乎没为此写特殊代码。因为<strong>编译后的图本来就是一个 Runnable</strong>，而节点接受任何 Runnable。今天看两件事：编译好的子图怎么被当节点接上，以及父子图如何"共享同名字段"的状态。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 8 · 函数式 API 与子图（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D47 @entrypoint/@task</span><span class="sep">→</span>
+                <span class="st">D48 func→pregel</span><span class="sep">→</span>
+                <span class="st on">D49 子图基础</span><span class="sep">→</span>
+                <span class="st">D50 子图隔离/stream</span><span class="sep">→</span>
+                <span class="st">D51 CachePolicy</span><span class="sep">→</span>
+                <span class="st">D52 重试容错</span>
+            </div>
+        </div>
+
+        <div class="ask" style="margin:0 0 4px"><span class="t">🤔 痛点：图越写越大，一个文件几十个节点</span>
+        一个复杂 Agent 系统：检索模块 5 个节点、推理模块 4 个节点、审阅模块 3 个节点……全塞进一张 StateGraph，节点名冲突、无法复用、无法单独测试。你想像搭积木一样：把"检索模块"打包成一个可复用组件，在多个大图里当一个节点用。</div>
+        <div class="essence" style="margin:6px 0"><span class="t">💡 本质：子图 = 把一张编译好的图当节点嵌进另一张图</span>
+        就像编程里"函数调用函数"。父图跑到某个节点，这个节点其实是一整张子图，子图跑完把结果交回父图继续。类比：公司的组织架构——总公司（父图）下面有一个"财务部"（子图），对总公司来说财务部是"一个节点"，但点进去它内部又是一整套流程。关键问题只有一个：<strong>父图和子图怎么传递/共享状态？</strong>答案是"看字段名对不对得上"。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种嵌法：直接当节点 vs 包一层函数</h1></div>
+            <div class="card">
+                <p>子图有两种接法，今天讲第一种（共享状态），明天讲第二种（隔离转换）：</p>
+                <table class="fld">
+                    <tr><th>方式</th><th>写法</th><th>状态关系</th></tr>
+                    <tr><td>直接当节点</td><td><code>parent.add_node("sub", subgraph)</code></td><td><b>共享</b>：父子图同名字段自动互通（今天）</td></tr>
+                    <tr><td>包一层函数</td><td><code>parent.add_node("sub", lambda s: subgraph.invoke({...}))</code></td><td><b>隔离</b>：手动转换输入/输出，schema 可完全不同（D50）</td></tr>
+                </table>
+                <div class="example"><span class="t">📝 直接当节点（共享状态）的最小例子</span>
+<pre><code class="language-python">from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+
+class State(TypedDict):
+    foo: str            # 父子图都有 foo → 共享
+
+# 子图
+sub = StateGraph(State)
+sub.add_node("s1", lambda s: {"foo": s["foo"] + "|sub"})
+sub.add_edge(START, "s1"); sub.add_edge("s1", END)
+subgraph = sub.compile()
+
+# 父图：把编译好的子图直接当节点
+parent = StateGraph(State)
+parent.add_node("p1", lambda s: {"foo": s["foo"] + "|p1"})
+parent.add_node("sub", subgraph)          # ← 子图当节点！
+parent.add_edge(START, "p1"); parent.add_edge("p1", "sub"); parent.add_edge("sub", END)
+app = parent.compile()
+app.invoke({"foo": "start"})              # {'foo': 'start|p1|sub'}</code></pre>
+                注意 <code>add_node("sub", subgraph)</code> 第二个参数是<strong>编译好的图对象</strong>，不是函数。父图把整个 <code>State</code> 传给子图，子图对 <code>foo</code> 的修改直接体现在父图的 <code>foo</code> 上。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>为什么图能直接当节点：它就是个 Runnable</h1></div>
+            <div class="card">
+                <p>秘密在类型继承链。编译后的图是 <code>Pregel</code>，而 <code>Pregel</code> 实现了 <code>PregelProtocol</code>，后者直接继承 <code>Runnable</code> <span class="fileref">pregel/protocol.py:25</span>：</p>
+<pre><code class="language-python"># pregel/protocol.py:25
+class PregelProtocol(Runnable[InputT, Any], Generic[StateT, ContextT, InputT, OutputT]):
+    ...
+# pregel/main.py:450
+class Pregel(PregelProtocol[StateT, ContextT, InputT, OutputT], ...):
+    ...</code></pre>
+                <p>而 <code>add_node</code> 对 action 的处理，就是一句 <code>coerce_to_runnable</code> <span class="fileref">graph/state.py:874</span>：</p>
+<pre><code class="language-python"># graph/state.py:872
+self.nodes[node] = StateNodeSpec(
+    coerce_to_runnable(action, name=node, trace=False),   # 把 action 归一成 Runnable
+    metadata, input_schema=..., retry_policy=..., cache_policy=..., ...
+)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Pregel is-a Runnable</code><span>因为编译好的子图本身就是 Runnable，<code>coerce_to_runnable</code> 见到它<b>原样返回</b>（无需包装）。所以子图能像普通函数节点一样被存进 nodes。</span></div>
+                    <div class="r"><code>子图有 .invoke</code><span>父图跑到这个节点时，就调子图的 <code>.invoke(state, config)</code>——和调一个普通函数节点没区别。子图内部自己跑完整一轮 Pregel 循环。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 155" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：父图跑到 "sub" 节点 → 调子图 invoke → 结果回父图</text>
+                        <rect x="20" y="45" width="120" height="42" rx="8" fill="rgba(99,102,241,.12)" stroke="#818cf8"/>
+                        <text x="80" y="63" fill="#a5b4fc" text-anchor="middle" font-weight="700">父图节点 p1</text>
+                        <text x="80" y="79" fill="#94a3b8" text-anchor="middle">改 foo</text>
+                        <rect x="180" y="35" width="150" height="62" rx="9" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="255" y="55" fill="#fbbf24" text-anchor="middle" font-weight="700">节点 "sub" = 子图</text>
+                        <text x="255" y="72" fill="#94a3b8" text-anchor="middle">subgraph.invoke(state)</text>
+                        <text x="255" y="88" fill="#94a3b8" text-anchor="middle">内部跑完整一轮 Pregel</text>
+                        <rect x="370" y="45" width="120" height="42" rx="8" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="430" y="63" fill="#34d399" text-anchor="middle" font-weight="700">写回父图</text>
+                        <text x="430" y="79" fill="#94a3b8" text-anchor="middle">同名 foo 通道</text>
+                        <rect x="520" y="45" width="60" height="42" rx="8" fill="rgba(148,163,184,.1)" stroke="#64748b"/>
+                        <text x="550" y="70" fill="#94a3b8" text-anchor="middle">END</text>
+                        <path d="M140 66 L178 66" stroke="#818cf8" stroke-width="1.3" marker-end="url(#a9b)"/>
+                        <path d="M330 66 L368 66" stroke="#f59e0b" stroke-width="1.3" marker-end="url(#a9b)"/>
+                        <path d="M490 66 L518 66" stroke="#22c55e" stroke-width="1.3" marker-end="url(#a9b)"/>
+                        <text x="300" y="128" fill="#64748b" text-anchor="middle">对父图而言 "sub" 就是普通一步；点进去是一整张子图（独立命名空间存档）</text>
+                        <defs><marker id="a9b" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：子图执行像"函数调函数"——调 invoke、跑完、结果按同名字段合并回父图。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么不专门设计一个"SubgraphNode"类型？</span>朴素框架会为"嵌套"引入一等公民概念（如 <code>add_subgraph</code>）。LangGraph 选择<strong>复用 Runnable 抽象</strong>：既然节点吃 Runnable、编译图又是 Runnable，那"图当节点"就免费成立，零特殊代码。好处是极其统一——子图、普通函数、LCEL 链、甚至远程图（RemoteGraph）都能当节点，因为它们都是 Runnable。代价是"这个节点是不是子图"这件事变得隐式，需要靠运行时探测（L03）才能知道，用于流式和状态展开等特殊处理。这是"用统一抽象换特殊能力"的经典权衡。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>引擎怎么知道"这个节点是子图"：自动探测</h1></div>
+            <div class="card">
+                <p>虽然子图当节点靠的是 Runnable 抽象，但引擎有时需要知道"这里面藏着一张图"（比如流式要下钻、get_state 要展开子图状态）。<code>PregelNode</code> 构造时会自动探测 <span class="fileref">pregel/_read.py:182</span>：</p>
+<pre><code class="language-python"># pregel/_read.py:182
+if subgraphs is not None:
+    self.subgraphs = subgraphs
+elif self.bound is not DEFAULT_BOUND:
+    try:
+        subgraph = find_subgraph_pregel(self.bound)   # 从 bound 里挖有没有 Pregel
+    except Exception:
+        subgraph = None
+    if subgraph:
+        self.subgraphs = [subgraph]
+    else:
+        self.subgraphs = []
+else:
+    self.subgraphs = []</code></pre>
+                <p><code>find_subgraph_pregel</code> 会顺着 Runnable 的结构往里挖 <span class="fileref">pregel/_utils.py:47</span>：</p>
+<pre><code class="language-python"># pregel/_utils.py:47
+def find_subgraph_pregel(candidate: Runnable) -> PregelProtocol | None:
+    from langgraph.pregel import Pregel
+    candidates: list[Runnable] = [candidate]
+    for c in candidates:
+        if (isinstance(c, PregelProtocol)
+                and (not isinstance(c, Pregel) or c.checkpointer is not False)):
+            return c                                   # 找到一张图！
+        elif isinstance(c, RunnableSequence) or isinstance(c, RunnableSeq):
+            candidates.extend(c.steps)                 # 是链 → 挖每一步
+        elif isinstance(c, RunnableLambda):
+            candidates.extend(c.deps)                  # 是 lambda → 挖它依赖的对象
+        elif isinstance(c, RunnableCallable):
+            if c.func is not None:
+                candidates.extend(                     # 是函数 → 挖闭包里引用的对象
+                    nl.__self__ if hasattr(nl, "__self__") else nl
+                    for nl in get_function_nonlocals(c.func))
+            ...
+    return None</code></pre>
+                <div class="walk">
+                    <div class="r"><code>直接是 Pregel → 返回</code><span>L01 第一种写法：子图直接当节点，bound 就是 Pregel，一眼探测到。</span></div>
+                    <div class="r"><code>是链/lambda → 继续挖</code><span>就算你把子图包在函数里（L01 第二种写法），它也会顺着闭包的 <code>get_function_nonlocals</code> 挖出被引用的子图。所以"包一层"也能被识别为含子图。</span></div>
+                    <div class="r"><code>checkpointer is not False</code><span>细节：显式关掉存档（<code>checkpointer=False</code>）的子图不算——因为它不参与父图的持久化协调（D50 讲 ns）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：探测是为"下钻能力"服务</span><code>node.subgraphs</code> 这个列表被 <code>get_subgraphs()</code>（L06）、流式下钻（D50）、时间旅行展开子图状态用到。平时执行子图并不需要它——执行只靠"它是 Runnable，调 invoke 就行"。探测是"想看清内部时才需要的地图"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>状态共享的真相：按字段名对齐</h1></div>
+            <div class="card">
+                <p>为什么 L01 例子里父图改 <code>foo</code>、子图也改 <code>foo</code>，二者能接上？因为父图把整个 state 传给子图当输入，子图读它认识的字段、写回同名字段，父图再用<strong>同名通道的 reducer</strong> 合并。共享的前提就是<strong>字段名相同</strong>。</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 210" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：共享状态靠同名字段（foo）对齐</text>
+                        <rect x="30" y="40" width="250" height="150" rx="10" fill="rgba(99,102,241,.06)" stroke="#818cf8"/>
+                        <text x="155" y="60" fill="#a5b4fc" text-anchor="middle" font-weight="700">父图 State</text>
+                        <rect x="55" y="72" width="90" height="30" rx="5" fill="rgba(34,197,94,.15)" stroke="#22c55e"/>
+                        <text x="100" y="91" fill="#34d399" text-anchor="middle">foo</text>
+                        <rect x="165" y="72" width="90" height="30" rx="5" fill="rgba(148,163,184,.12)" stroke="#64748b"/>
+                        <text x="210" y="91" fill="#94a3b8" text-anchor="middle">bar(父独有)</text>
+                        <rect x="70" y="120" width="170" height="55" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="155" y="140" fill="#fbbf24" text-anchor="middle" font-weight="700">节点 "sub" = 子图</text>
+                        <text x="155" y="158" fill="#94a3b8" text-anchor="middle">收到整个 State</text>
+                        <rect x="340" y="40" width="250" height="150" rx="10" fill="rgba(236,72,153,.06)" stroke="#ec4899"/>
+                        <text x="465" y="60" fill="#f472b6" text-anchor="middle" font-weight="700">子图 State</text>
+                        <rect x="365" y="72" width="90" height="30" rx="5" fill="rgba(34,197,94,.15)" stroke="#22c55e"/>
+                        <text x="410" y="91" fill="#34d399" text-anchor="middle">foo</text>
+                        <text x="465" y="130" fill="#94a3b8" text-anchor="middle">子图读 foo、改 foo</text>
+                        <text x="465" y="148" fill="#94a3b8" text-anchor="middle">写回父图同名通道</text>
+                        <path d="M240 87 L363 87" stroke="#22c55e" stroke-width="1.6" marker-end="url(#a6)"/>
+                        <text x="300" y="80" fill="#34d399" text-anchor="middle" font-size="9">同名 → 打通</text>
+                        <path d="M363 100 L240 100" stroke="#22c55e" stroke-width="1.6" stroke-dasharray="3 2" marker-end="url(#a6)"/>
+                        <defs><marker id="a6" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#22c55e"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：只有同名字段（foo）在父子图之间流动；父图独有的 bar 子图看不见也动不了。</div>
+                </div>
+                <div class="walk">
+                    <div class="r"><code>父传整个 state</code><span>父图执行子图节点时，把当前 state 作为输入调 <code>subgraph.invoke(state)</code>。子图按自己的 input schema 取用其中认识的键。</span></div>
+                    <div class="r"><code>子图写回同名键</code><span>子图返回的更新（如 <code>{"foo": ...}</code>）被当作父图的节点写，走父图 <code>foo</code> 通道的 reducer 合并（Day 07 reducer）。</span></div>
+                    <div class="r"><code>不同名 = 不共享</code><span>父图的 <code>bar</code> 子图 schema 里没有，子图既读不到也改不了。想让子图用一个不同名字段，就得走 D50 的"包一层转换"。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：共享字段的 reducer 以父图为准</span>如果 <code>foo</code> 在父图用 <code>add</code> 累加、在子图用覆盖写，最终写回父图时按<strong>父图 foo 通道</strong>的 reducer 处理。父子图对同名字段的 reducer 语义不一致时容易踩坑（比如你以为覆盖，父图却累加）。规避：共享字段在父子图保持一致的类型与 reducer 约定；不确定时用 D50 的显式转换隔离，别依赖隐式同名共享。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>子图有自己的命名空间（存档隔离）</h1></div>
+            <div class="card">
+                <p>状态字段可以共享，但<strong>存档（checkpoint）是分层的</strong>。父图执行子图节点时，给子图分配一个嵌套的 checkpoint 命名空间 <span class="fileref">pregel/_algo.py:624</span>：</p>
+<pre><code class="language-python"># pregel/_algo.py:624
+task_checkpoint_ns = f"{checkpoint_ns}{NS_END}{task_id}"
+# ...
+# 传给子图执行的 config 里（同函数体 :746）
+CONFIG_KEY_CHECKPOINT_NS: task_checkpoint_ns,</code></pre>
+                <div class="walk">
+                    <div class="r"><code>task_checkpoint_ns = 父ns + task_id</code><span>子图这次执行拿到一个独立的命名空间字符串，形如 <code>sub:&lt;task_id&gt;</code>。它挂在父图的 ns 下面。</span></div>
+                    <div class="r"><code>CONFIG_KEY_CHECKPOINT_NS 传给子图</code><span>子图内部所有存档都写在这个 ns 下。回想 Day 35 InMemorySaver：存储键第一层是 thread、第二层就是 checkpoint_ns。父图存在 <code>""</code>（根 ns），子图存在 <code>sub:xxx</code>。井水不犯河水。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：字段共享 + 命名空间隔离，为什么要"半共享半隔离"？</span>两种极端都不好：全共享（父子图连存档都混在一起）会让子图的中间状态污染父图的档、时间旅行时无法区分层级；全隔离（父子图状态完全不通）又回到 D50 要手写一堆转换的麻烦。LangGraph 选了中间路线——<strong>运行时的值按同名字段流动（协作方便），持久化的坐标按命名空间分层（互不干扰）</strong>。这样父子图既能自然传数据，又能各自独立地断点、恢复、时间旅行。代价是使用者要理解"字段共享但存档隔离"这个看似矛盾的模型，但它精确对应了"协作"与"隔离"两种不同需求的分离。</div>
+                <div class="essence"><span class="t">💡 本质：状态"字段"共享，但存档"空间"隔离</span>这看起来矛盾，其实分工明确：<strong>字段共享</strong>让父子图能协作传数据（运行时的值流动）；<strong>命名空间隔离</strong>让父子图的存档、断点、时间旅行互不干扰（持久化的坐标分层）。一个子图中断（interrupt）时，恢复能精确定位到"父图的哪个 task 下的子图的哪一步"，正是靠这条 <code>父ns|子ns</code> 的嵌套路径。Day 41 讲的 interrupt 在子图里也能用，就是这个原因。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>get_subgraphs：把嵌套结构列出来 + 小结</h1></div>
+            <div class="card">
+                <p>L03 探测出的 <code>node.subgraphs</code> 在这里派上用场——<code>get_subgraphs</code> 遍历所有节点，把子图（可递归）列出来 <span class="fileref">pregel/main.py:1076</span>：</p>
+<pre><code class="language-python"># pregel/main.py:1089
+for name, node in self.nodes.items():
+    ...
+    graph = node.subgraphs[0] if node.subgraphs else None   # 用探测结果
+    if graph:
+        if namespace is None:
+            yield name, graph                                # 产出 (节点名, 子图)
+        if recurse and isinstance(graph, Pregel):            # recurse=True 继续下钻
+            yield from ((f"{name}{NS_SEP}{n}", s)
+                        for n, s in graph.get_subgraphs(namespace=namespace, recurse=recurse))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>遍历 nodes 找 subgraphs</code><span>哪些节点其实是子图，一目了然——这就是 L03 探测的价值兑现。</span></div>
+                    <div class="r"><code>recurse 递归下钻</code><span>子图里还有子图？<code>recurse=True</code> 会一路挖到底，命名空间用 <code>|</code> 拼成完整路径，如 <code>outer|inner</code>。</span></div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 子图必须和父图用同一个 State schema 吗？</p>
+                    <p class="a">👨‍🏫 不必完全相同，但<strong>想共享的字段名必须一致</strong>。父图 State 有 <code>{a, b, c}</code>，子图 State 有 <code>{b, d}</code>，那么只有 <code>b</code> 共享：父图把 b 传进去、子图改了 b 传回来；子图的 d 是它的私有字段（父图看不见）；父图的 a、c 子图碰不到。完全不同 schema（一个字段都不重名）就没法直接当节点共享，得走 D50 的转换方式。</p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么编译好的图能直接当节点？（Pregel 实现 PregelProtocol，后者继承 Runnable，而节点吃 Runnable）</li>
+                    <li>add_node 怎么处理子图？（coerce_to_runnable 见到 Runnable 原样返回，存进 nodes）</li>
+                    <li>引擎怎么知道一个节点是子图？（PregelNode 构造时 find_subgraph_pregel 探测，存进 node.subgraphs）</li>
+                    <li>父子图状态怎么共享？（按同名字段对齐：父传整个 state，子图读写同名键，用父图通道 reducer 合并）</li>
+                    <li>父图独有字段子图能改吗？（不能，schema 里没有就看不见）</li>
+                    <li>子图的存档在哪？（独立的嵌套命名空间 <code>父ns|sub:task_id</code>，与父图隔离）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读三段
+sed -n '47,75p'    libs/langgraph/langgraph/pregel/_utils.py   # find_subgraph_pregel
+sed -n '150,195p'  libs/langgraph/langgraph/pregel/_read.py    # PregelNode 探测
+sed -n '1076,1114p' libs/langgraph/langgraph/pregel/main.py    # get_subgraphs
+
+# 2. 亲手验证共享 + 列子图
+python - <<'PY'
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+class S(TypedDict):
+    foo: str
+sub = StateGraph(S); sub.add_node("s1", lambda s: {"foo": s["foo"]+"|sub"})
+sub.add_edge(START,"s1"); sub.add_edge("s1",END)
+subgraph = sub.compile()
+p = StateGraph(S)
+p.add_node("p1", lambda s: {"foo": s["foo"]+"|p1"}); p.add_node("sub", subgraph)
+p.add_edge(START,"p1"); p.add_edge("p1","sub"); p.add_edge("sub",END)
+app = p.compile()
+print(app.invoke({"foo":"start"}))                 # {'foo': 'start|p1|sub'}
+print([name for name,_ in app.get_subgraphs()])    # ['sub']
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 50</strong>：如果父子图<strong>连一个同名字段都没有</strong>怎么办？如何显式转换输入/输出让 schema 完全解耦？以及流式时怎么"下钻"看到子图内部的每一步（<code>stream(subgraphs=True)</code>）？明天讲子图的状态隔离与转换。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day48.html" style="color:var(--accent-cyan);">&larr; Day 48 func→pregel</a>
+                <a href="langgraph-day50.html" style="color:var(--accent-green);">Day 50 · 子图状态隔离与转换 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

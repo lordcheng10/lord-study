@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 50 · 子图状态隔离与转换、stream 下钻 — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">50</div>
+            <h2>Day 50</h2>
+            <p class="version">子图隔离/stream · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 完全不同的 schema</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 包一层做转换</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 隔离但仍被探测</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 命名空间转成元组</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · stream(subgraphs=True)</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 取舍/边界 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day49.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 49 子图基础</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day51.html" class="nav-link" style="color:var(--accent-green);">Day 51 CachePolicy &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 50 / 共 60 天 · 阶段 8 函数式 API 与子图</span>
+            <h1 class="part-title">子图隔离与转换：schema 完全不同也能嵌套 + 流式下钻</h1>
+            <p class="part-desc">昨天的共享靠"字段同名"。但真实世界里，你复用的子图往往有<strong>自己的一套 state schema</strong>，和父图一个字段都不重名。今天讲第二种接法——<strong>包一层转换函数</strong>做输入/输出映射，让父子图彻底解耦。再解决一个实战问题：流式运行时，怎么看到子图内部每一步（<code>stream(subgraphs=True)</code>）？这背后是每个 Pregel 循环给自己的流式输出打的"命名空间戳"。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 8 · 函数式 API 与子图（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D47 @entrypoint/@task</span><span class="sep">→</span>
+                <span class="st">D48 func→pregel</span><span class="sep">→</span>
+                <span class="st">D49 子图基础</span><span class="sep">→</span>
+                <span class="st on">D50 子图隔离/stream</span><span class="sep">→</span>
+                <span class="st">D51 CachePolicy</span><span class="sep">→</span>
+                <span class="st">D52 重试容错</span>
+            </div>
+        </div>
+
+        <div class="ask" style="margin:0 0 4px"><span class="t">🤔 痛点：子图 state 里叫 query，父图叫 user_input，对不上</span>
+        你从别处拿来一个"检索子图"，它的输入字段叫 <code>query</code>、输出叫 <code>docs</code>；而你的父图里对应字段叫 <code>user_input</code> 和 <code>retrieved</code>。昨天的"同名共享"完全失效——名字都不一样。硬改子图的 schema？那子图就不通用了。怎么办？</div>
+        <div class="essence" style="margin:6px 0"><span class="t">💡 本质：隔离 = 在父图节点里手动"翻译"进出的状态</span>
+        既然名字对不上，那就<strong>不让它们直接共享</strong>：父图节点是一个普通函数，函数里手动把父图字段翻译成子图字段、调 <code>subgraph.invoke(...)</code>、再把子图结果翻译回父图字段。子图完全不知道父图长啥样。类比：两个说不同语言的部门，中间放一个翻译（转换函数），各说各话、互不改口音。这是"适配器模式"在图上的体现。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种接法对照：共享 vs 隔离</h1></div>
+            <div class="card">
+                <table class="fld">
+                    <tr><th>维度</th><th>直接当节点（D49 共享）</th><th>包一层转换（今天 隔离）</th></tr>
+                    <tr><td>写法</td><td><code>add_node("sub", subgraph)</code></td><td><code>add_node("sub", call_sub)</code>（call_sub 是函数）</td></tr>
+                    <tr><td>state 关系</td><td>同名字段自动互通</td><td>手动翻译，schema 可完全无关</td></tr>
+                    <tr><td>控制力</td><td>低（隐式）</td><td>高（你决定传什么、收什么）</td></tr>
+                    <tr><td>适用</td><td>父子图本就共用一套状态</td><td>复用第三方/独立子图，字段命名不一致</td></tr>
+                </table>
+                <div class="baby"><span class="t">大白话</span>D49 是"两家合用一个账本，谁改都算"；今天是"两家各记各的账，中间派个会计（转换函数）对账"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>包一层转换函数：手动 invoke 子图</h1></div>
+            <div class="card">
+                <p>核心就是"节点不是子图本身，而是一个调用子图的普通函数"：</p>
+<pre><code class="language-python">from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+
+# 子图：自己的一套 schema（query / docs）
+class SubState(TypedDict):
+    query: str
+    docs: str
+sub = StateGraph(SubState)
+sub.add_node("search", lambda s: {"docs": f"docs-for({s['query']})"})
+sub.add_edge(START, "search"); sub.add_edge("search", END)
+subgraph = sub.compile()
+
+# 父图：完全不同的 schema（user_input / retrieved）
+class ParentState(TypedDict):
+    user_input: str
+    retrieved: str
+
+def call_sub(state: ParentState) -> dict:
+    # ① 父 → 子：翻译输入字段
+    sub_out = subgraph.invoke({"query": state["user_input"]})
+    # ② 子 → 父：翻译输出字段
+    return {"retrieved": sub_out["docs"]}
+
+parent = StateGraph(ParentState)
+parent.add_node("sub", call_sub)              # 节点是转换函数，不是子图
+parent.add_edge(START, "sub"); parent.add_edge("sub", END)
+app = parent.compile()
+app.invoke({"user_input": "cats", "retrieved": ""})
+# {'user_input': 'cats', 'retrieved': 'docs-for(cats)'}</code></pre>
+                <div class="walk">
+                    <div class="r"><code>subgraph.invoke({"query": ...})</code><span>父图节点函数里显式调子图的 invoke，只传子图认识的字段 <code>query</code>。父图的 <code>user_input</code> 在这里被翻译成子图的 <code>query</code>。</span></div>
+                    <div class="r"><code>return {"retrieved": sub_out["docs"]}</code><span>子图返回 <code>docs</code>，函数把它翻译回父图字段 <code>retrieved</code>。父子图字段名从头到尾不用一致。</span></div>
+                    <div class="r"><code>节点 = call_sub 函数</code><span>对父图而言这就是一个普通函数节点，走 Day 03-05 的节点机制。子图被"藏"在函数体里。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 175" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：转换函数作"适配器"，父子 schema 完全解耦</text>
+                        <rect x="20" y="40" width="150" height="110" rx="9" fill="rgba(99,102,241,.08)" stroke="#818cf8"/>
+                        <text x="95" y="58" fill="#a5b4fc" text-anchor="middle" font-weight="700">父 ParentState</text>
+                        <text x="95" y="80" fill="#94a3b8" text-anchor="middle">user_input</text>
+                        <text x="95" y="100" fill="#94a3b8" text-anchor="middle">retrieved</text>
+                        <rect x="210" y="55" width="180" height="80" rx="9" fill="rgba(236,72,153,.1)" stroke="#ec4899"/>
+                        <text x="300" y="75" fill="#f472b6" text-anchor="middle" font-weight="700">call_sub (适配器)</text>
+                        <text x="300" y="95" fill="#94a3b8" text-anchor="middle">user_input → query</text>
+                        <text x="300" y="113" fill="#94a3b8" text-anchor="middle">docs → retrieved</text>
+                        <rect x="430" y="40" width="150" height="110" rx="9" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="505" y="58" fill="#fbbf24" text-anchor="middle" font-weight="700">子 SubState</text>
+                        <text x="505" y="80" fill="#94a3b8" text-anchor="middle">query</text>
+                        <text x="505" y="100" fill="#94a3b8" text-anchor="middle">docs</text>
+                        <path d="M170 85 L208 85" stroke="#818cf8" stroke-width="1.3" marker-end="url(#a10b)"/>
+                        <path d="M390 95 L428 95" stroke="#ec4899" stroke-width="1.3" marker-end="url(#a10b)"/>
+                        <text x="300" y="165" fill="#64748b" text-anchor="middle">父子图零重名字段，全靠中间函数翻译 → 子图可独立复用/测试</text>
+                        <defs><marker id="a10b" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：适配器模式在图上的体现——两套 schema 各自干净，转换只发生在函数边界。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>藏进函数里，引擎还认得它是子图吗？认得</h1></div>
+            <div class="card">
+                <p>你可能担心：子图藏在 <code>call_sub</code> 函数体里，引擎还能探测到吗？能——回看 D49 的 <code>find_subgraph_pregel</code>，它会挖函数闭包里引用的对象 <span class="fileref">pregel/_utils.py:63</span>：</p>
+<pre><code class="language-python"># pregel/_utils.py:63
+elif isinstance(c, RunnableCallable):
+    if c.func is not None:
+        candidates.extend(
+            nl.__self__ if hasattr(nl, "__self__") else nl
+            for nl in get_function_nonlocals(c.func)   # 挖函数引用到的外部对象
+        )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>get_function_nonlocals(c.func)</code><span><code>call_sub</code> 函数体里用到了外层的 <code>subgraph</code> 变量（一个闭包自由变量/全局引用）。这个工具把这些被引用的对象挖出来。</span></div>
+                    <div class="r"><code>候选里发现 Pregel → 返回</code><span>挖出的对象里有编译好的 <code>subgraph</code>（是 Pregel），于是识别成功。所以"包一层"的子图<b>依然</b>会出现在 <code>get_subgraphs()</code> 里、也能被流式下钻。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：探测靠"静态引用"，动态构造的子图挖不到</span><code>find_subgraph_pregel</code> 靠分析函数引用的外部变量。如果你在 <code>call_sub</code> 内部<strong>临时 compile 一张子图</strong>（<code>sub = StateGraph(...).compile(); sub.invoke(...)</code>），它是局部变量、不是被引用的 nonlocal，探测挖不到——于是 <code>stream(subgraphs=True)</code> 看不到它内部、get_state 也不展开它。想被下钻，就把子图 compile 在<strong>模块级/闭包外层</strong>，让节点函数去引用它。执行本身不受影响（invoke 照跑），受影响的只是"可观测性"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>流式下钻的地基：每个循环给输出盖"命名空间戳"</h1></div>
+            <div class="card">
+                <p>子图内部跑的是它自己的一轮 Pregel 循环（<code>PregelLoop</code>）。这个循环启动时，把自己的 checkpoint 命名空间<strong>切成元组</strong>存起来 <span class="fileref">pregel/_loop.py:367</span>：</p>
+<pre><code class="language-python"># pregel/_loop.py:367
+self.checkpoint_ns = (
+    tuple(cast(str, self.config[CONF][CONFIG_KEY_CHECKPOINT_NS]).split(NS_SEP))
+    if self.config[CONF].get(CONFIG_KEY_CHECKPOINT_NS)
+    else ()
+)</code></pre>
+                <p>然后每次它往外流式吐东西，都带上这个命名空间元组 <span class="fileref">pregel/_loop.py:1394</span>：</p>
+<pre><code class="language-python"># pregel/_loop.py:1394
+for v in values(*args, **kwargs):
+    if mode in self.stream.modes:
+        self.stream((self.checkpoint_ns, mode, v))    # (命名空间, 模式, 数据)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>checkpoint_ns 切成元组</code><span>父图根循环的 ns 是 <code>()</code>（空元组）；子图循环的 ns 是 <code>("sub:&lt;task_id&gt;",)</code>；孙子图是 <code>("sub:x", "grand:y")</code>。层级用元组长度表示。</span></div>
+                    <div class="r"><code>stream((ns, mode, v))</code><span>每个流式块都是三元组：<b>谁发的（ns）+ 什么模式 + 数据</b>。父图和子图的输出都汇进同一个流，靠 ns 区分来源。</span></div>
+                </div>
+                <p>那如果同一个父图节点里<strong>并发调了两次同一个子图</strong>，ns 岂不撞车？引擎用一个计数器给它们加数字后缀区分 <span class="fileref">pregel/_loop.py:329</span>：</p>
+<pre><code class="language-python"># pregel/_loop.py:329
+if cnt := scratchpad.subgraph_counter():        # 本节点内第几次进子图
+    self.config = patch_configurable(self.config, {
+        CONFIG_KEY_CHECKPOINT_NS: NS_SEP.join(
+            (config[CONF][CONFIG_KEY_CHECKPOINT_NS], str(cnt))   # ns 末尾拼一个序号
+        )
+    })</code></pre>
+                <div class="walk">
+                    <div class="r"><code>subgraph_counter()</code><span>同一节点内多次进入子图时递增。第一次不加后缀，之后拼上 <code>|1</code>、<code>|2</code>…让每次子图调用有唯一命名空间，存档和流式都不混。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 190" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：多层循环的流式输出汇入一条流，靠 ns 元组区分</text>
+                        <rect x="30" y="40" width="180" height="42" rx="8" fill="rgba(99,102,241,.1)" stroke="#818cf8"/>
+                        <text x="120" y="58" fill="#a5b4fc" text-anchor="middle" font-weight="700">父图循环 ns=()</text>
+                        <text x="120" y="74" fill="#94a3b8" text-anchor="middle">((), "updates", {...})</text>
+                        <rect x="30" y="100" width="180" height="42" rx="8" fill="rgba(236,72,153,.1)" stroke="#ec4899"/>
+                        <text x="120" y="118" fill="#f472b6" text-anchor="middle" font-weight="700">子图循环 ns=("sub:x",)</text>
+                        <text x="120" y="134" fill="#94a3b8" text-anchor="middle">(("sub:x",),"updates",{...})</text>
+                        <rect x="360" y="70" width="230" height="52" rx="9" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="475" y="90" fill="#34d399" text-anchor="middle" font-weight="700">同一条 stream</text>
+                        <text x="475" y="108" fill="#94a3b8" text-anchor="middle">subgraphs=False → 丢弃 ns≠() 的</text>
+                        <path d="M210 61 L358 88" stroke="#818cf8" stroke-width="1.3" marker-end="url(#a7)"/>
+                        <path d="M210 121 L358 104" stroke="#ec4899" stroke-width="1.3" marker-end="url(#a7)"/>
+                        <defs><marker id="a7" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：ns 的元组长度=嵌套深度。默认只放行 ns=() 的父图输出；subgraphs=True 才放行子图。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>stream(subgraphs=True)：放行子图输出</h1></div>
+            <div class="card">
+                <p>默认 <code>stream()</code> 只给你父图那层（ns=()）的输出，子图内部悄悄跑完。传 <code>subgraphs=True</code> 就把带命名空间的子图输出也吐给你。看官方参数说明 <span class="fileref">pregel/main.py:2713</span>：</p>
+<pre><code class="language-python"># pregel/main.py:2713（stream 的 docstring）
+# subgraphs: Whether to stream events from inside subgraphs, defaults to False.
+#   If True, the events will be emitted as tuples (namespace, data),
+#   or (namespace, mode, data) if stream_mode is a list,
+#   where namespace is a tuple with the path to the node where a subgraph is invoked,
+#   e.g. ("parent_node:<task_id>", "child_node:<task_id>").</code></pre>
+                <div class="example"><span class="t">📝 对比两种流式输出</span>
+<pre><code class="language-python"># 默认：只见父图
+for chunk in app.stream({"user_input": "cats", "retrieved": ""}):
+    print(chunk)
+# {'sub': {'retrieved': 'docs-for(cats)'}}      ← 只有父图节点的更新
+
+# subgraphs=True：能下钻看到子图内部
+for ns, chunk in app.stream({"user_input": "cats", "retrieved": ""}, subgraphs=True):
+    print(ns, chunk)
+# ()                 {'sub': {...}}              ← 父图层
+# ('sub:<id>',)      {'search': {'docs': ...}}   ← 子图 search 节点那一步！</code></pre>
+                打开 <code>subgraphs=True</code> 后，你能看到子图里 <code>search</code> 节点执行的中间步骤，前缀是它所在的命名空间元组。这对调试嵌套系统至关重要。</div>
+                <div class="walk">
+                    <div class="r"><code>返回值多了 ns</code><span>开了 subgraphs=True，每个 chunk 前面多一个命名空间元组，告诉你"这条是哪一层哪个节点发的"。</span></div>
+                    <div class="r"><code>ns 就是 L04 那个元组</code><span>它正是子图循环打的戳。前端拿到后可以按 ns 做缩进展示、或过滤只看某一层。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>取舍、边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么流式不默认下钻子图？</span>朴素想法是"全都吐出来，越详细越好"。但默认 <code>subgraphs=False</code> 是刻意的：对大多数使用者，子图是一个<strong>封装好的黑盒</strong>，他们只关心"这个节点产出了什么"，不关心子图内部十几步的碎碎念。默认扁平化（只看顶层）让输出简洁、心智负担低；需要调试时再显式 <code>subgraphs=True</code> 下钻。用"命名空间元组"给每条输出打标签、而非用多个独立流，好处是<strong>一条流承载所有层级</strong>，消费者一个循环就能处理、还能自由决定过滤到哪一层。这是"信息分层 + 按需展开"的设计。</div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：转换函数（隔离）vs 直接当节点（共享），怎么选？</span>共享写起来省事但耦合：父子图被"同名字段"绑死，改一个字段名两边都要动、且 reducer 语义必须一致（D49 的坑）。转换函数多写几行，换来<strong>子图的完全独立</strong>：子图可以有自己干净的 schema、能单独测试、能在多个 schema 迥异的父图里复用。工程上的经验法则：<strong>自己项目内紧密协作的子流程用共享；复用的、独立演进的、第三方的子图用转换隔离。</strong>解耦的成本是那个翻译函数，收益是可维护性——通常值得。</div>
+                <div class="qa">
+                    <p class="q">👶 用转换函数隔离后，子图还能有自己的 checkpointer 做断点续跑吗？</p>
+                    <p class="a">👨‍🏫 能。子图当节点（无论共享还是包一层）时，如果它编译时没显式关掉存档，会继承父图的 checkpointer，并在自己的命名空间下存档（D49 L05）。所以子图内部的 interrupt、时间旅行都正常工作，坐标是 <code>父ns|子ns</code>。只有显式 <code>compile(checkpointer=False)</code> 的子图才不参与持久化（也就不会被 find_subgraph_pregel 当作可下钻子图）。</p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>父子图 schema 完全不同怎么嵌套？（父图节点用普通函数，函数里手动翻译字段并 subgraph.invoke）</li>
+                    <li>藏在函数里的子图还能被探测吗？（能，find_subgraph_pregel 会挖 get_function_nonlocals 引用的对象）</li>
+                    <li>什么情况探测不到？（在节点函数内部临时 compile 的局部子图，非静态引用）</li>
+                    <li>流式下钻的地基是什么？（每个 PregelLoop 把 checkpoint_ns 切成元组，输出都盖 (ns, mode, v) 戳）</li>
+                    <li>ns 元组的长度代表什么？（嵌套深度：() 父图、("sub:x",) 子图、两层则更长）</li>
+                    <li>stream(subgraphs=True) 做什么？（放行带命名空间的子图输出，chunk 前多一个 ns 元组）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读命名空间戳与下钻源码
+sed -n '360,372p'   libs/langgraph/langgraph/pregel/_loop.py   # ns 切成元组
+sed -n '1388,1394p' libs/langgraph/langgraph/pregel/_loop.py   # 输出打 ns 戳
+
+# 2. 亲手下钻子图
+python - <<'PY'
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+class Sub(TypedDict):
+    query: str; docs: str
+sub = StateGraph(Sub); sub.add_node("search", lambda s:{"docs":f"docs({s['query']})"})
+sub.add_edge(START,"search"); sub.add_edge("search",END); subgraph = sub.compile()
+class P(TypedDict):
+    user_input: str; retrieved: str
+def call_sub(s): return {"retrieved": subgraph.invoke({"query": s["user_input"]})["docs"]}
+p = StateGraph(P); p.add_node("sub", call_sub)
+p.add_edge(START,"sub"); p.add_edge("sub",END); app = p.compile()
+print("--- 默认 ---")
+for c in app.stream({"user_input":"cats","retrieved":""}): print(c)
+print("--- subgraphs=True ---")
+for ns,c in app.stream({"user_input":"cats","retrieved":""}, subgraphs=True): print(ns, c)
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 51</strong>：子图讲完，转向"性能与可靠性"。同样的输入反复跑一个昂贵节点（比如调大模型），能不能把结果缓存下来？<code>CachePolicy</code> 怎么算缓存 key、TTL 怎么控制过期？明天读 <code>types.py</code> 的 CachePolicy 和 <code>_internal/_cache.py</code> 的默认 key 函数。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day49.html" style="color:var(--accent-cyan);">&larr; Day 49 子图基础</a>
+                <a href="langgraph-day51.html" style="color:var(--accent-green);">Day 51 · 缓存 CachePolicy &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

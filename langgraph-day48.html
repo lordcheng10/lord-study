@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 48 · func 与 pregel 的接缝：@task 如何变成节点 — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">48</div>
+            <h2>Day 48</h2>
+            <p class="version">func→pregel · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 悬念：CALL 回调是谁</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · _call 调度 PUSH 任务</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Call 结构与包装</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · RETURN 通道传结果</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 动态派生 PUSH 任务</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 幂等复用 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day47.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 47 函数式 API</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day49.html" class="nav-link" style="color:var(--accent-green);">Day 49 子图基础 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 48 / 共 60 天 · 阶段 8 函数式 API 与子图</span>
+            <h1 class="part-title">func 与 pregel 的接缝：一次 @task 调用如何变成一个真节点</h1>
+            <p class="part-desc">昨天留了个悬念：<code>_call_with_options</code> 里那句 <code>impl = config[CONF][CONFIG_KEY_CALL]</code> ——这个"提交任务"的回调到底是谁塞进 config 的？今天我们顺着这条线，从"你写的 <code>inc(n)</code>"一路追到"引擎里一个 <code>PregelExecutableTask</code>"。看完你会明白：函数式的 task 不是编译期的静态节点，而是<strong>运行时动态长出来的 PUSH 任务</strong>——和 Day 16 的 Send 扇出用的是同一套机制。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 8 · 函数式 API 与子图（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D47 @entrypoint/@task</span><span class="sep">→</span>
+                <span class="st on">D48 func→pregel</span><span class="sep">→</span>
+                <span class="st">D49 子图基础</span><span class="sep">→</span>
+                <span class="st">D50 子图隔离/stream</span><span class="sep">→</span>
+                <span class="st">D51 CachePolicy</span><span class="sep">→</span>
+                <span class="st">D52 重试容错</span>
+            </div>
+        </div>
+
+        <div class="ask" style="margin:0 0 4px"><span class="t">🤔 痛点：entrypoint 编译成"单节点图"，那 task 到底跑在哪个节点里？</span>
+        D47 我们看到 entrypoint 只组装了一个 PregelNode。可你在函数体里 <code>inc(1); inc(2); inc(3)</code> 明明并行跑了三个活儿。它们既不在静态 nodes 字典里，也没写 add_node——<strong>这三个任务是从哪冒出来的？谁调度的？结果又怎么传回给 Future 的？</strong></div>
+        <div class="essence" style="margin:6px 0"><span class="t">💡 本质：task 调用 = 运行时向引擎"追加"一个 PUSH 任务</span>
+        Pregel 有两种任务：PULL（编译期就在图里、被通道触发的静态节点）和 PUSH（运行时被"推"进来的动态任务，Day 16 的 Send 就是 PUSH）。<code>@task</code> 调用走的正是 PUSH 通路：entrypoint 节点在跑的时候，每调一次 task，就通过 config 里的回调向引擎"推"一个新任务，引擎当场调度、跑完把结果塞回你手里的 Future。类比：主厨（entrypoint 节点）做菜时随时喊"传菜口再来一份小料"（PUSH task），厨房立刻加派一个人做，做好递回主厨手里。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>悬念揭晓：CONFIG_KEY_CALL 的回调是 runner 塞的</h1></div>
+            <div class="card">
+                <p>昨天 <code>_call_with_options</code> 从 config 里取回调 <span class="fileref">pregel/_call.py:288</span>：</p>
+<pre><code class="language-python"># pregel/_call.py:288
+config = get_config()
+impl = config[CONF][CONFIG_KEY_CALL]         # ← 这个 impl 是谁放的？
+fut = impl(func, (args, kwargs), retry_policy=retry_policy,
+           cache_policy=cache_policy, callbacks=config["callbacks"], timeout=timeout)
+return fut</code></pre>
+                <p>答案在执行器 runner 启动每个任务时。它把 <code>_call</code> 用 <code>partial</code> 绑好一堆上下文，塞进 <code>CONFIG_KEY_CALL</code> <span class="fileref">pregel/_runner.py:211</span>：</p>
+<pre><code class="language-python"># pregel/_runner.py:211
+run_with_retry(
+    t,
+    retry_policy,
+    configurable={
+        CONFIG_KEY_CALL: partial(
+            _call,                         # ← 就是它！
+            weakref.ref(t),                # 当前正在跑的任务（弱引用）
+            retry_policy=retry_policy,
+            futures=weakref.ref(futures),  # 收集子任务 Future 的容器
+            schedule_task=schedule_task,   # "向引擎追加任务"的钩子
+            submit=self.submit,            # 线程池提交器
+        ),
+    },
+)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>partial(_call, ...)</code><span>runner 把"当前任务、futures 容器、schedule_task、submit"这些只有引擎知道的东西预先绑到 <code>_call</code> 上，做成一个"傻瓜按钮"塞进 config。</span></div>
+                    <div class="r"><code>CONFIG_KEY_CALL: 这个 partial</code><span>于是你在函数体里 <code>inc(1)</code> → <code>_call_with_options</code> → 从 config 取到这个按钮 → 一按，引擎就帮你排任务。task 和引擎的"暗号"就此接上。</span></div>
+                    <div class="r"><code>weakref.ref(t)</code><span>用弱引用避免"回调持有任务、任务持有 config、config 持有回调"形成循环引用导致内存泄漏。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：依赖注入</span>task 的代码在<strong>用户模块</strong>里，引擎在<strong>框架内部</strong>。二者不能硬编码互相 import。于是引擎"运行时把能力（提交任务的回调）注入到 config"，task 运行时"从 config 取能力"。config 就是它们之间的传话筒——这也是为什么 task 必须在图内部调用（脱离图 config 里没这个回调）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>_call：把一次调用变成一个 PUSH 任务</h1></div>
+            <div class="card">
+                <p><code>_call</code> 是接缝的核心 <span class="fileref">pregel/_runner.py:700</span>。它做三件事：造 <code>Call</code>、请引擎 <code>schedule_task</code>、拿到（或提交）任务的 Future：</p>
+<pre><code class="language-python"># pregel/_runner.py:720
+scratchpad = task().config[CONF][CONFIG_KEY_SCRATCHPAD]
+if next_task := schedule_task(              # ① 请引擎追加一个任务
+    task(),
+    scratchpad.call_counter(),              # 这是本任务内第几次 task 调用（计数器）
+    Call(                                   # ② 把这次调用打包成 Call
+        func, input,
+        retry_policy=retry_policy, cache_policy=cache_policy,
+        callbacks=callbacks, timeout=timeout,
+    ),
+):
+    ...
+    elif next_task.writes:                  # ③a 若任务已经跑过（有写）→ 直接取缓存结果
+        fut = concurrent.futures.Future()
+        ret = next((v for c, v in next_task.writes if c == RETURN), MISSING)
+        if ret is not MISSING:
+            fut.set_result(ret)
+        ...
+    else:                                   # ③b 否则真正提交去线程池跑
+        fut = submit()(run_with_retry, next_task, retry_policy,
+                       configurable={CONFIG_KEY_CALL: partial(_call, ...)},
+                       __next_tick__=True)
+        futures()[fut] = next_task</code></pre>
+                <div class="walk">
+                    <div class="r"><code>scratchpad.call_counter()</code><span>同一个父任务里第 1、2、3 次调 task，counter 递增。它参与生成子任务的确定性 id——这样恢复重跑时，同一次调用能对上同一个任务（幂等基础）。</span></div>
+                    <div class="r"><code>schedule_task(...)</code><span>把 Call 交给引擎，引擎按 PUSH 规则派生一个 <code>PregelExecutableTask</code>（下一超步执行）并返回它。</span></div>
+                    <div class="r"><code>if next_task.writes: 取 RETURN</code><span><b>幂等/缓存命中</b>：如果这个任务此前已经跑完（writes 里有结果），不重跑，直接从 RETURN 写里取值填进 Future。L06 细讲。</span></div>
+                    <div class="r"><code>else: submit(run_with_retry, ...)</code><span>没跑过就丢进线程池，并给它也塞一个 CONFIG_KEY_CALL——这样 <b>task 里还能再调 task</b>（嵌套），递归地长出任务树。</span></div>
+                    <div class="r"><code>__next_tick__=True</code><span>新任务放到"下一个超步"跑，保证本超步的写先提交/流式输出，顺序不乱（BSP 模型，Day 19-20）。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Call：一次调用的"任务申请单"</h1></div>
+            <div class="card">
+                <p><code>Call</code> 是个极简的数据容器 <span class="fileref">pregel/_algo.py:120</span>，装着"跑这个 task 需要的一切"：</p>
+<pre><code class="language-python"># pregel/_algo.py:120
+class Call:
+    __slots__ = ("func", "input", "retry_policy", "cache_policy",
+                 "callbacks", "timeout")
+    func: Callable                                   # 你的原函数
+    input: tuple[tuple[Any, ...], dict[str, Any]]    # (args, kwargs)
+    retry_policy: Sequence[RetryPolicy] | None       # 来自 @task 的重试策略
+    cache_policy: CachePolicy | None                 # 来自 @task 的缓存策略
+    callbacks: Callbacks
+    timeout: TimeoutPolicy | None</code></pre>
+                <div class="anno">用 <code>__slots__</code> 而非普通 dict：Call 会被大量创建（每次 task 调用一个），slots 省内存、访问更快。这是"高频小对象"的常见优化。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 175" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：Call → 包装 → PregelExecutableTask</text>
+                        <rect x="20" y="35" width="160" height="120" rx="9" fill="rgba(236,72,153,.08)" stroke="#ec4899"/>
+                        <text x="100" y="53" fill="#f472b6" text-anchor="middle" font-weight="700">Call (申请单)</text>
+                        <text x="100" y="72" fill="#94a3b8" text-anchor="middle">func</text>
+                        <text x="100" y="88" fill="#94a3b8" text-anchor="middle">input=(args,kwargs)</text>
+                        <text x="100" y="104" fill="#94a3b8" text-anchor="middle">retry_policy</text>
+                        <text x="100" y="120" fill="#94a3b8" text-anchor="middle">cache_policy</text>
+                        <text x="100" y="136" fill="#94a3b8" text-anchor="middle">timeout</text>
+                        <rect x="220" y="55" width="150" height="80" rx="9" fill="rgba(99,102,241,.08)" stroke="#818cf8"/>
+                        <text x="295" y="73" fill="#a5b4fc" text-anchor="middle" font-weight="700">RunnableSeq</text>
+                        <text x="295" y="92" fill="#94a3b8" text-anchor="middle">① 跑 func</text>
+                        <text x="295" y="110" fill="#94a3b8" text-anchor="middle">② 写 RETURN</text>
+                        <rect x="410" y="35" width="175" height="120" rx="9" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="497" y="53" fill="#fbbf24" text-anchor="middle" font-weight="700">PregelExecutableTask</text>
+                        <text x="497" y="72" fill="#94a3b8" text-anchor="middle">name / input / proc</text>
+                        <text x="497" y="88" fill="#94a3b8" text-anchor="middle">checkpoint_ns=父|name</text>
+                        <text x="497" y="104" fill="#94a3b8" text-anchor="middle">retry_policy / cache_key</text>
+                        <text x="497" y="120" fill="#94a3b8" text-anchor="middle">task_id(确定性)</text>
+                        <text x="497" y="136" fill="#94a3b8" text-anchor="middle">triggers=PUSH</text>
+                        <path d="M180 95 L218 95" stroke="#ec4899" stroke-width="1.3" marker-end="url(#a8b)"/>
+                        <path d="M370 95 L408 95" stroke="#818cf8" stroke-width="1.3" marker-end="url(#a8b)"/>
+                        <defs><marker id="a8b" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：一次 task 调用的申请单 Call，经 get_runnable_for_task 包装，具现成 PUSH 型可执行任务。</div>
+                </div>
+                <p>func 本身不能直接当节点跑——引擎节点吃的是 <code>Runnable</code>。所以 <code>get_runnable_for_task</code> 把它裹一层 <span class="fileref">pregel/_call.py:200</span>：</p>
+<pre><code class="language-python"># pregel/_call.py:200
+def get_runnable_for_task(func) -> Runnable:
+    ...
+    run = RunnableCallable(func, ..., explode_args=True, trace=False, recurse=False)
+    seq = RunnableSeq(
+        run,                                          # ① 跑你的函数
+        ChannelWrite([ChannelWriteEntry(RETURN)]),    # ② 把返回值写进 RETURN 通道
+        name=name,
+        trace_inputs=functools.partial(_explode_args_trace_inputs, inspect.signature(func)),
+    )
+    ...
+    return CACHE.setdefault(key, seq)                 # 缓存，同一 func 只包一次</code></pre>
+                <div class="walk">
+                    <div class="r"><code>RunnableCallable(func, explode_args=True)</code><span>把普通函数变成 Runnable。<code>explode_args=True</code> 让它接收 <code>(args, kwargs)</code> 形式的输入并展开成实参调用。</span></div>
+                    <div class="r"><code>RunnableSeq(run, ChannelWrite(RETURN))</code><span>关键：任务 = "跑函数" + "把结果写进 RETURN 通道"两步串起来。RETURN 是 task 传结果给父任务的专用通道。</span></div>
+                    <div class="r"><code>CACHE.setdefault</code><span>同一个函数只包装一次并缓存 Runnable，避免每次调用都重复构造，也让 <code>identifier(func)</code> 稳定（缓存 key 用得上，D51）。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>RETURN 通道：task 的结果怎么回到 Future</h1></div>
+            <div class="card">
+                <p>L03 看到 task 跑完会把返回值写进 <code>RETURN</code> 通道。L02 看到 <code>_call</code> 从 <code>next_task.writes</code> 里挑出 <code>c == RETURN</code> 的写，填进 Future <span class="fileref">pregel/_runner.py:748</span>：</p>
+<pre><code class="language-python"># pregel/_runner.py:748
+ret = next((v for c, v in next_task.writes if c == RETURN), MISSING)
+if ret is not MISSING:
+    fut.set_result(ret)                       # ← 结果回到你手里的 Future
+elif exc := next((v for c, v in next_task.writes if c == ERROR), None):
+    fut.set_exception(exc if isinstance(exc, BaseException) else Exception(exc))
+else:
+    fut.set_result(None)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>挑 RETURN 写</code><span>任务的 writes 是一串 <code>(通道名, 值)</code>。task 只关心通道名叫 <code>RETURN</code> 的那条，它就是函数返回值。</span></div>
+                    <div class="r"><code>fut.set_result(ret)</code><span>把值放进 Future。这时你在 entrypoint 里写的 <code>f.result()</code> 才不再阻塞、拿到结果。</span></div>
+                    <div class="r"><code>ERROR 写 → set_exception</code><span>task 里抛的异常也通过 writes 传回，Future 会重新抛出——所以 <code>f.result()</code> 能拿到 task 内部的报错。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么 task 结果走 RETURN 通道，而不是函数直接 return 给调用者？</span>朴素想法是"task 跑完把返回值直接塞进 Future 完事"。但 LangGraph 让结果<strong>先写进 RETURN 通道</strong>再由 _call 取出。多这一步是为了让 task 结果<strong>纳入统一的 writes 体系</strong>：writes 会被 checkpoint 持久化（Day 34）、会参与幂等去重（Day 46）、会被缓存复用（Day 51）。如果结果绕开通道直接返回，这些能力就全都用不上了——恢复时无法知道"这个 task 上次返回了啥"。用"结果也是一种通道写"这个统一抽象，换来了持久化/幂等/缓存三大能力的免费复用。代价是多一次通道读写的间接，但对可靠性来说完全值得。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 250" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一次 inc(n) 从调用到拿结果</text>
+                        <rect x="20" y="40" width="150" height="46" rx="8" fill="rgba(99,102,241,.12)" stroke="#818cf8"/>
+                        <text x="95" y="60" fill="#a5b4fc" text-anchor="middle" font-weight="700">你写 inc(n)</text>
+                        <text x="95" y="77" fill="#94a3b8" text-anchor="middle">_TaskFunction.__call__</text>
+                        <rect x="20" y="110" width="150" height="46" rx="8" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="95" y="130" fill="#60a5fa" text-anchor="middle" font-weight="700">_call_with_options</text>
+                        <text x="95" y="147" fill="#94a3b8" text-anchor="middle">取 CONFIG_KEY_CALL</text>
+                        <rect x="245" y="110" width="150" height="46" rx="8" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="320" y="130" fill="#f472b6" text-anchor="middle" font-weight="700">_call (runner)</text>
+                        <text x="320" y="147" fill="#94a3b8" text-anchor="middle">造 Call + schedule_task</text>
+                        <rect x="470" y="110" width="150" height="46" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="545" y="127" fill="#fbbf24" text-anchor="middle" font-weight="700">PUSH 任务被调度</text>
+                        <text x="545" y="143" fill="#94a3b8" text-anchor="middle">RunnableSeq: 跑函数→写RETURN</text>
+                        <rect x="245" y="185" width="150" height="46" rx="8" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="320" y="205" fill="#34d399" text-anchor="middle" font-weight="700">Future.set_result</text>
+                        <text x="320" y="222" fill="#94a3b8" text-anchor="middle">从 writes 挑 RETURN</text>
+                        <rect x="20" y="185" width="150" height="46" rx="8" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="95" y="205" fill="#34d399" text-anchor="middle" font-weight="700">f.result()</text>
+                        <text x="95" y="222" fill="#94a3b8" text-anchor="middle">拿到 n+1</text>
+                        <path d="M95 86 L95 108" stroke="#818cf8" stroke-width="1.3" marker-end="url(#a5)"/>
+                        <path d="M170 133 L243 133" stroke="#3b82f6" stroke-width="1.3" marker-end="url(#a5)"/>
+                        <path d="M395 133 L468 133" stroke="#ec4899" stroke-width="1.3" marker-end="url(#a5)"/>
+                        <path d="M545 156 L545 178 L397 205" stroke="#f59e0b" stroke-width="1.3" fill="none" marker-end="url(#a5)"/>
+                        <path d="M245 208 L172 208" stroke="#22c55e" stroke-width="1.3" marker-end="url(#a5)"/>
+                        <defs><marker id="a5" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：调用 → 取回调 → 造 Call 调度 PUSH → 跑完写 RETURN → 回填 Future → result()。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>PUSH 任务如何"具现"：prepare_push_task_functional</h1></div>
+            <div class="card">
+                <p><code>schedule_task</code> 最终会调到 <code>prepare_push_task_functional</code> <span class="fileref">pregel/_algo.py:801</span>，把 Call 变成一个真正的可执行任务。核心是命名和坐标：</p>
+<pre><code class="language-python"># pregel/_algo.py:826
+call = task_path[-1]                              # 取出附在路径末尾的 Call
+proc_ = get_runnable_for_task(call.func)          # L03 那个包装
+name = proc_.name
+...
+checkpoint_ns = f"{parent_ns}{NS_SEP}{name}" if parent_ns else name   # 命名空间嵌套
+task_id = task_id_func(checkpoint_id_bytes, checkpoint_ns, str(step),
+                       name, PUSH, task_path_str(task_path[1]), str(task_path[2]))
+task_checkpoint_ns = f"{checkpoint_ns}:{task_id}"</code></pre>
+                <p>然后组装成 <code>PregelExecutableTask</code> <span class="fileref">pregel/_algo.py:893</span>：</p>
+<pre><code class="language-python"># pregel/_algo.py:893
+return PregelExecutableTask(
+    name,
+    call.input,                                   # (args, kwargs)
+    proc_,                                         # 要跑的 Runnable
+    writes,
+    patch_config(..., configurable={
+        CONFIG_KEY_TASK_ID: task_id,
+        CONFIG_KEY_SEND: writes.extend,           # task 写结果的出口
+        CONFIG_KEY_CHECKPOINT_NS: task_checkpoint_ns,  # 独立命名空间
+        CONFIG_KEY_RUNTIME: runtime,
+        ...
+    }),
+    triggers,                                     # PUSH_TRIGGER
+    call.retry_policy or retry_policy,            # @task 的重试策略在此生效（D52）
+    cache_key,                                    # @task 的缓存 key 在此生成（D51）
+    task_id,
+    in_progress_task_path,
+    timeout=call.timeout,
+)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>checkpoint_ns = parent|name</code><span>子任务的命名空间挂在父任务下面（用 <code>|</code> 分隔）。这让每个 task 在存档里有独立坐标，恢复时能精确定位——和子图的命名空间嵌套是同一套（D50）。</span></div>
+                    <div class="r"><code>task_id 确定性生成</code><span>id 由 checkpoint_ns、step、name、PUSH、路径共同哈希得到。同样的输入→同样的 id→恢复重跑能对上上次那个任务。</span></div>
+                    <div class="r"><code>call.retry_policy / cache_key</code><span>你在 <code>@task(retry_policy=..., cache_policy=...)</code> 设的策略，此刻被搬进可执行任务，交给 D51/D52 的机制处理。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 一次 compose(topic) 调用具现出的真实坐标</span>
+                在 <code>@entrypoint</code> 名为 <code>wf</code> 的图里调 <code>compose("cats")</code>，引擎会算出类似：<code>name="compose"</code>、<code>checkpoint_ns="wf:&lt;父task_id&gt;|compose"</code>、再拼上自己的 <code>task_id</code> 得到 <code>task_checkpoint_ns="…|compose:&lt;task_id&gt;"</code>。同一次调用只要输入和调用序号（call_counter）不变，<code>task_id</code> 就恒定——这正是恢复时"认得上上次那个任务"的锚点。
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么 task 走"运行时 PUSH"，而不是编译期变成静态节点？</span>朴素想法是"扫描 entrypoint 函数体，把每个 task 调用抽成一个静态节点连边"。但函数体是命令式代码——task 可能在循环里、if 分支里、甚至递归里调用，<strong>数量和结构直到运行时才确定</strong>（比如 <code>for n in numbers</code> 有几个 task 取决于 numbers 多长）。静态分析根本画不出这张图。用 PUSH 动态派生，就把"图的形状"推迟到运行时按实际调用决定，天然支持数据驱动的并行/扇出。代价是无法在编译期画出完整图形（get_graph 只看到单节点），换来的是命令式代码的完整表达力。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>幂等复用：断点恢复时 task 不重跑 + 小结</h1></div>
+            <div class="card">
+                <p>回看 L02 那个分支——这正是 D47 docstring 说的"恢复后 compose_essay 不会重跑" <span class="fileref">pregel/_runner.py:745</span>：</p>
+<pre><code class="language-python"># pregel/_runner.py:745
+elif next_task.writes:
+    # if it already ran, return the result
+    fut = concurrent.futures.Future()
+    ret = next((v for c, v in next_task.writes if c == RETURN), MISSING)
+    if ret is not MISSING:
+        fut.set_result(ret)          # 直接返回上次的结果，不重新执行 func</code></pre>
+                <div class="essence"><span class="t">💡 本质：task 的结果被当作 checkpoint 写持久化了</span>task 跑完，RETURN 写进 checkpoint（Day 34 的 put_writes）。当 entrypoint 因 interrupt 中断、之后恢复时，引擎重放到同一个 task 调用，发现它的 writes 已在档里——于是 <code>next_task.writes</code> 非空，直接取旧结果填 Future，<strong>跳过真正执行</strong>。这就是为什么"人工审阅期间等了半天，恢复后不会把文章重新生成一遍"。task_id 的确定性（L05）保证了"同一次调用"能对上"同一份存档写"。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：task 的输入/输出必须可序列化（开了 checkpointer 时）</span>因为要把 RETURN 结果存进 checkpoint 再读回，task 的参数和返回值必须能被序列化（Day 39 的 serde）。返回一个数据库连接、文件句柄、lambda 之类不可序列化的东西，恢复时会炸。docstring func/__init__.py:154 明确写了这条约束。规避：task 返回可序列化的"数据"，副作用（写库、发请求）在 task 内部完成即可。</div>
+                <div class="qa">
+                    <p class="q">👶 那 @task 和 Day 16 的 Send 有什么区别？都是 PUSH。</p>
+                    <p class="a">👨‍🏫 底层都是 PUSH 任务，但入口不同：Send 是在 StateGraph 里 <code>return [Send("node", arg)]</code> 显式扇出到<strong>已定义的节点</strong>；@task 是在函数式代码里直接调用一个<strong>普通函数</strong>，引擎帮你把这个函数临时包装成任务。可以说 @task 是"给命令式代码用的 Send 糖衣"——你不用先定义节点，写函数、调函数即可。</p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CONFIG_KEY_CALL 的回调是谁塞的？（runner 用 <code>partial(_call, ...)</code> 在启动任务时注入 config）</li>
+                    <li>task 调用走的是 PULL 还是 PUSH？（PUSH，运行时动态派生，和 Send 同机制）</li>
+                    <li>Call 对象装了什么？（func、input、retry/cache 策略、callbacks、timeout）</li>
+                    <li>task 的结果怎么传回 Future？（RunnableSeq 把返回值写进 RETURN 通道，_call 从 writes 挑出来 set_result）</li>
+                    <li>为什么不能编译期把 task 变静态节点？（task 数量/结构运行时才确定，如循环里调用）</li>
+                    <li>恢复时 task 为什么不重跑？（RETURN 写已持久化，next_task.writes 非空则直接取旧结果）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 顺着接缝读三段
+sed -n '700,786p'  libs/langgraph/langgraph/pregel/_runner.py   # _call
+sed -n '200,242p'  libs/langgraph/langgraph/pregel/_call.py     # get_runnable_for_task
+sed -n '801,933p'  libs/langgraph/langgraph/pregel/_algo.py     # prepare_push_task_functional
+
+# 2. 观察 task 不重跑：中断再恢复
+python - <<'PY'
+import time
+from langgraph.func import entrypoint, task
+from langgraph.types import interrupt, Command
+from langgraph.checkpoint.memory import InMemorySaver
+calls = {"n": 0}
+@task
+def compose(topic: str) -> str:
+    calls["n"] += 1
+    return f"essay about {topic}"
+@entrypoint(checkpointer=InMemorySaver())
+def wf(topic: str):
+    essay = compose(topic).result()
+    review = interrupt({"essay": essay})
+    return {"essay": essay, "review": review}
+cfg = {"configurable": {"thread_id": "t"}}
+list(wf.stream("cats", cfg))                 # 触发 interrupt，compose 跑 1 次
+list(wf.stream(Command(resume="good"), cfg)) # 恢复
+print("compose 执行次数:", calls["n"])       # 仍是 1，没重跑
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 49</strong>：函数式讲完，进入"子图"。一张图能不能当另一张图的节点？<code>add_node("sub", 编译好的子图)</code> 是怎么工作的？父子图如何共享状态？明天读 <code>graph/state.py</code> 的 add_node、<code>pregel/_read.py</code> 的子图自动探测，看"图套图"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day47.html" style="color:var(--accent-cyan);">&larr; Day 47 函数式 API</a>
+                <a href="langgraph-day49.html" style="color:var(--accent-green);">Day 49 · 子图基础 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
