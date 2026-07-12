@@ -3,32 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 05 · 一次 invoke 的完整旅程 — LangGraph 源码学习</title>
+    <title>Day 05 · State 与 TypedDict（schema 如何变成通道）— LangGraph 60 天深度版</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        .journey{display:flex;flex-direction:column;gap:0;margin:16px 0}
-        .journey .step{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-left:2px solid var(--border-color);padding-left:16px;margin-left:8px;position:relative}
-        .journey .step:before{content:'';position:absolute;left:-7px;top:13px;width:12px;height:12px;border-radius:50%;background:#14b8a6}
-        .journey .step .num{font-size:10px;font-weight:800;color:#14b8a6;flex-shrink:0;margin-top:2px}
-        .journey .step .b{font-size:12.5px} .journey .step .b b{color:var(--text-primary)}
-        /* —— 改进版新增组件（进度条用 .journey.pbar，避免与本页已有 .journey 时间线冲突）—— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
-        .journey.pbar{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
         .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
@@ -36,6 +29,25 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple,#a855f7)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -43,191 +55,294 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#14b8a6,#6366f1);">05</div>
             <h2>Day 05</h2>
-            <p class="version">invoke 完整旅程 · 8 讲</p>
+            <p class="version">State 与 TypedDict · 8 讲</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 追踪一段代码</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ① 输入灌入 State</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · ② 超步1 跑 agent</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ③ 路由决定去向</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ④ 超步2 跑 tools</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ⑤ 循环回 agent</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ⑥ 结果流出</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 第1周收官 + 动手</a></li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · State 到底是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · _add_schema 入口</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · _get_channels 拆字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _get_channel 四选一</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 如何"嗅"出 reducer</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 三种合法 schema</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 取舍与边界</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="langgraph-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 条件边</a></li>
-            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="langgraph-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 Pregel &rarr;</a></li>
+            <li><a href="langgraph-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04 节点与边</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day06.html" class="nav-link" style="color:var(--accent-green);">Day 06 第一个对话图 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 05 / 共 20 天 · 第 1 周收官</span>
-            <h1 class="part-title">一次 invoke 的完整旅程</h1>
-            <p class="part-desc">把前四天串成故事线：一次 <code>graph.invoke()</code>，输入怎么流入状态、超步怎么推进、节点怎么跑、路由怎么走、循环怎么转、结果怎么出。</p>
+            <span class="part-label">Day 05 / 共 60 天 · 阶段 1 入门与心智</span>
+            <h1 class="part-title">State 与 TypedDict：一个类如何变成一排通道</h1>
+            <p class="part-desc">D03 说过"构造 <code>StateGraph(State)</code> 那一刻，字段就被解析成通道了"。今天就把这台"翻译机"拆开：<code>_get_channels</code> 怎么遍历你 <code>TypedDict</code> 的每个字段、<code>_get_channel</code> 怎么在四种可能里选出正确的通道类型、<code>Annotated[list, reducer]</code> 里的 reducer 又是怎么靠<strong>数参数个数</strong>被嗅出来的。看完你会明白：State schema 不是"运行时的数据"，而是"编译前的一张字段→通道映射表"。</p>
         </div>
 
-        <div class="journey pbar"><div class="jt">📍 你在整门课的位置（第 1 周收官 → 下周进引擎）</div>
-        <div class="steps"><span class="st">全景</span><span class="sep">→</span><span class="st">StateGraph</span><span class="sep">→</span><span class="st">State+reducer</span><span class="sep">→</span><span class="st">条件边</span><span class="sep">→</span><span class="st on">invoke旅程</span><span class="sep">→</span><span class="st">Pregel引擎</span></div></div>
+        <div class="journey">
+            <div class="jt">📍 阶段 1「入门与心智」(D01-06) · 你在第 5 天</div>
+            <div class="steps">
+                <span class="st">D01 全景分包</span><span class="sep">→</span>
+                <span class="st">D02 跑通第一个图</span><span class="sep">→</span>
+                <span class="st">D03 StateGraph</span><span class="sep">→</span>
+                <span class="st">D04 节点与边</span><span class="sep">→</span>
+                <span class="st on">D05 State/TypedDict</span><span class="sep">→</span>
+                <span class="st">D06 对话图+小结</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 一句话锚点</span>
+        你写的 <code>class State(TypedDict)</code> 是"图纸的字段说明书"。LangGraph <strong>不直接用</strong>这个类存运行数据，而是在建图时把它<strong>逐字段翻译成通道（channel）</strong>——每个字段配一个"这个字段该怎么合并"的小对象。字段没写 reducer → <code>LastValue</code>（新值覆盖旧值）；写了 <code>Annotated[类型, 函数]</code> → 用你的函数合并。State schema 的全部意义，就是产出这张 <code>{字段名 → 通道}</code> 表。</div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>追踪一段代码</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：为什么不能直接拿 TypedDict 当状态用？</h1></div>
             <div class="card">
-<pre><code class="language-python"># 一个 ReAct 风格的小图（我们追踪它的 invoke）
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
-
-builder = StateGraph(State)
-builder.add_node("agent", call_llm)     # 调 LLM
-builder.add_node("tools", run_tools)    # 执行工具
-builder.add_edge(START, "agent")
-builder.add_conditional_edges("agent", should_continue)  # 要工具→tools，否则→END
-builder.add_edge("tools", "agent")      # 回头边=循环
-graph = builder.compile()
-
-graph.invoke({"messages": [("user", "北京天气?")]})   # ← 追踪这一行</code></pre>
-                <div class="anno">读法：<b>一个经典 ReAct 图：agent 节点 + tools 节点 + 条件边（判断要不要工具）+ 回头边（循环）。</b>下面逐超步追踪 invoke 的执行。</div>
-                <div class="essence"><span class="t">💡 本质：invoke 内部就是"开一个循环，反复推进超步，直到没人可跑"</span>
-                你调的 <code>graph.invoke()</code>，真身是 <code>Pregel.invoke</code>（<code>pregel/main.py:450</code>——还记得 Day 02 吗？编译产物继承 Pregel）。它内部开一个 <code>PregelLoop</code>（<code>pregel/_loop.py:158</code>），然后反复调 <code>loop.tick()</code>（<code>_loop.py:599</code>）——每调一次推进<strong>一个超步</strong>；直到再没有节点被触发（走到 <code>END</code>，<code>constants.py:28</code>）就停下、返回最终状态。<br><strong>这就像生活中的实习生干活：</strong>想一步（agent 调 LLM）→ 动手（tools 执行）→ 看结果 → 再想下一步……<code>tick()</code> 就是"你去把这一轮做完"的指令，反复喊，直到实习生说"完事了"。</div>
-                <div class="ask"><span class="t">🤔 对话：invoke 到底"跑了几次"图？</span>
-                <span>👶 <b>小白：</b>我只 <code>invoke</code> 了一次，为什么 agent 跑了两遍、tools 跑了一遍？</span><br>
-                <span>👨‍🏫 <b>老师：</b>一次 <code>invoke</code> = 一整段循环，里面有很多个"超步"。每个超步跑一批被触发的节点。你的一句"北京天气?"要经过 agent→tools→agent 三个超步才有答案，所以图被推进了 3 步——但对你只是一次调用。</span></div>
+                <div class="ask"><span class="t">🤔 痛点</span>你自然会想：状态就是个 <code>dict</code>，节点返回 <code>{"x": 5}</code> 直接更新进去不就行了？但问题来了——如果<strong>两个并行节点</strong>同时返回 <code>{"messages": [...]}</code>，谁覆盖谁？如果某个字段本意是"<strong>累加</strong>"（消息越来越多）而不是"覆盖"，光靠 <code>dict.update</code> 根本表达不了。LangGraph 需要<strong>为每个字段单独记住"合并规矩"</strong>，而普通 <code>TypedDict</code> 只有类型、没有合并规矩。</div>
+                <div class="essence"><span class="t">💡 本质：把"字段的合并规矩"编码进类型标注里</span>LangGraph 借用 Python 的 <code>Annotated[类型, 元数据]</code> 语法——类型给人和类型检查器看，元数据（reducer 函数或通道对象）给 LangGraph 看。建图时它读出这些元数据，为每个字段造一个对应的通道。<strong>没标注的字段</strong>就默认 <code>LastValue</code>（覆盖）。所以 <code>State</code> 类本质是"把合并规矩塞进字段标注"的载体。</div>
+                <div class="baby"><span class="t">大白话</span>普通 <code>dict</code> 只知道"x 是个 int"；LangGraph 的通道还额外知道"x 该怎么更新——是覆盖，还是累加，还是自定义"。今天就是看它怎么从你的类里读出这份"怎么更新"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>① 输入灌入 State</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>入口 _add_schema：解析 + 登记 + 查重</h1></div>
             <div class="card">
-                <div class="journey">
-                    <div class="step"><span class="num">1</span><div class="b"><b>输入进 START 通道</b>：<code>{"messages": [用户问题]}</code> 通过特殊 START 通道分发到 State 的 messages 键（经 add_messages reducer 写入）。</div></div>
-                    <div class="step"><span class="num">2</span><div class="b"><b>START → agent</b>：START 边点亮 agent 的触发通道（Day 04），agent 成为超步 1 要跑的节点。</div></div>
+                <p>D03 见过 <code>__init__</code> 一上来就调 <code>_add_schema(state_schema)</code>。它的完整逻辑：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:342-372</div>
+<pre><code class="language-python">    def _add_schema(self, schema, /, allow_managed=True):
+        if schema not in self.schemas:                       # 同一个 schema 只解析一次
+            _warn_invalid_state_schema(schema)               # ① 校验是不是合法 schema
+            channels, managed, type_hints = _get_channels(schema)   # ② 核心翻译
+            if managed and not allow_managed:                # ③ input/output 不许有托管字段
+                raise ValueError(f"Invalid managed channels ...")
+            self.schemas[schema] = {**channels, **managed}   # ④ 缓存这个 schema 的解析结果
+            for key, channel in channels.items():
+                if key in self.channels:
+                    if self.channels[key] != channel:
+                        if isinstance(channel, LastValue):
+                            pass                             # 同名但新的是 LastValue → 容忍
+                        else:
+                            raise ValueError(f"Channel '{key}' already exists ...")
+                else:
+                    self.channels[key] = channel             # ⑤ 汇总进全局 channels</code></pre>
+                <div class="walk">
+                    <div class="r"><code>schema not in self.schemas</code><span>解析结果按 schema 类缓存。state/input/output 若指向同一个类，只翻译一次。</span></div>
+                    <div class="r"><code>_get_channels(schema)</code><span>★真正的翻译在这（L03）。返回三样：普通通道字典、托管值字典、原始类型提示。</span></div>
+                    <div class="r"><code>allow_managed=False</code><span>D11 会讲：输入/输出 schema 里不许出现引擎托管字段，这里用参数卡死。</span></div>
+                    <div class="r"><code>self.channels[key] = channel</code><span>把各 schema 解析出的通道<b>合并到全局 <code>self.channels</code></b>。这就是"图里所有字段的通道总表"。</span></div>
+                    <div class="r"><code>LastValue 冲突放行</code><span>D03 讲过的"宽进严出"：同名字段若新来的是最普通的 LastValue，不覆盖已有的更具体通道。</span></div>
                 </div>
-                <div class="anno">读法：<b>invoke 的输入被 START 通道分发进共享 State，然后 START→agent 的边让 agent 待执行。</b>此刻超步 0 结束，进入超步 1。</div>
-                <div class="svgbox">
-                <svg viewBox="0 0 730 120" width="100%" font-family="sans-serif">
-                    <defs><marker id="d5a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#8b5cf6"/></marker></defs>
-                    <rect x="8" y="38" width="82" height="46" rx="9" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
-                    <text x="49" y="66" fill="#e5e5e5" font-size="12" font-weight="bold" text-anchor="middle">invoke()</text>
-                    <line x1="90" y1="61" x2="118" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
-                    <rect x="122" y="38" width="128" height="46" rx="9" fill="#2a2a3a" stroke="#14b8a6" stroke-width="2"/>
-                    <text x="186" y="60" fill="#e5e5e5" font-size="11.5" text-anchor="middle">灌输入 → START</text>
-                    <text x="186" y="76" fill="#bbb" font-size="10" text-anchor="middle">分发进 State</text>
-                    <line x1="250" y1="61" x2="278" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
-                    <rect x="282" y="30" width="196" height="62" rx="9" fill="#2a2a3a" stroke="#14b8a6" stroke-width="2"/>
-                    <text x="380" y="52" fill="#e5e5e5" font-size="11.5" font-weight="bold" text-anchor="middle">loop.tick() 反复推进超步</text>
-                    <text x="380" y="69" fill="#bbb" font-size="10" text-anchor="middle">超步1 agent → 超步2 tools</text>
-                    <text x="380" y="83" fill="#bbb" font-size="10" text-anchor="middle">→ 超步3 agent（_loop.py:599）</text>
-                    <line x1="478" y1="61" x2="506" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
-                    <rect x="510" y="38" width="78" height="46" rx="9" fill="#2a2a3a" stroke="#8b5cf6" stroke-width="2"/>
-                    <text x="549" y="66" fill="#e5e5e5" font-size="12" font-weight="bold" text-anchor="middle">到 END</text>
-                    <line x1="588" y1="61" x2="616" y2="61" stroke="#8b5cf6" stroke-width="2" marker-end="url(#d5a)"/>
-                    <rect x="620" y="38" width="102" height="46" rx="9" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
-                    <text x="671" y="66" fill="#e5e5e5" font-size="11.5" font-weight="bold" text-anchor="middle">返回 State</text>
-                </svg>
-                <div class="cap">一次 invoke 的时序：灌输入 → PregelLoop.tick 反复跑超步 → 到 END → 把最终 State 还给你</div>
-                </div>
-                <div class="example"><span class="t">🎬 第一人称：现在"你"就是那条输入</span>
-                想象<strong>你</strong>就是那条 <code>{"messages": [("user", "北京天气?")]}</code>，跟着走完这一生：<br>
-                ①「我从 <code>invoke</code> 的大门进来，被 START 通道<strong>登记进共享 State 的 messages 里</strong>。」<br>
-                ②「START→agent 的边亮了，我被送到 <strong>agent</strong> 工位；它读了我，问 LLM，LLM 说'先查天气'，往我身上<strong>贴了一条带 tool_calls 的 AI 消息</strong>。」<br>
-                ③「岔路口（条件边）看我最新那条有 tool_calls → 把我送去 <strong>tools</strong>；工具查到'25℃'，又给我贴一条结果消息。」<br>
-                ④「回头边把我送回 <strong>agent</strong>；这次 LLM 看到 25℃，直接给出答案（不再要工具）。岔路口一看'没 tool_calls'→ 送我去 <strong>END</strong>。」<br>
-                ⑤「大门打开，我（此刻已攒了 4 条消息的完整 State）被<strong>交还给最初调用的人</strong>。」</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>② 超步 1：跑 agent</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>_get_channels：把一个类拆成一排字段</h1></div>
             <div class="card">
-                <div class="journey">
-                    <div class="step"><span class="num">1</span><div class="b"><b>Plan</b>：Pregel 引擎（Day 06）发现 agent 的触发通道被更新了，选它执行。</div></div>
-                    <div class="step"><span class="num">2</span><div class="b"><b>Execution</b>：agent 节点读 State（messages），调 LLM，LLM 输出"我要调 get_weather 工具"，节点返回 <code>{"messages": [带 tool_calls 的 AI 消息]}</code>。</div></div>
-                    <div class="step"><span class="num">3</span><div class="b"><b>Update</b>：超步末，用 add_messages reducer 把 AI 消息追加进 State.messages。</div></div>
+                <p>翻译机的主函数。它先处理"没有字段的裸类型"，再逐字段调 <code>_get_channel</code>：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1801-1821</div>
+<pre><code class="language-python">def _get_channels(schema):
+    if not hasattr(schema, "__annotations__"):               # 没字段（如裸 int/list）
+        return ({"__root__": _get_channel("__root__", schema, allow_managed=False)}, {}, {})
+
+    type_hints = get_type_hints(schema, include_extras=True)  # ★带上 Annotated 的元数据
+    all_keys = {
+        name: _get_channel(name, typ)                        # 每个字段翻译成一个通道
+        for name, typ in type_hints.items()
+        if name != "__slots__"
+    }
+    return (
+        {k: v for k, v in all_keys.items() if isinstance(v, BaseChannel)},   # 普通通道
+        {k: v for k, v in all_keys.items() if is_managed_value(v)},          # 托管值
+        type_hints,
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>没有 __annotations__</code><span>你可以把整个状态设成一个裸类型（如 <code>StateGraph(int)</code>），这时造一个特殊字段 <code>__root__</code> 包住它。这就是 D03 见过的 "__root__" 由来。</span></div>
+                    <div class="r"><code>include_extras=True</code><span>★关键参数！默认的 <code>get_type_hints</code> 会<b>丢掉</b> <code>Annotated</code> 的元数据（只留类型）。加上它才能拿到 reducer。少了这个参数整个 reducer 机制就废了。</span></div>
+                    <div class="r"><code>逐字段 _get_channel</code><span>字典推导，把每个 <code>(字段名, 类型标注)</code> 交给 <code>_get_channel</code> 决定它变成哪种通道。</span></div>
+                    <div class="r"><code>分成 channels / managed</code><span>翻译结果分两类：普通通道（BaseChannel）和引擎托管值（如 RemainingSteps，D17 会见）。分开返回。</span></div>
                 </div>
-                <div class="anno">读法：<b>超步 = Plan（选节点）→ Execution（并行跑）→ Update（写回状态）三阶段（Day 06）。</b>agent 跑完，State 里多了一条带 tool_calls 的 AI 消息。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 240" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：一个 State 类被拆成一排通道</text>
+                        <rect x="30" y="36" width="200" height="150" rx="10" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="130" y="56" fill="#86efac" text-anchor="middle" font-weight="700">class State(TypedDict)</text>
+                        <text x="130" y="82" fill="#94a3b8" text-anchor="middle">x: int</text>
+                        <text x="130" y="104" fill="#94a3b8" text-anchor="middle">msgs: Annotated[</text>
+                        <text x="130" y="120" fill="#94a3b8" text-anchor="middle">  list, add]</text>
+                        <text x="130" y="146" fill="#94a3b8" text-anchor="middle">step: RemainingSteps</text>
+                        <text x="130" y="176" fill="#64748b" text-anchor="middle">你写的说明书</text>
+                        <path d="M235 110 L305 110" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a5)"/>
+                        <text x="270" y="102" fill="#a5b4fc" text-anchor="middle" font-size="10">_get_channels</text>
+                        <defs><marker id="a5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#94a3b8"/></marker></defs>
+                        <rect x="320" y="40" width="270" height="44" rx="8" fill="rgba(59,130,246,.1)" stroke="#3b82f6"/>
+                        <text x="335" y="60" fill="#93c5fd" font-weight="700">"x"</text><text x="380" y="60" fill="#94a3b8">→ LastValue(int)</text><text x="455" y="78" fill="#64748b" font-size="10">没标注→覆盖写</text>
+                        <rect x="320" y="90" width="270" height="44" rx="8" fill="rgba(59,130,246,.1)" stroke="#3b82f6"/>
+                        <text x="335" y="110" fill="#93c5fd" font-weight="700">"msgs"</text><text x="390" y="110" fill="#94a3b8">→ BinaryOperatorAggregate</text><text x="455" y="128" fill="#64748b" font-size="10">有 reducer→累加</text>
+                        <rect x="320" y="140" width="270" height="44" rx="8" fill="rgba(148,163,184,.08)" stroke="#64748b"/>
+                        <text x="335" y="160" fill="#cbd5e1" font-weight="700">"step"</text><text x="390" y="160" fill="#94a3b8">→ managed (托管值)</text><text x="455" y="178" fill="#64748b" font-size="10">引擎算，不入channels</text>
+                        <text x="310" y="212" fill="#94a3b8" text-anchor="middle">每个字段独立决定"怎么合并"，互不影响</text>
+                        <text x="310" y="230" fill="#64748b" text-anchor="middle">普通字段进 self.channels，托管字段进 self.managed</text>
+                    </svg>
+                    <div class="cap">图注：schema 的产物是一张字段→通道映射表，不同字段可以有完全不同的合并语义。</div>
+                </div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>③ 路由决定去向</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>_get_channel：四选一决定通道类型</h1></div>
             <div class="card">
-                <div class="journey">
-                    <div class="step"><span class="num">1</span><div class="b"><b>条件边触发</b>：agent 有条件边，路由函数 <code>should_continue</code> 读 State——最后一条消息有 tool_calls → 返回 "tools"。</div></div>
-                    <div class="step"><span class="num">2</span><div class="b"><b>点亮 tools</b>：路由结果翻译成"往 tools 的触发通道写"（Day 04）→ tools 成为超步 2 要跑的节点。</div></div>
+                <p>单个字段的通道类型，靠这个"四选一"函数拍板：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1836-1859</div>
+<pre><code class="language-python">def _get_channel(name, annotation, *, allow_managed=True):
+    # 先剥掉 Required / NotRequired 外壳
+    if hasattr(annotation, "__origin__") and annotation.__origin__ in (Required, NotRequired):
+        annotation = annotation.__args__[0]
+
+    if manager := _is_field_managed_value(name, annotation):   # ① 是托管值吗？
+        if allow_managed: return manager
+        else: raise ValueError(...)
+    elif channel := _is_field_channel(annotation):             # ② 标注里直接给了通道对象吗？
+        channel.key = name
+        return channel
+    elif channel := _is_field_binop(annotation):               # ③ 标注里给了 reducer 函数吗？
+        channel.key = name
+        return channel
+
+    fallback = LastValue(annotation)                           # ④ 都不是 → 默认覆盖写
+    fallback.key = name
+    return fallback</code></pre>
+                <div class="walk">
+                    <div class="r"><code>剥 Required/NotRequired</code><span>TypedDict 里 <code>NotRequired[int]</code> 这种可选标记先脱壳，只看里面的真实类型。</span></div>
+                    <div class="r"><code>① 托管值</code><span>如 <code>RemainingSteps</code>（D17）——引擎自己算的值，不用你写。</span></div>
+                    <div class="r"><code>② 直接给通道</code><span>你写 <code>Annotated[int, EphemeralValue]</code>——标注里明确指定通道类，直接用。</span></div>
+                    <div class="r"><code>③ 给 reducer 函数</code><span>你写 <code>Annotated[list, add_messages]</code>——最后一个元数据是可调用的合并函数，包成 <code>BinaryOperatorAggregate</code>（L05 细看）。</span></div>
+                    <div class="r"><code>④ fallback = LastValue</code><span>★最常见分支：字段只写了普通类型（<code>x: int</code>），没有任何合并元数据 → 默认 <code>LastValue</code>（新值覆盖旧值）。</span></div>
                 </div>
-                <div class="baby"><span class="t">路由就是"看状态决定下一步"</span>
-                agent 跑完，条件边的路由函数看 State 里最新的 AI 消息："它带了 tool_calls，说明想调工具" → 路由到 tools 节点。如果 AI 消息没有 tool_calls（直接回答了），就路由到 END。<strong>这就是 Agent"要不要继续"的判断——完全基于状态。</strong></div>
+                <div class="anno"><b>顺序即优先级</b>：托管值 &gt; 显式通道 &gt; reducer 函数 &gt; 默认 LastValue。这个 if-elif 链的顺序不能乱——它决定了当一个标注同时符合多个条件时听谁的。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>④ 超步 2：跑 tools</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>怎么"嗅"出 reducer：数参数个数</h1></div>
             <div class="card">
-                <div class="journey">
-                    <div class="step"><span class="num">1</span><div class="b"><b>Plan</b>：引擎发现 tools 触发通道更新，选它跑。</div></div>
-                    <div class="step"><span class="num">2</span><div class="b"><b>Execution</b>：tools 节点读 State 里的 tool_calls，执行 get_weather(北京)，得到"25℃"，返回 <code>{"messages": [Tool 结果消息]}</code>。</div></div>
-                    <div class="step"><span class="num">3</span><div class="b"><b>Update</b>：Tool 消息追加进 State.messages。</div></div>
+                <p>最精妙的一段——它怎么判断 <code>Annotated</code> 最后那个东西是不是一个合法 reducer？答案是<strong>数它接受几个位置参数</strong>：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1890-1908</div>
+<pre><code class="language-python">def _is_field_binop(typ):
+    if hasattr(typ, "__metadata__"):            # 是 Annotated 才有 __metadata__
+        meta = typ.__metadata__
+        if len(meta) >= 1 and callable(meta[-1]):     # 最后一个元数据可调用
+            sig = signature(meta[-1])
+            params = list(sig.parameters.values())
+            if sum(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                   for p in params) == 2:             # ★恰好 2 个位置参数
+                return BinaryOperatorAggregate(typ, meta[-1])
+            else:
+                raise ValueError(f"Invalid reducer signature. Expected (a, b) -> c. Got {sig}")
+    return None</code></pre>
+                <div class="walk">
+                    <div class="r"><code>__metadata__</code><span><code>Annotated[list, add]</code> 会把 <code>(add,)</code> 存到类型的 <code>__metadata__</code> 里。没有这个属性 → 不是 Annotated → 返回 None。</span></div>
+                    <div class="r"><code>callable(meta[-1])</code><span>取最后一个元数据，必须是"可调用的"（函数/lambda）才可能是 reducer。</span></div>
+                    <div class="r"><code>恰好 2 个位置参数</code><span>★reducer 的约定签名是 <code>(旧值, 新值) -> 合并值</code>。这里用 <code>signature</code> 数它有几个位置参数，<b>必须恰好 2 个</b>。这就是 reducer"长什么样"的运行时定义。</span></div>
+                    <div class="r"><code>不是 2 个就 raise</code><span><b>边界</b>：你写了个 3 参数的函数当 reducer？直接报错 <code>Expected (a, b) -> c</code>，不让你在运行时才炸。</span></div>
+                    <div class="r"><code>BinaryOperatorAggregate</code><span>包成"二元累加通道"——它会拿旧值和新值反复调你的函数。<code>add_messages</code>、<code>operator.add</code> 都走这条路（D07-09 深入）。</span></div>
                 </div>
-                <div class="anno">读法：<b>tools 节点执行工具、把结果作为 Tool 消息追加进 State。</b>现在 State.messages 有：用户问题 + AI(要调工具) + Tool(25℃)。</div>
+                <p>对比 <code>_is_field_channel</code>（直接给通道对象/类的情况）：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1862-1887（节选）</div>
+<pre><code class="language-python">def _is_field_channel(typ):
+    if hasattr(typ, "__metadata__"):
+        for item in typ.__metadata__:
+            if isinstance(item, BaseChannel):        # 元数据是"通道实例" → 直接用
+                return item
+            elif isclass(item) and issubclass(item, BaseChannel):  # 是"通道类" → 实例化
+                return item(typ.__origin__ if hasattr(typ, "__origin__") else typ)
+    return None</code></pre>
+                <div class="example"><span class="t">📝 真实值走一遍</span>
+                <code>msgs: Annotated[list, add_messages]</code> → <code>__metadata__=(add_messages,)</code>，<code>add_messages</code> 可调用、签名 <code>(left, right)</code> 恰好 2 个位置参 → 造出 <code>BinaryOperatorAggregate(list, add_messages)</code>。<br>
+                <code>x: int</code> → 没有 <code>__metadata__</code>，三个探测函数全返回 None → fallback 到 <code>LastValue(int)</code>。<br>
+                <code>flag: Annotated[int, EphemeralValue]</code> → <code>_is_field_channel</code> 命中"通道类"分支 → <code>EphemeralValue(int)</code>（用完即弃，不持久化，D31）。
+                </div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>⑤ 循环回 agent</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>三种合法 schema：TypedDict / dataclass / Pydantic</h1></div>
             <div class="card">
-                <div class="journey">
-                    <div class="step"><span class="num">1</span><div class="b"><b>回头边</b>：<code>add_edge("tools", "agent")</code> → tools 跑完点亮 agent 触发通道 → 超步 3 又跑 agent。</div></div>
-                    <div class="step"><span class="num">2</span><div class="b"><b>agent 再判断</b>：agent 读 State（现在有工具结果了），调 LLM。LLM 看到"25℃"，生成最终答案"北京今天 25 度"——<strong>不再带 tool_calls</strong>。</div></div>
-                    <div class="step"><span class="num">3</span><div class="b"><b>路由走 END</b>：条件边路由函数发现最新 AI 消息<strong>没有 tool_calls</strong> → 返回 END → 图停机。</div></div>
-                </div>
-                <div class="baby"><span class="t">循环怎么结束？</span>
-                每轮 agent 后都判断"还要调工具吗"。前面轮次要（有 tool_calls），就去 tools、再循环回来。<strong>直到某轮 LLM 觉得信息够了、直接给答案（不带 tool_calls），路由就走 END，循环结束。</strong>是 LLM 自己决定何时停——这就是 ReAct 的自主性。Day 04 的回头边让它能循环，条件边让它能停。<br><strong>还是那个实习生：</strong>他自己掂量"手头资料够不够写报告"——不够就再去查一轮（tools），够了就交稿（END）。停不停不是你规定死的轮数，是他"看情况"定的。<br>👉 <strong>一句话复述：</strong>一次 <code>invoke</code> = 反复跑超步的循环，每轮 agent 后由 LLM 自己决定"再来一轮还是收工"。</div>
+                <p>State schema 不止 <code>TypedDict</code>。建图时有个校验函数会提醒你别传错东西：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:111-120</div>
+<pre><code class="language-python">def _warn_invalid_state_schema(schema):
+    if isinstance(schema, type):        # 是个类 → OK
+        return
+    if typing.get_args(schema):         # 是 Annotated[...] 之类带参数的 → OK
+        return
+    warnings.warn(
+        f"Invalid state_schema: {schema}. Expected a type or Annotated[type, reducer]. ...")</code></pre>
+                <table class="ttable">
+                    <thead><tr><th>schema 形态</th><th>写法</th><th>特点</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>TypedDict</code></td><td><code>class S(TypedDict): x: int</code></td><td>最常用，轻量，运行时就是普通 dict</td></tr>
+                        <tr><td><code>dataclass</code></td><td><code>@dataclass class S: x: int</code></td><td>属性访问 <code>state.x</code>，读取时被 coerce 成实例（见 D04 mapper）</td></tr>
+                        <tr><td>Pydantic <code>BaseModel</code></td><td><code>class S(BaseModel): x: int</code></td><td>★带校验！每次读状态都会 validate（D12 专讲）</td></tr>
+                        <tr><td>裸类型</td><td><code>StateGraph(int)</code></td><td>整个状态就一个值，包成 <code>__root__</code> 通道</td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">大白话</span>不管你用哪种，最终都经过 <code>_get_channels</code> 变成"字段→通道"表。区别只在<b>节点拿到的 state 长啥样</b>：TypedDict 拿到 dict，dataclass/Pydantic 拿到对象实例（靠 D04 学过的 mapper 转换）。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>⑥ 结果流出</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>两处设计取舍 + 一处边界</h1></div>
             <div class="card">
-                <p>图停机后，<code>invoke</code> 返回<strong>最终的完整 State</strong>——<code>{"messages": [用户问题, AI(要工具), Tool(25℃), AI(最终答案)]}</code>。你取最后一条 AI 消息就是答案。</p>
-                <div class="example"><span class="t">🔍 单步走查表：State.messages 一步步长成什么样</span>
-                <table style="width:100%;border-collapse:collapse;font-size:12px;margin:6px 0">
-                    <tr style="text-align:left"><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">超步</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">跑哪个节点</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">此刻发生什么</th><th style="padding:6px 8px;border-bottom:2px solid var(--border-color);color:#14b8a6">State.messages（关键状态值）</th></tr>
-                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">0</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">START</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">灌入输入</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">[用户: 北京天气?]</td></tr>
-                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">1</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">agent</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">LLM 决定调工具</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>AI(要调 get_weather)</b></td></tr>
-                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">2</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">tools</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">执行工具</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>Tool(25℃)</b></td></tr>
-                    <tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">3</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">agent</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">LLM 给最终答案 → END</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)">…+ <b>AI(北京今天 25 度)</b></td></tr>
-                </table>
-                <span style="color:var(--text-muted);font-size:11.5px">每个超步只往 messages "追加"（add_messages reducer，Day 03），历史一条不丢——4 步下来攒成完整对话。</span></div>
-                <div class="glossary"><b>每步都存了检查点</b>（如果配了 checkpointer，Day 11）：超步 0/1/2/3 之间各存一次快照。所以这次运行能被恢复、时间旅行、或在中间中断等人工。<strong>整个旅程 = 输入灌入 State → 超步循环（Plan/Execution/Update）+ 路由 + 回头边 → LLM 决定结束 → 返回最终 State。</strong>这就是 LangGraph 执行一个 Agent 的全貌。<br><strong>检查点就像生活中的游戏存档：</strong>每过一关（超步）自动存一次档，中途关机也不怕——下次读档从上次那关接着打，甚至能"读一个更早的档"重走一遍（时间旅行）。没有存档的游戏，崩一次就得从头再来。</div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍①：为什么用 <code>Annotated</code> 塞 reducer，而不是单独一个配置字典？</span>
+                朴素做法：让你在 <code>StateGraph(State, reducers={"msgs": add})</code> 里单独传合并规矩。源码选择<strong>把 reducer 写进字段类型标注</strong>（<code>Annotated[list, add]</code>）。<strong>好处</strong>：字段的"类型"和"合并规矩"写在<strong>同一行</strong>、离得最近，一眼看全；且 <code>Annotated</code> 对类型检查器透明（IDE 仍认为 <code>msgs</code> 是 <code>list</code>）。<strong>代价</strong>：语法对新手有点怪（"这方括号里第二个东西是啥？"），且必须记得用 <code>get_type_hints(..., include_extras=True)</code> 才读得到——少个参数就全失效。</div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍②：为什么靠"数参数个数"识别 reducer，而不要求显式包一层？</span>
+                源码判断"是不是 reducer"的标准是<strong>可调用且恰好 2 个位置参数</strong>（<code>_is_field_binop</code>）。<strong>好处</strong>：你能直接用标准库现成的 <code>operator.add</code>、自己的 <code>lambda x,y: y</code>，不用为了当 reducer 去继承或包装什么。<strong>代价</strong>：约定很脆——写成 3 参数、或用了带默认值的奇怪签名，就被判定非法（虽然会明确报错）。这是"鸭子类型的便利 vs 显式接口的稳妥"之间的取舍，LangGraph 选了便利+早报错。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：并行节点写同一个"覆盖字段"会报错</span>如果两个并行节点在<strong>同一超步</strong>都写了一个 <code>LastValue</code>（无 reducer）字段，LangGraph 无法决定"听谁的"，会抛 <code>InvalidUpdateError</code>（<code>INVALID_CONCURRENT_GRAPH_UPDATE</code>）。<strong>本质</strong>：<code>LastValue</code> 的语义是"只能有一个写入者"，并行两个写入者违反了它。解法是给该字段配一个能"合并多个写入"的 reducer（如 <code>operator.add</code> 累加、<code>add_messages</code>）。所以"要不要 reducer"不只是风格问题——<strong>只要某字段可能被并行写，就必须给它 reducer</strong>。这条边界 D07/D10 会再展开。</div>
             </div>
         </section>
 
         <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>🎓 第 1 周收官 + 动手</h1></div>
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手 + 明日预告</h1></div>
             <div class="card highlight-card">
-                <h3>第 1 周（Day 01-05）你已建立完整心智</h3>
+                <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li><b>Day 01</b> 全景：LangGraph 是什么、和 LangChain 关系</li>
-                    <li><b>Day 02</b> StateGraph：节点+边+状态、compile 成 Pregel</li>
-                    <li><b>Day 03</b> State 与 reducers：局部更新怎么合并（add_messages）</li>
-                    <li><b>Day 04</b> 条件边与路由：if/router、循环、通道触发</li>
-                    <li><b>Day 05</b> 完整旅程：超步循环 + 路由 + 回头边</li>
+                    <li>State schema 的产物是什么？（一张 <code>{字段名 → 通道}</code> 映射表，存进 self.channels）</li>
+                    <li>没写 reducer 的字段默认是什么通道？（<code>LastValue</code>，新值覆盖旧值）</li>
+                    <li>_get_channel 的"四选一"顺序？（托管值 → 显式通道 → reducer 函数 → 默认 LastValue）</li>
+                    <li>LangGraph 怎么判断一个东西是 reducer？（可调用 + 恰好 2 个位置参数）</li>
+                    <li>为什么解析必须用 <code>get_type_hints(..., include_extras=True)</code>？（否则丢掉 Annotated 元数据，reducer 全失效）</li>
+                    <li>合法 schema 有哪几种？（TypedDict / dataclass / Pydantic BaseModel / 裸类型）</li>
+                    <li>什么情况下字段"必须"有 reducer？（可能被并行节点同时写入时）</li>
                 </ul>
-                <p style="margin-top:8px">你已理解"一个图如何被执行"的全局。下周（Day 06-10）深入 <strong>Pregel 引擎</strong>——BSP 超步、通道、执行循环、编译。</p>
             </div>
             <div class="card">
-                <h3>✋ 动手：跑一个真图观察</h3>
-<pre><code class="language-python"># 用 stream 观察每一步（Day 18 详讲）
-for chunk in graph.stream({"messages": [("user","北京天气?")]}, stream_mode="updates"):
-    print(chunk)   # 看到 agent → tools → agent 一步步的更新</code></pre>
-                <div class="tip"><strong>下周预告 · Day 06</strong>：深入 <strong>Pregel / BSP 模型</strong>——LangGraph 用 Google Pregel 的"超步（super-step）"执行图。Plan/Execution/Update 三阶段、快照隔离、节点靠通道触发。</div>
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 看解析入口 _add_schema
+sed -n '342,372p' libs/langgraph/langgraph/graph/state.py
+
+# 2. 看主翻译 _get_channels（注意 include_extras=True）
+sed -n '1801,1821p' libs/langgraph/langgraph/graph/state.py
+
+# 3. 看四选一 _get_channel + reducer 嗅探
+sed -n '1836,1908p' libs/langgraph/langgraph/graph/state.py
+
+# 4. 亲眼看不同字段变成不同通道
+python3 -c "
+from langgraph.graph import StateGraph
+from typing_extensions import TypedDict, Annotated
+import operator
+class S(TypedDict):
+    x: int
+    msgs: Annotated[list, operator.add]
+g = StateGraph(S)
+for k,v in g.channels.items(): print(k, '->', type(v).__name__)
+"</code></pre>
+                <div class="essence"><span class="t">💡 明日预告 · Day 06</span>阶段 1 收官！明天 D06 不引入新机制，而是把 D01-05 串成一张<strong>能跑的对话图</strong>：用现成的 <code>MessagesState</code>（<code>graph/message.py:372</code>）、加一个模型节点、一条条件边形成循环，然后回头用"通道触发"心智模型完整讲一遍它是怎么转起来的——给入门阶段画个句号。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="langgraph-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 条件边</a>
-                <a href="langgraph-day06.html" style="color:var(--accent-green);">Day 06 · Pregel 引擎 &rarr;</a>
+                <a href="langgraph-day04.html" style="color:var(--accent-cyan);">&larr; Day 04 · 节点与边</a>
+                <a href="langgraph-day06.html" style="color:var(--accent-green);">Day 06 · 第一个对话图 &rarr;</a>
             </div>
         </section>
     </main>
