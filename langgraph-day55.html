@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 55 · ToolNode 源码 — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">55</div>
+            <h2>Day 55</h2>
+            <p class="version">ToolNode 源码 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · ToolNode 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · __init__ 建索引</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · _parse_input 找 tool_calls</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _func 并行执行</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · _execute_tool_sync 错误处理</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · handle_tool_errors 四形态</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 输出合并 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day54.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 54 逐行①</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day56.html" class="nav-link" style="color:var(--accent-green);">Day 56 tools_condition &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 55 / 共 60 天 · 阶段 9 预制件与流式</span>
+            <h1 class="part-title">ToolNode：把"执行工具"这件脏活干干净净</h1>
+            <p class="part-desc">agent 节点负责"想"，tools 节点负责"做"。这个 tools 节点就是 <code>ToolNode</code>。别看它在图里只是一个节点，源码有 2000 行——因为"执行工具"的真实世界充满脏活：并行跑多个工具、工具报错不能崩全图、参数校验失败要翻译成模型能懂的话、还要往工具里注入 state/store/运行时。今天把它的主干拆开。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 9 · 预制件与流式（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D53 总览</span><span class="sep">→</span>
+                <span class="st">D54 逐行①</span><span class="sep">→</span>
+                <span class="st on">D55 ToolNode</span><span class="sep">→</span>
+                <span class="st">D56 校验</span><span class="sep">→</span>
+                <span class="st">D57 流式5模式</span><span class="sep">→</span>
+                <span class="st">D58 流式底层</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        ToolNode 像一个<strong>后厨调度台</strong>。前台（模型）下了一叠订单（tool_calls），调度台先<strong>看懂订单</strong>（_parse_input）、把订单<strong>分给多个厨师同时做</strong>（线程池并行）、每个厨师做菜时<strong>万一翻车了不许喊崩整个厨房</strong>，而要写一张"这道菜出问题了：XXX"的纸条端回给前台（错误转 ToolMessage）、最后把所有成品和纸条<strong>装盘归位</strong>（合并输出）。今天看这套调度怎么写。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>ToolNode 是什么：一个会执行工具的 Runnable</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>模型输出的 <code>AIMessage.tool_calls</code> 只是"我想调 weather(city=北京)"的<strong>意图</strong>，不是真调用。谁把意图变成真实函数调用、再把返回值包成模型能读的 ToolMessage？</div>
+                <p>就是 ToolNode。它继承自 <code>RunnableCallable</code>（<span class="fileref">tool_node.py:622</span>），所以能当图节点用。核心入口是 <code>_func</code>（同步）/<code>_afunc</code>（异步）。整体职责：<strong>输入含 tool_calls 的消息/状态 → 执行工具 → 输出 ToolMessage 列表</strong>。</p>
+<pre><code class="language-python"># tool_node.py:622（类头，裁剪 docstring）
+class ToolNode(RunnableCallable):
+    """A node that runs the tools called in the last AIMessage."""
+    # 关键内部状态（在 __init__ 里建，见 L02）：
+    #   self._tools_by_name : dict[str, BaseTool]   工具名 → 工具
+    #   self._handle_tool_errors : 错误处理策略
+    #   self._injected_args : 每个工具需要注入哪些特殊参数</code></pre>
+                <div class="baby"><span class="t">👶 一句话</span>ToolNode = "把模型的调用意图，真正执行掉，并把结果/错误都变成 ToolMessage"。它是意图和现实之间的翻译官+执行者。</div>
+                <div class="anno">D53 里 create_react_agent 会自动帮你把 tools 列表包成 ToolNode。但你也能单独用它，配到任何自己的 StateGraph 里——它就是个普通节点。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>__init__：把工具建成"名字 → 工具"的索引</h1></div>
+            <div class="card">
+                <p><span class="fileref">tool_node.py:743</span>，构造时做两件准备：</p>
+<pre><code class="language-python"># tool_node.py:743
+def __init__(self, tools, *, name="tools", tags=None,
+             handle_tool_errors=_default_handle_tool_errors,
+             messages_key="messages", wrap_tool_call=None, awrap_tool_call=None):
+    super().__init__(self._func, self._afunc, name=name, tags=tags, trace=False)
+    self._tools_by_name = {}
+    self._injected_args = {}
+    self._handle_tool_errors = handle_tool_errors        # 错误策略（L06）
+    self._messages_key = messages_key
+    self._wrap_tool_call = wrap_tool_call                # 拦截器（重试/缓存）
+    for tool in tools:
+        if not isinstance(tool, BaseTool):
+            tool_ = create_tool(tool)                    # 普通函数 → 包成 BaseTool
+        else:
+            tool_ = tool
+        self._tools_by_name[tool_.name] = tool_          # ★ 建 名字→工具 索引
+        self._injected_args[tool_.name] = _get_all_injected_args(tool_)  # 预扫注入参数</code></pre>
+                <div class="walk">
+                    <div class="r"><code>super().__init__(self._func, self._afunc)</code><span>把同步 <code>_func</code>、异步 <code>_afunc</code> 注册给父类 RunnableCallable——这就是节点被调用时真正跑的东西。</span></div>
+                    <div class="r"><code>create_tool(tool)</code><span>你传普通 Python 函数也行，这里自动包成 <code>BaseTool</code>（借 LangChain 的机制推断参数 schema）。</span></div>
+                    <div class="r"><code>self._tools_by_name[name] = tool_</code><span>建 <b>名字→工具</b> 字典。执行时按模型给的 <code>call["name"]</code> 直接 O(1) 查表。</span></div>
+                    <div class="r"><code>_get_all_injected_args(tool_)</code><span><b>提前一次性</b>扫描每个工具"需要注入哪些特殊参数"（如 InjectedState/InjectedStore）。存起来避免每次执行都重扫。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么在 __init__ 就预扫 injected_args，而不是执行时现扫？</span>工具的注入参数（哪些形参要塞 state、哪些要塞 store）在<strong>整个 Agent 生命周期里不变</strong>。执行时现扫要用 <code>inspect</code> 反射签名——反射慢且每次工具调用都做一遍很浪费。放到 __init__ 扫一次、存进 <code>self._injected_args</code>，之后每次执行直接查字典。这是<strong>"不变量前移到初始化"</strong>的经典优化：一次成本换 N 次省。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>_parse_input：从三种输入里挖出 tool_calls</h1></div>
+            <div class="card">
+                <p>节点被调用时，输入可能是消息列表、状态 dict、或 Send 传来的特殊结构。<span class="fileref">tool_node.py:1224</span> 统一解析：</p>
+<pre><code class="language-python"># tool_node.py:1224
+def _parse_input(self, input) -> tuple[list[ToolCall], Literal["list","dict","tool_calls"]]:
+    if isinstance(input, list):
+        if isinstance(input[-1], dict) and input[-1].get("type") == "tool_call":
+            return cast(list[ToolCall], input), "tool_calls"   # 直接给了 tool_call 列表
+        input_type = "list"; messages = input
+    elif isinstance(input, dict) and input.get("__type") == "tool_call_with_context":
+        input_with_ctx = cast(ToolCallWithContext, input)       # ★ D53 v2 的 Send 载荷
+        return [input_with_ctx["tool_call"]], "tool_calls"
+    elif isinstance(input, dict) and (messages := input.get(self._messages_key, [])):
+        input_type = "dict"
+    elif messages := getattr(input, self._messages_key, []):
+        input_type = "dict"                                     # dataclass 状态
+    else:
+        raise ValueError("No message found in input")
+    try:
+        latest_ai_message = next(m for m in reversed(messages) if isinstance(m, AIMessage))
+    except StopIteration:
+        raise ValueError("No AIMessage found in input")
+    return list(latest_ai_message.tool_calls), input_type</code></pre>
+                <div class="walk">
+                    <div class="r"><code>input[-1]... "tool_call"</code><span>你直接喂一个 tool_call 列表（少见）→ 原样用，标记 <code>"tool_calls"</code>。</span></div>
+                    <div class="r"><code>__type == "tool_call_with_context"</code><span><b>关键</b>：D53 v2 用 Send 分发时，每个任务的输入就是这个结构，里面装着<b>单个</b> tool_call + state 快照。这里取出那一个 tool_call。</span></div>
+                    <div class="r"><code>input.get(messages_key)</code><span>最常见：输入是状态 dict，从 <code>messages</code> 里取。</span></div>
+                    <div class="r"><code>next(... reversed ... AIMessage)</code><span>从后往前找<b>最近的一条 AIMessage</b>，它的 <code>tool_calls</code> 就是待执行清单。</span></div>
+                    <div class="r"><code>返回 input_type</code><span>记住输入形态（list/dict/tool_calls），因为<b>输出格式要跟输入对齐</b>（L07）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：一个节点要同时服务 v1 和 v2</span>v1 整条状态进来（走 dict/list 分支，一次拿到全部 tool_calls）；v2 每个 Send 单独进来（走 tool_call_with_context 分支，只拿一个）。<code>_parse_input</code> 用<strong>输入结构</strong>区分两条路，让 <code>_func</code> 后续逻辑统一——不管几个 tool_call，都当"一个列表"处理。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>_func：线程池并行执行每个工具</h1></div>
+            <div class="card">
+                <p>主流程 <span class="fileref">tool_node.py:793</span>：</p>
+<pre><code class="language-python"># tool_node.py:793
+def _func(self, input, config, runtime):
+    tool_calls, input_type = self._parse_input(input)          # L03
+    config_list = get_config_list(config, len(tool_calls))
+    tool_runtimes = []
+    for call, cfg in zip(tool_calls, config_list):
+        state = self._extract_state(input, cfg)
+        tool_runtime = ToolRuntime(state=state, tool_call_id=call["id"], config=cfg,
+            context=runtime.context, store=runtime.store,          # 注入运行时资源
+            stream_writer=runtime.stream_writer, tools=list(self.tools_by_name.values()), ...)
+        tool_runtimes.append(tool_runtime)
+    input_types = [input_type] * len(tool_calls)
+    with get_executor_for_config(config) as executor:
+        outputs = list(executor.map(self._run_one, tool_calls, input_types, tool_runtimes))  # ★ 并行
+    return self._combine_tool_outputs(outputs, input_type)     # L07 合并</code></pre>
+                <div class="walk">
+                    <div class="r"><code>for call in tool_calls: ToolRuntime(...)</code><span>给每个工具调用造一个 <b>ToolRuntime</b>：把 state、store、stream_writer、config 等运行时资源打包，稍后按需注入进工具。</span></div>
+                    <div class="r"><code>get_executor_for_config(config)</code><span>拿到一个<b>线程池</b>执行器（来自 config，可复用图的执行器配置）。</span></div>
+                    <div class="r"><code>executor.map(self._run_one, ...)</code><span><b>今天的高潮</b>：把每个 tool_call 丢进线程池<b>并行</b>跑 <code>_run_one</code>。三个工具就三个线程同时跑，不用串行等。</span></div>
+                    <div class="r"><code>异步版 _afunc（:828）</code><span>对应异步：用 <code>asyncio.gather(*coros)</code> 并发 await 每个 <code>_arun_one</code>。同样是并行，只是换成协程。</span></div>
+                    <div class="r"><code>_combine_tool_outputs</code><span>把 N 个工具的结果合并成节点的返回值（L07）。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：v2 已经用 Send 并行了，为什么 ToolNode 内部还要线程池并行？</span>两者是<strong>不同层次</strong>的并行，且互补。v2（D53）在<strong>图层</strong>把每个 tool_call 拆成独立任务，好处是每个工具能独立中断/重试/记检查点。但当 ToolNode 被<strong>单独</strong>用在别人的图里（不走 create_react_agent 的 v2），或 v1 模式下，一个节点里就有多个 tool_call——此时靠<strong>节点内</strong>的线程池 <code>executor.map</code> 并行。<strong>ToolNode 自己保证"给我多少工具我都并行跑"，不依赖上层怎么调度</strong>。这是"组件自洽"的设计：不假设调用方一定用 v2。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：工具是 CPU 密集或阻塞 IO 时，线程池并行才有意义</span>线程池对<strong>IO 型工具</strong>（调 API、查数据库）能真并行（GIL 在 IO 等待时释放）。但纯 CPU 计算的工具受 GIL 限制，线程并行提速有限。异步版 <code>_afunc</code> 要求工具本身是 <code>async</code> 的才能真正并发。选同步还是异步，取决于你的工具是什么类型——用错了会"看似并行实则排队"。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>_execute_tool_sync：报错不崩，转成 ToolMessage</h1></div>
+            <div class="card">
+                <p>单个工具的执行 + 兜错在 <span class="fileref">tool_node.py:922</span>：</p>
+<pre><code class="language-python"># tool_node.py:922（裁剪）
+def _execute_tool_sync(self, request, input_type, config):
+    call = request.tool_call; tool = request.tool
+    if tool is None:                                            # 模型点了不存在的工具
+        if invalid_tool_message := self._validate_tool_call(call):
+            return invalid_tool_message                         # 返回"没这个工具"的 ToolMessage
+    injected_call = self._inject_tool_args(call, request.runtime, tool)   # 注入 state/store
+    call_args = {**injected_call, "type": "tool_call"}
+    try:
+        try:
+            response = tool.invoke(call_args, config)           # ★ 真正执行工具
+        except ValidationError as exc:                          # 参数校验失败
+            filtered_errors = _filter_validation_errors(exc, self._injected_args.get(call["name"]))
+            raise ToolInvocationError(call["name"], exc, call["args"], filtered_errors) from exc
+        return self._normalize_tool_response(response, request.tool_call, input_type)
+    except GraphBubbleUp:                                       # interrupt() 等特殊信号
+        raise                                                   # ← 必须原样抛，不能吞
+    except Exception as e:
+        handled_types = ...                                     # 根据配置定"哪些异常要接住"
+        if not self._handle_tool_errors or not isinstance(e, handled_types):
+            raise                                               # 不在处理范围 → 抛出
+        content = _handle_tool_error(e, flag=self._handle_tool_errors)   # 转成错误文本
+        return ToolMessage(content=content, name=call["name"],
+                           tool_call_id=call["id"], status="error")      # ★ 错误也变消息</code></pre>
+                <div class="walk">
+                    <div class="r"><code>tool is None → _validate_tool_call</code><span>模型幻觉调了个不存在的工具，不崩，返回一条"这不是有效工具，可用的有[...]"的 ToolMessage（L06 会看模板）。</span></div>
+                    <div class="r"><code>_inject_tool_args(...)</code><span>执行前把 state、store、tool_call_id 等<b>注入</b>进工具参数（对声明了 InjectedState 的工具）。模型看不到这些参数、也不用填。</span></div>
+                    <div class="r"><code>tool.invoke(call_args, config)</code><span>真正执行工具函数。</span></div>
+                    <div class="r"><code>except GraphBubbleUp: raise</code><span><b>关键边界</b>：如果工具里调了 <code>interrupt()</code>（人在环，D41），会抛 GraphBubbleUp。这类信号<b>绝不能被错误处理吞掉</b>，必须原样往上抛，让图去暂停。</span></div>
+                    <div class="r"><code>except Exception → ToolMessage(status="error")</code><span><b>今天的高潮</b>：普通异常被<b>接住</b>，转成一条 <code>status="error"</code> 的 ToolMessage 喂回模型——模型看到报错文本，能自己纠正重试。<b>工具翻车，Agent 不崩。</b></span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：错误也是给模型的"反馈"</span>朴素思路：工具报错就抛异常、整个 Agent 挂掉。ToolNode 的思路：把错误<strong>翻译成模型能读的文本</strong>塞回对话。模型看到"Error: 城市名无效"，下一轮可能就自己改成正确参数重试。<strong>把异常变成对话的一部分</strong>，是让 Agent 具备"自我纠错"能力的关键机制。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>handle_tool_errors：四种错误处理形态</h1></div>
+            <div class="card">
+                <p>到底怎么把异常变文本？看 <code>_handle_tool_error</code>（<span class="fileref">tool_node.py:394</span>）和默认策略（<span class="fileref">tool_node.py:383</span>）：</p>
+<pre><code class="language-python"># tool_node.py:383  默认策略
+def _default_handle_tool_errors(e: Exception) -> str:
+    if isinstance(e, ToolInvocationError):    # 只兜"参数校验类"错误
+        return e.message
+    raise e                                   # 其它错误照样抛（不隐藏真 bug）
+
+# tool_node.py:394  按配置类型生成错误文本
+def _handle_tool_error(e, *, flag) -> str:
+    if isinstance(flag, (bool, tuple)) or (isinstance(flag, type) and issubclass(flag, Exception)):
+        content = TOOL_CALL_ERROR_TEMPLATE.format(error=repr(e))   # 用默认模板
+    elif isinstance(flag, str):
+        content = flag                        # 用你给的固定字符串
+    elif callable(flag):
+        content = flag(e)                     # 用你给的函数生成
+    else:
+        raise ValueError("Got unexpected type of `handle_tool_error`...")
+    return content
+# TOOL_CALL_ERROR_TEMPLATE = "Error: {error}\n Please fix your mistakes."  (:111)</code></pre>
+                <table class="ttable">
+                    <tr><th>handle_tool_errors 传值</th><th>行为</th></tr>
+                    <tr><td><code>True</code>（或异常类型/元组）</td><td>用模板 <code>"Error: {repr(e)}\n Please fix your mistakes."</code></td></tr>
+                    <tr><td><code>"自定义文本"</code>（str）</td><td>不管什么错，都返回这句固定话</td></tr>
+                    <tr><td><code>lambda e: ...</code>（callable）</td><td>调你的函数，按异常内容定制错误文本</td></tr>
+                    <tr><td><code>False</code></td><td>不处理，异常直接抛出（让图崩/上层处理）</td></tr>
+                </table>
+                <div class="walk">
+                    <div class="r"><code>默认只兜 ToolInvocationError</code><span>默认策略很克制：只把"参数校验失败"这类<b>模型能自己修</b>的错误转成消息；其它错误（如工具内部真 bug）照样抛，<b>不掩盖真问题</b>。</span></div>
+                    <div class="r"><code>flag 是异常类型/元组</code><span>你可以只让某几类异常被接住（如 <code>(ValueError, KeyError)</code>），其余照抛——精细控制"哪些错该喂回模型、哪些该崩"。</span></div>
+                    <div class="r"><code>_infer_handled_types（:444）</code><span>更妙：你传的自定义处理函数若标注了 <code>def h(e: ValueError)</code>，源码用反射<b>读你的类型注解</b>，只接住 ValueError。函数签名即配置。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：默认不是"接住一切"，而是"只接住模型能修的"</span>很多人以为 ToolNode 会吞掉所有异常。其实默认策略（<code>_default_handle_tool_errors</code>）只对 <code>ToolInvocationError</code>（参数不对）返回消息，其它 <code>raise e</code>。这是<strong>刻意的</strong>：如果把"数据库连接失败"也悄悄转成 ToolMessage 喂给模型，模型只会一脸懵地重试，真正的基础设施故障却被隐藏了。<strong>可恢复的错误喂回模型，不可恢复的错误暴露出来</strong>——这条界线是默认策略的精髓。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>_combine_tool_outputs：装盘归位 + 今日小结</h1></div>
+            <div class="card">
+                <p>并行跑完，N 个结果要合并成节点返回值。<span class="fileref">tool_node.py:862</span>（裁剪）：</p>
+<pre><code class="language-python"># tool_node.py:862
+def _combine_tool_outputs(self, outputs, input_type):
+    # 有工具返回了 list（多条消息）→ 先摊平
+    if any(isinstance(o, list) for o in outputs):
+        flat_outputs = []
+        for o in outputs:
+            flat_outputs.extend(o) if isinstance(o, list) else flat_outputs.append(o)
+    else:
+        flat_outputs = outputs
+    # 常见情况：没有 Command，直接按输入形态返回
+    if not any(isinstance(o, Command) for o in flat_outputs):
+        return flat_outputs if input_type == "list" else {self._messages_key: flat_outputs}
+    # 复杂情况：有工具返回 Command（要跳转/改状态），逐个处理并合并 parent goto
+    ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>摊平 list</code><span>某个工具可能返回<b>多条</b> ToolMessage（一个 list），先展平成一维。</span></div>
+                    <div class="r"><code>没 Command → 按 input_type 返回</code><span>输入是 list 就返回 list；输入是 dict 就返回 <code>{"messages": [...]}</code>。<b>输出格式对齐输入</b>（呼应 L03）。</span></div>
+                    <div class="r"><code>有 Command</code><span>工具可以返回 <code>Command</code>（D15）来跳转/改状态。这里把多个 Command 的 <code>goto</code> 合并、和普通 ToolMessage 一起打包，交给 LangGraph 处理。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 260" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：ToolNode 的内部索引与运行时</text>
+                        <rect x="40" y="45" width="250" height="70" rx="9" fill="rgba(99,102,241,.1)" stroke="#818cf8"/>
+                        <text x="165" y="66" fill="#a5b4fc" text-anchor="middle" font-weight="700">_tools_by_name</text>
+                        <text x="165" y="85" fill="#94a3b8" text-anchor="middle">"weather" → WeatherTool</text>
+                        <text x="165" y="102" fill="#94a3b8" text-anchor="middle">"add" → AddTool</text>
+                        <rect x="350" y="45" width="250" height="70" rx="9" fill="rgba(236,72,153,.1)" stroke="#f472b6"/>
+                        <text x="475" y="66" fill="#f9a8d4" text-anchor="middle" font-weight="700">_injected_args</text>
+                        <text x="475" y="85" fill="#94a3b8" text-anchor="middle">"weather" → {state, store}</text>
+                        <text x="475" y="102" fill="#94a3b8" text-anchor="middle">（__init__ 预扫）</text>
+                        <rect x="120" y="160" width="400" height="70" rx="9" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="320" y="181" fill="#fbbf24" text-anchor="middle" font-weight="700">ToolRuntime（每个 tool_call 一份）</text>
+                        <text x="320" y="200" fill="#94a3b8" text-anchor="middle">state / store / config / tool_call_id / stream_writer</text>
+                        <text x="320" y="217" fill="#94a3b8" text-anchor="middle">执行前按 _injected_args 注入进工具参数</text>
+                        <path d="M165 115 L280 158" stroke="#818cf8" marker-end="url(#e)"/>
+                        <path d="M475 115 L360 158" stroke="#f472b6" marker-end="url(#e)"/>
+                        <defs><marker id="e" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：查表找工具 + 查注入清单，为每个调用构造 ToolRuntime。</div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 230" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：_func 并行执行 + 错误兜底</text>
+                        <rect x="20" y="45" width="130" height="34" rx="8" fill="rgba(99,102,241,.1)" stroke="#818cf8"/><text x="85" y="66" fill="#a5b4fc" text-anchor="middle">_parse_input</text>
+                        <rect x="20" y="95" width="130" height="34" rx="8" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/><text x="85" y="116" fill="#fbbf24" text-anchor="middle">造 ToolRuntime</text>
+                        <rect x="200" y="55" width="120" height="34" rx="8" fill="rgba(34,197,94,.1)" stroke="#4ade80"/><text x="260" y="76" fill="#86efac" text-anchor="middle">工具1（线程）</text>
+                        <rect x="200" y="98" width="120" height="34" rx="8" fill="rgba(34,197,94,.1)" stroke="#4ade80"/><text x="260" y="119" fill="#86efac" text-anchor="middle">工具2（线程）</text>
+                        <rect x="200" y="141" width="120" height="34" rx="8" fill="rgba(34,197,94,.1)" stroke="#4ade80"/><text x="260" y="162" fill="#86efac" text-anchor="middle">工具3（线程）</text>
+                        <rect x="365" y="55" width="130" height="120" rx="9" fill="rgba(239,68,68,.08)" stroke="#f87171"/>
+                        <text x="430" y="90" fill="#fca5a5" text-anchor="middle">try 执行</text>
+                        <text x="430" y="112" fill="#fca5a5" text-anchor="middle">interrupt?→抛</text>
+                        <text x="430" y="134" fill="#fca5a5" text-anchor="middle">Exception?→</text>
+                        <text x="430" y="152" fill="#fca5a5" text-anchor="middle">转 ToolMessage</text>
+                        <rect x="530" y="98" width="90" height="34" rx="8" fill="rgba(6,182,212,.1)" stroke="#06b6d4"/><text x="575" y="119" fill="#67e8f9" text-anchor="middle">合并输出</text>
+                        <path d="M85 79 L85 93" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <path d="M150 112 L198 72" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <path d="M150 112 L198 115" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <path d="M150 112 L198 158" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <path d="M320 115 L363 115" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <path d="M495 115 L528 115" stroke="#94a3b8" marker-end="url(#f)"/>
+                        <defs><marker id="f" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：多个工具并行进 try 块，各自兜错，最后合并。</div>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>ToolNode 的职责？（把 tool_calls 意图变成真实执行，结果/错误都包成 ToolMessage）</li>
+                    <li>__init__ 为什么预扫 injected_args？（注入需求是不变量，前移到初始化省反射）</li>
+                    <li>_parse_input 如何区分 v1/v2？（v2 走 tool_call_with_context 分支，一次一个）</li>
+                    <li>工具怎么并行？（_func 用线程池 executor.map；_afunc 用 asyncio.gather）</li>
+                    <li>工具报错为什么不崩全图？（转成 status="error" 的 ToolMessage 喂回模型自纠）</li>
+                    <li>interrupt() 抛出的 GraphBubbleUp 为什么必须原样抛？（是暂停信号，不能被错误处理吞）</li>
+                    <li>默认错误策略接住哪些错？（只 ToolInvocationError，其余照抛，不掩盖真 bug）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 三段核心逐行读
+sed -n '793,826p'  libs/prebuilt/langgraph/prebuilt/tool_node.py   # _func 并行
+sed -n '922,1013p' libs/prebuilt/langgraph/prebuilt/tool_node.py   # 执行+兜错
+sed -n '383,393p'  libs/prebuilt/langgraph/prebuilt/tool_node.py   # 默认错误策略
+
+# 2. 亲手看"工具报错变消息"
+python - <<'PY'
+from langgraph.prebuilt import ToolNode
+from langchain_core.tools import tool
+from langchain_core.messages import AIMessage
+@tool
+def div(a:int,b:int)->float:
+    "除法"
+    return a/b
+node = ToolNode([div], handle_tool_errors=True)   # 接住一切错误
+ai = AIMessage(content="", tool_calls=[{"name":"div","args":{"a":1,"b":0},"id":"1","type":"tool_call"}])
+out = node.invoke({"messages":[ai]})
+print(out["messages"][0].content, out["messages"][0].status)  # 看到 Error: ... error
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 56</strong>：看 <code>tools_condition</code>（比 should_continue 更通用的路由函数）如何判断"该不该去 tools"，再看 <code>ValidationNode</code>（tool_validator.py）——一个"只校验参数不真跑工具"的节点，用于结构化抽取和"让模型重填直到合法"的重试循环。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day54.html" style="color:var(--accent-cyan);">&larr; Day 54 逐行①</a>
+                <a href="langgraph-day56.html" style="color:var(--accent-green);">Day 56 · tools_condition &amp; 校验 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

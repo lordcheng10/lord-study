@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 58 · 流式底层 逐 token — LangGraph 60 天</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">58</div>
+            <h2>Day 58</h2>
+            <p class="version">流式底层逐 token · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · token 是怎么来的</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Handler 是个回调</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · on_chat_model_start 记元数据</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · on_llm_new_token 逐 token</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · seen 去重防重复</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 节点输出里找消息</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · v2 事件流 + 收官</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day57.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 57 流式 5 模式</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day59.html" class="nav-link" style="color:var(--accent-green);">Day 59 运行时与部署 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 58 / 共 60 天 · 阶段 9 预制件与流式</span>
+            <h1 class="part-title">流式底层：一个 token 从模型到你屏幕的旅程</h1>
+            <p class="part-desc">昨天知道了 messages 模式靠"挂一个回调 handler"接入。今天把这个 handler——<code>StreamMessagesHandler</code>（<code>_messages.py</code>）拆开：模型每吐一个 token，它怎么捕获、怎么带上"这是哪个节点、哪个 LLM"的元数据、怎么防止"流式吐过的 token"和"节点返回的完整消息"被重复计数。这是 ChatGPT 式"逐字打字"体验在 LangGraph 里的最后一公里。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 9 · 预制件与流式（6 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D53 总览</span><span class="sep">→</span>
+                <span class="st">D54 逐行①</span><span class="sep">→</span>
+                <span class="st">D55 ToolNode</span><span class="sep">→</span>
+                <span class="st">D56 校验</span><span class="sep">→</span>
+                <span class="st">D57 流式5模式</span><span class="sep">→</span>
+                <span class="st on">D58 流式底层</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        想象模型是<strong>一台正在吐纸带的打字机</strong>，一个字一个字往外蹦。<code>StreamMessagesHandler</code> 是<strong>装在打字机旁的传感器</strong>：模型开始打字时（on_chat_model_start）它记下"这是哪个部门在打"（元数据）；每蹦一个字（on_llm_new_token）它立刻抄一份贴到公告栏（流）；打完（on_llm_end）它核对一下别把整段又抄一遍（去重）。它<strong>不打断模型、只旁听</strong>——这就是"回调"的本质：搭个便车，模型该干嘛干嘛。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>token 是怎么"冒"出来的</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>模型内部是"一个 token 接一个 token"生成的。可 <code>model.invoke()</code> 只在全部生成完才返回一整条 AIMessage。LangGraph 怎么在<strong>不改模型代码</strong>的前提下，把中途每个 token 都截获下来送进流？</div>
+                <div class="essence"><span class="t">💡 本质</span>靠 LangChain 的<strong>回调（callback）机制</strong>。模型在生成过程中会主动"广播"事件：开始了（on_chat_model_start）、来了个新 token（on_llm_new_token）、结束了（on_llm_end）。任何注册了回调 handler 的对象都能<strong>旁听</strong>这些事件。<code>StreamMessagesHandler</code> 就是这样一个旁听者——D57 里 <code>run_manager.inheritable_handlers.append(...)</code> 就是把它注册进去。</div>
+                <p>它的类头 <span class="fileref">_messages.py:49</span>：</p>
+<pre><code class="language-python"># _messages.py:49
+class StreamMessagesHandler(BaseCallbackHandler, _StreamingCallbackHandler):
+    """A callback handler that implements stream_mode=messages.
+    Collects messages from:
+    (1) chat model stream events; and
+    (2) node outputs.
+    """
+    run_inline = True
+    """We want this callback to run in the main thread to avoid order/locking issues."""</code></pre>
+                <div class="walk">
+                    <div class="r"><code>继承 BaseCallbackHandler</code><span>让它成为一个合法的 LangChain 回调，能接收 on_llm_* 等事件。</span></div>
+                    <div class="r"><code>收集两个来源</code><span>注释点明：它既收<b>模型 token 流</b>（逐字），也收<b>节点输出里的完整消息</b>（比如节点直接返回一条消息）。两个来源 → 去重成了刚需（L05）。</span></div>
+                    <div class="r"><code>run_inline = True</code><span>要求这个回调<b>在主线程同步跑</b>，不丢线程池。为什么？因为 token 是<b>有顺序</b>的，扔多线程会乱序、还要加锁。同步跑最省心。</span></div>
+                </div>
+                <div class="baby"><span class="t">👶 一句话</span>它是个"贴在模型旁的录音笔"，模型说一个字它录一个字，全程不插嘴。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Handler 的家当：stream + seen + metadata</h1></div>
+            <div class="card">
+                <p>构造函数 <span class="fileref">_messages.py:60</span>，家当很少：</p>
+<pre><code class="language-python"># _messages.py:60
+def __init__(self, stream, subgraphs, *, parent_ns=None):
+    self.stream = stream                 # ← D57 传进来的 stream.put，往流里推数据
+    self.subgraphs = subgraphs           # 是否也收子图的消息
+    self.metadata: dict[UUID, Meta] = {} # run_id → (命名空间, 元数据)
+    self.seen: set[int | str] = set()    # 已经吐过的 message id（去重用）
+    self.parent_ns = parent_ns           # 本 handler 创建时所在的命名空间</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self.stream</code><span>就是 D57 的 <code>stream.put</code>。handler 捕获到 token，最终就是调它 <code>self.stream((ns,"messages",(msg,meta)))</code> 推进流。</span></div>
+                    <div class="r"><code>self.metadata: run_id → Meta</code><span>关键字典：每次模型调用有个唯一 <code>run_id</code>，这里记下它对应的<b>命名空间 + 元数据</b>（哪个节点、哪个 step）。token 来时靠 run_id 查回元数据。</span></div>
+                    <div class="r"><code>self.seen</code><span>记录<b>已经吐过的 message id</b>。防止同一条消息被吐两次（L05）。</span></div>
+                    <div class="r"><code>parent_ns</code><span>处理子图流式的边界：只有明确请求了子图消息时才放行（见 on_chat_model_start 的判断）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：一个 handler 服务多个并发的模型调用</span>Agent 里可能同时有多个模型调用（v2 并行工具后各自再想）。它们共用<strong>同一个 handler 实例</strong>，靠 <code>run_id</code> 这把钥匙在 <code>self.metadata</code> 里各认各的元数据、互不串味。<strong>用 run_id 做隔离键</strong>是整个 handler 能并发工作的地基。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>on_chat_model_start：token 来之前先记好"户口"</h1></div>
+            <div class="card">
+                <p>模型一开始调用，先触发这个（<span class="fileref">_messages.py:130</span>）：</p>
+<pre><code class="language-python"># _messages.py:130
+def on_chat_model_start(self, serialized, messages, *, run_id, ..., tags=None, metadata=None, **kwargs):
+    if metadata and (not tags or (TAG_NOSTREAM not in tags)):     # 没被标记"不要流"
+        ns = tuple(metadata["langgraph_checkpoint_ns"].split(NS_SEP))[:-1]  # 算命名空间
+        if not self.subgraphs and len(ns) > 0 and ns != self.parent_ns:
+            return                                                # 不收子图 → 跳过
+        if (filtered_tags := filter_to_user_tags(tags)) is not None:
+            metadata["tags"] = filtered_tags
+        self.metadata[run_id] = (ns, metadata)                    # ★ 登记 run_id → (ns, meta)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>TAG_NOSTREAM not in tags</code><span>边界：如果这次模型调用被打了 <code>TAG_NOSTREAM</code>（比如内部用的、不想流给用户的），直接不登记——后面 token 来了也无处可查、自然不吐。</span></div>
+                    <div class="r"><code>ns = ...split(NS_SEP)[:-1]</code><span>从检查点命名空间算出这次调用属于哪个（子）图。<code>[:-1]</code> 去掉最后一段（本节点的 id）。</span></div>
+                    <div class="r"><code>not self.subgraphs and len(ns)&gt;0 → return</code><span>如果没要子图消息、而这次调用来自子图，跳过——不登记就不会吐。</span></div>
+                    <div class="r"><code>self.metadata[run_id] = (ns, metadata)</code><span><b>核心动作</b>：登记"户口"。之后 token/结束事件都靠 run_id 查这份 <code>(ns, metadata)</code>。<b>没登记的 run_id，后续事件一律无视</b>。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用"登记制"而不是"来了 token 现算元数据"？</span>token 事件（on_llm_new_token）触发得<strong>极其频繁</strong>——一条回答几百个 token 就是几百次回调。如果每个 token 来时都去解析 tags、算命名空间、判断要不要流，那是几百次重复计算。改成<strong>在 start 时算一次、登记进字典</strong>，token 来时只做一次 <code>self.metadata.get(run_id)</code> 字典查询。<strong>把"是否该流、属于谁"这个不变判断前移到 start</strong>，让高频的 token 路径极致轻量。这和 D55 的"__init__ 预扫注入参数"是同一种智慧。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>on_llm_new_token：每个 token 立刻推进流</h1></div>
+            <div class="card">
+                <p>今天的绝对核心——每来一个 token 触发（<span class="fileref">_messages.py:151</span>）：</p>
+<pre><code class="language-python"># _messages.py:151
+def on_llm_new_token(self, token, *, chunk=None, run_id, ..., **kwargs):
+    if not isinstance(chunk, ChatGenerationChunk):
+        return                                       # 不是聊天模型的 chunk → 忽略
+    if meta := self.metadata.get(run_id):            # ★ 查户口：登记过才处理
+        self._emit(meta, chunk.message)              # 把这一小片消息推进流</code></pre>
+                <p>推流动作 <code>_emit</code>（<span class="fileref">_messages.py:97</span>）：</p>
+<pre><code class="language-python"># _messages.py:97
+def _emit(self, meta, message, *, dedupe=False):
+    if dedupe and message.id in self.seen:
+        return                                       # 去重（L05）
+    else:
+        if message.id is None:
+            message.id = str(uuid4())                # 没 id 就补一个
+        self.seen.add(message.id)
+        self.stream((meta[0], "messages", (message, meta[1])))  # ★ (ns, "messages", (消息, 元数据))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>chunk.message</code><span>每个 token 其实是一个 <b>AIMessageChunk</b>（消息碎片），只含这一小段增量内容。</span></div>
+                    <div class="r"><code>meta := self.metadata.get(run_id)</code><span>查 L03 登记的户口。没登记（返回 None）→ 整个 if 不进，<b>这个 token 被静默丢弃</b>。这就是"NOSTREAM/子图不流"的落地点。</span></div>
+                    <div class="r"><code>self._emit(meta, chunk.message)</code><span>注意这里 <b>dedupe 默认 False</b>——流式 token 每片都不同、都要吐，不去重。</span></div>
+                    <div class="r"><code>self.stream((meta[0], "messages", (message, meta[1])))</code><span><b>最终推流</b>：三元组正是 D57 学的 <code>(ns, mode, data)</code>，其中 data 是 <code>(消息碎片, 元数据)</code>。你 <code>for msg, meta in stream(...)</code> 接住的就是它。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值</span>模型回答"北京晴"，你会依次收到：<code>(AIMessageChunk("北"), meta)</code>、<code>(AIMessageChunk("京"), meta)</code>、<code>(AIMessageChunk("晴"), meta)</code>——三次回调、三次推流。前端把 content 拼起来就是逐字出现的效果。<code>meta</code> 里有 <code>langgraph_node="agent"</code> 等，能知道是哪个节点在说话。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>seen 去重：为什么会重复、怎么防</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>token 流吐了"北""京""晴"三片。模型结束时（on_llm_end）又拿到一条<strong>完整的</strong> AIMessage("北京晴")。节点返回时这条完整消息还会再出现一次。如果都吐，用户就会看到内容<strong>出现两三遍</strong>。怎么办？</div>
+                <p>靠 <code>seen</code> 集合 + <code>dedupe=True</code>。看 on_llm_end（<span class="fileref">_messages.py:166</span>）和节点结束 on_chain_end（<span class="fileref">_messages.py:223</span>）：</p>
+<pre><code class="language-python"># _messages.py:166  模型结束：完整消息 dedupe=True
+def on_llm_end(self, response, *, run_id, **kwargs):
+    if meta := self.metadata.get(run_id):
+        if response.generations and response.generations[0]:
+            gen = response.generations[0][0]
+            if isinstance(gen, ChatGeneration):
+                self._emit(meta, gen.message, dedupe=True)   # ★ 去重吐完整消息
+    self.metadata.pop(run_id, None)                          # 用完清户口
+
+# _messages.py:223  节点结束：节点输出里的消息也 dedupe
+def on_chain_end(self, response, *, run_id, **kwargs):
+    if meta := self.metadata.pop(run_id, None):
+        ... self._find_and_emit_messages(meta, response)     # 内部 _emit(dedupe=True)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>流式 token：dedupe=False</code><span>L04 里每片碎片都吐、不查 seen——因为碎片本就该逐个出现。<b>但每片吐出时会 <code>seen.add(message.id)</code></b>。关键：同一次生成的所有碎片<b>共享同一个 message.id</b>。</span></div>
+                    <div class="r"><code>on_llm_end：dedupe=True</code><span>模型结束给的完整消息 id 和碎片相同 → 已在 seen 里 → <code>_emit</code> 开头 <code>if dedupe and id in seen: return</code> <b>直接跳过</b>。不会把完整消息再吐一遍。</span></div>
+                    <div class="r"><code>on_chain_end：也 dedupe</code><span>节点返回时那条消息同样 id 已 seen → 跳过。这就是"两个来源"（L01）却不重复的秘密。</span></div>
+                    <div class="r"><code>metadata.pop(run_id)</code><span>模型/节点结束时清掉户口，防止字典无限增长（内存泄漏防护）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：id 一致 + 先到先得</span>去重的地基是"流式碎片和最终完整消息<strong>共享同一个 message.id</strong>"。流式碎片先到、逐个吐并把 id 记进 seen；完整消息后到、发现 id 已 seen 就闭嘴。<strong>谁先到谁负责显示，后到的同 id 一律沉默</strong>——用一个 id 集合优雅解决了"同一内容多来源"的重复难题。若模型不支持流式（没碎片），那 on_llm_end 的完整消息就是第一次见到、正常吐出——两种情况都对。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>_find_and_emit_messages：从节点输出里挖消息</h1></div>
+            <div class="card">
+                <p>节点可能返回各种形状：一条消息、消息列表、或 <code>{"messages":[...]}</code> 状态。<code>_find_and_emit_messages</code>（<span class="fileref">_messages.py:106</span>）负责挖出所有消息：</p>
+<pre><code class="language-python"># _messages.py:106
+def _find_and_emit_messages(self, meta, response):
+    if isinstance(response, BaseMessage):
+        self._emit(meta, response, dedupe=True)              # 直接是一条消息
+    elif isinstance(response, Sequence):
+        for value in response:
+            if isinstance(value, BaseMessage):
+                self._emit(meta, value, dedupe=True)         # 消息列表
+    else:
+        for value in _state_values(response):                # 状态 dict：遍历各字段值
+            if isinstance(value, BaseMessage):
+                self._emit(meta, value, dedupe=True)
+            elif isinstance(value, Sequence):
+                for item in value:
+                    if isinstance(item, BaseMessage):
+                        self._emit(meta, item, dedupe=True)  # 字段值是消息列表</code></pre>
+                <div class="walk">
+                    <div class="r"><code>三种形状全覆盖</code><span>消息 / 消息列表 / 状态 dict。<code>_state_values</code>（:38）把 dict 或 Pydantic 状态的字段值都取出来遍历。</span></div>
+                    <div class="r"><code>全部 dedupe=True</code><span>节点输出里的消息<b>都去重</b>——因为它们大概率已经在流式阶段吐过了（同 id 已 seen）。</span></div>
+                    <div class="r"><code>on_chain_end 里处理 Command</code><span>补充：on_chain_end（:223）还专门处理节点返回 <code>Command</code>（D15）的情况，从 <code>command.update</code> 里挖消息。覆盖工具用 Command 返回结果的场景。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：节点直接返回消息、但模型没流式，怎么保证不漏？</span>如果某节点<strong>不调模型</strong>、直接往 messages 里塞一条消息（比如硬编码回复），那就没有 on_llm_new_token 事件——只有 on_chain_end。此时这条消息第一次进 <code>_find_and_emit_messages</code>，id 不在 seen 里，<code>dedupe=True</code> 也会正常吐出（因为"没吐过"）。反过来，on_chain_start（:191）还会<strong>预先把输入里已有消息的 id 记进 seen</strong>——防止把"上一轮就存在的历史消息"当新消息重吐。<strong>seen 既防重复吐，也防把老消息误当新消息</strong>，两头堵。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>v2 事件流 on_stream_event + 阶段收官</h1></div>
+            <div class="card">
+                <p>新版模型支持"内容块（content-block）"事件（如推理块、工具调用块分开流）。<code>StreamMessagesHandlerV2</code>（<span class="fileref">_messages.py:259</span>）用 <code>on_stream_event</code>（<span class="fileref">_messages.py:373</span>）转发：</p>
+<pre><code class="language-python"># _messages.py:373
+def on_stream_event(self, event, *, run_id, ..., **kwargs):
+    if meta := self.metadata.get(run_id):
+        if event.get("event") == "message-start":
+            self._streamed_run_ids.add(run_id)
+            msg_id = event.get("message_id")
+            if msg_id:
+                self.seen.add(msg_id)                # 提前记 id，让 on_chain_end 去重
+        v2_meta = {**meta[1], "run_id": str(run_id)}
+        self.stream((meta[0], "messages", (event, v2_meta)))  # 把事件本身推进流</code></pre>
+                <div class="walk">
+                    <div class="r"><code>v2 vs v1</code><span>v1（on_llm_new_token）吐 <b>AIMessageChunk</b>；v2 吐<b>结构化事件</b>（message-start / content-block-* / message-finish）。v2 能区分"这是推理内容还是最终答案"。</span></div>
+                    <div class="r"><code>message-start 时 seen.add(msg_id)</code><span>同样的去重思路：v2 事件流一开始就把 message id 记进 seen，防止节点结束时把完整消息重吐。</span></div>
+                    <div class="r"><code>on_llm_new_token 被 v2 置空（:275）</code><span>v2 handler 故意把 v1 的 token 回调<b>设成 no-op</b>——因为 v2 走事件流，不能让 v1 碎片也漏进来污染。</span></div>
+                    <div class="r"><code>何时用 v2</code><span>只在内部 <code>CONFIG_KEY_STREAM_MESSAGES_V2</code> 开关打开时才挂 v2（D57 main.py:2810 的 <code>use_stream_messages_v2</code>）；直接 <code>stream_mode="messages"</code> 仍用 v1，保持向后兼容。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 250" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：run_id 索引 + seen 去重集</text>
+                        <rect x="30" y="45" width="270" height="90" rx="9" fill="rgba(99,102,241,.1)" stroke="#818cf8"/>
+                        <text x="165" y="66" fill="#a5b4fc" text-anchor="middle" font-weight="700">self.metadata（run_id → Meta）</text>
+                        <text x="165" y="88" fill="#94a3b8" text-anchor="middle">run-abc → ((), {node:"agent",step:1})</text>
+                        <text x="165" y="106" fill="#94a3b8" text-anchor="middle">run-def → ((), {node:"agent",step:3})</text>
+                        <text x="165" y="124" fill="#94a3b8" text-anchor="middle">start 时登记，end 时 pop</text>
+                        <rect x="340" y="45" width="270" height="90" rx="9" fill="rgba(236,72,153,.1)" stroke="#f472b6"/>
+                        <text x="475" y="66" fill="#f9a8d4" text-anchor="middle" font-weight="700">self.seen（已吐 message id）</text>
+                        <text x="475" y="88" fill="#94a3b8" text-anchor="middle">{ "msg-001", "msg-002" }</text>
+                        <text x="475" y="106" fill="#94a3b8" text-anchor="middle">碎片吐出时 add</text>
+                        <text x="475" y="124" fill="#94a3b8" text-anchor="middle">完整消息 dedupe 时 check</text>
+                        <rect x="180" y="175" width="280" height="50" rx="9" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="320" y="196" fill="#fbbf24" text-anchor="middle" font-weight="700">stream((ns,"messages",(msg,meta)))</text>
+                        <text x="320" y="214" fill="#94a3b8" text-anchor="middle">最终推进 D57 那条统一流</text>
+                        <path d="M165 135 L280 173" stroke="#818cf8" marker-end="url(#k)"/>
+                        <path d="M475 135 L360 173" stroke="#f472b6" marker-end="url(#k)"/>
+                        <defs><marker id="k" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：metadata 查"谁在说"，seen 保"不重复"，一起喂给统一流。</div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一次模型调用的回调时间线</text>
+                        <rect x="20" y="60" width="120" height="44" rx="8" fill="rgba(59,130,246,.1)" stroke="#60a5fa"/><text x="80" y="80" fill="#93c5fd" text-anchor="middle">on_chat_model_start</text><text x="80" y="96" fill="#94a3b8" text-anchor="middle">登记 run_id</text>
+                        <rect x="180" y="45" width="90" height="30" rx="7" fill="rgba(168,85,247,.1)" stroke="#c084fc"/><text x="225" y="65" fill="#d8b4fe" text-anchor="middle">token"北"</text>
+                        <rect x="180" y="82" width="90" height="30" rx="7" fill="rgba(168,85,247,.1)" stroke="#c084fc"/><text x="225" y="102" fill="#d8b4fe" text-anchor="middle">token"京"</text>
+                        <rect x="180" y="119" width="90" height="30" rx="7" fill="rgba(168,85,247,.1)" stroke="#c084fc"/><text x="225" y="139" fill="#d8b4fe" text-anchor="middle">token"晴"</text>
+                        <text x="225" y="168" fill="#4ade80" text-anchor="middle">各自推流(不去重)</text>
+                        <rect x="310" y="60" width="120" height="44" rx="8" fill="rgba(59,130,246,.1)" stroke="#60a5fa"/><text x="370" y="80" fill="#93c5fd" text-anchor="middle">on_llm_end</text><text x="370" y="96" fill="#94a3b8" text-anchor="middle">完整消息 dedupe→跳</text>
+                        <rect x="470" y="60" width="140" height="44" rx="8" fill="rgba(59,130,246,.1)" stroke="#60a5fa"/><text x="540" y="80" fill="#93c5fd" text-anchor="middle">on_chain_end</text><text x="540" y="96" fill="#94a3b8" text-anchor="middle">pop run_id + dedupe</text>
+                        <path d="M140 82 L178 60" stroke="#94a3b8" marker-end="url(#l)"/>
+                        <path d="M270 97 L308 85" stroke="#94a3b8" marker-end="url(#l)"/>
+                        <path d="M430 82 L468 82" stroke="#94a3b8" marker-end="url(#l)"/>
+                        <defs><marker id="l" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：start 登记 → 每个 token 立刻吐 → end 时完整消息因去重被跳过。</div>
+                </div>
+                <div class="essence"><span class="t">🎓 阶段 9 收官</span>六天我们从 <code>create_react_agent</code> 一行函数出发（D53），钻进它建的两个节点（D54 模型节点、D55 ToolNode），看了路由与校验的辅助件（D56），再从流式五模式（D57）一路追到单个 token 的旅程（D58）。核心感受：<strong>预制件不是魔法，是前 52 天底盘知识的精致组装；流式不是附加功能，是引擎的原生工作方式。</strong>你现在既能用现成 Agent，也看得懂它每一层在做什么。</div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>token 是怎么被截获的？（LangChain 回调机制，handler 旁听 on_llm_new_token）</li>
+                    <li>为什么 handler 要 run_inline=True？（token 有序，同步跑避免乱序和加锁）</li>
+                    <li>on_chat_model_start 干嘛？（按 run_id 登记 (ns, metadata)，高频 token 路径只需查字典）</li>
+                    <li>流式 token 为什么 dedupe=False，完整消息 dedupe=True？（碎片都要吐；完整消息同 id 已 seen 要跳过）</li>
+                    <li>去重的地基是什么？（碎片和完整消息共享同一 message.id，先到先得）</li>
+                    <li>节点直接返回消息（没流式）会漏吐吗？（不会，第一次见 id 不在 seen 照样吐）</li>
+                    <li>v2 handler 和 v1 差别？（v2 吐结构化 content-block 事件，且把 v1 token 回调置空）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 核心回调逐行读
+sed -n '97,165p'  libs/langgraph/langgraph/pregel/_messages.py    # _emit + start + token
+sed -n '166,257p' libs/langgraph/langgraph/pregel/_messages.py    # end + 去重 + 节点消息
+
+# 2. 亲手看逐 token（需真实模型 key）
+python - <<'PY'
+from langgraph.prebuilt import create_react_agent
+agent = create_react_agent("openai:gpt-4o-mini", [])
+for msg, meta in agent.stream(
+        {"messages":[("user","用一句话介绍北京")]},
+        stream_mode="messages"):
+    print(repr(msg.content), "| node=", meta.get("langgraph_node"))  # 一片一片打印
+PY</code></pre>
+                <div class="tip"><strong>明天预告 · Day 59</strong>：进入收官阶段——运行时与生产。看 <code>runtime.py</code> 的 Runtime/context（节点怎么拿到 store、stream_writer）、<code>config.py</code>、LangGraph Platform 与 CLI（libs/cli）、以及 <code>errors.py</code> 里那些错误类型的总览。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day57.html" style="color:var(--accent-cyan);">&larr; Day 57 流式 5 模式</a>
+                <a href="langgraph-day59.html" style="color:var(--accent-green);">Day 59 · 运行时与部署 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
