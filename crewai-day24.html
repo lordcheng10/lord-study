@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 24 · train 训练与 replay 回放 — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">24</div>
+            <h2>Day 24</h2>
+            <p class="version">train 训练与 replay 回放 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 调教与重跑两大诉求</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · train 入口与训练开关</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 训练主循环</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 评估并保存改进建议</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · replay 与产出存档</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 定位任务与重建上下文</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 取舍与边界</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day23.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 23 规划</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day25.html" class="nav-link" style="color:var(--accent-green);">Day 25 记忆开关 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 24 / 共 60 天 · 阶段4 Crew 与流程</span>
+            <h1 class="part-title">train 与 replay：把团队"调教"好，出错能"从中间重跑"</h1>
+            <p class="part-desc">前面几天都在讲"怎么跑"。今天讲两个偏"运维/调优"的能力：<strong>train（训练）</strong>——让 crew 反复跑同一批输入、每步收集你的人工反馈，最后为每个 agent 生成一份"以后该怎么做得更好"的改进建议存起来；<strong>replay（回放）</strong>——上次跑到第 5 个任务挂了，别从头重来，直接从第 5 个任务<strong>接着跑</strong>。两者都依赖同一个基础设施：<code>_task_output_handler</code> 把每个任务的产出<strong>存档到磁盘</strong>。核心在 <code>crew.py</code> 的 <code>train</code>（<span class="fileref">crew.py:914</span>）和 <code>replay</code>（<span class="fileref">crew.py:1944</span>）。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段4 Crew 与流程 · 共 8 天）</div>
+            <div class="steps">
+                <span class="st">D19 Crew 全字段</span><span class="sep">→</span>
+                <span class="st">D20 顺序流程</span><span class="sep">→</span>
+                <span class="st">D21 层级+manager</span><span class="sep">→</span>
+                <span class="st">D22 kickoff 家族</span><span class="sep">→</span>
+                <span class="st">D23 规划</span><span class="sep">→</span>
+                <span class="st on">D24 训练+replay</span><span class="sep">→</span>
+                <span class="st">D25 记忆开关</span><span class="sep">→</span>
+                <span class="st">D26 事件系统</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        <strong>train</strong> 像<strong>带新人做几遍演练</strong>：同一个任务反复做 N 遍，每做完你在旁边点评"这里该更简洁""数据要标来源"，最后把你所有点评<strong>提炼成一份"给这位同事的成长建议"</strong>存进档案，以后他上岗就带着这份建议。<strong>replay</strong> 像<strong>视频从断点续播</strong>：一场三小时的会议录像，你不用从头看，直接拖到"上次看到的地方"接着看——因为前面每段都<strong>存了档</strong>。今天就看这两套机制怎么用同一个"存档"底座实现。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：agent 不稳定，且失败重跑太贵</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>两个真实烦恼：① agent 每次输出风格/质量飘忽，你想<strong>"教"它按你的偏好来</strong>，但又不可能真去微调模型权重（太贵）；② 一个 5 任务的 crew，跑到第 4 个任务因为网络错崩了——难道要<strong>把前 3 个（花了钱花了时间的）任务全部重跑</strong>？前 3 个的产出明明是好的。这两个诉求，分别对应 train 和 replay。</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong>train = "反复跑 + 收人工反馈 + 生成改进建议文件"</strong>（不改模型权重，改的是"喂给 agent 的建议"，属于 prompt 级调教）；<strong>replay = "读上次的任务产出存档，从指定任务往后重跑"</strong>（前面的任务用存档结果重建 context，不重新执行）。两者的公共底座是 <code>_task_output_handler</code>：每个任务执行完，它的产出+inputs 都被 <code>_store_execution_log</code>（Day 20 见过）<strong>存到磁盘</strong>。</div>
+                <div class="baby"><span class="t">大白话</span>注意 train 里的"训练"和你想的深度学习<strong>不是一回事</strong>。它<strong>不动模型参数</strong>——它做的是"让你当老师点评几遍，把点评整理成一段文字建议，以后拼进 agent 的提示里"。所以它便宜、快、你自己就能做。本质是"人类反馈 → 文字建议 → 注入 prompt"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>train 入口 + 训练前的开关设置</h1></div>
+            <div class="card">
+                <p>训练前先把 crew 切到"训练模式"（<span class="fileref">crew.py:901</span>）：</p>
+<pre><code class="language-python"># crew.py:901
+def _setup_for_training(self, filename: str) -> None:
+    """Sets up the crew for training."""
+    self._train = True
+    for task in self.tasks:
+        task.human_input = True          # ★每个任务都强制要人工输入（点评）
+    for agent in self.agents:
+        agent.allow_delegation = False    # ★训练时禁止委派——要单独评估每个 agent
+    CrewTrainingHandler(TRAINING_DATA_FILE).initialize_file()   # 建原始反馈文件
+    CrewTrainingHandler(filename).initialize_file()             # 建最终建议文件</code></pre>
+                <p>train 主入口（<span class="fileref">crew.py:914</span>，节选头部）：</p>
+<pre><code class="language-python"># crew.py:914
+def train(self, n_iterations: int, filename: str, inputs: dict | None = None) -> None:
+    """Trains the crew for a given number of iterations."""
+    inputs = inputs or {}
+    try:
+        crewai_event_bus.emit(self, CrewTrainStartedEvent(
+            crew_name=self.name, n_iterations=n_iterations, filename=filename, inputs=inputs))
+        train_crew = self.copy()                 # ★在副本上训练，不污染原 crew
+        train_crew._setup_for_training(filename)
+        ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self._train = True</code><span>打开训练标志。执行时 agent 会知道"现在是训练模式，产出后要收反馈"。</span></div>
+                    <div class="r"><code>task.human_input = True</code><span>★强制每个任务<b>结束后暂停等你输入点评</b>（Day 14 的 human_input 机制）。这就是"人工反馈"的来源。</span></div>
+                    <div class="r"><code>allow_delegation = False</code><span>★训练时关掉委派——因为要<b>独立评估每个 agent 自己</b>的表现，委派会让功劳/问题混在一起。</span></div>
+                    <div class="r"><code>两个 CrewTrainingHandler</code><span>建两个文件：<code>TRAINING_DATA_FILE</code> 存<b>原始反馈</b>，<code>filename</code> 存<b>最终提炼的建议</b>。</span></div>
+                    <div class="r"><code>train_crew = self.copy()</code><span>★和 kickoff_for_each 一样：训练在<b>副本</b>上做。训练会改一堆开关（human_input/allow_delegation），不能污染你原来的 crew。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>训练主循环：跑 N 遍、攒反馈</h1></div>
+            <div class="card">
+                <p>train 的核心循环（<span class="fileref">crew.py:932</span>）：</p>
+<pre><code class="language-python"># crew.py:932
+            for n_iteration in range(n_iterations):        # ★跑 N 遍
+                train_crew._train_iteration = n_iteration
+                train_crew.kickoff(inputs=inputs)          # 每遍就是一次普通 kickoff
+
+            training_data = CrewTrainingHandler(TRAINING_DATA_FILE).load()   # 读回攒的原始反馈
+            ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>for n_iteration in range(n_iterations)</code><span>★训练 = 用<b>同一批 inputs 反复 kickoff N 次</b>。每次每个任务都会停下来等你点评。</span></div>
+                    <div class="r"><code>_train_iteration = n</code><span>记下这是第几遍，反馈存档时按迭代号归类。</span></div>
+                    <div class="r"><code>train_crew.kickoff(inputs)</code><span>★训练里的每一遍<b>就是一次标准 kickoff</b>（Day 22）——没有独立的"训练执行引擎"，完全复用。区别只在 human_input=True 会收集反馈。</span></div>
+                    <div class="r"><code>CrewTrainingHandler(...).load()</code><span>N 遍跑完，把这 N 遍里你给的所有原始反馈从磁盘读回来，准备提炼。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么训练要"跑同一批输入好几遍"？</span>因为一遍的反馈太单薄——你对某个 agent 可能只点评一次，样本不足。<strong>反复跑几遍</strong>，你会在不同迭代里针对同一个 agent 给出多角度的点评（这次嫌啰嗦、下次嫌漏了来源……）。多遍的反馈汇总起来，才能提炼出一份<strong>相对全面的改进建议</strong>。<code>n_iterations</code> 就是你愿意花多少遍来调教的预算。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>评估：把反馈提炼成"给每个 agent 的建议"</h1></div>
+            <div class="card">
+                <p>训练的产出在这一步生成（<span class="fileref">crew.py:938</span>）：</p>
+<pre><code class="language-python"># crew.py:938
+            for agent in train_crew.agents:
+                if training_data.get(str(agent.id)):
+                    result = TaskEvaluator(agent).evaluate_training_data(   # ★LLM 提炼反馈
+                        training_data=training_data, agent_id=str(agent.id))
+                    CrewTrainingHandler(filename).save_trained_data(        # 存进最终文件
+                        agent_id=str(agent.role),
+                        trained_data=result.model_dump())
+            crewai_event_bus.emit(self, CrewTrainCompletedEvent(
+                crew_name=self.name, n_iterations=n_iterations, filename=filename))
+    except Exception as e:
+        crewai_event_bus.emit(self, CrewTrainFailedEvent(error=str(e), crew_name=self.name))
+        self._logger.log("error", f"Training failed: {e}", color="red")
+        CrewTrainingHandler(TRAINING_DATA_FILE).clear()   # ★失败清空，别留半截脏数据
+        CrewTrainingHandler(filename).clear()
+        raise</code></pre>
+                <div class="walk">
+                    <div class="r"><code>for agent in agents</code><span>逐个 agent 提炼——每个 agent 得到<b>属于自己</b>的一份建议。</span></div>
+                    <div class="r"><code>TaskEvaluator(agent).evaluate_training_data</code><span>★用一次 LLM 调用，把你对这个 agent 的<b>零散反馈</b>提炼成<b>结构化的改进建议</b>（"更简洁、标注来源、避免……"）。</span></div>
+                    <div class="r"><code>save_trained_data(agent_id=agent.role, ...)</code><span>★存档，<b>按 role 存</b>（不是随机 id）——这样以后新建同 role 的 agent 也能匹配到建议。</span></div>
+                    <div class="r"><code>CrewTrainCompletedEvent</code><span>发训练完成事件（Day 26）。日志/UI 靠事件知道训练结束。</span></div>
+                    <div class="r"><code>except: clear() + raise</code><span>★训练出错：<b>清空</b>两个文件（避免留下半截无效数据误导后续）+ 发失败事件 + 抛出。事务性的清理。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：建议按 <code>role</code> 存，而不是按 <code>id</code></span>
+                注意 <code>save_trained_data(agent_id=str(agent.role), ...)</code>——键用的是 <strong>role（"资深分析师"）</strong>而非随机 <code>id</code>。为什么？因为训练是<strong>离线一次性</strong>的，而使用建议是<strong>之后另起进程</strong>的——那时 agent 的随机 <code>id</code> 早变了（Day 19 讲过 id 每次新建都不同）。用 <code>role</code> 当键，才能让"下次跑的、同角色的 agent"通过 <code>trained_agents_file</code>（Day 19 字段）加载到这份建议。<strong>持久化的关联键必须选跨进程稳定的标识——role 稳，id 不稳。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>replay：从存档里"接着跑"</h1></div>
+            <div class="card">
+                <p>replay 主流程（<span class="fileref">crew.py:1944</span>）：</p>
+<pre><code class="language-python"># crew.py:1944
+def replay(self, task_id: str, inputs: dict | None = None) -> CrewOutput:
+    """Replay the crew execution from a specific task."""
+    stored_outputs = self._task_output_handler.load()      # ① 读磁盘上的任务产出存档
+    if not stored_outputs:
+        raise ValueError(f"Task with id {task_id} not found in the crew's tasks.")
+
+    start_index = self._find_task_index(task_id, stored_outputs)   # ② 找到从哪个任务开始
+    if start_index is None:
+        raise ValueError(f"Task with id {task_id} not found in the crew's tasks.")
+
+    replay_inputs = inputs if inputs is not None else stored_outputs[start_index]["inputs"]
+    self._inputs = replay_inputs
+    if replay_inputs:
+        self._interpolate_inputs(replay_inputs)             # 用当时/新的 inputs 插值
+
+    if self.process == Process.hierarchical:
+        self._create_manager_agent()                        # 层级流程要重新造经理
+
+    for i in range(start_index):                            # ③ 重建断点之前的任务产出
+        stored_output = stored_outputs[i]["output"]
+        task_output = TaskOutput(
+            description=stored_output["description"], agent=stored_output["agent"],
+            raw=stored_output["raw"], pydantic=stored_output["pydantic"],
+            json_dict=stored_output["json_dict"], output_format=stored_output["output_format"],
+            messages=stored_output.get("messages", []))
+        self.tasks[i].output = task_output                  # 把存档结果填回任务，不重跑
+    self._logging_color = "bold_blue"
+    return self._execute_tasks(self.tasks, start_index, True)   # ④ 从 start_index 往后真跑</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_task_output_handler.load()</code><span>★读回上次 kickoff 时 <code>_store_execution_log</code> 存的每个任务产出（Day 20 埋的伏笔）。没存档就没法 replay。</span></div>
+                    <div class="r"><code>_find_task_index(task_id, ...)</code><span>按你给的 <code>task_id</code> 在存档里找到它是第几个任务 → <code>start_index</code>。</span></div>
+                    <div class="r"><code>for i in range(start_index)</code><span>★<b>关键</b>：断点<b>之前</b>的任务不重跑，而是从存档里<b>重建 TaskOutput 填回 <code>task.output</code></b>。这样后续任务的 context 拿得到它们。</span></div>
+                    <div class="r"><code>_execute_tasks(tasks, start_index, True)</code><span>★复用 Day 20 引擎，但从 <code>start_index</code> 开始，且 <code>was_replayed=True</code>。前面的靠 <code>should_skip</code> 跳过（用存档）。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>定位任务 + 存档格式</h1></div>
+            <div class="card">
+                <p>怎么按 task_id 找到位置（<span class="fileref">crew.py:1934</span>）：</p>
+<pre><code class="language-python"># crew.py:1934
+@staticmethod
+def _find_task_index(task_id: str, stored_outputs: list[Any]) -> int | None:
+    return next(
+        (index for (index, d) in enumerate(stored_outputs)
+         if d["task_id"] == str(task_id)),      # 在存档里逐个比对 task_id
+        None)                                    # 没找到返回 None</code></pre>
+                <p>存档的内容（回看 Day 20 的 <code>_store_execution_log</code>，<span class="fileref">crew.py:1445</span>）：</p>
+<pre><code class="language-python"># crew.py:1445
+log = {
+    "task": task,
+    "output": {"description": ..., "raw": output.raw, "pydantic": output.pydantic,
+               "json_dict": output.json_dict, "agent": output.agent, "messages": ...},
+    "task_index": task_index,
+    "inputs": inputs,                # ★连当时的 inputs 也存了
+    "was_replayed": was_replayed,
+}
+self._task_output_handler.update(task_index, log)   # 写进磁盘存档</code></pre>
+                <div class="walk">
+                    <div class="r"><code>next((...), None)</code><span>Python 惯用法：找到第一个匹配的 index 就返回，找不到返回默认值 <code>None</code>。简洁的"查找或空"。</span></div>
+                    <div class="r"><code>d["task_id"] == str(task_id)</code><span>按 task_id 精确匹配。所以你 replay 时要传的是<b>任务的 id</b>（可以从上次日志里拿到）。</span></div>
+                    <div class="r"><code>存档含 output + inputs</code><span>★存档不只存产出，还存<b>当时的 inputs</b>——所以 replay 能复原"当时是用什么输入跑的"，插值才对得上。</span></div>
+                    <div class="r"><code>_task_output_handler.update</code><span>每个同步任务完成后写一次。这是 train/replay 共用的持久化底座。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：replay 依赖"上一次真的存了档"</span>
+                <code>replay</code> 第一步 <code>stored_outputs = load()</code>，如果为空直接 <code>raise</code>。也就是说——<strong>你只能 replay "之前正常跑过、留下了存档"的执行</strong>。如果你换了台机器、或存档文件被清了（比如 <code>kickoff_for_each</code> 结尾会 <code>_task_output_handler.reset()</code>，Day 22），就没得 replay。而且如果你 replay 前<strong>改了任务列表的结构</strong>（加删任务），存档的 index 就对不上了，行为不可预期。<strong>replay 是"同一份任务定义 + 有存档"前提下的续跑，不是万能时间机器。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>取舍与边界</h1></div>
+            <div class="card">
+                <div class="tradeoff"><span class="t">💡 设计取舍②：train/replay 为什么都"复用 kickoff + _execute_tasks"？</span>
+                你会发现一个反复出现的模式：train 的每一遍是 <code>kickoff</code>，replay 的执行是 <code>_execute_tasks</code>——<strong>没有一套独立的"训练引擎"或"回放引擎"</strong>。这是刻意的：如果训练/回放走另一套代码，就会和正常执行<strong>行为不一致</strong>（正常跑对了、训练时却因为引擎不同出别的 bug）。复用同一个执行核心，保证"训练时看到的行为 = 真实上线的行为"。<strong>代价</strong>是要在核心引擎里塞一些 <code>was_replayed</code>、<code>should_skip</code> 之类的分支参数，但换来行为一致性，非常值。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 170" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="330" y="15" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：一个存档底座，喂养 train 与 replay</text>
+                        <rect x="230" y="30" width="200" height="34" rx="8" fill="rgba(249,115,22,.14)" stroke="#f97316"/>
+                        <text x="330" y="46" fill="#fdba74" text-anchor="middle" font-weight="700">_task_output_handler</text>
+                        <text x="330" y="58" fill="#fdba74" text-anchor="middle" font-size="9">磁盘存档：每任务 output+inputs</text>
+                        <rect x="60" y="105" width="230" height="46" rx="8" fill="rgba(56,189,248,.1)" stroke="#38bdf8"/>
+                        <text x="175" y="123" fill="#7dd3fc" text-anchor="middle">train：跑 N 遍 kickoff</text>
+                        <text x="175" y="138" fill="#7dd3fc" text-anchor="middle" font-size="9">收人工反馈→TaskEvaluator→建议文件</text>
+                        <rect x="370" y="105" width="230" height="46" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="485" y="123" fill="#86efac" text-anchor="middle">replay：读存档定位断点</text>
+                        <text x="485" y="138" fill="#86efac" text-anchor="middle" font-size="9">重建前置 output→从断点 _execute_tasks</text>
+                        <path d="M290 64 C250 80 210 92 180 103" stroke="#38bdf8" stroke-width="1.2" marker-end="url(#a)"/>
+                        <path d="M370 64 C410 80 455 92 485 103" stroke="#22c55e" stroke-width="1.2" marker-end="url(#a)"/>
+                        <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：train 靠反复 kickoff 攒反馈，replay 靠读存档续跑，两者共享 _task_output_handler 存档。</div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：train 之后 agent 真的"变聪明"了吗？下次自动生效？</p>
+                    <p class="a">👨‍🏫 老师：不是自动的。train 只是<strong>生成了一个建议文件</strong>。要让它生效，你得在建 crew 时设 <code>trained_agents_file="那个文件"</code>（Day 19 的字段），框架才会在推理时把建议<strong>拼进 agent 的提示</strong>。而且它<strong>没改模型权重</strong>——所谓"变聪明"是"提示里多了针对性建议"，属于 prompt 工程，不是真微调。效果有限但零成本、可解释。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结</h1></div>
+            <div class="card">
+                <div class="essence"><span class="t">💡 一句话收束</span>
+                <strong>train</strong>：<code>copy()</code> 副本 → <code>_setup_for_training</code>（human_input=True + 禁委派）→ 跑 N 遍收反馈 → <code>TaskEvaluator</code> 按 <b>role</b> 提炼成建议文件。<strong>replay</strong>：<code>_task_output_handler.load()</code> 读存档 → <code>_find_task_index</code> 定位断点 → 重建前置 <code>task.output</code> → 从断点 <code>_execute_tasks</code>。二者共享"每任务产出存磁盘"的底座，且都复用正常执行引擎保证行为一致。</div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>train 的"训练"改的是什么？是模型权重吗？</li>
+                        <li>训练前 <code>_setup_for_training</code> 为什么要开 human_input、关委派？</li>
+                        <li>为什么训练要跑 N 遍？建议为什么按 role 存而非 id？</li>
+                        <li>replay 从哪读数据？断点之前的任务重跑吗？</li>
+                        <li>replay 依赖什么前提？什么情况下会失败？</li>
+                        <li>train/replay 为什么都复用 kickoff / _execute_tasks？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '901,965p'   $P/crew.py     # _setup_for_training + train 全流程
+sed -n '1934,1982p' $P/crew.py     # _find_task_index + replay
+sed -n '1445,1475p' $P/crew.py     # _store_execution_log 存档格式
+cat $P/utilities/training_handler.py   # CrewTrainingHandler
+# 体验 replay（需先正常跑一次留下存档，再用某个 task_id replay）
+python -c "
+from crewai import Agent, Task, Crew
+a=Agent(role='作家', goal='写作', backstory='x')
+t1=Task(description='写一句关于春天的话', expected_output='一句', agent=a)
+t2=Task(description='基于上文再写一句', expected_output='一句', agent=a)
+c=Crew(agents=[a], tasks=[t1,t2])
+c.kickoff()                          # 先正常跑，留存档
+print('task2 id =', t2.id)          # 记下这个 id
+# c.replay(task_id=str(t2.id))       # 再从 task2 续跑
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 25</strong>：今天多次提到 agent/crew 的 <code>memory</code>。明天专门拆<strong>记忆开关与 crew 级配置</strong>：<code>memory=True</code> 时 <code>create_crew_memory</code> 怎么造出统一记忆、<code>root_scope</code> 命名空间怎么定、<code>_memory_llm</code> 怎么兜底选模型、后台写入 <code>drain_writes</code> 的机制。记忆的"总开关"这一层。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day23.html" style="color:var(--accent-cyan);">&larr; Day 23 规划</a>
+                    <a href="crewai-day25.html" style="color:var(--accent-green);">Day 25 · 记忆开关 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

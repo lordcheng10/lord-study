@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 29 · 工具调用 tool_calling — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">29</div>
+            <h2>Day 29</h2>
+            <p class="version">工具调用 tool_calling · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 从"一句话"到一次调用</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ToolCalling 数据结构</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · _tool_calling 三级降级</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · _validate_tool_input 修 JSON</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · _select_tool 模糊匹配</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · use 的总调度</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 参数过滤与调用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day28.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 28 StructuredTool</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day30.html" class="nav-link" style="color:var(--accent-green);">Day 30 缓存复用 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 29 / 共 60 天 · 阶段5 工具系统</span>
+            <h1 class="part-title">工具调用：把 LLM 的"我要用某工具"落到一次真调用</h1>
+            <p class="part-desc">工具能跑了（D27/D28），但 LLM 说的是一句<strong>可能格式跑偏的话</strong>："Action: 搜索工具 / Action Input: {city:上海}"。中间要把它变成一次精确的 <code>tool.invoke(...)</code>。今天读 <code>tools/tool_calling.py</code>（<code>ToolCalling</code> 这个小而关键的数据结构）和 <code>tools/tool_usage.py</code> 的调度逻辑：<strong>工具名对不上怎么模糊匹配、参数是破损 JSON 怎么一路修、解析失败怎么三级降级重试</strong>。这一层专治"LLM 不靠谱"。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段5 工具系统 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">D27 BaseTool</span><span class="sep">→</span>
+                <span class="st">D28 StructuredTool</span><span class="sep">→</span>
+                <span class="st on">D29 工具调用</span><span class="sep">→</span>
+                <span class="st">D30 缓存复用</span><span class="sep">→</span>
+                <span class="st">D31 MCP 工具</span><span class="sep">→</span>
+                <span class="st">D32 自定义与最佳实践</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        LLM 就像一个<strong>字写得潦草、还老写错菜名的顾客</strong>。他点单写"来份 蕃茄炒蛋"（错别字），参数写成 <code>{份数:2</code>（漏了右括号）。<code>tool_usage</code> 就是那个经验老到的服务员：菜名对不上就<strong>找最像的那道菜</strong>（模糊匹配 <code>_select_tool</code>），订单 JSON 坏了就<strong>一层层想办法读懂</strong>（<code>_validate_tool_input</code> 修复），实在读不懂就<strong>换个方式再问一遍</strong>（三级降级 <code>_tool_calling</code>）。目标只有一个：把潦草订单变成后厨能执行的标准工单。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：LLM 的输出天生不可靠</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Day 08 的执行循环里，模型输出被解析成 <code>AgentAction(tool="搜索", tool_input="...")</code>。但模型给的工具名可能带空格、大小写不一致、甚至写了个近似名；参数可能是标准 JSON，也可能是 Python 字典字面量，还可能是缺引号/缺括号的破损串。<strong>如果直接拿去调用，十有八九报错。</strong>谁来把这些"人类级别的模糊"变成"机器级别的精确"？</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong><code>ToolUsage</code> 是"工具调用的容错调度中枢"。</strong>它做三件事：① 把模型的话解析成结构化的 <code>ToolCalling</code>（tool_name + arguments），解析走"先试直接解析 → 不行用函数调用 LLM → 再不行重试"的<strong>三级降级</strong>；② 用<strong>字符串相似度</strong>把模型给的工具名匹配到真实工具；③ 用<strong>四种手段</strong>依次尝试把破损的参数串修成 dict。<strong>核心思想：LLM 会犯错是常态，容错不是可选项而是必需品。</strong></div>
+                <p>关键方法一览（<span class="fileref">tool_usage.py:76</span> 的 <code>ToolUsage</code> 类）：</p>
+<pre><code class="language-python"># tool_usage.py
+class ToolUsage:
+    def use(self, calling, tool_string): ...            # :132 总入口
+    def parse_tool_calling(self, tool_string): ...      # :121 解析入口
+    def _tool_calling(self, tool_string): ...           # :861 三级降级解析
+    def _validate_tool_input(self, tool_input): ...     # :884 四招修 JSON
+    def _select_tool(self, tool_name): ...              # :759 模糊匹配工具
+    def _use(self, tool_string, tool, calling): ...     # :469 真正执行</code></pre>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ToolCalling：一个"要调什么"的最小结构</h1></div>
+            <div class="card">
+                <p>整个 <code>tool_calling.py</code> 只有两个小模型（<span class="fileref">tool_calling.py:11</span>）：</p>
+<pre><code class="language-python"># tool_calling.py:11
+class ToolCalling(BaseModel):
+    tool_name: str = Field(..., description="The name of the tool to be called.")
+    arguments: dict[str, Any] | None = Field(
+        ..., description="A dictionary of arguments to be passed to the tool.")
+
+class InstructorToolCalling(PydanticBaseModel):
+    tool_name: str = PydanticField(..., description="The name of the tool to be called.")
+    arguments: dict[str, Any] | None = PydanticField(
+        ..., description="A dictionary of arguments to be passed to the tool.")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>只有两个字段</code><span>"调哪个工具"（<code>tool_name</code>）+"传什么参数"（<code>arguments</code>）。一次工具调用的本质就这么点信息。</span></div>
+                    <div class="r"><code>arguments 可为 None</code><span>有些工具不需要参数（比如"获取当前时间"），所以允许 <code>None</code>。</span></div>
+                    <div class="r"><code>为何有两个几乎一样的类</code><span><code>ToolCalling</code> 用普通方式解析；<code>InstructorToolCalling</code> 用 instructor 库（强约束 LLM 输出结构）解析。分开是为了给两种解析路径各自的目标类型（L03 会看到怎么选）。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>你可以把 <code>ToolCalling</code> 理解成一张"工单"：只写"叫谁 + 给它什么料"。今天大部分工作，就是想尽办法从 LLM 那段潦草输出里，<strong>可靠地填好这张工单</strong>。填好了，后面 <code>invoke</code>（D28）就能照单执行。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：从潦草文本到标准工单</text>
+                        <rect x="20" y="35" width="200" height="70" rx="8" fill="rgba(245,158,11,.09)" stroke="#f59e0b"/>
+                        <text x="120" y="55" fill="#fcd34d" text-anchor="middle" font-weight="700">LLM 原始输出</text>
+                        <text x="120" y="75" fill="#cbd5e1" text-anchor="middle" font-size="10.5">Action: 搜索工具</text>
+                        <text x="120" y="92" fill="#cbd5e1" text-anchor="middle" font-size="10.5">Action Input: {city:上海</text>
+                        <rect x="260" y="45" width="130" height="50" rx="8" fill="rgba(59,130,246,.09)" stroke="#3b82f6"/>
+                        <text x="325" y="68" fill="#93c5fd" text-anchor="middle">ToolUsage</text>
+                        <text x="325" y="85" fill="#94a3b8" text-anchor="middle" font-size="10">解析+修复+匹配</text>
+                        <rect x="430" y="35" width="190" height="70" rx="8" fill="rgba(34,197,94,.09)" stroke="#22c55e"/>
+                        <text x="525" y="55" fill="#86efac" text-anchor="middle" font-weight="700">ToolCalling（工单）</text>
+                        <text x="525" y="76" fill="#cbd5e1" text-anchor="middle" font-size="10.5">tool_name: "搜索工具"</text>
+                        <text x="525" y="93" fill="#cbd5e1" text-anchor="middle" font-size="10.5">arguments: {"city":"上海"}</text>
+                        <path d="M220 72 L258 72" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a29)"/>
+                        <path d="M390 72 L428 72" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#a29)"/>
+                        <text x="320" y="145" fill="#94a3b8" text-anchor="middle" font-size="10.5">三个动作各治一种"不靠谱"：名字→_select_tool | 参数→_validate_tool_input | 整体→_tool_calling</text>
+                        <rect x="60" y="165" width="160" height="26" rx="6" fill="rgba(168,85,247,.08)" stroke="#a855f7"/>
+                        <text x="140" y="182" fill="#c084fc" text-anchor="middle" font-size="10.5">名字对不上 → 相似度</text>
+                        <rect x="240" y="165" width="160" height="26" rx="6" fill="rgba(168,85,247,.08)" stroke="#a855f7"/>
+                        <text x="320" y="182" fill="#c084fc" text-anchor="middle" font-size="10.5">JSON 破损 → 四招修</text>
+                        <rect x="420" y="165" width="160" height="26" rx="6" fill="rgba(168,85,247,.08)" stroke="#a855f7"/>
+                        <text x="500" y="182" fill="#c084fc" text-anchor="middle" font-size="10.5">解析失败 → 三级降级</text>
+                        <defs><marker id="a29" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：三种"不靠谱"各有一招对治，最终填好 ToolCalling 这张标准工单。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>_tool_calling：三级降级的解析策略</h1></div>
+            <div class="card">
+                <p>解析核心 <code>_tool_calling</code>（<span class="fileref">tool_usage.py:861</span>）是一个"try 里套 try、失败就递归重试"的结构：</p>
+<pre><code class="language-python"># tool_usage.py:861
+def _tool_calling(self, tool_string):
+    try:
+        try:
+            return self._original_tool_calling(tool_string, raise_error=True)  # ① 首选：直接解析
+        except Exception:
+            if self.function_calling_llm:
+                return self._function_calling(tool_string)   # ② 退而求其次：让 LLM 帮忙解析
+            return self._original_tool_calling(tool_string)  # 无备用 LLM → 再试一次不抛错版
+    except Exception as e:
+        self._run_attempts += 1
+        if self._run_attempts > self._max_parsing_attempts:  # ③ 试够上限 → 放弃，返回错误提示
+            self._telemetry.tool_usage_error(llm=self.function_calling_llm)
+            if self.task:
+                self.task.increment_tools_errors()
+            return ToolUsageError(
+                f"{I18N_DEFAULT.errors('tool_usage_error').format(error=e)}\n"
+                f"Moving on then. {I18N_DEFAULT.slice('format').format(tool_names=self.tools_names)}")
+        return self._tool_calling(tool_string)               # ★递归重试</code></pre>
+                <div class="walk">
+                    <div class="r"><code>① _original_tool_calling</code><span>首选：直接从 <code>self.action</code>（已解析的工具名+输入）构造 <code>ToolCalling</code>，参数走 <code>_validate_tool_input</code> 修复。最快、最省钱。</span></div>
+                    <div class="r"><code>② _function_calling</code><span>直接解析失败且配了 <code>function_calling_llm</code> → 让一个 LLM 用结构化输出<b>专门帮忙</b>把这段话转成 <code>{tool_name, arguments}</code>。更可靠但要多花一次 LLM 调用。</span></div>
+                    <div class="r"><code>③ 试够 _max_parsing_attempts</code><span>重试次数用完（默认 3 次，大模型 2 次，见 <span class="fileref">tool_usage.py:100</span>）→ 不再硬刚，返回一个 <code>ToolUsageError</code>，里面附上"可用工具列表"提示模型换招。</span></div>
+                    <div class="r"><code>递归 self._tool_calling</code><span>还没到上限就<b>递归自己</b>重来一遍。每递归一次 <code>_run_attempts += 1</code>，靠这个计数做刹车。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：三级降级 + 递归重试</text>
+                        <rect x="40" y="35" width="175" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="127" y="54" fill="#86efac" text-anchor="middle" font-size="10.5">① 直接解析（免费）</text>
+                        <rect x="235" y="35" width="175" height="30" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="322" y="54" fill="#93c5fd" text-anchor="middle" font-size="10.5">② LLM 帮解析（付费）</text>
+                        <rect x="430" y="35" width="180" height="30" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="520" y="54" fill="#fca5a5" text-anchor="middle" font-size="10.5">③ 超上限 → 返回错误</text>
+                        <path d="M215 50 L233 50" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a29c)"/>
+                        <text x="224" y="30" fill="#f59e0b" text-anchor="middle" font-size="9.5">失败</text>
+                        <path d="M410 50 L428 50" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a29c)"/>
+                        <text x="419" y="30" fill="#f59e0b" text-anchor="middle" font-size="9.5">仍失败</text>
+                        <rect x="200" y="110" width="240" height="30" rx="7" fill="rgba(168,85,247,.1)" stroke="#a855f7"/>
+                        <text x="320" y="129" fill="#c084fc" text-anchor="middle" font-size="10.5">递归 _tool_calling（_run_attempts+1）</text>
+                        <path d="M322 65 C322 88 322 95 322 108" stroke="#a855f7" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#a29p)"/>
+                        <path d="M200 125 C120 125 127 80 127 67" stroke="#a855f7" stroke-width="1.2" stroke-dasharray="4 3" fill="none" marker-end="url(#a29p)"/>
+                        <text x="320" y="165" fill="#22c55e" text-anchor="middle" font-size="10.5">任一级成功 → 返回 ToolCalling ✅</text>
+                        <text x="320" y="185" fill="#94a3b8" text-anchor="middle" font-size="10">未到 _max_parsing_attempts 就重试；到了才放弃</text>
+                        <defs>
+                          <marker id="a29c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a29p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#a855f7"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：从免费到付费到放弃，逐级升级；每轮失败递归重试，用计数封顶防烧钱。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么先"免费直接解析"再"付费 LLM 解析"</span>
+                让 LLM 帮忙解析（<code>_function_calling</code>）最可靠，但每次都要多一轮模型调用——<strong>又慢又费钱</strong>。所以源码把它放在"备选"位：先用零成本的直接解析（<code>_original_tool_calling</code> + JSON 修复）碰运气，只有失败了才升级到 LLM 解析。<strong>成本优先、可靠性兜底</strong>。而且用 <code>_max_parsing_attempts</code> 封顶，防止在一个死解析上无限烧钱。这是"分层容错 + 成本控制"的经典组合。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>_validate_tool_input：修 JSON 的四连招</h1></div>
+            <div class="card">
+                <p>参数往往是破损的。<code>_validate_tool_input</code>（<span class="fileref">tool_usage.py:884</span>）依次用四种手段尝试：</p>
+<pre><code class="language-python"># tool_usage.py:884
+def _validate_tool_input(self, tool_input: str | None) -> dict:
+    if tool_input is None:
+        return {}
+    if not isinstance(tool_input, str) or not tool_input.strip():
+        raise Exception("Tool input must be a valid dictionary in JSON or Python literal format")
+
+    try:                                    # 招式1：标准 JSON
+        arguments = json.loads(tool_input)
+        if isinstance(arguments, dict):
+            return arguments
+    except (JSONDecodeError, TypeError):
+        pass
+
+    try:                                    # 招式2：Python 字面量（单引号、True/None 等）
+        arguments = ast.literal_eval(tool_input)
+        if isinstance(arguments, dict):
+            return arguments
+    except (ValueError, SyntaxError):
+        repaired_input = repair_json(tool_input)
+
+    try:                                    # 招式3：JSON5（宽松 JSON，允许尾逗号/注释）
+        arguments = json5.loads(tool_input)
+        if isinstance(arguments, dict):
+            return arguments
+    except (JSONDecodeError, ValueError, TypeError):
+        pass
+
+    try:                                    # 招式4：repair_json 强力修复（补括号/引号）
+        repaired_input = str(repair_json(tool_input, skip_json_loads=True))
+        if self.agent and self.agent.verbose:
+            PRINTER.print(content=f"Repaired JSON: {repaired_input}", color="blue")
+        arguments = json.loads(repaired_input)
+        if isinstance(arguments, dict):
+            return arguments
+    except Exception as e:
+        ...
+    error_message = "Tool input must be a valid dictionary in JSON or Python literal format"
+    self._emit_validate_input_error(error_message)      # 四招全败 → 发事件 + 抛错
+    raise Exception(error_message)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>招式1 json.loads</code><span>最标准。模型输出规范时一步到位。</span></div>
+                    <div class="r"><code>招式2 ast.literal_eval</code><span>模型有时输出 Python 风格：<code>{'city': '上海'}</code>（单引号）、<code>True/None</code>。标准 JSON 不认，Python 字面量能读。</span></div>
+                    <div class="r"><code>招式3 json5.loads</code><span>宽松 JSON：容忍尾逗号、注释、无引号键。覆盖模型的"半规范"输出。</span></div>
+                    <div class="r"><code>招式4 repair_json</code><span>★最强力：<code>skip_json_loads=True</code> 直接进修复引擎，能补上缺失的括号、引号。<code>{city:上海</code> 这种也能救回来。verbose 时会打印修复后的样子。</span></div>
+                    <div class="r"><code>全败 → 抛错 + 发事件</code><span>四招都不行才放弃，<code>_emit_validate_input_error</code> 发一个 <code>ToolValidateInputErrorEvent</code>（阶段4 D26 的事件系统）方便观测，再抛异常回到 L03 的重试。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：招式必须"渐进"，不能一上来就用最强的 repair_json</span>
+                为什么不直接用 <code>repair_json</code>（招式4）省事？因为<strong>强力修复可能"过度纠正"</strong>——把本来合法但它没料到的结构改坏。所以顺序是<strong>从最严格（json）到最宽松（repair）</strong>：能用标准方式读通的绝不动它，只有前面都失败才动用"猜着修"。<strong>反模式：图省事直接上最激进的解析器，反而可能把好数据改错。</strong>"最小必要修复"才安全。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>_select_tool：工具名对不上就找最像的</h1></div>
+            <div class="card">
+                <p>模型给的工具名未必精确，<code>_select_tool</code>（<span class="fileref">tool_usage.py:759</span>）用字符串相似度匹配：</p>
+<pre><code class="language-python"># tool_usage.py:759
+def _select_tool(self, tool_name: str) -> Any:
+    sanitized_input = sanitize_tool_name(tool_name)
+    order_tools = sorted(                           # ★按相似度从高到低排序
+        self.tools,
+        key=lambda tool: SequenceMatcher(
+            None, sanitize_tool_name(tool.name), sanitized_input).ratio(),
+        reverse=True)
+    for tool in order_tools:
+        sanitized_tool = sanitize_tool_name(tool.name)
+        if (sanitized_tool == sanitized_input       # 完全相等 → 直接命中
+                or SequenceMatcher(None, sanitized_tool, sanitized_input).ratio() > 0.85):
+            return tool                             # 相似度 > 0.85 → 认为是它
+    if self.task:
+        self.task.increment_tools_errors()
+    if tool_name and tool_name != "":
+        error = f"Action '{tool_name}' don't exist, these are the only available Actions:\n{self.tools_description}"
+        crewai_event_bus.emit(self, ToolSelectionErrorEvent(...))
+        raise Exception(error)
+    error = f"I forgot the Action name, these are the only available Actions: {self.tools_description}"
+    ...
+    raise Exception(error)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>sanitize_tool_name</code><span>先把两边名字都规范化（去空格、统一格式）。Day 27 就见过它，这里是它发挥作用的地方——保证"搜索 工具"和"搜索工具"能对上。</span></div>
+                    <div class="r"><code>SequenceMatcher.ratio()</code><span>Python 标准库的字符串相似度，返回 0~1。用它给所有工具打分排序。</span></div>
+                    <div class="r"><code>&gt; 0.85 阈值</code><span>★相似度超过 0.85 就认为模型指的是这个工具。容忍小拼写差异（"calcualtor" vs "calculator"），又不至于乱认。</span></div>
+                    <div class="r"><code>两种错误消息</code><span>名字非空但没匹配上 → "这个 Action 不存在，可用的是……"；名字为空（模型忘了写）→ "我忘了写 Action 名，可用的是……"。都附上工具列表引导模型改正。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 例子：模糊匹配救场</span>
+                真实工具名 <code>Search the internet</code>。模型输出 <code>Action: search internet</code>（漏词）。<br>
+                → sanitize 后比对，相似度约 0.8~0.9，超过 0.85 阈值 → 匹配成功，照常执行。<br>
+                但若模型写 <code>Action: 计算器</code>（和任何工具都不像）→ 相似度太低 → 抛错并把可用工具列表喂回，让模型重选。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>use：把解析、选择、执行串成总调度</h1></div>
+            <div class="card">
+                <p>对外总入口 <code>use</code>（<span class="fileref">tool_usage.py:132</span>）把前面几块串起来：</p>
+<pre><code class="language-python"># tool_usage.py:132
+def use(self, calling, tool_string) -> str:
+    if isinstance(calling, ToolUsageError):          # 解析阶段就失败了
+        error = calling.message
+        if self.agent and self.agent.verbose:
+            PRINTER.print(content=f"\n\n{error}\n", color="red")
+        if self.task:
+            self.task.increment_tools_errors()
+        return error                                 # 把错误当结果返回（喂回给 LLM）
+
+    try:
+        tool = self._select_tool(calling.tool_name)  # ★选工具（L05）
+    except Exception as e:
+        error = getattr(e, "message", str(e))
+        if self.task:
+            self.task.increment_tools_errors()
+        if self.agent and self.agent.verbose:
+            PRINTER.print(content=f"\n\n{error}\n", color="red")
+        return error                                 # 选不到 → 返回错误提示
+    ...
+    # 之后走 _use(...) 真正执行（L07 / D30）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>先判 ToolUsageError</code><span>如果传进来的 <code>calling</code> 本身就是解析失败的错误对象，直接把错误信息 return——它会作为"观察"喂回 LLM。</span></div>
+                    <div class="r"><code>_select_tool 包 try</code><span>选工具可能抛错（没匹配上）。这里 catch 住，转成返回值而不是让异常冒泡崩掉 Agent。</span></div>
+                    <div class="r"><code>increment_tools_errors</code><span>每次工具相关错误都给 task 的错误计数 +1——用于统计和后续"错误太多就收尾"的判断。</span></div>
+                    <div class="r"><code>错误即返回值</code><span>★贯穿全篇的模式：几乎所有错误都<b>转成字符串返回</b>，而非抛异常。因为返回值会进 LLM 的对话历史，让模型"看到问题、自己纠正"。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么"错误当返回值"是 Agent 框架的核心哲学</span>普通程序里，错误就该抛异常、让上层处理。但在 Agent 里，<strong>LLM 就是那个"上层处理者"</strong>——它有推理能力，能看懂"你的工具名不存在，可用的是 A/B/C"并自己改。所以把错误<strong>写成 LLM 能读的自然语言、塞回对话</strong>，比抛异常崩溃有用得多。这是"人在环"之外的"模型在环自愈"。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>参数过滤：只喂工具认识的字段</h1></div>
+            <div class="card">
+                <p><code>_use</code> 真正调用工具前，会把参数<strong>按 schema 过滤</strong>一遍（<span class="fileref">tool_usage.py:570</span>）：</p>
+<pre><code class="language-python"># tool_usage.py:570
+if calling.arguments:
+    try:
+        acceptable_args = tool.args_schema.model_json_schema()["properties"].keys()
+        arguments = {                      # ★只保留 schema 里声明的字段
+            k: v for k, v in calling.arguments.items() if k in acceptable_args}
+        result = tool.invoke(input=arguments, config=fingerprint_config)
+    except Exception:
+        arguments = calling.arguments      # 过滤失败 → 用原始参数兜底
+        result = tool.invoke(input=arguments, config=fingerprint_config)
+else:
+    result = tool.invoke(input={}, config=fingerprint_config)  # 无参数工具</code></pre>
+                <div class="walk">
+                    <div class="r"><code>acceptable_args</code><span>从工具的 args_schema 里取出"合法字段名集合"。</span></div>
+                    <div class="r"><code>字典推导过滤</code><span>★只保留模型给的参数里<b>工具认识的那些</b>。模型有时会多塞无关字段（幻觉出一个参数），过滤掉能避免 <code>invoke</code> 报"未知参数"。</span></div>
+                    <div class="r"><code>except 兜底</code><span>如果连取 schema 都失败（极端情况），退回用原始参数直接调，尽量别让工具没机会跑。</span></div>
+                    <div class="r"><code>tool.invoke(config=fingerprint_config)</code><span>这里就接上了 D28 的 <code>CrewStructuredTool.invoke</code>——参数过滤后，正式落到一次真调用。<code>fingerprint_config</code> 带上 Agent 指纹用于审计。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：过滤"多余参数"而不是直接报错</span>
+                模型幻觉出一个不存在的参数很常见。<strong>严格做法</strong>：多一个参数就报错，逼模型重来——干净但浪费一整轮。<strong>源码做法</strong>：静默丢掉多余字段，用剩下合法的照常执行。宽容、少一轮重试。代价是<strong>可能掩盖"模型理解偏差"</strong>（它以为有这个参数说明它没完全读懂工具）。这是"鲁棒性优先于严格性"的权衡——对追求"能跑通"的 Agent 场景通常划算，但调试期你可能希望它报出来。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="pitfall"><span class="t">⚠️ 边界：三级降级 + 递归重试可能"多花好几次 LLM 调用"</span>
+                最坏情况：直接解析失败 → 调 <code>function_calling_llm</code> 解析（1 次 LLM）→ 又失败 → 递归重试 → 再调一次……直到 <code>_max_parsing_attempts</code>。也就是说<strong>一次工具调用背后可能藏着好几次隐形的 LLM 请求</strong>，既慢又费钱。所以：① 工具名和描述要写清楚（减少模型犯错）；② 用支持原生函数调用的模型（Day 08 的原生路径基本绕开这套文本解析）；③ 关注 <code>_max_parsing_attempts</code>——它是防止无限烧钱的最后一道闸。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：这套复杂的容错，原生函数调用模式也走吗？</p>
+                    <p class="a">👨‍🏫 老师：基本不走。原生模式（Day 08 <code>_invoke_loop_native_tools</code>）里，模型直接吐结构化的 <code>tool_calls</code>，工具名和参数都是规范的，不需要模糊匹配和修 JSON。今天这套主要服务<strong>文本 ReAct 模式</strong>（老模型/无原生支持）。这也解释了为什么现代首选原生模式——它把一大堆"猜模型意图"的脏活省掉了。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li><code>ToolCalling</code> 只有哪两个字段？为什么有两个几乎一样的类？</li>
+                        <li><code>_tool_calling</code> 的三级降级是哪三级？为什么"免费的"排前面？</li>
+                        <li><code>_validate_tool_input</code> 的四招修 JSON 顺序为什么"从严到宽"？</li>
+                        <li><code>_select_tool</code> 用什么做模糊匹配？阈值是多少？</li>
+                        <li>为什么这一层几乎所有错误都"当返回值"而不是抛异常？</li>
+                        <li>参数过滤为什么静默丢多余字段？这个宽容有什么代价？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai/tools
+sed -n '1,25p'     $P/tool_calling.py        # ToolCalling 结构
+sed -n '861,883p'  $P/tool_usage.py          # 三级降级
+sed -n '884,930p'  $P/tool_usage.py          # 四招修 JSON
+sed -n '759,802p'  $P/tool_usage.py          # 模糊匹配
+python -c "
+from difflib import SequenceMatcher
+print(SequenceMatcher(None,'search the internet','search internet').ratio())
+import json, ast
+print(ast.literal_eval(\"{'city':'上海'}\"))   # 单引号字面量
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 30</strong>：今天 <code>_use</code> 里执行工具时，其实还夹着一层"先查缓存、命中就不重复跑"。明天读 <code>agents/tools_handler.py</code> + <code>agents/cache/cache_handler.py</code> + <code>tool_usage.py</code> 的缓存分支：<code>on_tool_use</code> 怎么记结果、<code>cache_function</code> 怎么决定要不要缓存、<code>_check_tool_repeated_usage</code> 怎么防"连续调同一个工具同参数"。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day28.html" style="color:var(--accent-cyan);">&larr; Day 28 StructuredTool</a>
+                    <a href="crewai-day30.html" style="color:var(--accent-green);">Day 30 · 缓存复用 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

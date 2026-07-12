@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 30 · 工具缓存与 ToolsHandler — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">30</div>
+            <h2>Day 30</h2>
+            <p class="version">工具缓存与复用 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么工具要缓存</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · ToolsHandler 中枢</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CacheHandler 与读写锁</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 执行前先读缓存</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · cache_function 开关</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 防连续重复调用</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 用量上限与结果直答</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day29.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 29 工具调用</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day31.html" class="nav-link" style="color:var(--accent-green);">Day 31 MCP 工具 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 30 / 共 60 天 · 阶段5 工具系统</span>
+            <h1 class="part-title">工具缓存：让 Agent 不做重复的苦活</h1>
+            <p class="part-desc">Agent 转圈时经常会<strong>用同一个工具、同样的参数重复调用</strong>——比如反复搜同一个词。每次真跑一遍既慢又费钱（有些工具还收费）。今天读缓存三件套：<code>agents/tools_handler.py</code>（记账中枢 <code>ToolsHandler</code>）、<code>agents/cache/cache_handler.py</code>（带读写锁的 <code>CacheHandler</code>）、以及 <code>tools/tool_usage.py</code> 里的缓存分支。看清楚：<strong>什么时候读缓存、什么时候写、<code>cache_function</code> 怎么细粒度控制、以及"连续调同一个工具同参数"怎么被拦下。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段5 工具系统 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">D27 BaseTool</span><span class="sep">→</span>
+                <span class="st">D28 StructuredTool</span><span class="sep">→</span>
+                <span class="st">D29 工具调用</span><span class="sep">→</span>
+                <span class="st on">D30 缓存复用</span><span class="sep">→</span>
+                <span class="st">D31 MCP 工具</span><span class="sep">→</span>
+                <span class="st">D32 自定义与最佳实践</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        缓存就像<strong>公司前台的"常见问题登记本"</strong>。有人问"三楼会议室 WiFi 密码"，前台查一次、记本子上；下次再有人问<strong>一模一样</strong>的问题，直接翻本子答，不用再跑一趟机房。<code>ToolsHandler</code> 是那个前台，<code>CacheHandler</code> 是那本登记本（key = "工具名-参数"）。而 <code>cache_function</code> 是一条规矩："哪些问题值得记"（比如实时股价就别记，会过期）。还有一条铁律：同一个人<strong>连问两遍完全一样</strong>的问题，前台会说"你刚问过了"——这就是防重复调用。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：重复劳动又慢又烧钱</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Agent 的 ReAct 循环（Day 08）里，模型可能因为"没记住上一步"或推理绕圈，<strong>反复用同样的参数调同一个工具</strong>。如果这个工具是"调用付费 API""跑一个几秒的爬虫"，每重复一次就是实打实的钱和时间。更糟的是模型可能陷入"调 A → 看结果 → 又调一模一样的 A"的死循环。怎么破？</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong>用 (工具名 + 参数) 当 key，把工具结果存起来，下次相同调用直接返回缓存。</strong>加上两道额外保险：① <code>cache_function</code> 让每个工具自定义"这次结果值不值得缓存"（实时数据就别缓存）；② <code>_check_tool_repeated_usage</code> 拦住"紧接着又调完全相同的一次"，直接回一句"你刚用过"逼模型换招。<strong>缓存省钱省时，防重复救死循环。</strong></div>
+                <p>三个角色的分工：</p>
+                <table class="ttable">
+                    <tr><th>角色</th><th>文件</th><th>职责</th></tr>
+                    <tr><td><code>ToolsHandler</code></td><td><span class="fileref">tools_handler.py:15</span></td><td>记账中枢：记"最后用的工具"、决定写不写缓存</td></tr>
+                    <tr><td><code>CacheHandler</code></td><td><span class="fileref">cache_handler.py</span></td><td>真正的存储：一个带读写锁的字典</td></tr>
+                    <tr><td>缓存分支</td><td><span class="fileref">tool_usage.py:516</span></td><td>执行流程里"先读缓存 / 后写缓存"的钩子</td></tr>
+                </table>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>ToolsHandler：记账中枢</h1></div>
+            <div class="card">
+                <p>整个 <code>tools_handler.py</code> 很短（<span class="fileref">tools_handler.py:15</span>）：</p>
+<pre><code class="language-python"># tools_handler.py:15
+class ToolsHandler(BaseModel):
+    cache: CacheHandler | None = Field(default=None)
+    last_used_tool: ToolCalling | InstructorToolCalling | None = Field(default=None)
+
+    def on_tool_use(self, calling, output, should_cache=True) -> None:
+        self.last_used_tool = calling                 # ① 记下"最后用的工具"
+        if self.cache and should_cache and calling.tool_name != CacheTools().name:
+            input_str = ""
+            if calling.arguments:
+                if isinstance(calling.arguments, dict):
+                    input_str = json.dumps(calling.arguments)    # 参数序列化成字符串
+                else:
+                    input_str = str(calling.arguments)
+            self.cache.add(                            # ② 写缓存
+                tool=calling.tool_name, input=input_str, output=output)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>last_used_tool</code><span>记住"上一次调的是哪个工具、什么参数"。这是 L06 防重复调用的依据。</span></div>
+                    <div class="r"><code>on_tool_use</code><span>每次工具执行完都调它。做两件事：更新 <code>last_used_tool</code>、（满足条件时）写缓存。</span></div>
+                    <div class="r"><code>三个写缓存条件</code><span>① 有 cache；② <code>should_cache</code> 为真（由 cache_function 决定，L05）；③ 不是缓存工具自己（<code>CacheTools().name</code>，避免自己缓存自己造成套娃）。</span></div>
+                    <div class="r"><code>参数序列化</code><span>把 arguments 转成字符串当 key 的一部分——因为字典不能直接当稳定 key，序列化后 <code>{"a":1}</code> 才有确定的字符串形式。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span><code>ToolsHandler</code> 就是那个"前台记录员"，本身不存东西（存的活交给 <code>CacheHandler</code>），只负责在每次工具用完后<strong>拍板"记不记、怎么记"</strong>，并顺手记下"刚才用的是谁"。它是执行循环和缓存存储之间的中间人。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：缓存三角色的持有关系</text>
+                        <rect x="235" y="32" width="170" height="46" rx="8" fill="rgba(236,72,153,.09)" stroke="#ec4899"/>
+                        <text x="320" y="52" fill="#f472b6" text-anchor="middle" font-weight="700">ToolsHandler</text>
+                        <text x="320" y="70" fill="#94a3b8" text-anchor="middle" font-size="10">last_used_tool · cache</text>
+                        <rect x="60" y="120" width="200" height="55" rx="8" fill="rgba(59,130,246,.09)" stroke="#3b82f6"/>
+                        <text x="160" y="140" fill="#93c5fd" text-anchor="middle" font-weight="700">CacheHandler</text>
+                        <text x="160" y="158" fill="#94a3b8" text-anchor="middle" font-size="10">_cache: dict + _lock: RWLock</text>
+                        <text x="160" y="171" fill="#94a3b8" text-anchor="middle" font-size="10">key = "工具名-参数串"</text>
+                        <rect x="385" y="120" width="200" height="55" rx="8" fill="rgba(245,158,11,.09)" stroke="#f59e0b"/>
+                        <text x="485" y="140" fill="#fcd34d" text-anchor="middle" font-weight="700">last_used_tool</text>
+                        <text x="485" y="158" fill="#94a3b8" text-anchor="middle" font-size="10">ToolCalling（上一次调用）</text>
+                        <text x="485" y="171" fill="#94a3b8" text-anchor="middle" font-size="10">→ 供防重复比对</text>
+                        <path d="M290 78 C250 100 200 108 175 118" stroke="#3b82f6" stroke-width="1.2" fill="none" marker-end="url(#a30d)"/>
+                        <text x="215" y="100" fill="#3b82f6" font-size="9.5">持有(存储)</text>
+                        <path d="M350 78 C400 100 450 108 470 118" stroke="#f59e0b" stroke-width="1.2" fill="none" marker-end="url(#a30dy)"/>
+                        <text x="440" y="100" fill="#f59e0b" font-size="9.5">记录</text>
+                        <defs>
+                          <marker id="a30d" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#3b82f6"/></marker>
+                          <marker id="a30dy" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#f59e0b"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：ToolsHandler 持有一个 CacheHandler（真存储）和一个 last_used_tool（防重复依据）。职责清晰分离。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CacheHandler：一个带读写锁的字典</h1></div>
+            <div class="card">
+                <p>真正的存储 <code>CacheHandler</code>（<span class="fileref">cache_handler.py</span>）——本质是个字典 + 读写锁：</p>
+<pre><code class="language-python"># cache_handler.py
+class CacheHandler(BaseModel):
+    _cache: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _lock: RWLock = PrivateAttr(default_factory=RWLock)      # 读写锁
+
+    def add(self, tool: str, input: str, output: Any) -> None:
+        with self._lock.w_locked():                          # ★写锁：独占
+            self._cache[f"{tool}-{input}"] = output          # key = "工具名-参数串"
+
+    def read(self, tool: str, input: str) -> Any | None:
+        with self._lock.r_locked():                          # ★读锁：可并发
+            return self._cache.get(f"{tool}-{input}")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>key = f"{tool}-{input}"</code><span>缓存键就是"工具名 + 参数串"拼起来。相同工具 + 相同参数 = 相同 key = 命中缓存。</span></div>
+                    <div class="r"><code>w_locked()（写锁）</code><span>写入时<b>独占</b>：同一时刻只能一个线程写，防止并发写坏字典。</span></div>
+                    <div class="r"><code>r_locked()（读锁）</code><span>★读取时<b>可并发</b>：多个线程能同时读（读不改数据，无冲突），只在有写时才互斥。这就是读写锁比普通互斥锁高效的地方。</span></div>
+                    <div class="r"><code>PrivateAttr</code><span><code>_cache</code>/<code>_lock</code> 是私有属性，不参与 Pydantic 序列化——缓存是运行时状态，不该被存档。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用读写锁而不是普通锁</span>
+                工具执行是高度并发的（Day 08 原生模式的线程池同时跑多个工具）。<strong>普通互斥锁</strong>：读和读之间也互斥，多个线程想同时查缓存得排队——而查缓存本是无冲突的只读操作，白白串行化。<strong>读写锁</strong>：允许"多读并发、写时独占"。缓存场景是典型的"读多写少"，读写锁能让大量并发的缓存查询不互相阻塞。代价是读写锁实现更复杂、写饥饿风险。<strong>对读多写少的缓存，这个复杂度换来的吞吐提升很值。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>执行前：先敲敲缓存的门</h1></div>
+            <div class="card">
+                <p><code>_use</code> 一开始就尝试读缓存（<span class="fileref">tool_usage.py:516</span>）：</p>
+<pre><code class="language-python"># tool_usage.py:516
+from_cache = False
+result = None
+try:
+    if self.tools_handler and self.tools_handler.cache:
+        input_str = ""
+        if calling.arguments:
+            if isinstance(calling.arguments, dict):
+                input_str = json.dumps(calling.arguments)
+            else:
+                input_str = str(calling.arguments)
+        result = self.tools_handler.cache.read(          # ★先读缓存
+            tool=sanitize_tool_name(calling.tool_name), input=input_str)
+        from_cache = result is not None                 # 命中标记
+    ...
+    elif result is None:                                 # ★没命中才真执行
+        # ... 真正 tool.invoke(...) ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>cache.read(...)</code><span>用和写入时一致的 key（<code>sanitize_tool_name</code> + 序列化参数）去查。查到了 <code>result</code> 就有值。</span></div>
+                    <div class="r"><code>from_cache = result is not None</code><span>命中缓存的标记。后面事件（<code>on_tool_use_finished</code>）会带上这个标记，让观测端知道"这次是走缓存的、没真跑"。</span></div>
+                    <div class="r"><code>elif result is None → 真执行</code><span>★只有缓存没命中（<code>result</code> 还是 None）才走真正的 <code>tool.invoke</code>。命中了就跳过执行，直接用缓存值。</span></div>
+                    <div class="r"><code>key 对齐是关键</code><span>读用 <code>sanitize_tool_name(calling.tool_name)</code>，写（<code>on_tool_use</code>）用 <code>calling.tool_name</code>——注意 D30 里读写 key 生成必须一致，否则永远命不中。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 220" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：一次工具调用的缓存路径</text>
+                        <rect x="245" y="32" width="150" height="30" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="320" y="51" fill="#93c5fd" text-anchor="middle">收到 ToolCalling</text>
+                        <rect x="235" y="80" width="170" height="30" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="320" y="99" fill="#fcd34d" text-anchor="middle">cache.read(工具名-参数)</text>
+                        <path d="M320 62 L320 79" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a30)"/>
+                        <rect x="40" y="135" width="220" height="30" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="150" y="154" fill="#86efac" text-anchor="middle">命中 → 直接用缓存值（不执行）</text>
+                        <rect x="380" y="135" width="220" height="30" rx="7" fill="rgba(56,189,248,.1)" stroke="#38bdf8"/>
+                        <text x="490" y="154" fill="#7dd3fc" text-anchor="middle">未命中 → tool.invoke 真执行</text>
+                        <path d="M280 110 L160 133" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a30g)"/>
+                        <path d="M360 110 L480 133" stroke="#38bdf8" stroke-width="1.1" marker-end="url(#a30c)"/>
+                        <rect x="380" y="185" width="220" height="28" rx="7" fill="rgba(236,72,153,.1)" stroke="#ec4899"/>
+                        <text x="490" y="204" fill="#f472b6" text-anchor="middle">on_tool_use → 按 cache_function 写回</text>
+                        <path d="M490 165 L490 184" stroke="#ec4899" stroke-width="1.2" marker-end="url(#a30p)"/>
+                        <text x="150" y="192" fill="#94a3b8" text-anchor="middle" font-size="10.5">from_cache=True，省一次执行</text>
+                        <defs>
+                          <marker id="a30" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a30g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                          <marker id="a30c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#38bdf8"/></marker>
+                          <marker id="a30p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#ec4899"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：读缓存命中就跳过执行；未命中才真跑，跑完按 cache_function 决定写不写回。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>cache_function：这次结果到底该不该缓存</h1></div>
+            <div class="card">
+                <p>执行完后要不要写缓存，由每个工具的 <code>cache_function</code> 决定（<span class="fileref">tool_usage.py:591</span>）：</p>
+<pre><code class="language-python"># tool_usage.py:591
+if self.tools_handler:
+    should_cache = True
+    # 从原工具（to_structured_tool 转来的）上找 cache_function
+    original_tool = getattr(available_tool, "_original_tool", None)
+    cache_func = None
+    if original_tool and hasattr(original_tool, "cache_function"):
+        cache_func = original_tool.cache_function
+    elif hasattr(available_tool, "cache_function"):
+        cache_func = available_tool.cache_function
+
+    if cache_func:
+        should_cache = cache_func(calling.arguments, result)  # ★传入参数和结果，返回布尔
+    self.tools_handler.on_tool_use(
+        calling=calling, output=result, should_cache=should_cache)  # 把决定传给中枢</code></pre>
+                <p>默认的 <code>cache_function</code>（Day 27 见过，<span class="fileref">base_tool.py:81</span>）永远返回 True：</p>
+<pre><code class="language-python"># base_tool.py:81
+def _default_cache_function(_args=None, _result=None) -> bool:
+    """Default cache function that always allows caching."""
+    return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>should_cache 默认 True</code><span>没自定义就默认缓存一切。多数工具（搜索、计算）缓存都安全。</span></div>
+                    <div class="r"><code>先找 _original_tool 的</code><span>因为执行态是 <code>CrewStructuredTool</code>（D28），<code>cache_function</code> 挂在原 <code>BaseTool</code> 上，要通过 <code>_original_tool</code> 指针取回。取不到再看执行态自己有没有。</span></div>
+                    <div class="r"><code>cache_func(arguments, result)</code><span>★把"这次的参数"和"这次的结果"都传给它，让它据此判断。比如结果是"服务暂时不可用"就别缓存，参数含时间戳就别缓存。</span></div>
+                    <div class="r"><code>结果传给 on_tool_use</code><span>把 <code>should_cache</code> 交给 L02 的中枢，由它最终决定写不写。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 例子：给"实时股价工具"关掉缓存</span>
+<pre style="margin:6px 0"><code class="language-python">from crewai.tools import tool
+
+@tool
+def stock_price(symbol: str) -> str:
+    """查询实时股价"""
+    return fetch_price(symbol)
+
+# 实时数据缓存了就过期 → 让 cache_function 永远返回 False
+stock_price.cache_function = lambda args, result: False</code></pre>
+                这样每次都真查，不会返回一个过时的旧价。而"计算 π 的前 100 位"这种确定性结果，就该用默认的 True 缓存。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>防连续重复：你刚刚才用过</h1></div>
+            <div class="card">
+                <p>缓存解决"重复调用还得走一遍流程"，而 <code>_check_tool_repeated_usage</code>（<span class="fileref">tool_usage.py:728</span>）直接拦住"紧接着又调完全一样的一次"：</p>
+<pre><code class="language-python"># tool_usage.py:728
+def _check_tool_repeated_usage(self, calling) -> bool:
+    if not self.tools_handler:
+        return False
+    if last_tool_usage := self.tools_handler.last_used_tool:   # 拿"上一次用的工具"
+        return (
+            sanitize_tool_name(calling.tool_name)
+            == sanitize_tool_name(last_tool_usage.tool_name)   # 工具名相同
+        ) and (calling.arguments == last_tool_usage.arguments) # 且参数完全相同
+    return False</code></pre>
+                <p>命中时 <code>_use</code> 会直接返回一句提示（<span class="fileref">tool_usage.py:476</span>）：</p>
+<pre><code class="language-python"># tool_usage.py:476
+if self._check_tool_repeated_usage(calling=calling):
+    result = I18N_DEFAULT.errors("task_repeated_usage").format(tool_names=self.tools_names)
+    self.last_raw_result = result
+    self._telemetry.tool_repeated_usage(...)
+    return self._format_result(result=result)   # 直接回"你重复了"，不执行</code></pre>
+                <div class="walk">
+                    <div class="r"><code>比对 last_used_tool</code><span>只看"紧挨着的上一次"。工具名 + 参数都完全一样，才算"重复"。</span></div>
+                    <div class="r"><code>命中 → 返回提示</code><span>返回一句"你刚用过这个工具，别重复了，可用工具有……"，喂回给 LLM，逼它<b>换个动作</b>（换工具或给答案），打破死循环。</span></div>
+                    <div class="r"><code>和缓存的区别</code><span>缓存：相同调用<b>返回上次结果</b>（还是有个"结果"）；防重复：相同的<b>连续</b>调用直接<b>拒绝执行</b>并提醒。前者省成本，后者破死循环。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么防重复只看"上一次"而非"历史所有"</span>
+                <strong>严格做法</strong>：记录本轮所有调用过的 (工具,参数)，只要重复过就拦。能拦更多重复。<strong>源码做法</strong>：只比对<code>最近一次</code>。因为真正有害的是"卡在原地反复调同一个"（死循环），而<strong>隔了几步又调回同一个工具往往是合理的</strong>（比如查完 A、算了别的、又回来查 A 的新角度）。只看上一次，既能斩断紧邻死循环，又不误伤正常的"迂回复用"。<strong>用最小的状态（一个 last_used_tool）解决主要问题</strong>——简单且够用。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>用量上限与"结果即答案"的收尾</h1></div>
+            <div class="card">
+                <p>执行前还会查用量上限（<span class="fileref">tool_usage.py:546</span>，配合 Day 27 的 <code>max_usage_count</code>）：</p>
+<pre><code class="language-python"># tool_usage.py:546
+usage_limit_error = self._check_usage_limit(available_tool, sanitize_tool_name(tool.name))
+if usage_limit_error:
+    result = usage_limit_error
+    self.last_raw_result = result
+    self._telemetry.tool_usage_error(llm=self.function_calling_llm)
+    result = self._format_result(result=result)     # 超限 → 返回提示，不执行
+elif result is None:
+    ...  # 未超限且未命中缓存 → 真执行</code></pre>
+                <p>执行成功后，若工具设了 <code>result_as_answer</code>，会标记"这就是最终答案"（<span class="fileref">tool_usage.py:623</span>）：</p>
+<pre><code class="language-python"># tool_usage.py:623
+if (hasattr(available_tool, "result_as_answer")
+        and available_tool.result_as_answer):
+    result_as_answer = available_tool.result_as_answer
+    data["result_as_answer"] = result_as_answer       # 传给执行循环 → 直接收尾</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_check_usage_limit</code><span>Day 27 的 <code>max_usage_count</code> 在这里生效：超限返回一段"这个工具用到上限了"的话（不 raise，喂回 LLM），让它别再用。</span></div>
+                    <div class="r"><code>顺序：防重复 → 缓存 → 上限 → 执行</code><span>层层过滤，每一层能拦下就不进下一层。缓存命中和超限都直接返回，省掉真执行。</span></div>
+                    <div class="r"><code>result_as_answer 标记</code><span>回到 Day 08 循环：带这个标记的结果会让执行器<b>直接把它当 Final Answer</b>，不再继续推理。适合"生成报告""最终交付物"类工具。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 这些机制其实是同一个思想的不同侧面</span>缓存、防重复、用量上限、结果直答——看似四件事，本质都是<strong>"控制工具被调用的次数和方式，把 Agent 的自由发挥约束在成本可控的范围内"</strong>。LLM 天生倾向"多试几次""绕圈子"，这些机制就是给它套上的缰绳：能省则省（缓存）、别原地打转（防重复）、别无限用（上限）、该停就停（直答）。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="pitfall"><span class="t">⚠️ 边界：缓存是"进程内内存字典"，且不会自动过期</span>
+                <code>CacheHandler._cache</code> 就是个普通 dict，存在<strong>当前进程内存里</strong>：进程一停，缓存全没；多进程/分布式部署时各进程<strong>各存各的</strong>，不共享。而且它<strong>没有 TTL（过期时间）</strong>——一旦缓存了某结果，同参数调用永远返回它，直到进程结束。<strong>坑：把一个"结果会随时间变化"的工具用默认缓存</strong>（比如"今天天气"缓存了，明天还返回昨天的）。解法：这类工具务必用 <code>cache_function</code> 返回 False，或在参数里带上日期让 key 天然区分。生产级需求（跨进程、带过期）得自己接外部缓存。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：那个 <code>CacheTools</code>（<span class="fileref">cache_tools.py</span>）是干嘛的？和 CacheHandler 有啥区别？</p>
+                    <p class="a">👨‍🏫 老师：<code>CacheHandler</code> 是"存储"（后台的登记本）。<code>CacheTools</code> 是一个<strong>特殊工具</strong>——它把"读缓存"这个动作包装成一个 Agent 能调的工具（<code>hit_cache</code>），用于某些让模型"主动查缓存"的场景。L02 里 <code>on_tool_use</code> 特意排除 <code>CacheTools().name</code>，就是防止"缓存工具的调用结果又被缓存"的套娃。日常你几乎不用直接碰它。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>缓存 key 是怎么构成的？读和写为什么必须用一致的 key？</li>
+                        <li><code>ToolsHandler</code> 和 <code>CacheHandler</code> 分别管什么？</li>
+                        <li>为什么用读写锁而不是普通互斥锁？</li>
+                        <li><code>cache_function</code> 收哪两个参数？什么工具该关掉缓存？</li>
+                        <li>"缓存命中"和"防重复调用"有什么本质区别？</li>
+                        <li>防重复为什么只看上一次而非全部历史？</li>
+                        <li>缓存的三个边界（进程内/不共享/不过期）分别是什么坑？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+cat $P/agents/tools_handler.py                  # 记账中枢（很短）
+cat $P/agents/cache/cache_handler.py            # 读写锁字典
+sed -n '516,606p' $P/tools/tool_usage.py        # 读缓存 + cache_function
+sed -n '728,738p' $P/tools/tool_usage.py        # 防重复
+python -c "
+from crewai.agents.cache.cache_handler import CacheHandler
+c=CacheHandler()
+c.add(tool='search', input='{\"q\":\"a\"}', output='结果A')
+print(c.read('search','{\"q\":\"a\"}'))   # 命中 → 结果A
+print(c.read('search','{\"q\":\"b\"}'))   # 未命中 → None
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 31</strong>：前四天讲的都是"本地工具"。但现在流行 MCP（Model Context Protocol）——把工具做成<strong>独立服务</strong>，Agent 远程连过去用。明天读 <code>mcp/</code> 目录 + <code>tools/mcp_tool_wrapper.py</code>/<code>mcp_native_tool.py</code>：MCP 服务器怎么配置（stdio/http/sse）、远程工具怎么被发现并包装成 <code>BaseTool</code>、连接超时/重试/并行隔离怎么处理。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day29.html" style="color:var(--accent-cyan);">&larr; Day 29 工具调用</a>
+                    <a href="crewai-day31.html" style="color:var(--accent-green);">Day 31 · MCP 工具 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
