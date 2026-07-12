@@ -3,222 +3,303 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 18 · 流式输出 — LangGraph 源码学习</title>
+    <title>Day 18 · START/END 与入口（constants.py / set_entry_point / validate）— LangGraph 60 天深度版</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
-        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
-        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
         .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
-        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .st.on{background:linear-gradient(135deg,#8b5cf6,#ec4899);color:#fff;border-color:transparent;font-weight:700}
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple,#a855f7)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
     <nav class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">18</div>
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#ec4899);">18</div>
             <h2>Day 18</h2>
-            <p class="version">流式输出 · 8 讲</p>
+            <p class="version">START/END 与入口 · 7 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要流式</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · stream() API</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · values 模式</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · updates 模式</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · messages 模式</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · custom / debug</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · yield 从何而来</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · START/END 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · sys.intern 定义</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · set_entry_point 语法糖</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · add_edge 的方向护栏</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · validate 校验入口</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 取舍与边界</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 阶段回顾</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="langgraph-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 ToolNode</a></li>
-            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="langgraph-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 部署 &rarr;</a></li>
+            <li><a href="langgraph-day17.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 17 递归上限</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day19.html" class="nav-link" style="color:var(--accent-green);">Day 19 Pregel/BSP &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 应用层</span>
-            <h1 class="part-title">流式输出</h1>
-            <p class="part-desc">聊天界面里 AI 逐字蹦字、工具进度实时刷新——怎么做到的？读 <code>stream_mode</code>（<code>types.py:120</code>）的五种模式，理解 Day 08 驱动循环里的 <code>yield</code> 怎么变成用户看到的流。</p>
+            <span class="part-label">Day 18 / 共 60 天 · 阶段 3 控制流</span>
+            <h1 class="part-title">START / END 与入口：两个"虚拟节点"的真相</h1>
+            <p class="part-desc">你一直在写 <code>add_edge(START, "model")</code>、<code>add_edge("x", END)</code>，但 <code>START</code> / <code>END</code> 到底是什么？它们不是真节点，而是 <code>constants.py</code> 里两个特殊字符串常量。今天把它们看穿：为什么用 <code>sys.intern</code> 定义、<code>set_entry_point</code> 只是 <code>add_edge(START, key)</code> 的一层糖、<code>add_edge</code> 怎么用几行护栏禁止"END 当起点/START 当终点"、以及 <code>compile</code> 时 <code>validate</code> 如何靠"START 必须出现在某条边的起点"来判定图有没有入口。阶段 3 收官。</p>
         </div>
 
-        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
-        <div class="steps"><span class="st">ToolNode</span><span class="sep">→</span><span class="st on">流式</span><span class="sep">→</span><span class="st">部署</span><span class="sep">→</span><span class="st">结业🎓</span></div></div>
+        <div class="journey">
+            <div class="jt">📍 阶段 3「控制流」(D13-18) · 你在第 18 天（收官）</div>
+            <div class="steps">
+                <span class="st">D13 条件边</span><span class="sep">→</span>
+                <span class="st">D14 Branch 路由</span><span class="sep">→</span>
+                <span class="st">D15 Command</span><span class="sep">→</span>
+                <span class="st">D16 Send 扇出</span><span class="sep">→</span>
+                <span class="st">D17 递归上限</span><span class="sep">→</span>
+                <span class="st on">D18 START/END</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 一句话锚点</span>
+        <code>START</code> 和 <code>END</code> 是两个<strong>保留字符串</strong>（<code>"__start__"</code> / <code>"__end__"</code>），代表图的"虚拟入口"和"虚拟出口"。<code>add_edge(START, "A")</code> 的意思是"图一开始就把输入送给 A"；<code>add_edge("A", END)</code> 意思是"到 A 就结束"。它们不对应你写的任何函数，只是让"入口/出口"能用和普通节点一样的"边"来表达——不需要为入口出口发明新语法。</div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>为什么要流式</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：入口和出口，凭什么也用"边"表达？</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点：invoke 要等全跑完，用户对着空屏干等</span>
-                一个 Agent 可能想好几轮、调好几个工具，几十秒起步。用 <code>invoke()</code> 期间界面一片空白，用户以为卡死了。可我们明明每一步都已经算出了中间结果——为什么不能边算边给？</div>
-                <p><code>invoke()</code> 要等整个图跑完才返回——长任务用户干等几十秒，体验差。<code>stream()</code> 让你<strong>边跑边拿中间结果</strong>：token 逐个出、每个节点完成即推送。</p>
-                <div class="baby"><span class="t">流式 = "边做边报告"，不是"做完才交卷"</span>
-                想象点外卖：<strong>invoke 像"做好了一次性端上来"（中间你啥也看不到）；stream 像"下单成功→开始备餐→骑手取货→即将送达"实时推送。</strong>对 Agent 尤其重要——它可能要想好几轮、调好几个工具，几十秒起步。流式让用户看到"AI 正在查天气""正在计算"，甚至答案逐字蹦出，体验天差地别。<strong>这就是所有 AI 聊天产品都用流式的原因。</strong></div>
-                <div class="essence"><span class="t">💡 本质：图执行是超步驱动，天然能在每步 yield 中间结果</span>
-                Day 08 那个驱动循环本来就是"跑一个超步 → 产出 → 再跑下一个超步"。<strong>流式不是额外加的功能，而是把这些本就存在的中间产出按需 yield 出来。</strong><code>invoke</code> 其实就是"把 stream 的产出收集起来、只返回最后一份"。<br><strong>流式就像餐厅里厨师边炒边上菜：</strong>invoke 是"满汉全席全做完再一起端上桌"，你饿着等半天；stream 是"凉菜先上、热菜一道一道端"，你边吃边等，体感快得多。而厨房（引擎）本来就是一道道做出来的——流式只是把每做好一道就先端出去，而不是全压在最后。</div>
+                <div class="ask"><span class="t">🤔 痛点</span>一张图要能跑，必须回答两件事：数据<strong>从哪个节点进</strong>（入口）、<strong>到哪算跑完</strong>（出口）。最直白的设计是给建造器加两个专门方法/属性存"入口节点名""出口节点名"。但这样一来，"入口→A"这种关系就和"A→B"这种普通边<strong>用了两套机制</strong>，调度器得分别处理，代码分叉。</div>
+                <div class="essence"><span class="t">💡 本质：用两个"虚拟节点"把入口/出口也变成普通的边</span>LangGraph 造了两个特殊名字 <code>START</code>、<code>END</code> 冒充节点。于是"入口"= 一条从 <code>START</code> 出发的边，"出口"= 一条指向 <code>END</code> 的边。整张图从头到尾只有一种关系——边。调度器、校验器、可视化都只需处理"边"，不用为入口出口开小灶。这是"用一个巧妙的抽象消灭特例"的经典手法。</div>
+                <div class="baby"><span class="t">大白话</span>START 就像"传送带的入料口"、END 像"出料口"。它们不是机器（节点），但画在图上就能让"从哪进、到哪出"用连线（边）表达，和机器之间的连线一模一样。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>stream() API</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>constants.py：两个 sys.intern 字符串</h1></div>
             <div class="card">
-<pre><code class="language-python">for chunk in graph.stream(input, config, stream_mode="updates"):
-    print(chunk)   # 每个超步/每个节点完成就吐一块，不用等全跑完</code></pre>
-                <p><code>stream_mode</code>（<code>types.py:120-134</code>）决定"吐什么粒度"，可传单个或列表（多模式混合）。</p>
-                <div class="ask"><span class="t">💬 小白 vs 老师</span>
-                👶 <strong>小白：</strong>stream 比 invoke 快吗？总耗时是不是更短？<br>
-                👨‍🏫 <strong>老师：</strong>总耗时几乎一样——图要跑的活没变少。stream 快的是<strong>"首次看到东西"的时间</strong>：invoke 要等全跑完（比如 20 秒）才有输出，stream 可能第 1 秒就开始蹦字。<br>
-                👶 <strong>小白：</strong>那 invoke 是不是就没用了？<br>
-                👨‍🏫 <strong>老师：</strong>不是。后台批处理、不需要给人看进度的场景，invoke 更省事。其实 invoke 内部就是把 stream 的产出收集起来只返回最后一份——它俩同源。</div>
-                <div class="anno">读法：<b><code>stream()</code> 返回一个生成器，用 for 循环边跑边收。<code>stream_mode</code> 是关键参数——同一次执行，选不同模式看到的"流"完全不同。</b>下面逐个看五种模式。</div>
-                <div class="svgbox">
-                <svg viewBox="0 0 620 250" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif">
-                    <text x="310" y="24" fill="#e5e5e5" font-size="13" text-anchor="middle">同一次执行，不同 stream_mode 看到的"流"不同</text>
-                    <!-- values -->
-                    <rect x="20" y="45" width="180" height="180" rx="10" fill="#2a2a3a" stroke="#6366f1" stroke-width="2"/>
-                    <text x="110" y="70" fill="#6366f1" font-size="13" text-anchor="middle" font-weight="bold">values</text>
-                    <text x="110" y="92" fill="#bbb" font-size="11" text-anchor="middle">每步吐整份状态</text>
-                    <rect x="45" y="105" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="110" y="122" fill="#e5e5e5" font-size="10" text-anchor="middle">{全部 messages...}</text>
-                    <rect x="45" y="140" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="110" y="157" fill="#e5e5e5" font-size="10" text-anchor="middle">{全部 messages...}</text>
-                    <text x="110" y="195" fill="#888" font-size="10" text-anchor="middle">全量快照·数据量大</text>
-                    <!-- updates -->
-                    <rect x="220" y="45" width="180" height="180" rx="10" fill="#2a2a3a" stroke="#34d399" stroke-width="2"/>
-                    <text x="310" y="70" fill="#34d399" font-size="13" text-anchor="middle" font-weight="bold">updates</text>
-                    <text x="310" y="92" fill="#bbb" font-size="11" text-anchor="middle">每节点吐增量</text>
-                    <rect x="245" y="105" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="310" y="122" fill="#e5e5e5" font-size="10" text-anchor="middle">{agent: 新增1条}</text>
-                    <rect x="245" y="140" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="310" y="157" fill="#e5e5e5" font-size="10" text-anchor="middle">{tools: 新增1条}</text>
-                    <text x="310" y="195" fill="#888" font-size="10" text-anchor="middle">谁改了啥·省</text>
-                    <!-- messages -->
-                    <rect x="420" y="45" width="180" height="180" rx="10" fill="#2a2a3a" stroke="#8b5cf6" stroke-width="2"/>
-                    <text x="510" y="70" fill="#8b5cf6" font-size="13" text-anchor="middle" font-weight="bold">messages</text>
-                    <text x="510" y="92" fill="#bbb" font-size="11" text-anchor="middle">逐 token 吐</text>
-                    <rect x="445" y="105" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="510" y="122" fill="#e5e5e5" font-size="10" text-anchor="middle">"北" "京" "今"...</text>
-                    <rect x="445" y="140" width="130" height="26" rx="5" fill="#1e1e2a" stroke="#444"/>
-                    <text x="510" y="157" fill="#e5e5e5" font-size="10" text-anchor="middle">"天" "晴"...</text>
-                    <text x="510" y="195" fill="#888" font-size="10" text-anchor="middle">打字机效果</text>
-                </svg>
-                <div class="cap">图：values=整份状态 / updates=增量事件 / messages=LLM token，一次执行按需选</div>
+                <p>它们的定义，简单到只有两行有效代码：</p>
+                <div class="fileref">libs/langgraph/langgraph/constants.py:28-31</div>
+<pre><code class="language-python">END = sys.intern("__end__")
+"""The last (maybe virtual) node in graph-style Pregel."""
+START = sys.intern("__start__")
+"""The first (maybe virtual) node in graph-style Pregel."""</code></pre>
+                <p>同文件还定义了两个流式相关标签，也用 <code>sys.intern</code>：</p>
+                <div class="fileref">libs/langgraph/langgraph/constants.py:24-27</div>
+<pre><code class="language-python">TAG_NOSTREAM = sys.intern("nostream")
+TAG_HIDDEN = sys.intern("langsmith:hidden")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>"__start__" / "__end__"</code><span>就是普通字符串，只是用双下划线包裹表示"保留、别当普通节点名用"。这也是 D03 为什么 <code>add_node("__start__", ...)</code> 会被拒（保留名）。</span></div>
+                    <div class="r"><code>sys.intern(...)</code><span>★把字符串"驻留"到解释器的字符串池，保证<b>同一内容全程是同一个对象</b>。好处：判断 <code>key == START</code> / <code>key is START</code> 时可以走极快的<b>指针相等</b>，而不是逐字符比较。图运行时这种判断非常频繁，intern 是实打实的性能优化。</span></div>
+                    <div class="r"><code>docstring 里的 "maybe virtual"</code><span>官方注释自己都说 START/END 是"（可能是）虚拟节点"——它们在编译后会变成真实的 PregelNode（START）或被特殊处理（END），但概念上是虚拟的入口/出口。</span></div>
                 </div>
-                <div class="example"><span class="t">📝 例子：只想看"哪个节点在动"</span>
-                <code>for chunk in graph.stream(inp, stream_mode="updates"):</code> 每个节点跑完就吐一块 <code>{节点名: 它的返回值}</code>，用来做进度条或调试最直观——不像 values 每次都把整个 state 全量重发。</div>
+                <div class="essence"><span class="t">💡 为什么值得用 intern？</span>因为这两个常量在整个引擎里被<strong>成千上万次</strong>拿来做相等判断（每个节点 attach、每次路由都要判"是不是 START/END"）。intern 让这些判断退化成指针比较，是"小改动、全局收益"的典型微优化。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>values 模式</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>set_entry_point / set_finish_point：全是语法糖</h1></div>
             <div class="card">
-                <p><code>stream_mode="values"</code>：每个超步后吐出<strong>完整的当前状态</strong>。</p>
-                <div class="anno">读法：<b>每步给你"此刻整个 state 长啥样"。</b>适合"我只关心最新完整状态"的场景（如每步都想渲染完整对话历史）。代价：数据量大（每次全量）。</div>
+                <p>你可能见过两种写入口的写法。它们其实是<strong>同一件事</strong>：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1066-1077</div>
+<pre><code class="language-python">    def set_entry_point(self, key: str) -> Self:
+        """Specifies the first node to be called in the graph.
+        Equivalent to calling `add_edge(START, key)`."""
+        return self.add_edge(START, key)                # ★就是加一条 START→key 的边</code></pre>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1103-1114</div>
+<pre><code class="language-python">    def set_finish_point(self, key: str) -> Self:
+        """Marks a node as a finish point of the graph."""
+        return self.add_edge(key, END)                  # ★就是加一条 key→END 的边</code></pre>
+                <p>连"条件入口"也是一层糖——包在 <code>add_conditional_edges(START, ...)</code> 上：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1079-1101（节选）</div>
+<pre><code class="language-python">    def set_conditional_entry_point(self, path, path_map=None) -> Self:
+        return self.add_conditional_edges(START, path, path_map)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>set_entry_point(k) = add_edge(START, k)</code><span>完全等价。用哪个纯看你喜好。<code>set_entry_point</code> 语义更"读得懂"，<code>add_edge(START, k)</code> 更统一。</span></div>
+                    <div class="r"><code>set_finish_point(k) = add_edge(k, END)</code><span>同理。注意"finish point"不代表"图里唯一的结束"——你可以有多条通往 END 的边、也可以让条件边返回 END。</span></div>
+                    <div class="r"><code>为什么保留这些糖方法</code><span>历史 + 可读性。老代码和教程里 <code>set_entry_point</code> 很常见；新代码倾向直接 <code>add_edge(START, ...)</code>（少一个要记的 API）。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 185" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：START/END 就是 edges 里的普通元组</text>
+                        <rect x="90" y="34" width="420" height="96" rx="10" fill="rgba(99,102,241,.07)" stroke="#6366f1" stroke-dasharray="4 3"/>
+                        <text x="300" y="54" fill="#a5b4fc" text-anchor="middle" font-weight="700">self.edges : set[tuple[str, str]]</text>
+                        <rect x="120" y="66" width="160" height="30" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/><text x="200" y="86" fill="#fbbf24" text-anchor="middle" font-size="10">("__start__", "A")</text>
+                        <rect x="320" y="66" width="160" height="30" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/><text x="400" y="86" fill="#93c5fd" text-anchor="middle" font-size="10">("A", "B")</text>
+                        <rect x="220" y="102" width="160" height="22" rx="6" fill="rgba(20,184,166,.12)" stroke="#14b8a6"/><text x="300" y="117" fill="#2dd4bf" text-anchor="middle" font-size="10">("B", "__end__")</text>
+                        <text x="300" y="152" fill="#cbd5e1" text-anchor="middle">入口边、普通边、出口边 —— 全是同一个集合里的元组</text>
+                        <text x="300" y="172" fill="#64748b" text-anchor="middle">validate 只需检查 "__start__" 有没有作为某元组的第 0 项出现</text>
+                    </svg>
+                    <div class="cap">图注：没有单独的"入口/出口"字段，START/END 混在 edges 里，靠字符串值区分。</div>
+                </div>
+                <div class="baby"><span class="t">🍼 一句话</span>不用纠结"该用 set_entry_point 还是 add_edge(START,...)"——它们生成的图纸一模一样（都是往 <code>self.edges</code> 加一条边）。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>updates 模式</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>add_edge 的方向护栏</h1></div>
             <div class="card">
-                <p><code>stream_mode="updates"</code>：每个节点执行后，只吐出<strong>该节点做的增量更新</strong>（<code>{节点名: 它的返回值}</code>）。</p>
-<pre><code class="language-python">for chunk in graph.stream(input, stream_mode="updates"):
-    # {"agent": {"messages": [AIMessage(...)]}}   ← 谁更新了什么
-    for node, update in chunk.items():
-        print(f"{node} 更新了: {update}")</code></pre>
-                <div class="anno">读法：<b>values 给"全量状态"，updates 给"这步谁改了啥"（增量）。</b>updates 更省、更能反映"哪个节点在动"——调试和进度展示的首选。<strong>values vs updates = 全量快照 vs 增量事件，按需选。</strong></div>
+                <p>既然 START/END 是"节点"，就得防止你把它们用反。<code>add_edge</code> 开头几行就是这些护栏：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:938-953</div>
+<pre><code class="language-python">        if isinstance(start_key, str):
+            if start_key == END:
+                raise ValueError("END cannot be a start node")     # END 不能当起点
+            if end_key == START:
+                raise ValueError("START cannot be an end node")     # START 不能当终点
+            ...
+            self.edges.add((start_key, end_key))                    # 普通边进 edges
+            return self</code></pre>
+                <p>汇合边（多起点）那一支也有对称的校验，还多查"节点必须先 add_node"：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:956-966</div>
+<pre><code class="language-python">        for start in start_key:
+            if start == END:
+                raise ValueError("END cannot be a start node")
+            if start not in self.nodes:
+                raise ValueError(f"Need to add_node `{start}` first")   # 起点得是已注册节点
+        if end_key == START:
+            raise ValueError("START cannot be an end node")
+        if end_key != END and end_key not in self.nodes:
+            raise ValueError(f"Need to add_node `{end_key}` first")
+        self.waiting_edges.add((tuple(start_key), end_key))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>END 不能当起点</code><span>到了 END 就是终点，后面没有下一步。<code>add_edge(END, "x")</code> 直接报错。</span></div>
+                    <div class="r"><code>START 不能当终点</code><span>入口之前没有上一步。<code>add_edge("x", START)</code> 直接报错。</span></div>
+                    <div class="r"><code>汇合边起点必须已注册</code><span>多起点 <code>add_edge(["A","B"], "C")</code> 时，A、B 必须先 <code>add_node</code>。注意 <b>单起点普通边不做这个检查</b>——它允许边先于节点添加（顺序更宽松），最终由 compile 的 validate 兜底。</span></div>
+                    <div class="r"><code>END 例外</code><span>终点是 END 时不要求"已 add_node"（END 本就不是你注册的节点）。</span></div>
+                </div>
+                <div class="anno"><b>护栏分两道</b>：<code>add_edge</code> 这里是"<b>即时</b>护栏"（明显方向错误当场拦）；真正的"图整体连通性"校验留给 compile 时的 <code>validate</code>（L05）。分层校验让"当场能判的当场判、需要全图信息的最后判"。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>messages 模式（逐 token）</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>validate：靠"START 是否为某边起点"判入口</h1></div>
             <div class="card">
-                <p><code>stream_mode="messages"</code>：吐出 LLM 生成的<strong>每个 token</strong>（配元数据），实现打字机效果：</p>
-<pre><code class="language-python">for token, metadata in graph.stream(input, stream_mode="messages"):
-    print(token.content, end="", flush=True)   # 逐字打印，像 ChatGPT 那样蹦字</code></pre>
-                <div class="anno">读法：<b>这就是聊天界面"逐字蹦字"的来源——它深入到 LLM 的 token 流。</b>metadata 带节点名等信息（可区分是哪个节点的输出）。<strong>三种主力模式分工：values(全量)/updates(节点增量)/messages(token 级)。</strong></div>
-                <p style="margin-top:14px"><strong>单步走查：同一次执行（agent → tools → agent），三种模式每步各 yield 什么：</strong></p>
-                <table class="k">
-                    <tr><th>超步</th><th>values（全量状态）</th><th>updates（增量）</th><th>messages（token）</th></tr>
-                    <tr><td>agent①</td><td>{messages:[Human, AI]}</td><td>{"agent":{messages:[AI]}}</td><td>"我" "去" "查"…逐字</td></tr>
-                    <tr><td>tools</td><td>{messages:[Human, AI, Tool]}</td><td>{"tools":{messages:[Tool]}}</td><td>（工具无 token，不吐）</td></tr>
-                    <tr><td>agent②</td><td>{messages:[…, AI2]}</td><td>{"agent":{messages:[AI2]}}</td><td>"北" "京" "晴"…逐字</td></tr>
-                </table>
-                <div class="anno">⚠️ 小白常误以为 <b>"messages 模式能拿到工具的输出 token"</b>；其实 messages 只流 <strong>LLM 生成</strong>的 token，工具执行没有 token（看上表 tools 行为空）。想看工具进度得用 <code>updates</code> 或 <code>custom</code>。</div>
+                <p>compile 会调 <code>validate</code>。它先把所有边的起点汇成 <code>all_sources</code>，再检查 START 在不在里面：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1116-1132（节选）</div>
+<pre><code class="language-python">    def validate(self, interrupt=None):
+        all_sources = {src for src, _ in self._all_edges}       # 所有边的起点集合
+        for start, branches in self.branches.items():
+            all_sources.add(start)                              # 条件边的源也算
+        for name, spec in self.nodes.items():
+            if spec.ends:
+                all_sources.add(name)
+        # validate sources
+        for source in all_sources:
+            if source not in self.nodes and source != START:
+                raise ValueError(f"Found edge starting at unknown node '{source}'")
+        if START not in all_sources:                            # ★没有任何边从 START 出发
+            raise ValueError(
+                "Graph must have an entrypoint: add at least one edge from START to another node")</code></pre>
+                <p>出口侧则校验所有边的终点都是已知节点或 END：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1134-1155（节选）</div>
+<pre><code class="language-python">        all_targets = {end for _, end in self._all_edges}
+        ...
+        for target in all_targets:
+            if target not in self.nodes and target != END:
+                raise ValueError(f"Found edge ending at unknown node `{target}`")
+        ...
+        self.compiled = True
+        return self</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_all_edges</code><span>D04 学过的属性：把普通边 + 汇合边拍平成统一的 <code>(起,终)</code> 集合。这里用它取所有起点/终点。</span></div>
+                    <div class="r"><code>START not in all_sources → 报错</code><span>★"图必须有入口"的判定就这一句：只要没有<b>任何</b>边以 START 为起点，说明你没设入口，直接报错并教你 <code>add at least one edge from START</code>。</span></div>
+                    <div class="r"><code>起点/终点必须已知</code><span>边指向一个没 add_node 的名字？在这里被抓出来（<code>unknown node</code>）。这就是 D03 说的"结构错误集中在 compile 时爆出"。</span></div>
+                    <div class="r"><code>不强制必须有 END</code><span>注意：源码<b>没有</b>"必须有边指向 END"的检查。图可以没有显式 END 边——只要它能靠递归上限（D17）或中断停下。但没入口是硬错误。</span></div>
+                    <div class="r"><code>self.compiled = True</code><span>validate 通过后置 compiled 标记（D03 那个"编译后再改结构不生效"的开关）。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 180" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：validate 的两道检查</text>
+                        <rect x="30" y="40" width="250" height="110" rx="10" fill="rgba(34,197,94,.07)" stroke="#22c55e"/>
+                        <text x="155" y="60" fill="#86efac" text-anchor="middle" font-weight="700">✓ 合法图</text>
+                        <text x="155" y="82" fill="#94a3b8" text-anchor="middle">START → A → B → END</text>
+                        <text x="155" y="104" fill="#94a3b8" text-anchor="middle">START 在 all_sources 里</text>
+                        <text x="155" y="126" fill="#94a3b8" text-anchor="middle">所有终点是已知节点/END</text>
+                        <rect x="320" y="40" width="250" height="110" rx="10" fill="rgba(239,68,68,.07)" stroke="#ef4444"/>
+                        <text x="445" y="60" fill="#fca5a5" text-anchor="middle" font-weight="700">✗ 报错的图</text>
+                        <text x="445" y="82" fill="#94a3b8" text-anchor="middle">A → B（忘了连 START）</text>
+                        <text x="445" y="104" fill="#fca5a5" text-anchor="middle">→ "must have an entrypoint"</text>
+                        <text x="445" y="126" fill="#94a3b8" text-anchor="middle">X → typo（未注册节点）</text>
+                        <text x="445" y="140" fill="#fca5a5" text-anchor="middle" font-size="10">→ "unknown node"</text>
+                    </svg>
+                    <div class="cap">图注：入口缺失是最常见的新手错误，validate 用一句 <code>START not in all_sources</code> 就兜住。</div>
+                </div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>custom / debug 模式</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>两处设计取舍 + 一处边界</h1></div>
             <div class="card">
-                <table class="k">
-                    <tr><th>模式</th><th>吐什么</th></tr>
-                    <tr><td><code>custom</code></td><td>节点内用 <code>get_stream_writer()</code> 主动推送的自定义进度（如"已处理 30/100"）</td></tr>
-                    <tr><td><code>debug</code></td><td>最详尽的调试事件（任务开始/结束、检查点等）</td></tr>
-                </table>
-                <div class="baby"><span class="t">custom = 你自己往流里塞消息</span>
-                有时你想推送的不是状态、不是 token，而是<strong>你自定义的进度信息</strong>——比如工具在处理一个大文件，你想每处理 10% 就告诉前端。<code>custom</code> 模式让你在节点里用 <code>get_stream_writer()("已完成 30%")</code> 主动往流里塞任何东西。<strong>五种模式可以组合（传 list），一次 stream 同时拿到 token + 节点更新 + 自定义进度。</strong></div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍①：为什么把入口/出口做成"虚拟节点"，而不是单独的属性？</span>
+                朴素做法：建造器上加 <code>entry_point</code> / <code>finish_points</code> 属性。LangGraph 选择<strong>用 START/END 两个虚拟节点 + 普通边</strong>表达。<strong>好处</strong>：全图只有"边"一种关系——校验、可视化、Pregel 调度、条件边返回 END……全部复用同一套机制，没有特例分支；甚至"条件入口"也自然地变成 <code>add_conditional_edges(START, ...)</code>。<strong>代价</strong>：START/END 是"看起来像节点、其实不是节点"的特殊存在，新手会疑惑"它对应哪个函数"——需要像今天这样点破"它们只是保留字符串"。用一点认知成本，换整套机制的统一，划算。</div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍②：为什么"入口缺失"是硬错误，"出口缺失"却不是？</span>
+                <code>validate</code> 强制 START 必须是某条边起点，却<strong>不要求</strong>必须有边通向 END。<strong>为什么</strong>：没有入口的图<strong>根本无从开始</strong>——这是逻辑上不可能运行的死图，必须拦。而"没有显式 END"是合法的：带环的 Agent 常常靠"条件边动态返回 END""递归上限（D17）""人在环中断"来停止，不一定有静态的 <code>x→END</code> 边。强制要求 END 边反而会误伤这些合理形态。所以两者松紧不同，是按"是否逻辑上必须"来定的。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：单起点 add_edge 不检查节点是否存在，靠 compile 兜底</span>L04 看到：<strong>单起点</strong>普通边 <code>add_edge("A", "B")</code> 时，源码<strong>不</strong>检查 A/B 是否已 add_node（只有汇合边和某些路径才检查）。这意味着你可以先连边、后加节点，顺序很自由——但代价是<strong>拼错节点名不会当场报错</strong>，要等到 compile 的 <code>validate</code> 才抛 "unknown node"。如果你 <code>add_edge(START, "modle")</code>（把 model 拼错了），搭图时静悄悄，compile 时才炸。排查"unknown node"报错时，第一嫌疑就是<strong>边里的节点名和 add_node 的名字对不上</strong>（含大小写、下划线）。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>yield 从何而来</h1></div>
-            <div class="card">
-                <p>回到 Day 08 的驱动循环：</p>
-<pre><code class="language-python">while loop.tick():
-    for _ in runner.tick(tasks, ...):
-        yield from _output(...)     # ★ 这里！执行中的产出被 yield 出来
-    loop.after_tick()</code></pre>
-                <div class="glossary"><b>闭环回到引擎</b>：你在 Day 08 见过这个 <code>yield from _output(...)</code> 却没深究。<strong>现在明白了：正是它把执行过程中的产出（按 stream_mode 过滤成 token/更新/状态）一块块 yield 给外层的 <code>for chunk in graph.stream(...)</code>。</strong>流式不是额外功能，而是驱动循环<strong>本来就在边跑边 yield</strong>——<code>invoke</code> 其实是"把 stream 的产出收集起来只返回最后一个"。<strong>理解引擎，流式就是顺理成章的产物。</strong></div>
-            </div>
-        </section>
-
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 阶段 3 回顾 + 明日预告</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>流式解决什么体验问题？</li>
-                    <li>values / updates / messages 三种主力模式各吐什么？</li>
-                    <li>逐字打字机效果用哪个模式？</li>
-                    <li>custom 模式干嘛？模式能组合吗？</li>
-                    <li>stream 的 yield 来自引擎的哪一行？invoke 和 stream 的关系？</li>
+                    <li>START / END 本质是什么？（<code>constants.py</code> 里 <code>"__start__"</code>/<code>"__end__"</code> 两个保留字符串）</li>
+                    <li>为什么用 <code>sys.intern</code>？（字符串驻留，让频繁的相等判断走指针比较，提速）</li>
+                    <li>set_entry_point 和 add_edge(START, k) 的关系？（前者就是后者的语法糖，完全等价）</li>
+                    <li>add_edge 有哪些方向护栏？（END 不能当起点、START 不能当终点）</li>
+                    <li>validate 怎么判断图有没有入口？（<code>START not in all_sources</code> 就报 "must have an entrypoint"）</li>
+                    <li>为什么入口缺失报错、出口缺失不报错？（没入口逻辑上无法运行；没显式 END 可靠条件边/上限/中断停止）</li>
+                    <li>拼错节点名什么时候才报错？（单起点边不当场查，等 compile 的 validate 抛 unknown node）</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">P=libs/langgraph/langgraph
-sed -n '120,134p' $P/types.py            # StreamMode 定义
-grep -n 'def stream\b\|stream_mode' $P/pregel/main.py | head</code></pre>
-                <div class="tip"><strong>明天预告 · Day 19</strong>：<strong>部署与 Platform</strong>——从本地图到线上服务：langgraph-cli、langgraph.json、LangGraph Platform/Server 怎么把你的图变成带 API、持久化、任务队列的生产服务。</div>
+                <h3>🗺️ 阶段 3「控制流」五天回顾</h3>
+                <table class="fld">
+                    <thead><tr><th>天</th><th>一句话</th></tr></thead>
+                    <tbody>
+                        <tr><td>D13/14</td><td>条件边：路由函数决定下一步去哪，编译成对 branch 通道的动态写入</td></tr>
+                        <tr><td>D15</td><td>Command：节点直接返回"更新+跳转"，跨节点/跨子图控制</td></tr>
+                        <tr><td>D16</td><td>Send：动态扇出，一个节点派生 N 个并行任务（map-reduce）</td></tr>
+                        <tr><td>D17</td><td>递归上限：超步计数 step/stop 兜底，防死循环，GraphRecursionError</td></tr>
+                        <tr><td>D18</td><td>START/END 虚拟节点：把入口出口也统一成"边"，validate 校验入口</td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">🍼 阶段 3 直觉</span>控制流的一切——分支、跳转、扇出、循环、入口出口——在 LangGraph 里都被<strong>统一成"往通道写值 / 订阅通道触发"</strong>。理解这句，你就为阶段 4 深入 Pregel 引擎做好了准备。</div>
+                <div class="essence"><span class="t">💡 明日预告 · Day 19（进入阶段 4 深水区）</span>阶段 1-3 你已把"图怎么搭、状态怎么流、控制怎么走"全部看穿。明天起进入最硬核的阶段 4「Pregel 执行引擎」：D19 讲 BSP/超步模型——为什么图要一"超步"一"超步"地跑、<code>pregel/__init__.py</code> 的 <code>Pregel</code> 类总览，把前面反复提到的"通道触发""超步"正式讲透。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="langgraph-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 ToolNode</a>
-                <a href="langgraph-day19.html" style="color:var(--accent-green);">Day 19 · 部署与 Platform &rarr;</a>
+                <a href="langgraph-day17.html" style="color:var(--accent-cyan);">&larr; Day 17 · 循环与递归上限</a>
+                <a href="langgraph-day19.html" style="color:var(--accent-green);">Day 19 · Pregel / BSP 模型 &rarr;</a>
             </div>
         </section>
     </main>

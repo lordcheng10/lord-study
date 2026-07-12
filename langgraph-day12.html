@@ -3,29 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Day 12 · CheckpointSaver 与 threads — LangGraph 源码学习</title>
+    <title>Day 12 · Pydantic State（校验、字段重映射、coerce）— LangGraph 60 天深度版</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <style>
-        .glossary { border-left:3px solid var(--accent-cyan); background:rgba(6,182,212,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .glossary b { color:var(--accent-cyan); }
-        .baby { border-left:3px solid var(--accent-green); background:rgba(34,197,94,.06); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:13px; }
-        .baby .t { font-weight:700; color:var(--accent-green); display:block; margin-bottom:4px; }
-        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
-        table.k{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
-        table.k th{text-align:left;padding:7px 8px;border-bottom:2px solid var(--border-color);color:#6366f1}
-        table.k td{padding:7px 8px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)} table.k code{font-size:11px}
-        /* —— 改进版新增组件 —— */
         .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
         .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
         .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
         .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
         .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
         .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
         .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -34,6 +29,25 @@
         .journey .sep{color:var(--text-muted);font-size:12px}
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple,#a855f7)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -41,190 +55,277 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">12</div>
             <h2>Day 12</h2>
-            <p class="version">CheckpointSaver 与 threads · 8 讲</p>
+            <p class="version">Pydantic State · 7 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
-            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Saver 是什么</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 抽象接口</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · thread_id 隔离</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · InMemorySaver</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Sqlite/Postgres</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · get_state / list</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 多会话实战</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要校验状态</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 真实压测状态长啥样</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · coerce：每步都 validate</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 字段名保留字冲突</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 谁算"pydantic 支持"</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 取舍与边界</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
-            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 Checkpoint</a></li>
-            <li><a href="langgraph-tutorial.html" class="nav-link">20 天总目录</a></li>
-            <li><a href="langgraph-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 时间旅行 &rarr;</a></li>
+            <li><a href="langgraph-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 输入/输出 schema</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 普通边 vs 条件边 &rarr;</a></li>
         </ul>
     </nav>
     <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 12 / 共 20 天 · 第 3 周 持久化与人在环</span>
-            <h1 class="part-title">CheckpointSaver 与 threads</h1>
-            <p class="part-desc">检查点存哪里、怎么存？读 <code>BaseCheckpointSaver</code> 抽象接口和它的三种实现，理解 <code>thread_id</code> 怎么把多个独立会话隔离开。</p>
+            <span class="part-label">Day 12 / 共 60 天 · 阶段 2 状态与数据流</span>
+            <h1 class="part-title">Pydantic State：带校验的状态，代价是什么</h1>
+            <p class="part-desc">前面状态都用 <code>TypedDict</code>——轻，但没有运行时校验（塞进去一个类型不对的值它不管）。把状态换成 <strong>Pydantic <code>BaseModel</code></strong>，就能在每次进节点前自动校验、类型强转、跑 <code>field_validator</code>。今天从官方压测文件 <code>bench/pydantic_state.py</code> 看真实的 Pydantic 状态怎么写，再钻进 <code>graph/state.py</code> 和 <code>_internal/_pydantic.py</code>，看它是<strong>怎么在每个超步把 dict 强转成模型实例（每次都 validate）</strong>，以及一个隐蔽但重要的坑——字段名撞上 pydantic 保留字时的自动重映射。</p>
         </div>
 
-        <div class="journey"><div class="jt">📍 你在整门课的位置</div>
-        <div class="steps"><span class="st">Checkpoint</span><span class="sep">→</span><span class="st on">Saver·threads</span><span class="sep">→</span><span class="st">时间旅行</span><span class="sep">→</span><span class="st">人在环</span></div></div>
+        <div class="journey">
+            <div class="jt">📍 阶段 2「状态与数据流」(D07-12) · 你在第 12 天（收官）</div>
+            <div class="steps">
+                <span class="st">D07 reducers</span><span class="sep">→</span>
+                <span class="st">D08 add_messages</span><span class="sep">→</span>
+                <span class="st">D09 累加通道</span><span class="sep">→</span>
+                <span class="st">D10 并行写</span><span class="sep">→</span>
+                <span class="st">D11 输入/输出</span><span class="sep">→</span>
+                <span class="st on">D12 Pydantic</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 一句话锚点</span>
+        用 Pydantic 当状态，等于给状态加了一道"安检门"：每次<strong>节点读状态</strong>时，LangGraph 会把内部那份状态 dict 用 <code>Schema(**dict)</code> 重新构造成模型实例——这一步<strong>自动触发 pydantic 的类型校验和你写的 <code>field_validator</code></strong>。好处是脏数据进不来、错误早暴露；代价是每个超步、每个节点都要 validate 一遍，字段多时是实打实的开销（所以官方专门有 bench 压它）。</div>
 
         <section id="l01" class="section">
-            <div class="section-header"><span class="section-number">L01</span><h1>Saver 是什么</h1></div>
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：TypedDict 不校验，脏数据静悄悄溜进来</h1></div>
             <div class="card">
-                <div class="ask"><span class="t">🤔 痛点：一个服务同时服务上千用户，状态怎么分开存？</span>光有"存档"还不够——存到哪？内存还是数据库？更棘手的是：小明的对话和小红的对话都在同一个进程里跑，<strong>凭什么不会串台？</strong>难道要我自己维护一个 <code>{用户: 状态}</code> 的大字典？</div>
-                <div class="essence"><span class="t">💡 本质：Saver 管"存哪种后端"，thread_id 管"存哪个槽位"</span>两个正交的维度：<strong>Saver（后端）决定检查点落在内存/SQLite/Postgres；thread_id（槽位）决定这份检查点属于哪个会话</strong>。你只要给每个用户一个 thread_id，隔离和持久化引擎全自动搞定，不用手写任何会话管理。</div>
-                <p>Day 11 讲了检查点<em>是什么</em>，今天讲它<em>存哪儿</em>。<code>CheckpointSaver</code>（检查点存储器）负责把检查点写入/读出某种后端（内存、SQLite、Postgres……）。编译时传入：</p>
-<pre><code class="language-python">from langgraph.checkpoint.memory import InMemorySaver
-graph = builder.compile(checkpointer=InMemorySaver())   # 插上"存档器"
-graph.invoke(input, {"configurable": {"thread_id": "user-42"}})  # 指定存档槽位</code></pre>
-                <div class="anno">读法：<b>compile 时插上 checkpointer，图就获得了"存档能力"；invoke 时用 <code>thread_id</code> 指定"存到哪个会话"。</b>不传 checkpointer → 图无记忆，每次从头（Day 01-10 的默认）。</div>
-                <div class="anno">⚠️ <b>错误驱动：不传 checkpointer 会出什么事故？</b>做一个客服机器人却忘了插 checkpointer——用户说"我叫小明"，下一句问"我叫啥"，它<b>一脸懵</b>：每次 invoke 都是全新一局、毫无记忆。更糟的是聊到一半进程重启，整段对话直接蒸发。加上 checkpointer 才有"记性"。</div>
+                <div class="ask"><span class="t">🤔 痛点</span><code>TypedDict</code> 的类型标注只是"给人和 IDE 看的注释"，<strong>运行时不强制</strong>。你的字段声明 <code>count: int</code>，某个节点因为 bug 返回了 <code>{"count": "3"}</code>（字符串），TypedDict 状态照单全收，直到几步之后 <code>count + 1</code> 报 <code>TypeError</code>——离出错点已经很远，极难定位。你想要的是"<strong>脏值一进状态就报错</strong>"。</div>
+                <div class="essence"><span class="t">💡 本质：把"数据契约"变成运行时强制</span>Pydantic 模型在<strong>构造实例的那一刻</strong>校验每个字段：类型不符尝试强转（<code>"3"</code>→<code>3</code>）、强转不了就抛 <code>ValidationError</code>、还会跑你定义的 <code>@field_validator</code> 自定义规则。LangGraph 的做法是：内部照旧用通道存 dict（省内存、好合并），但<strong>每次把状态交给节点前，临时构造一次模型实例</strong>，借这次构造完成校验。</div>
+                <div class="baby"><span class="t">大白话</span>TypedDict 是"口头约定，违约不管"；Pydantic 是"合同+门卫，进门就查证件"。查证件的时机就是"节点拿到 state 之前"。</div>
             </div>
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>抽象接口</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>真实的 Pydantic 状态：bench/pydantic_state.py</h1></div>
             <div class="card">
-                <p><code>BaseCheckpointSaver</code>（<code>checkpoint/base/__init__.py</code>）定义了统一接口，所有后端实现它：</p>
-                <table class="k">
-                    <tr><th>方法</th><th>作用</th></tr>
-                    <tr><td><code>put</code></td><td>存一个检查点（Day 08 after_tick 调）· <code>base/__init__.py</code> L277</td></tr>
-                    <tr><td><code>put_writes</code></td><td>存 pending writes（Day 11 半完成保护）· L300</td></tr>
-                    <tr><td><code>get_tuple</code></td><td>读某检查点（恢复用）· L239</td></tr>
-                    <tr><td><code>list</code></td><td>列出某 thread 的所有检查点（时间旅行用，Day 13）· L253</td></tr>
-                </table>
-                <div class="baby"><span class="t">又是"接口/实现分离"（老朋友了）</span>
-                和 eino 的 ChatModel、AutoGPT 的 Block、crewAI 的 LLM 一样：<strong>Pregel 引擎只依赖 <code>BaseCheckpointSaver</code> 这个抽象接口（put/get/list），完全不关心底层是内存还是数据库。</strong>换存储后端 = 换一个实现类，引擎代码一行不改。<strong>开发时用 InMemory、生产用 Postgres，图逻辑完全一样——这就是抽象接口的价值。</strong>贯穿所有框架的同一设计哲学。</div>
+                <p>官方拿来做性能压测的状态，正是一个"字段多、每个都带校验"的 Pydantic 模型。节选前几个字段：</p>
+                <div class="fileref">libs/langgraph/bench/pydantic_state.py:14-56</div>
+<pre><code class="language-python">class State(BaseModel):
+    messages: Annotated[list, operator.add] = Field(default_factory=list)
+
+    @field_validator("messages", mode="after")
+    @classmethod
+    def validate_messages(cls, v):
+        if not isinstance(v, list):
+            raise TypeError("messages must be a list")
+        for msg in v:
+            if not isinstance(msg, dict):
+                raise TypeError("messages must be a list of dicts")
+        return v
+
+    trigger_events: Annotated[list, operator.add] = Field(default_factory=list)
+    ...
+    primary_issue_medium: Annotated[str, lambda x, y: y or x] = Field(default="email")
+    autoresponse: Annotated[dict | None, lambda _, y: y] = Field(default=None)  # 总是覆盖</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Annotated[list, operator.add]</code><span>★注意：reducer 照样写在 <code>Annotated</code> 里（D05 的嗅探对 Pydantic 字段一样有效）。<code>= Field(default_factory=list)</code> 是 pydantic 的默认值语法。两套机制叠加，互不冲突。</span></div>
+                    <div class="r"><code>@field_validator(mode="after")</code><span>pydantic 的自定义校验：<code>after</code> 表示在类型转换<b>之后</b>再跑你的检查（这里确保 messages 是"list of dicts"）。这些校验会在每次构造实例时执行。</span></div>
+                    <div class="r"><code>lambda x, y: y or x</code><span>reducer 写成 lambda，恰好 2 个位置参数——满足 D05 的"数参数"规则。<code>y or x</code> = 有新值用新值、否则保留旧值。</span></div>
+                    <div class="r"><code>为什么拿它做 bench</code><span>因为它有十几个字段、每个都带 validator——是"Pydantic 状态开销"的放大镜。压测就是要量"每步都 validate 一遍"到底多贵。</span></div>
+                </div>
+                <p>它的建图部分和 TypedDict 完全一样（Pydantic 只是换了 state 的"壳"）：</p>
+                <div class="fileref">libs/langgraph/bench/pydantic_state.py:249-297（节选）</div>
+<pre><code class="language-python">    builder = StateGraph(State)                 # 直接把 BaseModel 当 state
+    builder.add_edge(START, "one")
+    builder.add_node("one", partial(read_write, "messages", ["trigger_events", ...]))
+    ...
+    builder.add_conditional_edges(
+        "six", lambda state: END if len(state.messages) > n else "one")   # 注意 state.messages 属性访问</code></pre>
+                <div class="anno"><b>看这行 <code>state.messages</code></b>：TypedDict 状态是 <code>state["messages"]</code>（下标），Pydantic 状态是 <code>state.messages</code>（属性）。因为节点拿到的是<b>模型实例</b>不是 dict——这正是 L03 那次"coerce"的产物。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 200" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：同一份状态，两种"壳"</text>
+                        <rect x="30" y="36" width="255" height="150" rx="10" fill="rgba(148,163,184,.06)" stroke="#64748b"/>
+                        <text x="157" y="56" fill="#cbd5e1" text-anchor="middle" font-weight="700">TypedDict 状态</text>
+                        <text x="157" y="80" fill="#94a3b8" text-anchor="middle">通道存 dict</text>
+                        <text x="157" y="98" fill="#94a3b8" text-anchor="middle">节点直接拿到 dict</text>
+                        <text x="157" y="120" fill="#86efac" text-anchor="middle">state["count"]（下标）</text>
+                        <text x="157" y="146" fill="#64748b" text-anchor="middle" font-size="10">无 mapper · 无校验</text>
+                        <text x="157" y="164" fill="#64748b" text-anchor="middle" font-size="10">最快，脏值不拦</text>
+                        <rect x="315" y="36" width="255" height="150" rx="10" fill="rgba(236,72,153,.07)" stroke="#ec4899"/>
+                        <text x="442" y="56" fill="#f472b6" text-anchor="middle" font-weight="700">Pydantic 状态</text>
+                        <text x="442" y="80" fill="#94a3b8" text-anchor="middle">通道仍存 dict</text>
+                        <text x="442" y="98" fill="#94a3b8" text-anchor="middle">进节点前 State(**dict)</text>
+                        <text x="442" y="120" fill="#86efac" text-anchor="middle">state.count（属性）</text>
+                        <text x="442" y="146" fill="#64748b" text-anchor="middle" font-size="10">每步 coerce · 每步校验</text>
+                        <text x="442" y="164" fill="#64748b" text-anchor="middle" font-size="10">较慢，脏值挡门外</text>
+                        <text x="300" y="196" fill="#64748b" text-anchor="middle">底层都是 dict，区别在"交给你函数前要不要构造实例+校验"</text>
+                    </svg>
+                    <div class="cap">图注：Pydantic 只是在节点入口多套了一层"构造实例"的壳，通道底层存储没变。</div>
+                </div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>thread_id 隔离</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>核心：每次读状态都 coerce 成实例（=validate）</h1></div>
             <div class="card">
-                <p>检查点按 <code>thread_id</code> 分组存储。每个 thread_id 是一条<strong>独立的检查点时间线</strong>——互不干扰。</p>
-                <div class="svgbox">
-                <svg viewBox="0 0 600 190" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
-                    <text x="10" y="18" fill="#bbb" font-size="12">同一个 Saver 里，不同 thread_id 各是一条独立的检查点链，互不可见</text>
-                    <!-- thread A -->
-                    <rect x="14" y="40" width="120" height="30" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
-                    <text x="74" y="60" fill="#e5e5e5" font-size="12" text-anchor="middle">thread_id = "A"</text>
-                    <rect x="170" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
-                    <text x="200" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A0</text>
-                    <rect x="270" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
-                    <text x="300" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A1</text>
-                    <rect x="370" y="40" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
-                    <text x="400" y="60" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt A2</text>
-                    <line x1="230" y1="55" x2="270" y2="55" stroke="#6366f1" stroke-width="1.5"/>
-                    <line x1="330" y1="55" x2="370" y2="55" stroke="#6366f1" stroke-width="1.5"/>
-                    <!-- 隔离线 -->
-                    <line x1="14" y1="95" x2="586" y2="95" stroke="#444" stroke-width="1" stroke-dasharray="5 4"/>
-                    <text x="500" y="90" fill="#f59e0b" font-size="10">🔒 相互隔离</text>
-                    <!-- thread B -->
-                    <rect x="14" y="120" width="120" height="30" rx="8" fill="#2a2a3a" stroke="#8b5cf6"/>
-                    <text x="74" y="140" fill="#e5e5e5" font-size="12" text-anchor="middle">thread_id = "B"</text>
-                    <rect x="170" y="120" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
-                    <text x="200" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt B0</text>
-                    <rect x="270" y="120" width="60" height="30" rx="7" fill="#2a2a3a" stroke="#34d399"/>
-                    <text x="300" y="140" fill="#e5e5e5" font-size="10" text-anchor="middle">ckpt B1</text>
-                    <line x1="230" y1="135" x2="270" y2="135" stroke="#6366f1" stroke-width="1.5"/>
-                    <text x="10" y="178" fill="#bbb" font-size="11">invoke 时的 config 带哪个 thread_id，引擎就加载/追加哪条链</text>
-                </svg>
-                <div class="cap">thread_id 把一个 Saver 切成互不干扰的多条时间线</div>
+                <p>D04 讲 <code>attach_node</code> 时见过一个 <code>mapper</code>，注释写着"coerce state dict to schema class (eg. pydantic model)"。它由 <code>_pick_mapper</code> 挑出：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1718-1732</div>
+<pre><code class="language-python">def _pick_mapper(state_keys, schema):
+    if state_keys == ["__root__"]:
+        return None
+    if isclass(schema) and (issubclass(schema, BaseModel) or is_dataclass(schema)):
+        return partial(_coerce_state, schema)      # ★是 Pydantic/dataclass → 用 coerce
+    return None                                    # 是 TypedDict → 不转，直接给 dict
+
+_S = TypeVar("_S")
+
+def _coerce_state(schema, input: dict) -> _S:
+    return schema(**input)                         # ★关键：用 dict 构造模型实例</code></pre>
+                <div class="walk">
+                    <div class="r"><code>schema 是 BaseModel</code><span>只有状态是 Pydantic（或 dataclass）时才返回 mapper；TypedDict 返回 None（不转换，节点直接拿 dict，无校验开销）。</span></div>
+                    <div class="r"><code>schema(**input)</code><span>★整个 Pydantic 校验的"引爆点"就这一行。把内部状态 dict 展开成关键字参数构造模型——<b>pydantic 在这一步做全部校验 + 强转 + 跑 field_validator</b>。脏数据在这里就会抛 ValidationError。</span></div>
+                    <div class="r"><code>每个节点读状态都调</code><span>D04 学过：节点被触发时，引擎用它的 <code>channels</code> 读出状态 dict，再过 mapper。所以<b>每次进节点 = 构造一次实例 = validate 一次</b>。</span></div>
                 </div>
-                <div class="example"><span class="t">📝 例子：用 config 指定会话，状态自动累积</span>
-<pre><code class="language-python">config = {"configurable": {"thread_id": "user-42"}}
-graph.invoke({"messages":[HumanMessage("记住：我喜欢猫")]}, config)
-graph.invoke({"messages":[HumanMessage("我喜欢啥?")]}, config)
-# 第二次同一个 thread_id → 引擎自动加载上一份检查点 → 能答"猫"
-# 换成 thread_id="user-99" → 全新时间线，完全不知道"猫"</code></pre></div>
-                <div class="ask"><span class="t">💬 小白 vs 老师：上千用户为什么不会串台？</span>
-                👶 <b>小白</b>：所有用户都在同一个进程、同一个 Saver 里，凭啥小明的话不会跑到小红的对话里？<br>
-                👨‍🏫 <b>老师</b>：因为读写检查点时<b>必须带 thread_id 当索引</b>。就像生活中不同玩家在同一台游戏机上各有各的<b>存档槽位</b>——小明存进"槽 A"、小红存进"槽 B"，加载时按各自槽位取，物理上就取不到别人的。你只要保证"一个用户一个 thread_id"，隔离是引擎替你保证的。</div>
-                <div class="baby"><span class="t">thread = 一个独立的对话/会话</span>
-                想象一个客服机器人同时服务 1000 个用户。<strong>每个用户一个 <code>thread_id</code>——他们的对话历史（检查点）各存各的，绝不串台。</strong>用户 A 发消息用 <code>thread_id="A"</code>，图自动加载 A 的历史、接着聊；用户 B 用 <code>"B"</code>，是全新的另一条线。<strong>这就是 LangGraph 做"多用户记忆"的方式：不用你手动管理会话字典，thread_id + checkpointer 自动搞定持久化和隔离。</strong>换个 thread_id 就是换个记忆空间。</div>
+                <p>它挂载在 PregelNode 的 <code>mapper</code> 上（D04 见过的那段）：</p>
+                <div class="fileref">libs/langgraph/langgraph/graph/state.py:1506-1523（节选）</div>
+<pre><code class="language-python">            if input_schema in self.schema_to_mapper:
+                mapper = self.schema_to_mapper[input_schema]      # 缓存：同 schema 复用
+            else:
+                mapper = _pick_mapper(input_channels, input_schema)
+                self.schema_to_mapper[input_schema] = mapper
+            self.nodes[key] = PregelNode(
+                ...
+                mapper=mapper,     # 读出 dict 后，用它 coerce 成模型实例交给你的函数
+                bound=node.runnable)</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 190" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：节点读状态时的 coerce/validate 关卡</text>
+                        <rect x="30" y="60" width="130" height="50" rx="9" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/><text x="95" y="82" fill="#93c5fd" text-anchor="middle">通道里的状态</text><text x="95" y="98" fill="#94a3b8" text-anchor="middle" font-size="10">{"count":"3", ...}</text>
+                        <rect x="230" y="52" width="150" height="66" rx="9" fill="rgba(236,72,153,.13)" stroke="#ec4899"/><text x="305" y="76" fill="#f472b6" text-anchor="middle" font-weight="700">mapper</text><text x="305" y="94" fill="#94a3b8" text-anchor="middle" font-size="10">State(**dict)</text><text x="305" y="110" fill="#94a3b8" text-anchor="middle" font-size="10">校验+强转+validator</text>
+                        <rect x="450" y="60" width="140" height="50" rx="9" fill="rgba(34,197,94,.12)" stroke="#22c55e"/><text x="520" y="82" fill="#86efac" text-anchor="middle">你的节点函数</text><text x="520" y="98" fill="#94a3b8" text-anchor="middle" font-size="10">拿到 State 实例</text>
+                        <path d="M160 85 L228 85" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a12)"/>
+                        <path d="M380 85 L448 85" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a12)"/>
+                        <text x="305" y="140" fill="#fca5a5" text-anchor="middle" font-size="10">"3"→3 强转成功；类型不可转→抛 ValidationError（脏数据挡在门外）</text>
+                        <defs><marker id="a12" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#94a3b8"/></marker></defs>
+                        <text x="310" y="168" fill="#64748b" text-anchor="middle">TypedDict 状态：没有 mapper，dict 直达节点（无此关卡、无开销）</text>
+                    </svg>
+                    <div class="cap">图注：Pydantic 的安全性来自这道每步都过的关卡；TypedDict 省掉了它，换来速度、失去校验。</div>
+                </div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>InMemorySaver</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>隐蔽坑：字段名撞 pydantic 保留字会被重映射</h1></div>
             <div class="card">
-                <p><code>InMemorySaver</code>（<code>checkpoint/memory/</code>）把检查点存进内存字典（按 thread_id → checkpoint_id 嵌套）。进程结束即丢——适合开发、测试、单元测试。</p>
-                <div class="anno">读法：<b>最简单的实现，零依赖、零配置，验证逻辑用。</b>它证明了接口的完整性：连纯内存字典都能撑起完整的持久化/时间旅行 API。生产别用（重启就没了）。</div>
+                <p>LangGraph 内部经常需要<strong>动态造一个 pydantic 模型</strong>（比如为 JSON schema、输入校验）。造模型时，如果你的字段名以 <code>_</code> 开头、或撞上 pydantic 的保留名（如 <code>schema</code>、<code>model_*</code>），会被自动改名：</p>
+                <div class="fileref">libs/langgraph/langgraph/_internal/_pydantic.py:152-178</div>
+<pre><code class="language-python">def _remap_field_definitions(field_definitions):
+    remapped = {}
+    for key, value in field_definitions.items():
+        if key.startswith("_") or key in _RESERVED_NAMES:      # 撞保留字/下划线开头
+            if isinstance(value, FieldInfo):
+                raise NotImplementedError("Remapping ... not supported if ... Field instance ...")
+            type_, default_ = value
+            remapped[f"private_{key}"] = (                     # ★改名成 private_xxx
+                type_,
+                Field(default=default_, alias=key,             # 但保留原名作为 alias
+                      serialization_alias=key,
+                      title=key.lstrip("_").replace("_", " ").title()))
+        else:
+            remapped[key] = value
+    return remapped</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_RESERVED_NAMES</code><span>由 <code>{key for key in dir(BaseModel) if not key.startswith("_")}</code> 动态算出（<span class="fileref">_pydantic.py:149</span>）——即 BaseModel 的所有公共方法名（schema/dict/json/copy/model_dump…）。你的字段不能叫这些。</span></div>
+                    <div class="r"><code>改名 private_key + alias</code><span>如果撞了，内部字段名改成 <code>private_xxx</code>，但用 <code>alias=key</code> 保住原名对外可见。这样序列化/反序列化时你仍看到原名。</span></div>
+                    <div class="r"><code>Field 实例不给改</code><span><b>边界</b>：若这个撞名字段的值是一个显式 <code>Field(...)</code> 实例，无法安全重映射，直接 <code>NotImplementedError</code>——宁可报错也不猜。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：别把状态字段命名成 <code>schema</code> / <code>model_name</code> / <code>copy</code> 这类</span>这些是 pydantic <code>BaseModel</code> 的保留公共名。用它们当字段名，轻则触发上面的重映射（行为变得难以预测）、重则和 pydantic 内部机制冲突。<code>create_model</code> 还专门对 <code>model</code> 开头的名字<strong>临时静音警告</strong>（<span class="fileref">_pydantic.py:233-240</span>），侧面说明这类命名是"已知雷区"。<strong>实践建议</strong>：状态字段名保持普通业务词（<code>question</code>/<code>answer</code>/<code>retry_count</code>），避开 <code>schema/json/dict/copy/model_*</code>。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>Sqlite / Postgres</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>谁算"pydantic 能处理的类型"</h1></div>
             <div class="card">
-                <p>生产级实现在独立包：</p>
-                <table class="k">
-                    <tr><th>包</th><th>后端</th><th>适用</th></tr>
-                    <tr><td><code>langgraph-checkpoint-sqlite</code></td><td>SQLite 文件</td><td>单机、本地持久化</td></tr>
-                    <tr><td><code>langgraph-checkpoint-postgres</code></td><td>Postgres</td><td>生产、多实例共享</td></tr>
-                </table>
-                <p>它们把 Day 11 的 Checkpoint 结构序列化（Day 15 讲 serde）后存进表；<code>list</code>/<code>get_tuple</code> 用 SQL 查询实现。API 与 InMemory 完全一致。</p>
-                <div class="anno">读法：<b>同一套接口的持久化后端。生产用 Postgres——多个服务实例连同一个库，Agent 状态天然共享、可水平扩展。</b>切换只需换 checkpointer 那一行。</div>
+                <p>LangGraph 用一个函数判断某个复杂类型能不能交给 pydantic 处理（决定要不要走校验路径）：</p>
+                <div class="fileref">libs/langgraph/langgraph/_internal/_pydantic.py:252-275</div>
+<pre><code class="language-python">def is_supported_by_pydantic(type_) -> bool:
+    if is_dataclass(type_):
+        return True
+    if isinstance(type_, type) and issubclass(type_, BaseModel):
+        return True
+    if hasattr(type_, "__orig_bases__"):
+        for base in type_.__orig_bases__:
+            if base is TypedDict:                    # typing_extensions.TypedDict
+                return True
+            elif base is typing.TypedDict:           # 标准库 typing.TypedDict
+                if sys.version_info >= (3, 12):      # 仅 3.12+ pydantic 才支持
+                    return True
+    return False</code></pre>
+                <div class="walk">
+                    <div class="r"><code>dataclass / BaseModel</code><span>直接支持——它们能被 pydantic 校验/内省。</span></div>
+                    <div class="r"><code>TypedDict 分两种</code><span>★细节：<code>typing_extensions.TypedDict</code> 全版本支持；标准库 <code>typing.TypedDict</code> 只有 <b>Python 3.12+</b> 的 pydantic 才认。这就是为什么 LangGraph 文档一直推荐 <code>from typing_extensions import TypedDict</code>——兼容老 Python。</span></div>
+                    <div class="r"><code>返回 False 的类型</code><span>裸 int/str 这种原始类型返回 False（注释明说"对原始类型返回 False"）——它们走 <code>__root__</code> 路径，不需要 pydantic 建模。</span></div>
+                </div>
+                <div class="baby"><span class="t">🍼 一句话</span>这个函数就是"要不要给这个 schema 上 pydantic 那套机器"的开关。理解它，你就知道为什么"用 <code>typing_extensions.TypedDict</code>"是一句有技术含义的建议，不是随便说说。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>get_state / get_state_history</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>两处设计取舍 + 一处边界</h1></div>
             <div class="card">
-                <p>Pregel 在 Saver 之上包了用户友好的 API（<code>main.py</code>）：</p>
-<pre><code class="language-python">cfg = {"configurable": {"thread_id": "user-42"}}
-snap = graph.get_state(cfg)              # 当前状态快照（StateSnapshot）
-for s in graph.get_state_history(cfg):   # 历史所有检查点（新→旧）
-    print(s.config, s.values, s.next)    # next = 接下来该跑的节点</code></pre>
-                <div class="anno">读法：<b><code>get_state</code>=读当前存档；<code>get_state_history</code>=列出这个 thread 的所有历史存档（底层调 saver.list）。</b><code>StateSnapshot</code> 带 <code>next</code>（下一步跑谁）和 <code>config</code>（含 checkpoint_id）——Day 13 时间旅行就用这个 config 精确定位到某一步。</div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍①：为什么内部存 dict、只在"进节点"时才 coerce 成模型？</span>
+                朴素做法：状态从头到尾都以模型实例存在。LangGraph 选择<strong>内部通道存 dict、只在交给节点前临时构造实例</strong>。<strong>好处</strong>：通道的合并（reducer）在 dict/原始值层面做最省事、最好序列化落盘（阶段 6 checkpoint 要存的是 dict 不是对象）；模型实例只是"给用户函数用的临时视图"。<strong>代价</strong>：每进一次节点就构造一次实例、validate 一次——字段多、超步多时开销可观（正是 <code>bench/pydantic_state.py</code> 要量化的）。这是"持久化友好 + 用户友好"与"运行开销"的权衡。</div>
+                <div class="tradeoff"><span class="t">🎨 设计取舍②：撞保留字为什么"自动重映射"而不直接报错？</span>
+                <code>_remap_field_definitions</code> 遇到撞名字段自动改成 <code>private_xxx</code> + alias。<strong>好处</strong>：LangGraph 内部大量<strong>动态</strong>造模型（用你的字段名当 pydantic 字段名），若某个业务字段恰好叫 <code>schema</code> 就直接崩，用户体验差；自动重映射让绝大多数情况"照常工作"。<strong>代价</strong>：重映射后字段的内部名和你写的不一致，出问题时调试更绕；且对 <code>Field</code> 实例这种没法安全重映射的情况仍要 <code>NotImplementedError</code>。所以它是"尽量兜住，兜不住才报错"的折中。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界：Pydantic 状态的校验是"每步都跑"，不是"只在入口跑一次"</span>很多人以为校验只发生在 <code>invoke</code> 输入那一下。实际上因为 coerce 挂在<strong>每个节点的 mapper</strong> 上，状态在图里流转 N 个超步，就会被 validate N 次。这意味着：① 你的 <code>field_validator</code> 若很重（比如做正则、查表），会被反复执行，成为热点；② 如果某个内部节点写回了一个<strong>暂时不满足 validator</strong> 的中间态，下一个节点读时就会抛 ValidationError——即使这个中间态本打算马上被修正。排查性能或"莫名 ValidationError"时，记住这条"每步都验"的事实。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>多会话实战</h1></div>
-            <div class="card">
-<pre><code class="language-python">graph = builder.compile(checkpointer=InMemorySaver())
-
-# 会话 A：连续两轮，自动记住上一轮
-graph.invoke({"messages":[HumanMessage("我叫小明")]}, {"configurable":{"thread_id":"A"}})
-graph.invoke({"messages":[HumanMessage("我叫啥?")]}, {"configurable":{"thread_id":"A"}})
-# → 第二轮能答"小明"，因为 add_messages 累加了 A 的历史（Day 03 + Day 11）
-
-# 会话 B：全新记忆，不知道小明
-graph.invoke({"messages":[HumanMessage("我叫啥?")]}, {"configurable":{"thread_id":"B"}})
-# → 答不上来，B 是独立时间线</code></pre>
-                <div class="anno">读法：<b>这就是"聊天机器人记住上下文"的完整机制：checkpointer 存历史 + add_messages 累加 + thread_id 隔离。三者合起来，你几乎不用写记忆管理代码。</b></div>
-            </div>
-        </section>
-
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 + 明日预告</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
-                    <li>Saver 干什么？怎么给图插上它？</li>
-                    <li>BaseCheckpointSaver 的 put/get_tuple/list 各干嘛？</li>
-                    <li>thread_id 起什么作用？（会话隔离/多用户记忆）</li>
-                    <li>InMemory vs Sqlite vs Postgres 怎么选？</li>
-                    <li>get_state / get_state_history 返回什么？</li>
+                    <li>Pydantic 状态相比 TypedDict 多了什么？（运行时校验 + 类型强转 + field_validator）</li>
+                    <li>校验在哪一步、哪一行触发？（节点读状态时 mapper 调 <code>_coerce_state</code> → <code>schema(**dict)</code>）</li>
+                    <li>校验跑几次？（每个节点每次被触发都跑一次，不是只入口一次）</li>
+                    <li>为什么内部还是存 dict？（便于 reducer 合并 + checkpoint 序列化，实例只是临时视图）</li>
+                    <li>Pydantic 状态里 reducer 怎么写？（照样 <code>Annotated[类型, reducer]</code>，和 Field 默认值并存）</li>
+                    <li>为什么推荐 <code>typing_extensions.TypedDict</code>？（标准库 typing.TypedDict 仅 3.12+ 被 pydantic 支持）</li>
+                    <li>字段名不能叫什么？（pydantic 保留名 schema/dict/json/copy/model_* 等，会被重映射或冲突）</li>
                 </ul>
-                <div class="baby"><span class="t">🎯 一句话复述 + 记忆口诀</span>
-                一句话：<b>Saver 决定存档放哪种硬盘（内存/SQLite/Postgres），thread_id 决定存进哪个玩家的槽位——两件事互不干扰。</b><br>
-                口诀：<b>"Saver 选后端，thread 分槽位；换库改一行，隔离不用愁。"</b></div>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash">C=libs/checkpoint/langgraph/checkpoint
-grep -n 'class BaseCheckpointSaver' $C/base/__init__.py
-grep -n 'def put\b\|def get_tuple\|def list\b' $C/base/__init__.py
-ls $C/memory/</code></pre>
-                <div class="tip"><strong>明天预告 · Day 13</strong>：<strong>时间旅行与断点</strong>——既然每步都存了检查点、还能 list 出历史，那就能"读档到任意一步重新出发"。看 checkpoint_id 定位 + interrupt_before/after 断点。</div>
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读真实压测状态（字段多+每个带 validator）
+sed -n '14,70p' libs/langgraph/bench/pydantic_state.py
+
+# 2. 看 coerce 引爆点：schema(**input)
+sed -n '1718,1732p' libs/langgraph/langgraph/graph/state.py
+
+# 3. 看保留字重映射 + 支持判定
+sed -n '152,178p' libs/langgraph/langgraph/_internal/_pydantic.py
+sed -n '252,275p' libs/langgraph/langgraph/_internal/_pydantic.py
+
+# 4. 亲手感受"脏数据被挡在门外"
+python3 -c "
+from langgraph.graph import StateGraph, START, END
+from pydantic import BaseModel
+class S(BaseModel):
+    count: int
+def bad(s): return {'count': 'not-an-int'}   # 故意写脏值
+g=StateGraph(S); g.add_node('n', bad); g.add_edge(START,'n'); g.add_edge('n',END)
+try:
+    g.compile().invoke({'count': 1})
+except Exception as e:
+    print(type(e).__name__, '被拦住了')   # 下一个节点读到脏值时 ValidationError
+"</code></pre>
+                <div class="essence"><span class="t">💡 明日预告 · Day 13（进入阶段 3）</span>阶段 2 到此结束——你已吃透"状态怎么定义、怎么合并、怎么校验、对外怎么收发"。明天进入阶段 3「控制流」：D13 讲普通边和条件边的区别，钻进 <code>graph/_branch.py</code> 的 <code>add_conditional_edges</code>，看那个决定"下一步去哪"的路由函数是怎么被解析和执行的。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
-                <a href="langgraph-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 Checkpoint</a>
-                <a href="langgraph-day13.html" style="color:var(--accent-green);">Day 13 · 时间旅行与断点 &rarr;</a>
+                <a href="langgraph-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 · 输入/输出 schema</a>
+                <a href="langgraph-day13.html" style="color:var(--accent-green);">Day 13 · 普通边 vs 条件边 &rarr;</a>
             </div>
         </section>
     </main>
