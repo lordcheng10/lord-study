@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 19 · 任务队列与可观测 — Dify 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #1c64f2;background:rgba(28,100,242,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c64f2,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(28,100,242,.12);color:#a5b4fc;border:1px solid rgba(28,100,242,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c64f2,#6366f1);">19</div>
+            <h2>Day 19</h2>
+            <p class="version">任务队列与可观测 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：慢活不能卡住用户</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Celery：把活甩到后台</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · @shared_task 与队列分工</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 可观测：一次对话怎么被追踪</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · TraceQueueManager：攒批上报</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 接哪些追踪平台</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="dify-day18.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 18 插件/MCP</a></li>
+            <li><a href="dify-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="dify-day20.html" class="nav-link" style="color:var(--accent-green);">Day 20 收官全景 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 19 / 共 20 天 · 阶段6 运维与收官</span>
+            <h1 class="part-title">任务队列与可观测：让慢活跑后台、让每次调用看得见</h1>
+            <p class="part-desc">前 18 天都在讲"处理一次请求"。但生产系统还有两类"看不见却致命"的需求：<strong>①有些活很慢</strong>（给几百个文档建索引、发一批邮件），不能让用户干等——要甩到后台异步跑；<strong>②系统必须"看得见"</strong>——一次对话调了几次模型、花了多少 token、哪一步慢，都得能追踪。今天进 <code>api/tasks/</code>（Celery 异步任务）和 <code>core/ops/</code>（可观测追踪），弄清：<strong>①Celery 怎么把慢活甩到后台、还按队列分工；②一次对话的追踪数据怎么被攒批、异步上报到 Langfuse 这类平台。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段6：运维与收官 · D19-20）</div>
+            <div class="steps">
+                <span class="st">D16 工具系统</span><span class="sep">→</span>
+                <span class="st">D17 Agent</span><span class="sep">→</span>
+                <span class="st">D18 插件/MCP</span><span class="sep">→</span>
+                <span class="st on">D19 任务队列/可观测</span><span class="sep">→</span>
+                <span class="st">D20 收官全景</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        类比一：Celery 任务队列像<strong>餐厅的"叫号取餐"</strong>。你点了一份要现烤 20 分钟的披萨，收银员不会让你堵在窗口干等——给你个号、你去坐着，做好了叫你。前台（Dify 的 Web 进程）只管"接单、发号"（往队列丢任务），后厨（Celery worker 进程）在后面慢慢烤。用户请求秒回，慢活后台跑。类比二：可观测的"追踪"像<strong>快递的物流轨迹</strong>。一次对话经过"收件→分拣→运输→派送"好几个环节，追踪系统在每个环节盖个戳（几点到、花了多久），最后拼成一条完整轨迹。出问题时你一看轨迹就知道"卡在哪个环节"，而不是对着黑箱瞎猜。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：慢活卡住用户 + 系统是个黑箱</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>用户上传一个 500 页的 PDF 建知识库。切片、算 embedding、写向量库，可能要几分钟。如果同步处理，用户的浏览器就得转圈几分钟、甚至超时报错。另一个痛点：线上有人投诉"这次回答特别慢、还很贵"，你想查"到底是哪一步慢、哪次调用烧了 token"，可日志一片混沌，根本对不上是哪次对话。<strong>一个要"慢活异步化"，一个要"全链路看得见"。</strong></div>
+                <div class="essence"><span class="t">💡 本质：异步解耦 + 埋点追踪</span>两个成熟套路：<strong>①任务队列（Celery + Redis/消息队列）</strong>——把慢活封装成"任务"丢进队列，Web 进程立刻返回，独立的 worker 进程在后台消费。请求和执行<strong>解耦</strong>。<strong>②可观测（Tracing）</strong>——在关键节点埋点，把"这次对话/这次调用"的耗时、token、输入输出等采集下来，攒批异步上报到专业追踪平台（Langfuse、LangSmith 等）。系统从"黑箱"变"玻璃箱"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Celery：把慢活甩到后台的引擎</h1></div>
+            <div class="card">
+                <p>Dify 用 Celery 做任务队列，初始化在 <code>extensions/ext_celery.py</code>（<span class="fileref">extensions/ext_celery.py:99</span>）：</p>
+<pre><code class="language-python"># api/extensions/ext_celery.py:99
+def init_app(app: DifyApp) -> Celery:
+    class FlaskTask(Task):                                   # ★ 让每个后台任务也能用 Flask 上下文
+        def __call__(self, *args, **kwargs):
+            from core.logging.context import init_request_context
+            with app.app_context():                          #    进入应用上下文（能访问 db 等）
+                init_request_context()
+                return self.run(*args, **kwargs)
+
+    celery_app = Celery(
+        app.name, task_cls=FlaskTask,
+        broker=dify_config.CELERY_BROKER_URL,                # ★ broker：任务往哪丢（如 Redis）
+        backend=dify_config.CELERY_BACKEND,                  #    backend：结果存哪
+    )
+    celery_app.conf.update(
+        ...
+        task_ignore_result=True,                             # 多数任务不关心返回值，省存储
+        task_annotations=dify_config.CELERY_TASK_ANNOTATIONS,
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>broker</code><span>"消息中间人"。Web 进程把任务丢给 broker（Dify 默认用 Redis），worker 从 broker 取任务执行。broker 就是那个"叫号系统"：前台把号丢进去，后厨来取。</span></div>
+                    <div class="r"><code>FlaskTask</code><span>Celery worker 是独立进程，默认没有 Flask 的应用上下文。这个包装让每个任务运行前先 <code>with app.app_context()</code>——这样后台任务里也能正常用数据库、配置。<b>不然任务一碰 db 就报"working outside of application context"</b>。</span></div>
+                    <div class="r"><code>task_ignore_result=True</code><span>大多数任务（建索引、发邮件）你不关心它"返回了什么"，只关心"做没做"。忽略结果就不用把结果写进 backend，省资源。</span></div>
+                    <div class="r"><code>init_app 返回 celery_app</code><span>这个实例被挂到 <code>app.extensions["celery"]</code>，全局共用。还在这里注册了要预加载的任务模块 <code>imports</code>（<span class="fileref">ext_celery.py:154</span>）和定时任务 <code>beat_schedule</code>。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>Celery = "前台 + 后厨 + 叫号系统"三件套。<strong>Web 进程是前台（接单发号），worker 进程是后厨（真干活），broker（Redis）是叫号系统（传单子）。</strong>三者是独立的，所以你可以单独多开几个后厨（worker）来加速，前台一点不受影响。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>@shared_task 与"队列分工"</h1></div>
+            <div class="card">
+                <p>一个具体任务长这样——看 <code>tasks/document_indexing_task.py</code>（<span class="fileref">tasks/document_indexing_task.py:32</span>）：</p>
+<pre><code class="language-python"># api/tasks/document_indexing_task.py:32
+@shared_task(queue="dataset")                    # ★ 声明这是个 Celery 任务，丢进 "dataset" 队列
+def document_indexing_task(dataset_id: str, document_ids: list):
+    """
+    Async process document
+    Usage: document_indexing_task.delay(dataset_id, document_ids)   # ★ 调用方用 .delay() 异步触发
+    """
+    ...                                          # 切片、建索引的慢活都在这里，后台跑</code></pre>
+                <div class="walk">
+                    <div class="r"><code>@shared_task</code><span>装饰器。加上它，一个普通函数就变成"可被丢进队列后台执行"的任务。</span></div>
+                    <div class="r"><code>.delay(...)</code><span>★关键动作。业务代码不直接调 <code>document_indexing_task(...)</code>（那是同步、会阻塞），而是调 <code>document_indexing_task.delay(...)</code>——这行<b>瞬间返回</b>，任务被丢进队列，真正执行在 worker。用户请求秒回。</span></div>
+                    <div class="r"><code>queue="dataset"</code><span>★队列分工。Dify 把任务按类型分到不同队列：<code>dataset</code>（知识库索引）、<code>ops_trace</code>（追踪上报）、邮件、清理等。<b>这样可以给"重活队列"多配 worker、给"轻活队列"少配</b>，互不抢资源。<code>api/tasks/</code> 下有 50+ 个任务文件，各归各的队列。</span></div>
+                    <div class="r"><code>幂等与重试</code><span>后台任务可能失败重跑，所以这类任务通常设计成"重跑也不出错"（幂等）。这是异步任务的基本素养。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍：异步的代价是"最终一致"</span>把活甩后台，用户请求快了，但代价是<strong>结果不是立刻就绪的</strong>——文档"上传成功"不等于"已经能被检索"，中间有后台处理的时间差。所以 Dify 的文档有"处理中/已完成"状态，前端要轮询或等通知。<strong>用"最终一致"换"响应速度"</strong>，是所有异步系统都要向用户解释清楚的取舍。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>可观测：一次对话怎么被追踪</h1></div>
+            <div class="card">
+                <p>追踪的总管在 <code>core/ops/ops_trace_manager.py</code>。核心角色两个：<code>TraceTask</code>（<span class="fileref">core/ops/ops_trace_manager.py:651</span>，"一条待上报的追踪任务"）和 <code>TraceQueueManager</code>（<span class="fileref">ops_trace_manager.py:1491</span>，"攒批调度器"）。你在 Day16 见过的 <code>TraceQueueManager</code>、Day18 注入的追踪头，都汇到这里。</p>
+                <div class="walk">
+                    <div class="r"><code>埋点在哪</code><span>模型调用、工具调用（Day16 的小票）、工作流节点、Agent 每一步……关键节点都会产生一个 <code>TraceTask</code>。它记录"这一段发生了什么、耗时多少、token 多少、输入输出是什么"。</span></div>
+                    <div class="r"><code>为什么不立刻上报</code><span>如果每产生一条追踪就同步发一次网络请求给 Langfuse，会严重拖慢主流程（一次对话可能产生几十条）。所以要"攒起来、批量、异步"上报——这就是 <code>TraceQueueManager</code> 的活（L05）。</span></div>
+                    <div class="r"><code>OpsTraceManager</code><span>（<span class="fileref">ops_trace_manager.py:342</span>）另一个管理类，负责"这个 app 配了哪个追踪平台、拿它的追踪实例"。<code>TraceQueueManager</code> 构造时就靠它 <code>get_ops_trace_instance(app_id)</code>。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：追踪 = "旁路"采集，绝不阻塞主流程</span>可观测的铁律是<strong>"观测本身不能拖垮被观测的系统"</strong>。所以 Dify 的追踪是"旁路"的：主流程只管把追踪任务<strong>快速塞进一个内存队列</strong>就继续跑，真正的"攒批 + 上报"由后台定时器和 Celery 完成。用户对话的速度，完全不受追踪上报快慢的影响。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>TraceQueueManager：攒批 + 异步上报</h1></div>
+            <div class="card">
+                <p>看 <code>TraceQueueManager</code> 怎么"攒"和"发"（<span class="fileref">core/ops/ops_trace_manager.py:1506</span>）：</p>
+<pre><code class="language-python"># api/core/ops/ops_trace_manager.py:1506
+def add_trace_task(self, trace_task: TraceTask):
+    global trace_manager_timer, trace_manager_queue
+    try:
+        if self._enterprise_telemetry_enabled or self.trace_instance:
+            trace_task.app_id = self.app_id
+            trace_manager_queue.put(trace_task)      # ★① 只是塞进内存队列，瞬间返回（不阻塞对话）
+    except Exception:
+        logger.exception("Error adding trace task, trace_type %s", trace_task.trace_type)
+    finally:
+        self.start_timer()                           # ② 确保后台定时器在跑
+
+def collect_tasks(self):                             # ③ 定时器触发时：从队列捞一批
+    tasks = []
+    while len(tasks) &lt; trace_manager_batch_size and not trace_manager_queue.empty():
+        task = trace_manager_queue.get_nowait()
+        tasks.append(task)
+    return tasks
+
+def run(self):
+    tasks = self.collect_tasks()
+    if tasks:
+        self.send_to_celery(tasks)                   # ★④ 一批一起交给 Celery 异步上报</code></pre>
+                <p>定时器每隔几秒跑一次（间隔来自 <span class="fileref">ops_trace_manager.py:1487</span> 的 <code>TRACE_QUEUE_MANAGER_INTERVAL</code>，默认 5 秒；每批上限 <code>BATCH_SIZE</code> 默认 100），<code>send_to_celery</code>（<span class="fileref">ops_trace_manager.py:1542</span>）把追踪数据存成文件、再丢 Celery 的 <code>ops_trace</code> 队列：</p>
+<pre><code class="language-python"># api/tasks/ops_trace_task.py:41
+@shared_task(queue="ops_trace")                      # ★ 追踪上报有专属队列，和业务任务隔离
+def process_trace_tasks(self, file_info):
+    ...                                              # worker 里真正把数据推给 Langfuse/LangSmith</code></pre>
+                <div class="walk">
+                    <div class="r"><code>put 进内存队列</code><span>主流程调 <code>add_trace_task</code> 时，只做一件事：把任务丢进进程内的队列。<b>微秒级返回，对话流程零感知</b>。</span></div>
+                    <div class="r"><code>定时器 + 攒批</code><span>后台一个 <code>threading.Timer</code>（<span class="fileref">ops_trace_manager.py:1534</span> 的 <code>start_timer</code>）每 5 秒醒一次，一次捞最多 100 条一起处理——<b>把"几十次小上报"合并成"一次批量"，大幅减少网络开销</b>。</span></div>
+                    <div class="r"><code>再转 Celery</code><span>攒批后还不在当前进程发网络，而是存文件 + 丢 <code>ops_trace</code> 队列，交给 Celery worker 真正上报。<b>两级异步</b>：内存队列削峰、Celery 队列干重活。追踪慢了也绝不影响主服务。</span></div>
+                    <div class="r"><code>专属队列 ops_trace</code><span>追踪上报走自己的队列，和 <code>dataset</code> 这种业务队列分开——追踪积压不会拖慢知识库索引，反之亦然。呼应 L03 的队列分工。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 620 200" width="100%" style="max-width:620px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="310" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">追踪数据的两级异步（削峰 + 批量上报）</text>
+                        <rect x="20" y="40" width="130" height="44" rx="8" fill="rgba(28,100,242,.14)" stroke="#1c64f2"/>
+                        <text x="85" y="58" fill="#93c5fd" text-anchor="middle">对话/模型/工具</text><text x="85" y="74" fill="#cbd5e1" text-anchor="middle">产生 TraceTask</text>
+                        <path d="M150 62 L185 62" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a19)"/>
+                        <rect x="185" y="40" width="140" height="44" rx="8" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="255" y="58" fill="#d8b4fe" text-anchor="middle">内存队列(put)</text><text x="255" y="74" fill="#cbd5e1" text-anchor="middle">瞬间返回·不阻塞</text>
+                        <path d="M325 62 L360 62" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a19)"/>
+                        <rect x="360" y="40" width="140" height="44" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="430" y="58" fill="#fcd34d" text-anchor="middle">定时器每5s攒批</text><text x="430" y="74" fill="#cbd5e1" text-anchor="middle">一次最多100条</text>
+                        <path d="M500 62 L535 62" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a19)"/>
+                        <rect x="480" y="112" width="140" height="44" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="550" y="130" fill="#86efac" text-anchor="middle">Celery ops_trace</text><text x="550" y="146" fill="#cbd5e1" text-anchor="middle">worker 真上报</text>
+                        <path d="M535 84 L550 112" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a19)"/>
+                        <rect x="200" y="112" width="200" height="44" rx="8" fill="rgba(52,211,153,.08)" stroke="#34d399"/>
+                        <text x="300" y="130" fill="#6ee7b7" text-anchor="middle">Langfuse / LangSmith / …</text><text x="300" y="146" fill="#cbd5e1" text-anchor="middle">可视化追踪面板</text>
+                        <path d="M480 134 L400 134" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a19)"/>
+                        <defs><marker id="a19" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：主流程只塞内存队列（微秒返回）→ 定时器攒批 → 转 Celery 专属队列 → worker 批量推给追踪平台。全程不阻塞对话。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>接哪些追踪平台：可插拔的 Provider</h1></div>
+            <div class="card">
+                <p>Dify 不绑死某一家追踪平台，而是做成"可插拔"。看 <code>OpsTraceProviderConfigMap</code>（<span class="fileref">core/ops/ops_trace_manager.py:223</span> 附近），按需懒加载各家的配置和追踪实现：</p>
+<pre><code class="language-python"># api/core/ops/ops_trace_manager.py (Provider 映射节选)
+match key:
+    case TracingProviderEnum.LANGFUSE:                       # ★ Langfuse
+        from dify_trace_langfuse.langfuse_trace import LangFuseDataTrace
+        return {"config_class": LangfuseConfig,
+                "secret_keys": ["public_key", "secret_key"],
+                "other_keys": ["host", "project_key"],
+                "trace_instance": LangFuseDataTrace}
+    case TracingProviderEnum.LANGSMITH:                      # ★ LangSmith
+        from dify_trace_langsmith.langsmith_trace import LangSmithDataTrace
+        return {"config_class": LangSmithConfig,
+                "secret_keys": ["api_key"],
+                "other_keys": ["project", "endpoint"],
+                "trace_instance": LangSmithDataTrace}
+    case TracingProviderEnum.OPIK: ...                       # 还有 Opik 等</code></pre>
+                <div class="walk">
+                    <div class="r"><code>按 key match</code><span>你在 app 里配了哪家追踪平台，就用哪个分支——每家有自己的配置类、密钥字段、追踪实现类。加一家新平台，只要加一个 <code>case</code>。这是"策略模式 + 可插拔"。</span></div>
+                    <div class="r"><code>懒加载 import</code><span>每个 <code>case</code> 里才 <code>import</code> 对应的库。<b>你没用 LangSmith，就不会加载它的依赖</b>——省内存、也避免"没装某库就启动失败"。</span></div>
+                    <div class="r"><code>secret_keys / other_keys</code><span>区分"敏感字段（要加密存）"和"普通字段"。密钥类信息（如 <code>secret_key</code>）会被加密处理——安全意识再次出现。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 坑：没配追踪，但代码到处 add_trace_task 会有开销吗？</span>几乎没有。看 L05 的 <code>add_trace_task</code>：它一开始就判断 <code>if self._enterprise_telemetry_enabled or self.trace_instance</code>——<strong>没配追踪平台（trace_instance 为空）就直接跳过，连队列都不塞</strong>。所以"埋点代码遍布全身"不代表"没用追踪也有开销"。这又是"不常见情况不给常见情况添负担"的设计（和 Day05 的单 key 快路径同理）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：上传 PDF 建库 + 追踪一次对话</span>
+                <strong>异步侧：</strong>用户传 PDF → API 立刻 <code>document_indexing_task.delay(dataset_id, [doc_id])</code> 返回"处理中" → 任务进 <code>dataset</code> 队列 → worker 后台切片/算 embedding/写向量库（耗时 2 分钟）→ 完成后文档状态变"已完成"。用户全程不卡。<strong>追踪侧：</strong>另一个用户对话，调了 1 次 LLM + 2 次工具 → 产生 3 个 <code>TraceTask</code> → <code>add_trace_task</code> 塞进内存队列（对话零延迟）→ 5 秒后定时器攒批 → 丢 <code>ops_trace</code> 队列 → worker 推给 Langfuse → 你在 Langfuse 面板看到这次对话耗时 3.2s、用了 1850 token、哪一步最慢，一目了然。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：为什么追踪要"内存队列 + Celery"两层异步，一层不够吗？</p>
+                    <p class="a">👨‍🏫 老师：分工不同。<strong>内存队列</strong>是"削峰"——对话瞬间产生一堆追踪，先在进程内攒着、微秒级返回，绝不拖慢对话。<strong>Celery 队列</strong>是"干重活并跨进程"——真正发网络给 Langfuse 可能慢、可能失败要重试，这种活交给专门的 worker 进程最合适，还能和内存队列所在的 Web 进程解耦。一层负责"快", 一层负责"稳", 合起来才既不阻塞又可靠。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>Celery 三件套是什么？（前台 Web / 后厨 worker / 叫号 broker）</li>
+                        <li><code>.delay()</code> 做了什么？（把任务丢队列、瞬间返回，真正执行在 worker）</li>
+                        <li>为什么要 <code>queue="dataset"</code> 这种队列分工？（重活轻活分开配 worker，互不抢资源）</li>
+                        <li><code>FlaskTask</code> 为什么必要？（让后台任务也有 Flask 上下文，能用 db）</li>
+                        <li>追踪为什么要两级异步？（内存队列削峰不阻塞 + Celery 队列干重活跨进程）</li>
+                        <li>没配追踪平台会有开销吗？（几乎没有，<code>add_trace_task</code> 直接跳过）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/dify
+
+# 1. Celery 初始化
+sed -n '99,160p'  api/extensions/ext_celery.py         # init_app / FlaskTask / imports
+
+# 2. 一个真实任务
+sed -n '32,45p'   api/tasks/document_indexing_task.py  # @shared_task(queue="dataset")
+ls api/tasks/ | head -30                               # 50+ 个后台任务
+
+# 3. 可观测攒批上报
+sed -n '1491,1545p' api/core/ops/ops_trace_manager.py  # TraceQueueManager
+sed -n '41,48p'   api/tasks/ops_trace_task.py          # process_trace_tasks (queue=ops_trace)</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 20（收官）</strong>：20 天的最后一站！我们把前 19 天的所有模块——请求旅程、模型运行时、工作流、RAG、工具、Agent、插件、异步与可观测——用一张"全景知识地图"串成一条完整的血脉，再顺带看一眼 <code>web/</code> 前端，最后聊聊"学完之后怎么继续深入 Dify"。有始有终，明天见。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="dify-day18.html" style="color:var(--accent-cyan);">&larr; Day 18 插件/MCP</a>
+                    <a href="dify-day20.html" style="color:var(--accent-green);">Day 20 · 收官全景 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
