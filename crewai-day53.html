@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 53 · token/成本/usage 追踪 — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">53</div>
+            <h2>Day 53</h2>
+            <p class="version">token/成本/usage · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要数 token</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · UsageMetrics 数据模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · from_provider_dict 归一化</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · LLM 内部累加</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · TokenProcess 累加器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · TokenCalcHandler 回调</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · crew 级汇总</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day52.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 52 上下文窗口</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day54.html" class="nav-link" style="color:var(--accent-green);">Day 54 遥测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 53 / 共 60 天 · 阶段8 LLM 与集成</span>
+            <h1 class="part-title">token / 成本 / usage：算清每一次调用花了多少</h1>
+            <p class="part-desc">Agent 一跑起来就在烧钱——每次 LLM 调用都消耗 token，token 就是钱。你 <code>kickoff()</code> 完想知道"这次跑了多少 token、缓存命中多少、一共几次请求"，靠的就是今天这套 usage 追踪。我们会看：统一的 <code>UsageMetrics</code> 数据模型、<code>from_provider_dict</code> 怎么把 OpenAI/Gemini/Anthropic <strong>各不相同的字段名</strong>归一化、<code>_track_token_usage_internal</code> 怎么在每个 LLM 实例里累加、<code>TokenProcess</code> / <code>TokenCalcHandler</code> 两个累加器、以及 crew 级 <code>calculate_usage_metrics</code> 怎么把全队消耗汇总成一张总账。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段8 LLM 与集成 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">D49 LLM 抽象</span><span class="sep">→</span>
+                <span class="st">D50 provider 适配</span><span class="sep">→</span>
+                <span class="st">D51 函数调用/结构化</span><span class="sep">→</span>
+                <span class="st">D52 上下文窗口</span><span class="sep">→</span>
+                <span class="st on">D53 token/成本</span><span class="sep">→</span>
+                <span class="st">D54 遥测</span><span class="sep">→</span>
+                <span class="st">阶段9 进阶</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        usage 追踪就像<strong>手机话费账单</strong>。每打一个电话（每次 LLM 调用），运营商记一笔"时长/流量"。月底给你一张总账：打了多少分钟、用了多少流量、其中免费时段多少（缓存 token）。但麻烦在于——你可能同时用了移动、联通、电信（OpenAI/Gemini/Anthropic），每家账单格式还不一样。CrewAI 的活儿就是当那个<strong>把多家账单翻译成统一格式、再合并成一张总账</strong>的记账员。今天看它怎么记、怎么归一、怎么汇总。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：一次 kickoff 到底花了多少钱？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>你跑一个 3 个 Agent、5 个任务的 crew，中间 LLM 被调用了几十次。跑完你想知道：一共用了多少 token？花了多少钱？有多少 token 命中了缓存（省了钱）？可这些数据分散在<strong>每次调用的响应里</strong>，而且 OpenAI 叫 <code>prompt_tokens</code>、Gemini 叫 <code>prompt_token_count</code>、Anthropic 叫 <code>input_tokens</code>——名字都不一样。怎么把这些零散、异构的数据收集起来、算成一张能看的总账？</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                CrewAI 定义一个<strong>统一的 <code>UsageMetrics</code> 模型</strong>作为"记账单位"，用 <code>from_provider_dict</code> 把各家五花八门的字段名<strong>归一化</strong>成它，然后靠 <code>add_usage_metrics</code> 一路<strong>累加</strong>：单次调用 → 累进 LLM 实例的 <code>_token_usage</code> → 最后 crew 级 <code>calculate_usage_metrics</code> 遍历所有 Agent 把各自的 usage 求和成总账。<strong>核心是"统一模型 + 归一化入口 + 逐级累加"三件套。</strong></div>
+                <div class="baby"><span class="t">大白话</span>先规定一张标准表格（有 prompt/completion/cached 等固定格子），不管哪家 API 回来的数据，都先翻译填进这张标准表；然后每次调用填一张、往实例的"小计"上加；最后 crew 把所有 Agent 的小计加成"总计"。你 <code>kickoff()</code> 后拿到的 <code>crew.usage_metrics</code> 就是这张总计表。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>UsageMetrics：统一的记账单位</h1></div>
+            <div class="card">
+                <p>一切的核心数据结构（<span class="fileref">types/usage_metrics.py:32</span>）：</p>
+<pre><code class="language-python"># types/usage_metrics.py:32
+class UsageMetrics(BaseModel):
+    """Track usage metrics for crew execution."""
+    total_tokens: int = Field(default=0, description="Total number of tokens used.")
+    prompt_tokens: int = Field(default=0, ...)           # 输入 token
+    cached_prompt_tokens: int = Field(default=0, ...)    # 命中缓存的输入 token（省钱）
+    completion_tokens: int = Field(default=0, ...)       # 输出 token
+    reasoning_tokens: int = Field(default=0,             # o 系列 / Gemini 思考 token
+        description="Number of reasoning/thinking tokens ...")
+    cache_creation_tokens: int = Field(default=0,        # Anthropic 缓存写入 token
+        description="Number of cache creation tokens (e.g. Anthropic cache writes).")
+    successful_requests: int = Field(default=0, ...)     # 成功请求次数
+
+    def add_usage_metrics(self, usage_metrics: Self) -> None:
+        """Add usage metrics from another UsageMetrics object."""
+        self.total_tokens += usage_metrics.total_tokens
+        self.prompt_tokens += usage_metrics.prompt_tokens
+        self.cached_prompt_tokens += usage_metrics.cached_prompt_tokens
+        self.completion_tokens += usage_metrics.completion_tokens
+        self.reasoning_tokens += usage_metrics.reasoning_tokens
+        self.cache_creation_tokens += usage_metrics.cache_creation_tokens
+        self.successful_requests += usage_metrics.successful_requests</code></pre>
+                <div class="walk">
+                    <div class="r"><code>全部 default=0</code><span>每个字段默认 0，所以 <code>UsageMetrics()</code> 就是一张"空账单"，可作为累加的起点。</span></div>
+                    <div class="r"><code>prompt vs completion</code><span>输入 token 和输出 token 分开记——因为定价不同（输出通常更贵），分开才能准确算钱。</span></div>
+                    <div class="r"><code>cached_prompt_tokens</code><span>命中缓存的输入 token：这部分很便宜甚至免费，单独记才能体现省了多少。</span></div>
+                    <div class="r"><code>reasoning / cache_creation</code><span>为新型模型补的字段——o 系列的"思考"、Anthropic 的"缓存写入"都单独消耗，不记就漏账。</span></div>
+                    <div class="r"><code>add_usage_metrics</code><span>★累加的核心方法：把另一张账单的每个字段加到自己身上。整套汇总机制全靠它。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么用一个 add_usage_metrics 方法而不是到处手写加法？</span>因为累加发生在<strong>多个层级</strong>（单次→实例→Agent→crew）。如果每处都手写 <code>a.prompt += b.prompt; a.completion += b.completion; ...</code>，一旦新增字段（比如后来加的 <code>reasoning_tokens</code>），就得改一堆地方、极易漏。<strong>把"怎么加两张账单"收敛进这一个方法</strong>，新增字段只改这一处，所有调用点自动生效。这是 DRY（不重复自己）原则在数据聚合上的直接体现。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 175" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：UsageMetrics 的七个格子</text>
+                        <rect x="30" y="35" width="600" height="60" rx="8" fill="rgba(59,130,246,.06)" stroke="#3b82f6"/>
+                        <rect x="45" y="50" width="120" height="30" rx="5" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="105" y="69" fill="#86efac" text-anchor="middle" font-size="10">prompt_tokens</text>
+                        <rect x="175" y="50" width="130" height="30" rx="5" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="240" y="69" fill="#86efac" text-anchor="middle" font-size="10">completion_tokens</text>
+                        <rect x="315" y="50" width="140" height="30" rx="5" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="385" y="69" fill="#fcd34d" text-anchor="middle" font-size="9.5">cached_prompt_tokens</text>
+                        <rect x="465" y="50" width="150" height="30" rx="5" fill="rgba(59,130,246,.14)" stroke="#3b82f6"/>
+                        <text x="540" y="69" fill="#93c5fd" text-anchor="middle" font-size="10">total_tokens</text>
+                        <rect x="60" y="110" width="150" height="30" rx="5" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="135" y="129" fill="#c084fc" text-anchor="middle" font-size="9.5">reasoning_tokens</text>
+                        <rect x="220" y="110" width="170" height="30" rx="5" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="305" y="129" fill="#c084fc" text-anchor="middle" font-size="9.5">cache_creation_tokens</text>
+                        <rect x="400" y="110" width="170" height="30" rx="5" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="485" y="129" fill="#6ee7b7" text-anchor="middle" font-size="9.5">successful_requests</text>
+                        <text x="330" y="162" fill="#64748b" text-anchor="middle" font-size="10">绿=常规计费 · 橙=省钱/缓存 · 紫=新型模型专属 · add_usage_metrics 逐格相加</text>
+                    </svg>
+                    <div class="cap">图注：七个整数字段，全默认 0；两张 UsageMetrics 相加即逐格相加，累加机制的最小单位。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>from_provider_dict：抹平各家字段名差异</h1></div>
+            <div class="card">
+                <p>最能体现"记账员翻译能力"的方法（<span class="fileref">types/usage_metrics.py:80</span>）：</p>
+<pre><code class="language-python"># types/usage_metrics.py:80
+@classmethod
+def from_provider_dict(cls, usage_data: dict | None) -> Self | None:
+    """Normalize a provider's raw usage dict into a UsageMetrics.
+    Accepts the full set of key aliases CrewAI providers emit:
+    prompt_tokens / prompt_token_count (Gemini) / input_tokens (Anthropic)..."""
+    if not usage_data:
+        return None                                    # ★空输入返回 None，让调用方决定怎么办
+    prompt_tokens = _first_int(usage_data,
+        "prompt_tokens", "prompt_token_count", "input_tokens")   # ★三个别名任取其一
+    completion_tokens = _first_int(usage_data,
+        "completion_tokens", "candidates_token_count", "output_tokens")
+    cached_prompt_tokens = _first_int(usage_data,
+        "cached_tokens", "cached_prompt_tokens", "cache_read_input_tokens")
+    if not cached_prompt_tokens:
+        details = usage_data.get("prompt_tokens_details")        # OpenAI 把缓存嵌在子对象里
+        if isinstance(details, dict):
+            cached_prompt_tokens = _coerce_int(details.get("cached_tokens"))
+    return cls(
+        total_tokens=prompt_tokens + completion_tokens,
+        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+        cached_prompt_tokens=cached_prompt_tokens,
+        reasoning_tokens=_coerce_int(usage_data.get("reasoning_tokens")),
+        cache_creation_tokens=_coerce_int(usage_data.get("cache_creation_tokens")),
+        successful_requests=1)                          # 每次归一化 = 一次成功请求</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_first_int(三个别名)</code><span>★核心：OpenAI 用 <code>prompt_tokens</code>、Gemini 用 <code>prompt_token_count</code>、Anthropic 用 <code>input_tokens</code>——按顺序试，哪个有值用哪个。一行抹平三家差异。</span></div>
+                    <div class="r"><code>completion 同理</code><span>输出 token 也有三个别名（<code>candidates_token_count</code> 是 Gemini 的说法），统一处理。</span></div>
+                    <div class="r"><code>缓存 token 的嵌套兜底</code><span>OpenAI 把缓存数藏在 <code>prompt_tokens_details.cached_tokens</code> 子对象里，顶层找不到就往里挖一层。</span></div>
+                    <div class="r"><code>total = prompt + completion</code><span>总数自己算，不信任 provider 传的 total（有的家不给或算法不一）。</span></div>
+                    <div class="r"><code>successful_requests=1</code><span>归一化成功 = 记一次成功请求。累加时这些 1 相加就是总请求数。</span></div>
+                    <div class="r"><code>return None on empty</code><span>★边界：没有 usage 数据就返回 None，把"这次要不要记账"的决定权交给调用方，不硬塞一张全 0 的账单。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么把归一化做成"多别名兜底"而不是每家一个解析函数？</span>
+                <strong>朴素做法</strong>：<code>parse_openai_usage() / parse_gemini_usage() / parse_anthropic_usage()</code> 各写一个，调用前先判断是哪家。问题：得先<strong>知道</strong>是哪家（provider 信息不一定跟着 usage 一起来），且新增一家就多一个函数 + 一处分支。<strong>源码做法</strong>：一个 <code>from_provider_dict</code>，靠"字段别名列表"吃下所有家——因为不同家的字段名<strong>几乎不冲突</strong>（OpenAI 不会有 <code>input_tokens</code>，Anthropic 不会有 <code>prompt_tokens</code>），按别名顺序试就能自动认出。<strong>用"数据形状的差异"替代"显式的类型判断"</strong>，加一家新 provider 往往只需在别名列表里加个名字。代价是万一两家真用了同名不同义的字段会出错，但实践中没发生。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>LLM 内部累加：每个实例记自己的小账</h1></div>
+            <div class="card">
+                <p>每个 LLM 实例把每次调用的 usage 累进自己的 <code>_token_usage</code>（<span class="fileref">llms/base_llm.py:948</span>）：</p>
+<pre><code class="language-python"># llms/base_llm.py:948
+def _track_token_usage_internal(self, usage_data: dict[str, Any]) -> None:
+    """Track token usage internally in the LLM instance."""
+    metrics = UsageMetrics.from_provider_dict(usage_data)   # ① 先归一化（L03）
+    if metrics is None:
+        return                                              # 没数据就不记
+    self._token_usage["prompt_tokens"]      += metrics.prompt_tokens      # ② 逐字段累加
+    self._token_usage["completion_tokens"]  += metrics.completion_tokens
+    self._token_usage["total_tokens"]       += metrics.total_tokens
+    self._token_usage["successful_requests"]+= metrics.successful_requests
+    self._token_usage["cached_prompt_tokens"]  += metrics.cached_prompt_tokens
+    self._token_usage["reasoning_tokens"]       += metrics.reasoning_tokens
+    self._token_usage["cache_creation_tokens"]  += metrics.cache_creation_tokens
+
+def get_token_usage_summary(self) -> UsageMetrics:          # :966
+    """Get summary of token usage for this LLM instance."""
+    return UsageMetrics(**self._token_usage)                # ③ 打包成 UsageMetrics 交出去</code></pre>
+                <div class="walk">
+                    <div class="r"><code>先 from_provider_dict</code><span>无论哪家 API 的原始 usage，先过 L03 归一化——保证累加的都是标准字段。</span></div>
+                    <div class="r"><code>metrics is None → return</code><span>没解析出东西就跳过，不污染累计值。</span></div>
+                    <div class="r"><code>self._token_usage[...] +=</code><span>★这个实例活着期间的<b>累计小账</b>。同一个 LLM 被调 10 次，就累加 10 次。</span></div>
+                    <div class="r"><code>get_token_usage_summary</code><span>对外交账的口子：把累计的 dict 包成一个 <code>UsageMetrics</code> 对象返回，供上层（crew）汇总。</span></div>
+                </div>
+                <div class="anno">还记得 Day 49 说 provider 版 <code>call</code> 里都会调 <code>self._emit_call_completed_event</code> 吗？token 追踪就是在完成事件前后触发 <code>_track_token_usage_internal</code> 的——每次调用成功，实例小账 +1 笔。这是"共性行为放基类"的又一例：所有 provider 共用同一套 token 记账逻辑。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>TokenProcess：给非 BaseLLM 路径用的累加器</h1></div>
+            <div class="card">
+                <p>还有一个更轻的累加器，服务 litellm 回调路径（<span class="fileref">agents/agent_builder/utilities/base_token_process.py</span>）：</p>
+<pre><code class="language-python"># base_token_process.py
+class TokenProcess(BaseModel):
+    """Track token usage during agent processing."""
+    total_tokens: int = Field(default=0)
+    prompt_tokens: int = Field(default=0)
+    cached_prompt_tokens: int = Field(default=0)
+    completion_tokens: int = Field(default=0)
+    successful_requests: int = Field(default=0)
+
+    def sum_prompt_tokens(self, tokens: int) -> None:
+        self.prompt_tokens += tokens
+        self.total_tokens += tokens              # ★加 prompt 时顺手加 total
+    def sum_completion_tokens(self, tokens: int) -> None:
+        self.completion_tokens += tokens
+        self.total_tokens += tokens
+    def sum_cached_prompt_tokens(self, tokens: int) -> None:
+        self.cached_prompt_tokens += tokens      # 缓存不计入 total（避免重复）
+    def sum_successful_requests(self, requests: int) -> None:
+        self.successful_requests += requests
+    def get_summary(self) -> UsageMetrics:
+        return UsageMetrics(total_tokens=self.total_tokens, prompt_tokens=self.prompt_tokens,
+            cached_prompt_tokens=self.cached_prompt_tokens,
+            completion_tokens=self.completion_tokens, successful_requests=self.successful_requests)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>sum_prompt_tokens 同时 += total</code><span>加输入 token 时顺手把 total 也加上——省得最后再单独算总数。</span></div>
+                    <div class="r"><code>cached 不进 total</code><span>★注意：缓存 token 单独记，<b>不</b>累进 total。因为 cached 已经是 prompt 的一部分，重复加会翻倍。</span></div>
+                    <div class="r"><code>get_summary → UsageMetrics</code><span>和 <code>BaseLLM.get_token_usage_summary</code> 一样，最终都吐出统一的 <code>UsageMetrics</code>——两条记账路殊途同归。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么有 BaseLLM._token_usage 和 TokenProcess 两套记账？</span>
+                因为 CrewAI 有<strong>两条 LLM 调用路径</strong>（Day 49）：原生 provider 路径直接在 <code>BaseLLM</code> 实例里用 <code>_track_token_usage_internal</code> 累加；litellm 兜底路径则通过 litellm 的<strong>回调机制</strong>（L06 的 <code>TokenCalcHandler</code>）把数据喂给 <code>TokenProcess</code>。两条路的数据来源、时机不同，所以各有累加器。但关键是——<strong>它们最后都 <code>get_summary()/get_token_usage_summary()</code> 成同一个 <code>UsageMetrics</code></strong>，汇总时（L07）用同一个 <code>add_usage_metrics</code> 无差别相加。<strong>入口分两套是被现实逼的，出口收敛成一套是设计的克制</strong>——差异只允许存在于必要处，能统一的地方绝不放任分裂。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>TokenCalcHandler：litellm 的回调钩子</h1></div>
+            <div class="card">
+                <p>litellm 路径靠这个回调把 usage 喂进 <code>TokenProcess</code>（<span class="fileref">utilities/token_counter_callback.py</span>）：</p>
+<pre><code class="language-python"># token_counter_callback.py
+class TokenCalcHandler(BaseModel):
+    token_cost_process: TokenProcess | None = Field(default=None)
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time) -> None:
+        """Log successful LLM API call and track token usage."""
+        if self.token_cost_process is None:
+            return
+        with suppress_warnings():
+            if isinstance(response_obj, dict) and "usage" in response_obj:
+                usage = response_obj["usage"]
+                if usage:
+                    self.token_cost_process.sum_successful_requests(1)
+                    if hasattr(usage, "prompt_tokens"):
+                        self.token_cost_process.sum_prompt_tokens(usage.prompt_tokens)
+                    if hasattr(usage, "completion_tokens"):
+                        self.token_cost_process.sum_completion_tokens(usage.completion_tokens)
+                    if (hasattr(usage, "prompt_tokens_details")
+                            and usage.prompt_tokens_details
+                            and usage.prompt_tokens_details.cached_tokens):
+                        self.token_cost_process.sum_cached_prompt_tokens(
+                            usage.prompt_tokens_details.cached_tokens)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>log_success_event</code><span>★litellm 约定的回调名：每次 API 调用成功，litellm 自动回调它，把响应对象递进来。你不用手动调。</span></div>
+                    <div class="r"><code>持有 TokenProcess</code><span>回调里拿到 usage，就调 <code>token_cost_process.sum_*</code> 累进那个累加器（L05）。</span></div>
+                    <div class="r"><code>层层 hasattr 防御</code><span>不同模型返回的 usage 结构不一，先 <code>hasattr</code> 确认字段存在再取——避免 AttributeError。</span></div>
+                    <div class="r"><code>suppress_warnings()</code><span>litellm 内部有时会打一堆警告，这里静默掉，保持日志干净。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>litellm 帮你调完模型，会主动"喊你一声"（回调 <code>log_success_event</code>），把账单塞给你。<code>TokenCalcHandler</code> 就是接这个电话的人：接到就把 token 数记进小本本（<code>TokenProcess</code>）。你只要在调用时把这个 handler 挂上去，剩下的自动完成。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>crew 级汇总：全队消耗合成一张总账</h1></div>
+            <div class="card">
+                <p>最后一步，crew 把所有 Agent 的小账加成总账（<span class="fileref">crew.py:2114</span>）：</p>
+<pre><code class="language-python"># crew.py:2114
+def calculate_usage_metrics(self) -> UsageMetrics:
+    """Calculates and returns the usage metrics."""
+    total_usage_metrics = UsageMetrics()               # ① 一张空总账
+    for agent in self.agents:
+        if isinstance(agent.llm, BaseLLM):             # ★Day 49 的伏笔：判 BaseLLM 不判 LLM
+            llm_usage = agent.llm.get_token_usage_summary()    # 原生路径的小账
+            total_usage_metrics.add_usage_metrics(llm_usage)   # ② 累加
+        else:
+            if hasattr(agent, "_token_process"):
+                token_sum = agent._token_process.get_summary() # litellm 路径的小账
+                total_usage_metrics.add_usage_metrics(token_sum)
+    if self.manager_agent and hasattr(self.manager_agent, "_token_process"):
+        token_sum = self.manager_agent._token_process.get_summary()   # ③ 别忘了 manager
+        total_usage_metrics.add_usage_metrics(token_sum)
+    if self.manager_agent:
+        if isinstance(self.manager_agent.llm, BaseLLM):
+            total_usage_metrics.add_usage_metrics(self.manager_agent.llm.get_token_usage_summary())
+    self.usage_metrics = total_usage_metrics           # ④ 存到 crew，供你读
+    return total_usage_metrics</code></pre>
+                <div class="walk">
+                    <div class="r"><code>UsageMetrics() 空总账</code><span>从全 0 开始，作为累加的初始值。</span></div>
+                    <div class="r"><code>isinstance(agent.llm, BaseLLM)</code><span>★呼应 Day 49 边界：因为工厂可能返回 <code>AnthropicCompletion</code> 等，判断要盯基类 <code>BaseLLM</code>，命中就走原生路径的小账。</span></div>
+                    <div class="r"><code>else → _token_process</code><span>不是 BaseLLM 的（litellm 路径），从 Agent 的 <code>_token_process</code> 取小账。两条路都收。</span></div>
+                    <div class="r"><code>add_usage_metrics 反复用</code><span>★L02 那个方法在这大放异彩：每个 Agent 的账单一路 add 进总账。所有累加最终收敛到这一个方法。</span></div>
+                    <div class="r"><code>manager_agent 单独处理</code><span>★边界：层级流程（Day 21）的 manager 也在烧 token，但它不在 <code>self.agents</code> 列表里，得单独加，否则漏账。</span></div>
+                    <div class="r"><code>self.usage_metrics = ...</code><span>结果存进 crew 字段。你 <code>kickoff()</code> 后 <code>print(crew.usage_metrics)</code> 读的就是它。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 220" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据流：token 从单次调用汇聚到 crew 总账</text>
+                        <rect x="30" y="35" width="150" height="26" rx="6" fill="rgba(148,163,184,.1)" stroke="#64748b"/>
+                        <text x="105" y="52" fill="#cbd5e1" text-anchor="middle" font-size="10">provider 原始 usage</text>
+                        <path d="M105 61 L105 74" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a53)"/>
+                        <rect x="20" y="76" width="170" height="26" rx="6" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="105" y="93" fill="#c084fc" text-anchor="middle" font-size="10">from_provider_dict 归一化</text>
+                        <path d="M105 102 L105 115" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a53)"/>
+                        <rect x="20" y="117" width="170" height="26" rx="6" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="105" y="134" fill="#93c5fd" text-anchor="middle" font-size="10">LLM 实例 _token_usage</text>
+                        <rect x="255" y="76" width="150" height="26" rx="6" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="330" y="93" fill="#fcd34d" text-anchor="middle" font-size="10">litellm 回调</text>
+                        <path d="M330 102 L330 115" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a53)"/>
+                        <rect x="255" y="117" width="150" height="26" rx="6" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="330" y="134" fill="#93c5fd" text-anchor="middle" font-size="10">TokenProcess</text>
+                        <path d="M190 130 L245 160" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a53g)"/>
+                        <path d="M330 143 L330 158" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a53g)"/>
+                        <path d="M470 130 L415 160" stroke="#22c55e" stroke-width="1.1" marker-end="url(#a53g)"/>
+                        <rect x="440" y="117" width="180" height="26" rx="6" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="530" y="134" fill="#93c5fd" text-anchor="middle" font-size="10">manager _token_process</text>
+                        <rect x="215" y="160" width="230" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="330" y="179" fill="#86efac" text-anchor="middle">crew.usage_metrics（总账）</text>
+                        <text x="330" y="208" fill="#64748b" text-anchor="middle" font-size="10">全部经 add_usage_metrics 累加到一处</text>
+                        <defs>
+                          <marker id="a53" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a53g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：两条记账路（原生实例 / litellm 回调）+ manager，最终都汇入 crew.usage_metrics。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="pitfall"><span class="t">⚠️ 边界：usage 数据不一定"准"，别拿它当财务对账</span>
+                这套追踪有几个天生的不确定点：①<strong>不是每家 provider 都返回 usage</strong>——<code>from_provider_dict</code> 收到空就返回 None，那次调用的 token 就没记进去（漏账）；②<strong>缓存/思考 token 的字段各家支持程度不一</strong>，老模型可能压根不给 <code>cached_tokens</code>，这部分省钱信息就缺失；③流式调用的 usage 有时要等最后一个 chunk 才有，中途断开就丢。所以 <code>crew.usage_metrics</code> 适合<strong>用来大致估算、监控趋势、优化 prompt</strong>，但<strong>不该拿它跟 provider 的账单精确对账</strong>——真要对账以 provider 后台为准。<strong>教训：任何"从响应里顺手收集的指标"都带估算性质，用它做决策要留心它的盲区。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：我 kickoff 完怎么看这次花了多少 token？</p>
+                    <p class="a">👨‍🏫 老师：<code>result = crew.kickoff(); print(crew.usage_metrics)</code> 就能看到一张 <code>UsageMetrics</code>：<code>total_tokens / prompt_tokens / completion_tokens / cached_prompt_tokens / successful_requests</code> 等。想估算钱，用 <code>prompt_tokens</code> 和 <code>completion_tokens</code> 分别乘对应模型的单价（输入输出价不同），再减去 <code>cached_prompt_tokens</code> 省下的部分。CrewAI 记的是 token，换算成钱要你自己按模型定价来。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li><code>UsageMetrics</code> 有哪些字段？为什么 prompt/completion/cached 要分开？</li>
+                        <li><code>from_provider_dict</code> 怎么用"别名列表"抹平各家字段名差异？</li>
+                        <li>为什么有 <code>BaseLLM._token_usage</code> 和 <code>TokenProcess</code> 两套累加器？</li>
+                        <li><code>TokenCalcHandler.log_success_event</code> 是谁在什么时候调的？</li>
+                        <li><code>calculate_usage_metrics</code> 为什么要单独处理 manager_agent？</li>
+                        <li>为什么 usage 数据不能拿来精确对账？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '32,130p'  $P/types/usage_metrics.py            # UsageMetrics + from_provider_dict
+sed -n '948,975p' $P/llms/base_llm.py                  # 实例内累加
+cat $P/agents/agent_builder/utilities/base_token_process.py   # TokenProcess
+sed -n '2114,2138p' $P/crew.py                         # crew 级汇总
+# 亲眼看一次 kickoff 的 token 账单
+python -c "
+from crewai import Agent, Task, Crew
+a=Agent(role='助手', goal='答题', backstory='你博学')
+t=Task(description='用一句话解释什么是 token', expected_output='一句话', agent=a)
+c=Crew(agents=[a], tasks=[t]); c.kickoff(); print(c.usage_metrics)
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 54</strong>：token 是"花了多少"，那"框架内部到底发生了什么"呢？明天讲阶段8 收官——<strong>telemetry 遥测</strong>：<code>Telemetry</code> 单例怎么初始化 OpenTelemetry、怎么用环境变量一键关闭、<code>_safe_telemetry_operation</code> 怎么保证"遥测挂了也不影响你跑"、以及它到底收集/不收集什么（隐私边界）。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day52.html" style="color:var(--accent-cyan);">&larr; Day 52 上下文窗口</a>
+                    <a href="crewai-day54.html" style="color:var(--accent-green);">Day 54 · telemetry 遥测 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

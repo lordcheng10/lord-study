@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 50 · llms/ provider 适配 — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">50</div>
+            <h2>Day 50</h2>
+            <p class="version">provider 适配 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 每家 API 都不一样</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · providers/ 目录布局</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · AnthropicCompletion 字段</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 客户端惰性构建</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 消息格式翻译</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · provider 版 call</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · OpenAI 兼容层复用</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day49.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 49 LLM 抽象</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day51.html" class="nav-link" style="color:var(--accent-green);">Day 51 函数调用 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 50 / 共 60 天 · 阶段8 LLM 与集成</span>
+            <h1 class="part-title">provider 适配：把统一接口翻译成各家方言</h1>
+            <p class="part-desc">Day 49 我们知道 <code>_get_native_provider</code> 会返回 <code>OpenAICompletion / AnthropicCompletion / GeminiCompletion...</code> 这些"原生适配器"。今天进 <code>llms/providers/</code> 目录，拆开其中最有代表性的 <code>AnthropicCompletion</code>：它同样继承 <code>BaseLLM</code>，同样实现 <code>call</code>，但内部要处理 Anthropic 特有的一切——<strong>系统消息要单拎出来、消息必须 user/assistant 交替、工具结果要塞进 user 消息、思考块要放最前</strong>。你会看到"统一接口 + 各自实现"这条设计线在真实差异面前是怎么落地的。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段8 LLM 与集成 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">D49 LLM 抽象</span><span class="sep">→</span>
+                <span class="st on">D50 provider 适配</span><span class="sep">→</span>
+                <span class="st">D51 函数调用/结构化</span><span class="sep">→</span>
+                <span class="st">D52 上下文窗口</span><span class="sep">→</span>
+                <span class="st">D53 token/成本</span><span class="sep">→</span>
+                <span class="st">D54 遥测</span><span class="sep">→</span>
+                <span class="st">阶段9 进阶</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        provider 适配器就像<strong>翻译官</strong>。CrewAI 上层说的是一门"普通话"（统一的 messages 格式），但 OpenAI 听英语、Anthropic 听法语、Gemini 听德语。每个 provider 适配器就是一位专职翻译：进来普通话，它翻成对应语言递给那家 API；对方回话，它再翻回普通话交给上层。<strong>翻译官内部怎么处理语法差异是它的事，上层永远只说普通话。</strong>今天看 Anthropic 这位翻译官怎么干活。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：为什么每家 API 都要单独适配？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>都是"聊天补全"，OpenAI 和 Anthropic 能差多少？差很多：OpenAI 把 system 消息和普通消息放<strong>同一个列表</strong>，Anthropic 要求 system <strong>单独一个参数</strong>；OpenAI 消息可以连续两条 user，Anthropic 要求<strong>严格 user/assistant 交替</strong>；工具调用结果，OpenAI 用 <code>role:"tool"</code> 消息，Anthropic 要塞进 user 消息的 <code>tool_result</code> 内容块……如果 Day 49 那个统一 <code>call</code> 想适配所有家，代码里就得写满 <code>if provider == "anthropic"</code>。怎么优雅地隔离这些差异？</div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                <strong>每家 API 一个独立的适配器类，各自继承 <code>BaseLLM</code> 并覆盖 <code>call</code> 及一堆格式化方法。</strong>差异被<strong>封装在各自的类里</strong>——<code>AnthropicCompletion</code> 里全是 Anthropic 的怪癖，<code>OpenAICompletion</code> 里全是 OpenAI 的规矩，彼此互不干扰。上层 <code>call(messages)</code> 时多态分发到对应适配器，"翻译"这件脏活就地消化。<strong>这是"策略模式"：同一个接口，多种可互换的具体策略。</strong></div>
+                <p>目录布局一眼看清有哪些原生 provider（<span class="fileref">llms/providers/</span>）：</p>
+<pre><code class="language-bash">llms/providers/
+├── openai/completion.py             # OpenAICompletion
+├── anthropic/completion.py          # AnthropicCompletion（今天主角）
+├── azure/completion.py              # AzureCompletion
+├── gemini/completion.py             # GeminiCompletion
+├── bedrock/completion.py            # BedrockCompletion
+├── snowflake/completion.py          # SnowflakeCompletion
+├── openai_compatible/completion.py  # 一批"类 OpenAI"服务共用
+└── utils/common.py                  # 共享工具（safe_tool_conversion 等）</code></pre>
+                <div class="baby"><span class="t">大白话</span>一个文件夹一家模型，每个文件夹里一个 <code>completion.py</code>，里面一个 <code>XxxCompletion</code> 类。想加新模型？照葫芦画瓢新建一个文件夹、写一个类、在 Day 49 的 <code>_get_native_provider</code> 里加一个分支。扩展点非常清晰。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>AnthropicCompletion：也是一个 BaseLLM</h1></div>
+            <div class="card">
+                <p>它同样继承 <code>BaseLLM</code>，但字段是 Anthropic 专属的（<span class="fileref">anthropic/completion.py:148</span>）：</p>
+<pre><code class="language-python"># anthropic/completion.py:148
+class AnthropicCompletion(BaseLLM):
+    """Anthropic native completion implementation. ...native tool use,
+    streaming support, and proper message formatting."""
+    llm_type: Literal["anthropic"] = "anthropic"
+    model: str = "claude-3-5-sonnet-20241022"
+    max_retries: int = 2
+    max_tokens: int = 4096                        # ★Anthropic 要求 max_tokens 必填
+    stream: bool = False
+    client_params: dict[str, Any] | None = None
+    interceptor: BaseInterceptor[...] | None = None
+    thinking: AnthropicThinkingConfig | None = None       # 思考模式配置
+    response_format: JsonResponseFormat | type[BaseModel] | None = None
+    tool_search: AnthropicToolSearchConfig | None = None
+    is_claude_3: bool = False
+    supports_tools: bool = True
+    _client: Any = PrivateAttr(default=None)              # SDK 同步客户端（私有）
+    _async_client: Any = PrivateAttr(default=None)        # SDK 异步客户端</code></pre>
+                <div class="walk">
+                    <div class="r"><code>llm_type = "anthropic"</code><span>身份标记，和 Day 49 的 <code>"litellm"</code> 区分开。</span></div>
+                    <div class="r"><code>max_tokens = 4096（有默认值）</code><span>★关键差异：Anthropic 的 API <b>强制</b>要 max_tokens。OpenAI 可以不给，Anthropic 不给会报错，所以这里给了默认值兜底。</span></div>
+                    <div class="r"><code>thinking / tool_search</code><span>Anthropic 独有特性——扩展思考、内置工具搜索。原生适配器才能用上这些，LiteLLM 兜底路一般吃不到。</span></div>
+                    <div class="r"><code>_client / _async_client (PrivateAttr)</code><span>真正的 Anthropic SDK 客户端对象，用 <code>PrivateAttr</code> 存——不参与 Pydantic 序列化，是纯运行时状态。</span></div>
+                </div>
+                <p>初始化前还有一步字段归一化（<span class="fileref">anthropic/completion.py:176</span>）：</p>
+<pre><code class="language-python"># anthropic/completion.py:176
+@model_validator(mode="before")
+def _normalize_anthropic_fields(cls, data):
+    popped = data.pop("stop_sequences", None)
+    seqs = popped if popped is not None else (data.get("stop") or [])
+    if isinstance(seqs, str): seqs = [seqs]
+    data["stop"] = seqs                                   # 统一成 list
+    data["is_claude_3"] = "claude-3" in data.get("model", "").lower()  # 顺手判代际
+    ts = data.get("tool_search")
+    if ts is True: data["tool_search"] = AnthropicToolSearchConfig()   # True→默认配置对象
+    return data</code></pre>
+                <div class="anno"><code>@model_validator(mode="before")</code> 在 Pydantic 真正校验字段<b>之前</b>运行，专门用来"把用户传的各种花样归一化成规范形状"。比如 <code>stop</code> 既接受字符串又接受列表，这里统一成列表；<code>tool_search=True</code> 这种简写自动展开成配置对象。<b>把宽容留给用户、把规范留给内部。</b></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 210" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11.5">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：provider 适配器的策略家族</text>
+                        <rect x="255" y="30" width="150" height="30" rx="8" fill="rgba(59,130,246,.14)" stroke="#3b82f6"/>
+                        <text x="330" y="50" fill="#93c5fd" text-anchor="middle" font-weight="700">BaseLLM.call() 契约</text>
+                        <rect x="30" y="105" width="115" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="87" y="125" fill="#86efac" text-anchor="middle">OpenAI</text>
+                        <rect x="160" y="105" width="120" height="30" rx="7" fill="rgba(249,115,22,.14)" stroke="#f97316"/>
+                        <text x="220" y="125" fill="#fdba74" text-anchor="middle">Anthropic</text>
+                        <rect x="295" y="105" width="105" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="347" y="125" fill="#86efac" text-anchor="middle">Gemini</text>
+                        <rect x="415" y="105" width="105" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="467" y="125" fill="#86efac" text-anchor="middle">Bedrock</text>
+                        <rect x="535" y="105" width="105" height="30" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="587" y="125" fill="#86efac" text-anchor="middle">Snowflake</text>
+                        <rect x="180" y="165" width="300" height="30" rx="7" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="330" y="185" fill="#c084fc" text-anchor="middle">OpenAICompatible（继承 OpenAI，配置表驱动 7 家）</text>
+                        <path d="M87 105 L300 62" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                        <path d="M220 105 L310 62" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                        <path d="M347 105 L340 62" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                        <path d="M467 105 L360 62" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                        <path d="M587 105 L370 62" stroke="#94a3b8" stroke-dasharray="4 3"/>
+                        <path d="M330 165 L87 137" stroke="#a855f7" stroke-dasharray="3 3"/>
+                    </svg>
+                    <div class="cap">图注：都实现同一份 call 契约（虚线=is-a）；OpenAICompatible 又继承 OpenAI，用配置表复用它的调用逻辑。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>客户端惰性构建：import 时还没 key 也不崩</h1></div>
+            <div class="card">
+                <p>构建 SDK 客户端这一步做得很谨慎（<span class="fileref">anthropic/completion.py:195</span>）：</p>
+<pre><code class="language-python"># anthropic/completion.py:195
+@model_validator(mode="after")
+def _init_clients(self) -> AnthropicCompletion:
+    """Eagerly build clients when the API key is available, otherwise
+    defer so LLM(model="anthropic/...") can be constructed at module
+    import time even before deployment env vars are set."""
+    try:
+        self._client = self._build_sync_client()
+        self._async_client = self._build_async_client()
+    except ValueError:
+        pass                             # ★没 key → 静默跳过，不报错
+    return self
+
+def _get_sync_client(self) -> Any:       # :222
+    if self._client is None:             # 用的时候若还没建，补建
+        self._client = self._build_sync_client()
+    return self._client</code></pre>
+                <div class="walk">
+                    <div class="r"><code>mode="after"</code><span>字段都校验完了才跑——此时能安全读 <code>self.api_key</code> 等。</span></div>
+                    <div class="r"><code>try...except ValueError: pass</code><span>★核心边界：构建客户端需要 API key，可有人会在<b>没设 key</b>的时候就 <code>import</code> 定义了 LLM 的模块。这里吞掉 ValueError，让"定义"和"真正调用"解耦。</span></div>
+                    <div class="r"><code>_get_sync_client 补建</code><span>真调用时若客户端还是 None（因为当时没 key），此刻再建一次。这时 key 应该已就位。</span></div>
+                    <div class="r"><code>sync + async 两套</code><span>同步、异步客户端都建，分别服务 <code>call</code> 和 <code>acall</code>。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：构建客户端，"急切" vs "惰性"怎么选？</span>
+                <strong>纯急切</strong>（初始化就必须建成客户端）：定义 <code>LLM(model="anthropic/...")</code> 的那一刻若环境变量还没注入，就直接崩——很多部署场景里模块 import 早于 env 注入，这会让人很痛苦。<strong>纯惰性</strong>（永远等到第一次调用才建）：多一次判断、且延迟暴露配置错误。源码选了<strong>"能急切就急切，不行就静默降级到惰性"</strong>：有 key 时 <code>_init_clients</code> 立刻建好（快）；没 key 时吞掉异常，等 <code>_get_sync_client</code> 用时再补建（稳）。<strong>两头好处都要，用一个 try/except 把成本压到最低。</strong>注释里明明白白写了为什么这么做——这是高质量源码的标志。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>消息格式翻译：Anthropic 的四条铁律</h1></div>
+            <div class="card">
+                <p>最能体现"翻译官"价值的方法（<span class="fileref">anthropic/completion.py:653</span>），docstring 列出了 Anthropic 的硬性要求：</p>
+<pre><code class="language-python"># anthropic/completion.py:653
+def _format_messages_for_anthropic(self, messages):
+    """Anthropic has specific requirements:
+    - System messages are separate from conversation messages   # ① system 单拎出来
+    - Messages must alternate between user and assistant          # ② 必须交替
+    - First message must be from user                             # ③ 首条必是 user
+    - Tool results must be in user messages with tool_result blocks  # ④ 工具结果进 user
+    - When thinking is enabled, assistant messages must start with thinking blocks
+    Returns: Tuple of (formatted_messages, system_message)."""
+    base_formatted = super()._format_messages(messages)   # 先做通用格式化
+    formatted_messages: list[LLMMessage] = []
+    system_message: str | None = None
+    pending_tool_results: list[dict[str, Any]] = []
+    for message in base_formatted:
+        ...                                                # 逐条按四条铁律重排</code></pre>
+                <div class="walk">
+                    <div class="r"><code>返回 (messages, system)</code><span>★关键：把 system 消息<b>从列表里剥出来</b>单独返回，因为 Anthropic 的 API 把 system 当独立参数，不能混在对话里。</span></div>
+                    <div class="r"><code>super()._format_messages</code><span>先复用父类的通用格式化（字符串转列表等），再在结果上做 Anthropic 专属重排。<b>共性交给父类、个性自己处理。</b></span></div>
+                    <div class="r"><code>pending_tool_results</code><span>暂存工具结果，因为它们要<b>合并进下一条 user 消息</b>的 tool_result 块，而不是自成一条。</span></div>
+                    <div class="r"><code>user/assistant 交替</code><span>OpenAI 允许连续多条同角色消息，Anthropic 不行——这里要把它们合并/重排成严格交替。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 例子：同一段对话，两家格式差异</span>
+                CrewAI 内部统一格式：<code>[{system}, {user:问}, {assistant:调工具}, {tool:结果}, {user:继续}]</code>。<br>
+                翻给 <strong>OpenAI</strong>：几乎原样，system 留在列表里，tool 消息用 <code>role:"tool"</code>。<br>
+                翻给 <strong>Anthropic</strong>：system 抽成独立参数 <code>system="..."</code>；<code>{tool:结果}</code> 被塞进后面那条 user 消息的 <code>content:[{type:"tool_result",...}]</code> 块里；确保整体 user→assistant→user 严格交替。<strong>同一份对话，翻译官吐出两种截然不同的排布。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 220" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：统一 messages → Anthropic 专属格式</text>
+                        <rect x="220" y="30" width="220" height="28" rx="7" fill="rgba(148,163,184,.1)" stroke="#64748b"/>
+                        <text x="330" y="48" fill="#cbd5e1" text-anchor="middle">统一 messages（含 system / tool 消息）</text>
+                        <path d="M330 58 L330 74" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a50)"/>
+                        <rect x="200" y="76" width="260" height="26" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="330" y="93" fill="#93c5fd" text-anchor="middle">super()._format_messages 通用格式化</text>
+                        <path d="M330 102 L330 116" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a50)"/>
+                        <rect x="35" y="118" width="180" height="30" rx="7" fill="rgba(249,115,22,.12)" stroke="#f97316"/>
+                        <text x="125" y="137" fill="#fdba74" text-anchor="middle">① system 抽成独立参数</text>
+                        <rect x="240" y="118" width="180" height="30" rx="7" fill="rgba(249,115,22,.12)" stroke="#f97316"/>
+                        <text x="330" y="137" fill="#fdba74" text-anchor="middle">② tool 结果并入 user 块</text>
+                        <rect x="445" y="118" width="180" height="30" rx="7" fill="rgba(249,115,22,.12)" stroke="#f97316"/>
+                        <text x="535" y="137" fill="#fdba74" text-anchor="middle">③ 强制 user/assistant 交替</text>
+                        <path d="M300 116 L150 118" stroke="#f97316" stroke-width="1"/>
+                        <path d="M340 116 L335 118" stroke="#f97316" stroke-width="1"/>
+                        <path d="M360 116 L510 118" stroke="#f97316" stroke-width="1"/>
+                        <path d="M330 148 L330 164" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a50g)"/>
+                        <rect x="185" y="166" width="290" height="30" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="330" y="185" fill="#86efac" text-anchor="middle">返回 (formatted_messages, system_message)</text>
+                        <defs>
+                          <marker id="a50" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a50g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：先做通用格式化，再套 Anthropic 三条重排规则，最后把 system 与对话分成两个返回值。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>provider 版 call：同一个契约，各自的流水线</h1></div>
+            <div class="card">
+                <p>对比 Day 49 的 LiteLLM 版 <code>call</code>，Anthropic 版走自己的流程（<span class="fileref">anthropic/completion.py:277</span>）：</p>
+<pre><code class="language-python"># anthropic/completion.py:277
+def call(self, messages, tools=None, callbacks=None, available_functions=None,
+         from_task=None, from_agent=None, response_model=None) -> str | Any:
+    with llm_call_context():
+        try:
+            self._emit_call_started_event(...)                     # ① 同样广播开始事件
+            formatted_messages, system_message = \
+                self._format_messages_for_anthropic(messages)      # ② 翻译成 Anthropic 格式
+            if not self._invoke_before_llm_call_hooks(formatted_messages, from_agent):
+                raise ValueError("LLM call blocked by before_llm_call hook")   # ③ 同样过钩子
+            completion_params = self._prepare_completion_params(
+                formatted_messages, system_message, tools, available_functions)  # ④ 组参数
+            effective_response_model = response_model or self.response_format
+            if self._effective_stream():
+                return self._handle_streaming_completion(completion_params, ...)  # 流式
+            return self._handle_completion(completion_params, ...)                # 一次性
+        except Exception as e:
+            self._emit_call_failed_event(error=f"Anthropic API call failed: {e!s}", ...)
+            raise                                                  # ⑤ 失败也广播事件再抛</code></pre>
+                <div class="walk">
+                    <div class="r"><code>签名一模一样</code><span>★和 Day 49 <code>BaseLLM.call</code> 的契约完全一致——这才能让上层多态调用。差异全在<b>方法体内部</b>。</span></div>
+                    <div class="r"><code>_emit_call_started_event</code><span>开始/失败事件的广播<b>每个 provider 都做</b>——因为它们都继承了 <code>BaseLLM</code> 里的这些 <code>_emit_*</code> 方法。事件语义统一。</span></div>
+                    <div class="r"><code>_prepare_completion_params(4 个参数)</code><span>注意它比 Day 49 的版本多了 <code>system_message</code> 参数——因为 Anthropic 的 system 是独立参数，必须单独传进去。</span></div>
+                    <div class="r"><code>_handle_completion / streaming</code><span>真正调 Anthropic SDK 的地方，返回后还要把 Anthropic 的响应结构翻回统一格式。</span></div>
+                    <div class="r"><code>except → emit_failed → raise</code><span>失败先广播 <code>LLMCallFailedEvent</code>（让遥测/日志收到），再原样抛出——不吞错。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 共享行为放基类，差异化放子类</span>三个 provider 的 <code>call</code> 都调 <code>_emit_call_started_event / _invoke_before_llm_call_hooks / _emit_call_failed_event</code>——这些"共性行为"实现在 <code>BaseLLM</code>（Day 53/54 会看到它们的定义），子类直接继承。而 <code>_format_messages_for_anthropic / _prepare_completion_params</code> 这些"差异行为"由子类自己实现。<strong>这就是模板方法思想：骨架统一，具体步骤各自填。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>OpenAI 兼容层：一个类服务七家服务</h1></div>
+            <div class="card">
+                <p>最省心的复用——一批"长得像 OpenAI"的服务共用一个类（<span class="fileref">openai_compatible/completion.py:113</span>）：</p>
+<pre><code class="language-python"># openai_compatible/completion.py:113
+class OpenAICompatibleCompletion(OpenAICompletion):   # ★直接继承 OpenAICompletion
+    """Supported providers:
+        - openrouter / deepseek / ollama / ollama_chat
+        - hosted_vllm / cerebras / dashscope
+    Example:
+        llm = LLM(model="deepseek/deepseek-chat")
+        llm = LLM(model="llama3", provider="ollama")"""
+
+    @model_validator(mode="before")
+    def _resolve_provider_config(cls, data):
+        provider = data.get("provider", "")
+        config = OPENAI_COMPATIBLE_PROVIDERS.get(provider)
+        if config is None:
+            supported = ", ".join(sorted(OPENAI_COMPATIBLE_PROVIDERS.keys()))
+            raise ValueError(f"Unknown OpenAI-compatible provider: {provider}. "
+                             f"Supported providers: {supported}")   # ★未知 provider 明确报错
+        data["api_key"]  = cls._resolve_api_key(data.get("api_key"), config, provider)
+        data["base_url"] = cls._resolve_base_url(data.get("base_url"), config, provider)
+        data["default_headers"] = cls._resolve_headers(data.get("default_headers"), config)
+        return data</code></pre>
+                <div class="walk">
+                    <div class="r"><code>继承 OpenAICompletion</code><span>★不是继承 BaseLLM，而是继承 OpenAI 适配器——因为这些服务的 API <b>就是</b> OpenAI 协议，调用逻辑完全复用，只需改"连到哪、用什么 key、带什么头"。</span></div>
+                    <div class="r"><code>_resolve_provider_config</code><span>按 provider 名查一张配置表，自动填好 base_url（deepseek 连 deepseek.com、ollama 连本地）、api_key（读对应环境变量）、请求头。</span></div>
+                    <div class="r"><code>未知 provider → raise</code><span>★边界：写了个不认识的 provider，立刻报错并<b>列出所有支持的名字</b>——比默默连错地方强太多。</span></div>
+                    <div class="r"><code>_resolve_api_key/base_url/headers</code><span>三个专职方法，把"每家的连接细节"抽出来，config 表驱动。加一家新服务只需往表里加一行。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：为什么不给 deepseek/ollama 各写一个类？</span>
+                <strong>朴素做法</strong>：deepseek、ollama、cerebras... 每家一个 <code>XxxCompletion</code> 类——但它们的调用逻辑 99% 相同（都是 OpenAI 协议），只有连接配置不同，分开写就是<strong>大量重复代码</strong>。<strong>源码做法</strong>：一个 <code>OpenAICompatibleCompletion</code> 继承 OpenAI 的全部调用逻辑，差异只剩"配置表里的一行"（url/key/header）。<strong>用"配置驱动"替代"类爆炸"</strong>——加一家新服务的成本从"写一个类"降到"加一行配置"。当多个对象只有数据不同、行为相同时，就该用配置区分而非继承区分。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>能力方法的 provider 覆盖：更准的答案</h1></div>
+            <div class="card">
+                <p>Day 49 说"原生 provider 会覆盖能力探测方法"，这就是例子（<span class="fileref">anthropic/completion.py:1846</span>）：</p>
+<pre><code class="language-python"># anthropic/completion.py:1846
+def get_context_window_size(self) -> int:
+    from crewai.llm import CONTEXT_WINDOW_USAGE_RATIO
+    context_windows = {
+        "claude-3-5-sonnet": 200000, "claude-3-5-haiku": 200000,
+        "claude-3-opus": 200000,     "claude-3-7-sonnet": 200000,
+        "claude-2.1": 200000,        "claude-2": 100000,
+        "claude-instant": 100000,
+    }
+    for model_prefix, size in context_windows.items():
+        if self.model.startswith(model_prefix):
+            return int(size * CONTEXT_WINDOW_USAGE_RATIO)   # 命中→按前缀返回
+    return int(200000 * CONTEXT_WINDOW_USAGE_RATIO)         # 默认 200k
+
+def supports_function_calling(self) -> bool:  # :1838
+    return True                                # Anthropic 都支持，直接 True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Anthropic 专属的窗口表</code><span>不查 Day 49 的通用表，而是用 Anthropic 自己更准的一份——claude 系列基本都是 200k。</span></div>
+                    <div class="r"><code>startswith 前缀匹配</code><span>模型名 <code>claude-3-5-sonnet-20241022</code> 用 <code>startswith("claude-3-5-sonnet")</code> 命中，不用列全每个日期版本。</span></div>
+                    <div class="r"><code>× CONTEXT_WINDOW_USAGE_RATIO</code><span>★复用 Day 49 的 0.85 系数——留 15% 余量。这个常量跨 provider 共享，D52 详解。</span></div>
+                    <div class="r"><code>supports_function_calling → True</code><span>比 Day 49 那个"问 litellm"的版本干脆——Anthropic 我自己家的能力我最清楚，直接给答案。</span></div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：既然都继承 BaseLLM，为啥 Anthropic 要重写 get_context_window_size？基类不是有默认实现吗？</p>
+                    <p class="a">👨‍🏫 老师：基类的默认实现（<span class="fileref">base_llm.py:494</span>）只会返回一个保守的 <code>DEFAULT_CONTEXT_WINDOW_SIZE=8192</code>——对 claude 的 200k 窗口来说太小了，会导致明明能塞得下的对话被误判"超长"而提前压缩。原生 provider 重写它，是为了给出<strong>贴合自家模型的准确值</strong>。这就是"覆盖"的意义：基类给个能跑的下限，子类给个更对的答案。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="pitfall"><span class="t">⚠️ 边界：装了 crewai 不等于能用所有 provider</span>
+                看 Anthropic 适配器文件顶部的 import（<span class="fileref">anthropic/completion.py:24</span>）：<code>try: from anthropic import Anthropic ... except ImportError: raise ImportError('Anthropic native provider not available, to install: uv add "crewai[anthropic]"')</code>。这意味着：<strong>核心 crewai 包并不强制安装每家的 SDK</strong>——你想用 Anthropic 原生 provider，得额外装 <code>crewai[anthropic]</code>。如果没装就写 <code>LLM(model="anthropic/...")</code>，会在 <code>_get_native_provider</code> 触发 import 时抛出这条<strong>带安装命令的清晰错误</strong>。这是"可选依赖"的标准做法：核心轻量，按需装重。踩坑点在于——报错信息其实已经告诉你怎么修，别忽略它。</div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>为什么每家 API 要单独一个适配器类？封装了什么差异？</li>
+                        <li>Anthropic 消息格式的四条铁律是什么？system 为何单拎出来？</li>
+                        <li>客户端为什么"能急切就急切、不行就惰性"？解决什么部署痛点？</li>
+                        <li>provider 版 <code>call</code> 和 Day 49 的 <code>call</code> 有哪些共性、哪些差异？</li>
+                        <li>OpenAI 兼容层为什么用"一个类 + 配置表"而非"类爆炸"？</li>
+                        <li>原生 provider 为什么要覆盖 <code>get_context_window_size</code>？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+ls $P/llms/providers/                                          # 有哪些原生 provider
+sed -n '148,215p'  $P/llms/providers/anthropic/completion.py   # 字段 + 归一化
+sed -n '195,232p'  $P/llms/providers/anthropic/completion.py   # 客户端惰性构建
+sed -n '277,345p'  $P/llms/providers/anthropic/completion.py   # provider 版 call
+sed -n '113,166p'  $P/llms/providers/openai_compatible/completion.py  # 兼容层复用</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 51</strong>：适配器的 <code>call</code> 里传了 <code>tools</code> 和 <code>response_model</code>——今天没细看它们怎么工作。明天专攻<strong>函数调用与结构化输出</strong>：<code>_handle_tool_call</code> 怎么执行模型点名的函数、<code>_validate_structured_output</code> 怎么把模型吐的 JSON 校验成 Pydantic 对象、<code>_prepare_completion_params</code> 怎么把 <code>response_format</code> 塞进请求。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day49.html" style="color:var(--accent-cyan);">&larr; Day 49 LLM 抽象</a>
+                    <a href="crewai-day51.html" style="color:var(--accent-green);">Day 51 · 函数调用与结构化输出 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

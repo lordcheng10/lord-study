@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 52 · 上下文窗口管理 — CrewAI 60 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(249,115,22,.12);color:#fdba74;border:1px solid rgba(249,115,22,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#f97316,#ea580c);">52</div>
+            <h2>Day 52</h2>
+            <p class="version">上下文窗口管理 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是"脑容量"上限</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 窗口大小表与 0.85</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · get_context_window_size</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 超长错误的识别</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · handle_context_length 分流</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 摘要压缩历史</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 执行循环里的接入点</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 取舍 · 边界 · 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="crewai-day51.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 51 函数调用</a></li>
+            <li><a href="crewai-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="crewai-day53.html" class="nav-link" style="color:var(--accent-green);">Day 53 token/成本 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 52 / 共 60 天 · 阶段8 LLM 与集成</span>
+            <h1 class="part-title">上下文窗口管理：对话太长了怎么办</h1>
+            <p class="part-desc">Day 08 那个 ReAct 循环，每转一圈就往 <code>messages</code> 里追加一条观察——转个十几圈，加上工具 schema、结构化 schema，对话就可能撑爆模型的"脑容量"（上下文窗口）。今天把这条线走通：<code>LLM_CONTEXT_WINDOW_SIZES</code> 这张"每个模型多大窗口"的表、<code>get_context_window_size</code> 为什么要乘一个 <code>0.85</code> 系数、<code>is_context_length_exceeded</code> 怎么从五花八门的报错里认出"超长"、<code>handle_context_length</code> 怎么决定"摘要压缩 vs 直接报错"、以及 <code>summarize_messages</code> 怎么把长历史切块压缩。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 60 天里的位置（阶段8 LLM 与集成 · 共 6 天）</div>
+            <div class="steps">
+                <span class="st">D49 LLM 抽象</span><span class="sep">→</span>
+                <span class="st">D50 provider 适配</span><span class="sep">→</span>
+                <span class="st">D51 函数调用/结构化</span><span class="sep">→</span>
+                <span class="st on">D52 上下文窗口</span><span class="sep">→</span>
+                <span class="st">D53 token/成本</span><span class="sep">→</span>
+                <span class="st">D54 遥测</span><span class="sep">→</span>
+                <span class="st">阶段9 进阶</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用一个类比兜住今天</span>
+        上下文窗口就像一个人的<strong>短期记忆容量</strong>。你跟他聊天，他能记住的对话是有限的——超过就"这前面说的我忘了"。模型也一样，一次能"看到"的文字有个上限（token 数）。对话越聊越长，早晚顶到天花板。人怎么办？会<strong>把前面聊过的浓缩成一句"刚才我们讨论了 X、决定了 Y"</strong>，腾出脑子继续。CrewAI 的做法一模一样：快撑爆时，把旧历史<strong>摘要压缩</strong>成一小段，再接着跑。今天看它怎么测容量、怎么压缩。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：对话为什么会"装不下"？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>模型不是号称能读很长吗，为什么还会超长？因为<strong>每一次调用，整个对话历史都要重新发一遍</strong>——模型没有真正的"记忆"，你想让它记得前面说过啥，只能把之前所有消息再塞进这次请求。Day 08 的循环转 10 圈，第 10 次请求就带着前 9 圈的全部问答 + 工具结果。再叠加 Day 51 的工具 schema、结构化 schema，token 数蹭蹭涨。一旦超过模型窗口，API 直接报错整个任务挂掉。<strong>怎么在撑爆前优雅处理？</strong></div>
+                <div class="essence"><span class="t">💡 一句话本质</span>
+                CrewAI 分三步应对：<strong>①知道每个模型多大窗口</strong>（<code>LLM_CONTEXT_WINDOW_SIZES</code> 表 + <code>get_context_window_size</code>，还留 15% 余量）；<strong>②真超长时能认出来</strong>（<code>is_context_length_exceeded</code> 匹配各家报错关键词）；<strong>③认出后按用户配置分流</strong>（<code>respect_context_window=True</code> → 摘要压缩历史后继续；否则 → 明确报错让用户上 RAG）。<strong>核心是"预留余量 + 超长自愈"，而不是硬撞天花板。</strong></div>
+                <div class="baby"><span class="t">大白话</span>三件事：先量好"这个模型脑子多大"，再在真塞爆时"认出这是撑爆了而不是别的错"，最后"要么帮它把旧记忆压缩腾地方、要么老实告诉你该换方案"。这条链路平时你感觉不到，但它是长任务不崩的关键保险。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>窗口大小表 + 那个神秘的 0.85</h1></div>
+            <div class="card">
+                <p>先看那张"模型→窗口大小"的静态表和两个常量（<span class="fileref">llm.py:168</span> 与 <span class="fileref">llm.py:325</span>）：</p>
+<pre><code class="language-python"># llm.py:168
+LLM_CONTEXT_WINDOW_SIZES: Final[dict[str, int]] = {
+    "gpt-4": 8192,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 200000,
+    "gpt-4.1": 1047576,          # 官方文档值
+    "o1-preview": 128000,
+    "o3-mini": 200000,
+    ...
+    "mistral/mistral-large-latest": 32768,
+}
+
+# llm.py:325
+DEFAULT_CONTEXT_WINDOW_SIZE: Final[int] = 8192     # 不认识的模型给个保守下限
+CONTEXT_WINDOW_USAGE_RATIO: Final[float] = 0.85    # ★只用 85%，留 15% 余量</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Final[dict]</code><span><code>Final</code> 标记"这是常量，别改"。一张硬编码的查询表，key 是模型名前缀，value 是官方窗口 token 数。</span></div>
+                    <div class="r"><code>值差异巨大</code><span>从 gpt-4 的 8192 到 gpt-4.1 的 100 万+——不同模型脑容量差百倍，所以必须逐个记。</span></div>
+                    <div class="r"><code>DEFAULT = 8192</code><span>★兜底：表里查不到的模型，保守假设只有 8192，宁可小估也不冒险超发。</span></div>
+                    <div class="r"><code>USAGE_RATIO = 0.85</code><span>★核心设计：实际可用的当成"窗口 × 0.85"。为什么不用满？下面取舍详解。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍①：为什么只用 85%，白白浪费 15%？</span>
+                模型标称的窗口是"<strong>输入 + 输出</strong>"的总和。如果你把输入塞到 100% 满，模型就<strong>一个字都吐不出来</strong>了——没地方放回答。而且 token 计数是<strong>估算</strong>的（不同 tokenizer 有偏差），贴着上限走很容易实际超一点点就报错。留 15% 余量，既给回答留了空间，又给估算误差留了缓冲。<strong>朴素做法"用满窗口"看似高效，实则频繁在边界翻车；留余量看似浪费，实则换来稳定。</strong>这是"为不确定性预留 buffer"的经典工程判断——注释里 <code>get_context_window_size</code> 也明说了 "using 75% of the maximum to avoid cutting off messages mid-thread"（文档写 75%，常量实际是 85%，思路一致：都是留余量）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>get_context_window_size：惰性算 + 缓存</h1></div>
+            <div class="card">
+                <p>把表和系数结合起来算出实际可用窗口（<span class="fileref">llm.py:2443</span>）：</p>
+<pre><code class="language-python"># llm.py:2443
+def get_context_window_size(self) -> int:
+    """Returns 75% of the maximum to avoid cutting off messages mid-thread."""
+    if self.context_window_size != 0:
+        return self.context_window_size        # ★已算过 → 直接返回缓存
+    min_context = 1024
+    max_context = 2097152                       # gemini-1.5-pro 的上限
+    for key, value in LLM_CONTEXT_WINDOW_SIZES.items():
+        if value < min_context or value > max_context:
+            raise ValueError(f"Context window for {key} must be between ...")  # 表自检
+    self.context_window_size = int(DEFAULT_CONTEXT_WINDOW_SIZE * CONTEXT_WINDOW_USAGE_RATIO)
+    for key, value in LLM_CONTEXT_WINDOW_SIZES.items():
+        if self.model.startswith(key):          # ★前缀匹配模型名
+            self.context_window_size = int(value * CONTEXT_WINDOW_USAGE_RATIO)
+    return self.context_window_size</code></pre>
+                <div class="walk">
+                    <div class="r"><code>if != 0: return 缓存</code><span>★惰性 + 缓存：Day 49 说过初始 <code>context_window_size=0</code>。第一次算完就存进字段，之后直接返回，不重复算。</span></div>
+                    <div class="r"><code>表自检 raise</code><span>启动即校验：表里若有明显离谱的值（&lt;1024 或 &gt;209 万）直接报错——防止有人改表时手滑写错。</span></div>
+                    <div class="r"><code>先赋 DEFAULT × 0.85</code><span>先给个兜底值（8192×0.85≈6963），万一模型名一个都不匹配也有合理下限。</span></div>
+                    <div class="r"><code>startswith(key)</code><span>★前缀匹配：<code>gpt-4o-2024-08-06</code> 用 <code>startswith("gpt-4o")</code> 命中，不用把每个日期版本都列进表。</span></div>
+                    <div class="r"><code>× 0.85 存回字段</code><span>命中就用"真实窗口×0.85"覆盖兜底值，存进 <code>self.context_window_size</code> 缓存。</span></div>
+                </div>
+                <div class="anno">注意这是 <b>litellm 版 LLM</b> 的实现。Day 50 讲过原生 provider（如 <code>AnthropicCompletion.get_context_window_size</code>）会<b>覆盖</b>它，用自家更准的窗口表。基类 <code>BaseLLM</code>（<span class="fileref">base_llm.py:494</span>）则只返回保守的 <code>DEFAULT_CONTEXT_WINDOW_SIZE</code>。三层各司其职。</div>
+                <div class="example"><span class="t">📝 例子：gpt-4o 的可用窗口</span>
+                <code>llm = LLM(model="gpt-4o")</code>，第一次调 <code>llm.get_context_window_size()</code>：表里 <code>"gpt-4o": 128000</code> 命中，返回 <code>int(128000 × 0.85) = 108800</code>，并缓存。第二次调直接返回 108800，不再遍历表。<strong>所以框架认为 gpt-4o "实际能用" 约 10.8 万 token，留了 1.9 万余量。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 190" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：窗口的三层来源</text>
+                        <rect x="20" y="35" width="200" height="120" rx="8" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/>
+                        <text x="120" y="54" fill="#93c5fd" text-anchor="middle" font-weight="700">LLM_CONTEXT_WINDOW_SIZES</text>
+                        <text x="120" y="76" fill="#94a3b8" text-anchor="middle" font-size="10">gpt-4 : 8192</text>
+                        <text x="120" y="93" fill="#94a3b8" text-anchor="middle" font-size="10">gpt-4o : 128000</text>
+                        <text x="120" y="110" fill="#94a3b8" text-anchor="middle" font-size="10">gpt-4.1 : 1047576</text>
+                        <text x="120" y="127" fill="#94a3b8" text-anchor="middle" font-size="10">... (前缀匹配)</text>
+                        <text x="120" y="147" fill="#64748b" text-anchor="middle" font-size="9">查不到 → DEFAULT 8192</text>
+                        <rect x="255" y="72" width="130" height="46" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="320" y="90" fill="#fcd34d" text-anchor="middle" font-size="10">× 0.85</text>
+                        <text x="320" y="107" fill="#fcd34d" text-anchor="middle" font-size="9.5">USAGE_RATIO</text>
+                        <path d="M220 95 L253 95" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a52d)"/>
+                        <rect x="420" y="60" width="220" height="70" rx="8" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="530" y="82" fill="#86efac" text-anchor="middle" font-weight="700">self.context_window_size</text>
+                        <text x="530" y="102" fill="#94a3b8" text-anchor="middle" font-size="10">= 108800（算一次后缓存）</text>
+                        <text x="530" y="120" fill="#64748b" text-anchor="middle" font-size="9">下次直接返回，不再遍历</text>
+                        <path d="M385 95 L418 95" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a52dg)"/>
+                        <defs>
+                          <marker id="a52d" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a52dg" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：静态表（前缀匹配，查不到用 DEFAULT）× 0.85 系数 → 算一次缓存进实例字段。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>认出"超长"错误：关键词匹配</h1></div>
+            <div class="card">
+                <p>真超长时各家 API 报错文案五花八门，用一张关键词表统一识别（<span class="fileref">utilities/exceptions/context_window_exceeding_exception.py</span>）：</p>
+<pre><code class="language-python"># context_window_exceeding_exception.py
+CONTEXT_LIMIT_ERRORS: Final[list[str]] = [
+    "expected a string with maximum length",
+    "maximum context length",
+    "context length exceeded",
+    "context_length_exceeded",
+    "context window full",
+    "too many tokens",
+    "input is too long",
+    "exceeds token limit",
+]
+
+class LLMContextLengthExceededError(Exception):
+    @staticmethod
+    def _is_context_limit_error(error_message: str) -> bool:
+        return any(phrase.lower() in error_message.lower()
+                   for phrase in CONTEXT_LIMIT_ERRORS)   # ★任一关键词命中就算超长</code></pre>
+                <p>上层用一个薄封装调它（<span class="fileref">utilities/agent_utils.py:698</span>）：</p>
+<pre><code class="language-python"># agent_utils.py:698
+def is_context_length_exceeded(exception: Exception) -> bool:
+    return LLMContextLengthExceededError(str(exception))._is_context_limit_error(str(exception))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>CONTEXT_LIMIT_ERRORS 列表</code><span>★把 OpenAI/Anthropic/各网关的"超长"报错文案<b>都收集进一张表</b>——因为没有统一错误码，只能靠文案关键词认。</span></div>
+                    <div class="r"><code>any(... in ... lower())</code><span>报错消息里<b>含任一</b>关键词（不区分大小写）就判定为超长。宽松匹配，尽量不漏。</span></div>
+                    <div class="r"><code>is_context_length_exceeded</code><span>给执行循环用的简洁入口——传进一个异常，返回"是不是超长导致的"。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界：靠"报错文案关键词"识别是脆弱的</span>
+                这套机制有个天生的坑：<strong>它依赖各家 API 报错消息里的英文文案</strong>。如果某家 provider 改了措辞（比如把 "context length exceeded" 换成 "prompt too large"），而关键词表没收录，就会<strong>识别失败</strong>——超长错误被当成"未知错误"抛出，触发不了自动压缩。这就是为什么表里列了 8 种不同说法尽量覆盖。<strong>教训：当底层没有稳定的错误码、只能靠文案匹配时，要么维护一张尽量全的关键词表，要么就得接受偶尔漏判。</strong>更稳的做法是提前用 token 计数预判（在发送前就估算会不会超），但那又依赖准确的 tokenizer，同样有成本。这是"事后认错 vs 事前预判"的现实权衡。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>handle_context_length：压缩还是报错？</h1></div>
+            <div class="card">
+                <p>认出超长后，按用户配置的 <code>respect_context_window</code> 分流（<span class="fileref">utilities/agent_utils.py:712</span>）：</p>
+<pre><code class="language-python"># agent_utils.py:712
+def handle_context_length(respect_context_window, printer, messages, llm, callbacks, verbose=True):
+    """Handle context length exceeded by either summarizing or raising an error."""
+    if respect_context_window:                       # ① 用户允许自动处理
+        if verbose:
+            printer.print("Context length exceeded. Summarizing content to fit ...", color="yellow")
+        summarize_messages(messages=messages, llm=llm, callbacks=callbacks, verbose=verbose)  # 压缩
+    else:                                            # ② 用户不允许
+        if verbose:
+            printer.print("Context length exceeded. Consider ... RAG tools ...", color="red")
+        raise SystemExit(                            # ★直接退出，不硬撞
+            "Context length exceeded and user opted not to summarize. "
+            "Consider using smaller text or RAG tools from crewai_tools.")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>respect_context_window</code><span>Day 07/08 见过的开关（默认 False）。它决定"撑爆时是自动救还是直接停"。控制权交给用户。</span></div>
+                    <div class="r"><code>True → summarize_messages</code><span>用户说"你看着办"→ 调 <code>summarize_messages</code> 把历史压缩到能塞下（L06）。黄色警告提示正在压缩。</span></div>
+                    <div class="r"><code>False → raise SystemExit</code><span>★用户没开自动压缩 → <b>明确退出</b>并给出建议（用更小的文本 / 上 RAG 工具），而不是默默截断丢信息。</span></div>
+                    <div class="r"><code>红色 vs 黄色</code><span>细节：压缩用黄色（警告但能继续），报错用红色（严重需干预）。颜色即语义。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍②：超长了，为什么不无脑自动压缩，非要留个开关？</span>
+                自动摘要压缩<strong>会丢信息</strong>——把 20 条详细对话压成 3 句摘要，某些细节必然损失。对有些任务（闲聊、总结）无所谓，对另一些（精确的多步推理、代码生成）可能压缩后就答错了。所以源码<strong>不替用户做主</strong>：默认 <code>respect_context_window=False</code>，撑爆就明确报错并建议 RAG（治本：从源头减少塞进去的量）；用户明确 <code>=True</code> 才启用有损压缩（治标：能继续但可能降质）。<strong>"有损的自动救援"是把双刃剑，把选择权交还用户，比框架擅自决定更负责任。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>summarize_messages：切块 + 摘要</h1></div>
+            <div class="card">
+                <p>压缩的核心思路是"切成小块、各自摘要、拼回去"（<span class="fileref">utilities/agent_utils.py:920</span>，配合辅助函数）：</p>
+<pre><code class="language-python"># agent_utils.py:752 —— token 估算（保守启发式）
+def _estimate_token_count(text: str) -> int:
+    return len(text) // 4                    # ★经验值：约 4 个字符 ≈ 1 token
+
+# agent_utils.py:819 —— 按消息边界切块
+def _split_messages_into_chunks(messages, max_tokens):
+    non_system = [m for m in messages if m.get("role") != "system"]   # system 不参与切块
+    chunks, current_chunk, current_tokens = [], [], 0
+    for msg in non_system:
+        msg_tokens = _estimate_token_count(str(msg.get("content") or ""))
+        if current_chunk and (current_tokens + msg_tokens) > max_tokens:
+            chunks.append(current_chunk); current_chunk = []; current_tokens = 0  # 满了另起一块
+        current_chunk.append(msg); current_tokens += msg_tokens
+    if current_chunk: chunks.append(current_chunk)
+    return chunks
+
+# agent_utils.py:867 —— 从模型输出里抠摘要
+def _extract_summary_tags(text: str) -> str:
+    match = re.search(r"&lt;summary&gt;(.*?)&lt;/summary&gt;", text, re.DOTALL)
+    return match.group(1).strip() if match else text   # 有标签取标签内，否则取全文</code></pre>
+                <div class="walk">
+                    <div class="r"><code>len(text) // 4</code><span>★不精确算 token（那要 tokenizer、慢），用"4 字符≈1 token"的启发式快速估。<b>保守估算够用即可。</b></span></div>
+                    <div class="r"><code>system 不切块</code><span>系统提示（角色/目标）是灵魂，绝不能被压缩掉——切块时先排除它。</span></div>
+                    <div class="r"><code>按 max_tokens 切</code><span>累加到快超一块的上限就"另起一块"，保证每块都能塞进模型去做摘要。<b>在消息边界切，不切断单条消息。</b></span></div>
+                    <div class="r"><code>&lt;summary&gt; 标签</code><span>让模型把摘要写进标签里，框架用正则抠出——比让模型"直接回摘要"更可控（能过滤掉客套话）。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>历史太长塞不下？那就把它切成几段能塞下的小块，每块让模型"帮我总结一下"，再把这些小结拼起来当新的、短得多的历史。就像把一本厚书先分章缩写、再把缩写拼成一页纲要。system 提示（你是谁、要干嘛）不动，只压缩中间的问答过程。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>接入点：执行循环怎么触发这一切</h1></div>
+            <div class="card">
+                <p>回到 Day 08 的执行循环，超长处理就挂在 <code>except</code> 里（<span class="fileref">agents/crew_agent_executor.py:447</span>）：</p>
+<pre><code class="language-python"># crew_agent_executor.py:447（文本 ReAct 循环的异常分支）
+if is_context_length_exceeded(e):                 # ① 认出是超长错误
+    handle_context_length(                        # ② 分流：压缩 or 报错
+        respect_context_window=self.respect_context_window,
+        printer=self._printer,
+        messages=self.messages,                   # 把当前对话历史传进去
+        llm=self.llm,
+        callbacks=self.callbacks,
+    )
+    continue                                      # ③ ★压缩完 continue，接着转下一圈</code></pre>
+                <p>原生工具调用循环里也有对称的一处（<span class="fileref">crew_agent_executor.py:582</span>），逻辑相同。</p>
+                <div class="walk">
+                    <div class="r"><code>在 except 里触发</code><span>★不是主动预判，而是"真报错了"才处理——事后自愈。发一次请求，超长了，接住这个异常。</span></div>
+                    <div class="r"><code>is_context_length_exceeded(e)</code><span>先用 L04 的关键词匹配确认"这个异常确实是超长导致的"，不是别的错误。</span></div>
+                    <div class="r"><code>handle_context_length(...)</code><span>传入 <code>self.messages</code>——注意它<b>原地修改</b>这个列表（压缩后的历史直接替换进去），不是返回新列表。</span></div>
+                    <div class="r"><code>continue</code><span>★关键：压缩完不是结束，而是 <code>continue</code> 回到循环开头，用<b>压缩后的短历史</b>重新发一次请求。这次就塞得下了。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 230" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：超长自愈的闭环</text>
+                        <rect x="240" y="32" width="180" height="28" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="330" y="50" fill="#93c5fd" text-anchor="middle">发请求（带全部历史）</text>
+                        <path d="M330 60 L330 74" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a52)"/>
+                        <rect x="255" y="76" width="150" height="28" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="330" y="94" fill="#fca5a5" text-anchor="middle">API 抛超长异常</text>
+                        <path d="M330 104 L330 118" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a52)"/>
+                        <rect x="215" y="120" width="230" height="28" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="330" y="138" fill="#fcd34d" text-anchor="middle">is_context_length_exceeded? 是</text>
+                        <path d="M330 148 L330 162" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a52)"/>
+                        <rect x="70" y="164" width="240" height="30" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="190" y="183" fill="#86efac" text-anchor="middle">respect=True → 摘要压缩 messages</text>
+                        <rect x="360" y="164" width="240" height="30" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="480" y="183" fill="#fca5a5" text-anchor="middle">respect=False → SystemExit 报错</text>
+                        <path d="M300 162 L190 164" stroke="#22c55e" stroke-width="1"/>
+                        <path d="M360 162 L480 164" stroke="#ef4444" stroke-width="1"/>
+                        <path d="M190 194 C190 218 330 218 330 62" stroke="#22c55e" stroke-width="1.3" stroke-dasharray="4 3" fill="none" marker-end="url(#a52g)"/>
+                        <text x="330" y="212" fill="#22c55e" text-anchor="middle" font-size="10">continue：用压缩后的短历史重发</text>
+                        <defs>
+                          <marker id="a52" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker>
+                          <marker id="a52g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#22c55e"/></marker>
+                        </defs>
+                    </svg>
+                    <div class="cap">图注：超长→识别→分流。压缩这条路会 continue 重发形成闭环；报错那条路终止任务。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>边界 + 今日小结</h1></div>
+            <div class="card">
+                <div class="qa">
+                    <p class="q">👶 小白：既然会自动压缩，我干脆一直开着 <code>respect_context_window=True</code> 不就一劳永逸？</p>
+                    <p class="a">👨‍🏫 老师：不建议无脑常开。压缩是<strong>有损</strong>的——它会把详细历史换成摘要，多步精确推理任务可能因此丢关键细节而答错。而且每次压缩都要<strong>额外调一次（或多次）LLM 做摘要</strong>，费时费钱。更健康的做法是：从源头控制塞进去的量（用 Day 16 的 context 只传相关任务、用 RAG 检索而非全文塞入），把压缩当"最后的安全网"而非"日常依赖"。<strong>治本优于治标。</strong></p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>为什么对话会越来越长、直到撑爆窗口？</li>
+                        <li><code>CONTEXT_WINDOW_USAGE_RATIO=0.85</code> 为什么要留余量？</li>
+                        <li><code>get_context_window_size</code> 怎么惰性算 + 缓存 + 前缀匹配？</li>
+                        <li>超长错误为什么靠"关键词匹配"识别？这有什么脆弱性？</li>
+                        <li><code>respect_context_window</code> 两个分支各做什么？为什么留这个开关？</li>
+                        <li>摘要压缩为什么要切块？为什么 system 消息不参与？</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">P=lib/crewai/src/crewai
+sed -n '168,326p'  $P/llm.py                          # 窗口表 + 两个常量
+sed -n '2443,2470p' $P/llm.py                         # get_context_window_size
+cat $P/utilities/exceptions/context_window_exceeding_exception.py  # 超长识别
+sed -n '698,760p'  $P/utilities/agent_utils.py        # handle_context_length
+# 看看你的模型算出多大可用窗口
+python -c "
+from crewai import LLM
+for m in ['gpt-4','gpt-4o','gpt-4.1']:
+    print(m, LLM(model=m).get_context_window_size())
+"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 53</strong>：压缩省的是"窗口空间"，但每次调用还在花"钱"和"token"。明天讲<strong>token / 成本 / usage 追踪</strong>：<code>UsageMetrics</code> 数据模型、<code>from_provider_dict</code> 怎么把各家不同的 usage 字段归一化、<code>TokenProcess</code> 累加器、以及 crew 级 <code>calculate_usage_metrics</code> 怎么把全队消耗汇总。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="crewai-day51.html" style="color:var(--accent-cyan);">&larr; Day 51 函数调用</a>
+                    <a href="crewai-day53.html" style="color:var(--accent-green);">Day 53 · token/成本/usage &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
