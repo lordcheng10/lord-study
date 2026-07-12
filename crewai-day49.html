@@ -249,6 +249,37 @@ def __new__(cls, model: str, is_litellm: bool = False, **kwargs: Any) -> LLM:
                     <div class="r"><code>路③ 模型名带 "/"</code><span>像 <code>"anthropic/claude-..."</code>：拆出前缀 <code>anthropic</code>，查映射表，再核对模型名在不在常量表里——<b>都对</b>才走原生。</span></div>
                     <div class="r"><code>_validate_model_in_constants</code><span>防手滑：前缀对但模型名拼错（不在已知列表）→ 不敢当原生，退回 LiteLLM 兜底。</span></div>
                 </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 235" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：__new__ 的四条路由</text>
+                        <rect x="255" y="30" width="150" height="26" rx="7" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="330" y="47" fill="#93c5fd" text-anchor="middle">LLM(model=...) 调用</text>
+                        <path d="M330 56 L330 68" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a49)"/>
+                        <rect x="230" y="70" width="200" height="24" rx="6" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="330" y="86" fill="#fcd34d" text-anchor="middle">① custom_openai=True?</text>
+                        <path d="M330 94 L330 104" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a49)"/>
+                        <rect x="230" y="106" width="200" height="24" rx="6" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="330" y="122" fill="#fcd34d" text-anchor="middle">② 显式 provider?</text>
+                        <path d="M330 130 L330 140" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a49)"/>
+                        <rect x="210" y="142" width="240" height="24" rx="6" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="330" y="158" fill="#fcd34d" text-anchor="middle">③ 带"/"且模型在常量表?</text>
+                        <path d="M330 166 L330 176" stroke="#94a3b8" stroke-width="1.1" marker-end="url(#a49)"/>
+                        <rect x="230" y="178" width="200" height="24" rx="6" fill="rgba(245,158,11,.1)" stroke="#f59e0b"/>
+                        <text x="330" y="194" fill="#fcd34d" text-anchor="middle">④ 从模型名推断 provider</text>
+                        <rect x="470" y="70" width="170" height="96" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="555" y="112" fill="#86efac" text-anchor="middle">命中→原生 provider</text>
+                        <text x="555" y="132" fill="#64748b" text-anchor="middle" font-size="9.5">OpenAI/Anthropic/...</text>
+                        <path d="M430 82 C455 82 460 100 468 105" stroke="#22c55e" stroke-dasharray="3 3"/>
+                        <path d="M430 118 L468 118" stroke="#22c55e" stroke-dasharray="3 3"/>
+                        <path d="M450 154 C460 150 462 140 468 132" stroke="#22c55e" stroke-dasharray="3 3"/>
+                        <rect x="470" y="176" width="170" height="26" rx="7" fill="rgba(168,85,247,.1)" stroke="#a855f7"/>
+                        <text x="555" y="193" fill="#c084fc" text-anchor="middle">都不满足→LiteLLM 兜底</text>
+                        <path d="M430 190 L468 189" stroke="#a855f7" stroke-dasharray="3 3"/>
+                        <text x="180" y="120" fill="#64748b" text-anchor="middle" font-size="9" transform="rotate(-90 180 120)">否则依次下探</text>
+                        <defs><marker id="a49" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：四条路依次判断，任一命中就定 provider 走原生；全不命中则退回 LiteLLM 兜底。</div>
+                </div>
                 <div class="tradeoff"><span class="t">💡 设计取舍①：为什么用 __new__ 而不是简单地写个 create_llm() 函数？</span>
                 <strong>朴素做法</strong>：写个工厂函数 <code>make_llm(model)</code> 返回不同对象——但这样用户就得记住"要用 <code>make_llm()</code> 不能直接 <code>LLM()</code>"，且历史代码里满是 <code>LLM(...)</code> 没法平滑迁移。<strong>源码做法</strong>：把路由藏进 <code>__new__</code>，用户依旧写 <code>LLM(model=...)</code>，但拿到的<strong>可能是 OpenAICompletion、AnthropicCompletion 或 LLM 自己</strong>。对用户是<strong>零感知的升级</strong>——老代码不改一个字就自动享受原生 provider 提速。代价是 <code>__new__</code> 逻辑复杂、可读性下降，属于"把复杂度关进一个盒子换取调用方的简单"。</div>
             </div>
