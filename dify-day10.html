@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 图执行引擎 — Dify 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #1c64f2;background:rgba(28,100,242,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c64f2,#6366f1);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(28,100,242,.12);color:#a5b4fc;border:1px solid rgba(28,100,242,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">10</div>
+            <h2>Day 10</h2>
+            <p class="version">图执行引擎 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：引擎和 Dify 谁认识谁</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 适配器层：翻译官</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · DifyPreparedLLM：藏起全 API</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 轮询 LLM：长任务怎么等</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 工具运行时适配器</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 引擎装配全景回看</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 阶段3 收官 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="dify-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 节点体系</a></li>
+            <li><a href="dify-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="dify-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 阶段3 工作流</span>
+            <h1 class="part-title">图执行引擎：通用引擎与 Dify 之间那层"翻译官"</h1>
+            <p class="part-desc">Day08 说真正跑图的是通用引擎 <code>GraphEngine</code>（graphon 包），Day09 说造 LLM 节点时会"把 ModelInstance 包成适配器"。今天把这层适配器讲透——主角是 <code>core/workflow/node_runtime.py</code>。弄清三件事：<strong>①为什么通用引擎不能直接用 Dify 的 <code>ModelInstance</code>/工具/文件，必须隔一层适配器；②<code>DifyPreparedLLM</code> 怎么把 Day05 那个"胖胖的 ModelInstance"收窄成引擎节点只认的精简协议；③工具、文件、轮询式长任务的运行时适配器各自解决什么。</strong>理解这一层，你就理解了"通用引擎 + 业务适配"这种大型系统最常见的拼装方式。这也是阶段3 的收官。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段3：工作流 · D08-10 收官）</div>
+            <div class="steps">
+                <span class="st">D06 Provider/实体</span><span class="sep">→</span>
+                <span class="st">D07 Prompt/生成</span><span class="sep">→</span>
+                <span class="st">D08 工作流总览</span><span class="sep">→</span>
+                <span class="st">D09 节点体系</span><span class="sep">→</span>
+                <span class="st on">D10 图执行引擎</span><span class="sep">→</span>
+                <span class="st">S4 RAG</span><span class="sep">→</span>
+                <span class="st">S5 工具/Agent</span><span class="sep">→</span>
+                <span class="st">S6 收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        类比一：通用引擎 <code>GraphEngine</code> 像<strong>一台标准化的自动化流水线设备</strong>——它只认"标准接口的机械臂"。Dify 的 <code>ModelInstance</code>/工具/文件是"非标准零件"，得套一个<strong>转接头</strong>（适配器）才能插上。<code>DifyPreparedLLM</code> 就是"把 Dify 模型转成引擎标准插口"的转接头。类比二：适配器像<strong>翻译官</strong>——引擎讲"引擎语"（<code>LLMProtocol</code> 协议），Dify 讲"Dify 语"（<code>ModelInstance</code> 那套方法）。翻译官站中间，引擎说"给我 invoke_llm"，它转身用 Dify 的方式去调，再把结果翻回引擎听得懂的形式。引擎从头到尾不需要学 Dify 语。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：通用引擎凭什么认识 Dify 的东西</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Dify 把图执行做成了独立的通用引擎 <code>graphon.graph_engine.GraphEngine</code>（Day08 见过），目标是"能跑任意图，不绑定 Dify"。可矛盾来了：图里的 LLM 节点最终得调模型、工具节点得调工具、有的节点要读文件——这些能力全是 Dify 的（<code>ModelInstance</code> 来自 Day05、工具来自 <code>ToolManager</code>）。<strong>如果让通用引擎直接 import Dify 的 <code>ModelInstance</code>，引擎就被 Dify 绑死了，"通用"二字白谈</strong>；可要是引擎啥都不认识，节点又干不了活。怎么让"通用引擎"用上"Dify 的具体能力"，还不互相绑死？</div>
+                <div class="essence"><span class="t">💡 本质：面向协议 + 适配器隔离</span>答案是<strong>依赖倒置</strong>：引擎不依赖 Dify 的具体类，只定义一组<strong>协议</strong>（<code>LLMProtocol</code>、<code>ToolNodeRuntimeProtocol</code>、<code>FileReferenceFactoryProtocol</code> 等，是 <code>Protocol</code> 接口）。Dify 侧在 <code>node_runtime.py</code> 里写一批<strong>适配器类</strong>去<em>实现</em>这些协议，内部转调 Dify 的真实能力。引擎只跟协议打交道，Dify 的实现可以随便变——两边靠"协议"这层薄薄的契约解耦。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>适配器层：node_runtime.py 里的一排翻译官</h1></div>
+            <div class="card">
+                <p><code>core/workflow/node_runtime.py</code> 就是这批适配器的集中地。每个类都实现引擎的某个 Protocol：</p>
+                <table class="ttable">
+                    <thead><tr><th>适配器</th><th>实现的引擎协议</th><th>职责</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>DifyPreparedLLM</code></td><td><code>LLMProtocol</code></td><td>把 <code>ModelInstance</code> 收窄成引擎认的 LLM 接口 <span class="fileref">node_runtime.py:150</span></td></tr>
+                        <tr><td><code>DifyPreparedPollingLLM</code></td><td><code>LLMPollingCapableProtocol</code></td><td>额外支持"轮询式"长任务 LLM <span class="fileref">node_runtime.py:285</span></td></tr>
+                        <tr><td><code>DifyToolNodeRuntime</code></td><td><code>ToolNodeRuntimeProtocol</code></td><td>把 Dify 的 <code>ToolManager</code> 接到工具节点 <span class="fileref">node_runtime.py:459</span></td></tr>
+                        <tr><td><code>DifyFileReferenceFactory</code></td><td><code>FileReferenceFactoryProtocol</code></td><td>把配置里的文件引用还原成 Dify 的 File 对象 <span class="fileref">node_runtime.py:137</span></td></tr>
+                        <tr><td><code>DifyPromptMessageSerializer</code></td><td><code>PromptMessageSerializerProtocol</code></td><td>PromptMessage 的序列化 <span class="fileref">node_runtime.py:337</span></td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">大白话</span>Day09 的 <code>create_node</code> 给 LLM 节点"配料"时塞进去的，就是这些适配器（比如 <code>wrap_model_instance=True</code> 造的其实是 <code>DifyPreparedLLM</code>）。节点在引擎里跑，手里拿的是"翻译官"，通过翻译官去用 Dify 的真本事。<strong>节点只会讲"引擎语"，翻译官负责把它翻成 Dify 能听懂的调用。</strong></div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>DifyPreparedLLM：把"胖 ModelInstance"收窄</h1></div>
+            <div class="card">
+                <p>Day05 的 <code>ModelInstance</code> 方法很多（六种 invoke、算 token、拿 schema…）。但引擎里的 LLM 节点只需要其中一小撮。<code>DifyPreparedLLM</code>（<span class="fileref">api/core/workflow/node_runtime.py:150</span>）就是那层"只暴露必要的"包装：</p>
+<pre><code class="language-python"># api/core/workflow/node_runtime.py:150
+class DifyPreparedLLM(LLMProtocol):
+    """Workflow-layer adapter that hides the full `ModelInstance` API from `graphon` nodes."""
+    def __init__(self, model_instance: ModelInstance, request_metadata=None):
+        self._model_instance = model_instance          # ① 把真身藏起来，只留自己当门面
+        self._request_metadata = request_metadata
+
+    @property
+    def provider(self) -> str:
+        return self._model_instance.provider           # ② 引擎要什么，就转发什么
+
+    @override
+    def invoke_llm(self, *, prompt_messages, model_parameters, tools, stop, stream):
+        return self._model_instance.invoke_llm(         # ③ ★核心：转调 Day05 的 invoke_llm
+            prompt_messages=list(prompt_messages),
+            model_parameters=dict(model_parameters),
+            tools=list(tools or []), stop=list(stop or []),
+            stream=stream, request_metadata=self._request_metadata,  # 补上 Dify 的追踪元数据
+        )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>类注释直说了</code><span>"hides the full ModelInstance API from graphon nodes"——目的就是<b>藏</b>。节点看到的是精简的 <code>LLMProtocol</code>（provider/model_name/invoke_llm/get_num_tokens 等几样），看不到 <code>ModelInstance</code> 上 embedding/rerank/tts 那些跟它无关的方法。</span></div>
+                    <div class="r"><code>invoke_llm 转调</code><span>★这一句就是 Day05 和 Day10 的接头：节点调 <code>prepared_llm.invoke_llm(...)</code> → 适配器转调 <code>model_instance.invoke_llm(...)</code> → 进 Day05 的 <code>_round_robin_invoke</code>（负载均衡/冷却）→ 真正请求模型。工作流里的 LLM 调用，最终全汇入 Day05 那一个出海口。</span></div>
+                    <div class="r"><code>request_metadata</code><span>适配器还悄悄补上 Dify 的请求元数据（用于计费/追踪）。引擎节点不知道这东西存在——这正是适配器的价值：把"业务附加信息"在边界处补齐，不污染引擎接口。</span></div>
+                    <div class="r"><code>@override 标注</code><span>每个方法都标 <code>@override</code>，明示"我在实现协议里声明的这个方法"。签名对不上会被类型检查抓出来——契约有强制力。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 接口隔离：给对方它需要的最小面</span>不是"能给的都给"，而是"它要什么给什么"。节点只需要"能调 LLM"，就只给它 <code>LLMProtocol</code> 这么大的面。<strong>暴露面越小，耦合越小，将来 <code>ModelInstance</code> 怎么重构都不影响引擎</strong>。这跟 Day09 的"参数提取节点只给它需要的料"是同一条原则的两次体现。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>轮询式 LLM：长任务怎么"发起→等→取"</h1></div>
+            <div class="card">
+                <p>有些模型调用是长任务（如深度推理、批处理），不能一个请求干等到底。<code>DifyPreparedPollingLLM</code>（<span class="fileref">api/core/workflow/node_runtime.py:285</span>）在普通适配器上加了"轮询"能力：</p>
+<pre><code class="language-python"># api/core/workflow/node_runtime.py:285
+class DifyPreparedPollingLLM(DifyPreparedLLM, LLMPollingCapableProtocol):
+    """Prepared workflow LLM adapter that exposes Graphon's polling protocol."""
+    def __init__(self, model_instance, request_metadata=None):
+        super().__init__(model_instance, request_metadata=request_metadata)
+        model_type_instance = model_instance.model_type_instance
+        if not isinstance(model_type_instance, LargeLanguageModel):     # ① 前提：必须是 LLM
+            raise TypeError("Polling wrapper requires a large-language-model instance.")
+        plugin_model_runtime = model_type_instance.model_runtime
+        if not isinstance(plugin_model_runtime, PluginModelRuntime):    # ② 前提：必须是插件化模型
+            raise TypeError("Polling wrapper requires a plugin-backed model runtime.")
+        self._plugin_model_runtime = plugin_model_runtime
+
+    @override
+    def start_llm_polling(self, *, prompt_messages, model_parameters, tools, stop, json_schema):
+        return self._plugin_model_runtime.start_llm_polling(...)        # ③ 发起：拿一个"任务凭据"
+    @override
+    def check_llm_polling(self, *, plugin_state):
+        return self._plugin_model_runtime.check_llm_polling(...)        # ④ 查询：拿凭据问"好了没"</code></pre>
+                <div class="walk">
+                    <div class="r"><code>继承普通适配器</code><span>它 <code>extends DifyPreparedLLM</code>——普通的 <code>invoke_llm</code> 全继承下来，只<b>新增</b>轮询两方法。要短任务走 <code>invoke_llm</code>，要长任务走 <code>start/check</code>，同一个对象两副能力。</span></div>
+                    <div class="r"><code>start → check 模式</code><span>轮询就三步：<code>start_llm_polling</code> 发起并拿到一个 <code>plugin_state</code>（任务凭据）；引擎隔一会儿用这个凭据调 <code>check_llm_polling</code> 问"完成没/结果呢"；没完就接着等。像"取餐号"：先下单拿号，再凭号查餐好没。</span></div>
+                    <div class="r"><code>两道 isinstance 前提</code><span>轮询能力依赖"插件化模型运行时"（Day06 讲的插件进程）。所以构造时先确认这确实是个插件后端的 LLM，否则直接 <code>TypeError</code>——把"不支持轮询的模型误走轮询"挡在最前面。</span></div>
+                    <div class="r"><code>为什么单独一个类</code><span>不是所有模型都支持轮询。用一个子类隔离，Day09 的工厂就能按"这个模型支不支持轮询"（<code>_supports_plugin_llm_polling</code>）决定包成普通版还是轮询版——能力按需装配。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 坑：轮询任务的状态得能跨请求存活</span>轮询意味着"发起"和"取结果"可能是不同的请求、甚至不同的进程。所以那个 <code>plugin_state</code> 必须是可序列化、能存下来的——这也呼应 Day08 说的"工作流支持暂停/恢复，运行时状态要能完整保存"。长任务 + 可恢复，是工作流引擎比"一次性脚本"复杂的根本原因。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>工具运行时：把 ToolManager 接到工具节点</h1></div>
+            <div class="card">
+                <p>工具节点要调外部工具（搜索、画图、自定义 API）。<code>DifyToolNodeRuntime</code>（<span class="fileref">api/core/workflow/node_runtime.py:459</span>）把 Dify 的 <code>ToolManager</code> 适配成引擎的工具协议。看它的 <code>get_runtime</code>：</p>
+<pre><code class="language-python"># api/core/workflow/node_runtime.py:478（get_runtime 节选）
+def get_runtime(self, *, node_id, node_data, variable_pool, node_execution_id=None) -> ToolRuntimeHandle:
+    try:
+        tool_runtime = ToolManager.get_workflow_tool_runtime(     # ① ★转调 Dify 的 ToolManager
+            self._run_context.tenant_id, self._run_context.app_id, node_id,
+            self._build_tool_runtime_spec(node_data),
+            self._run_context.user_id, self._run_context.invoke_from, variable_pool)
+    except ToolNodeError:
+        raise                                                     # ② 已知工具错，原样上抛
+    except Exception as exc:
+        raise ToolRuntimeResolutionError(str(exc)) from exc       # ③ 未知错 → 包成引擎认的错
+
+    conversation_id = ... get_system_text(variable_pool, SystemVariableKey.CONVERSATION_ID)
+    return ToolRuntimeHandle(                                      # ④ 包成引擎的"工具句柄"
+        raw=_WorkflowToolRuntimeBinding(tool=tool_runtime, conversation_id=conversation_id, ...))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>转调 ToolManager</code><span>和 LLM 适配器一个套路：引擎问它要"工具运行时"，它转身用 Dify 的 <code>ToolManager.get_workflow_tool_runtime</code> 真正解析出工具（带上租户/应用/用户等 Dify 上下文），再包成引擎认的 <code>ToolRuntimeHandle</code> 交回去。</span></div>
+                    <div class="r"><code>异常翻译</code><span>★注意错误处理：已知的 <code>ToolNodeError</code> 原样抛，未知异常统一<b>包成 <code>ToolRuntimeResolutionError</code></b>（引擎认识的错误类型）。适配器不光翻译"调用"，也翻译"异常"——不让 Dify 内部的杂错泄漏给引擎。</span></div>
+                    <div class="r"><code>从变量池取上下文</code><span>工具可能需要"当前会话 id"等，这些从 Day08 的变量池里取（<code>get_system_text(variable_pool, ...)</code>）。适配器是"引擎世界"和"Dify 世界"数据交换的关卡。</span></div>
+                    <div class="r"><code>trace_context 追踪</code><span>若是"工作流即工具"（一个工作流被当工具调），还会串上父级 trace 上下文，让嵌套调用的链路追踪能连起来。企业级观测的细节都收在适配器里。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>三个适配器（LLM/工具/文件）长得像一家人：都是"引擎来要东西 → 我转调 Dify 的对应管理器 → 把结果和异常翻译成引擎认的形式 → 交回去"。学会一个，另外两个一眼就懂。这就是好架构的手感——<strong>同一种模式，反复出现</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>引擎装配全景：回看 Day08 的那句 GraphEngine(...)</h1></div>
+            <div class="card">
+                <p>现在回看 Day08 <code>WorkflowEntry.__init__</code> 里造引擎那段（<span class="fileref">api/core/workflow/workflow_entry.py:213</span>），你能看懂每个零件了：</p>
+<pre><code class="language-python"># api/core/workflow/workflow_entry.py:213
+self.graph_engine = GraphEngine(
+    workflow_id=workflow_id,
+    graph=graph,                          # 结构化图(Day08)
+    graph_runtime_state=graph_runtime_state,  # 含变量池的账本(Day08)
+    command_channel=command_channel,      # 急停通道(Day08)
+    config=GraphEngineConfig(min_workers=..., max_workers=...),  # 并发worker池(Day08)
+    child_engine_builder=self._child_engine_builder,            # 嵌套子工作流
+)
+# 挂各种 Layer：熔断 / 额度 / 观测 / 调试(Day08)
+self.graph_engine.layer(ExecutionLimitsLayer(...))
+self.graph_engine.layer(LLMQuotaLayer(tenant_id=tenant_id))</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 230" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">通用引擎 + Dify 适配层：全景</text>
+                        <rect x="150" y="28" width="300" height="150" rx="10" fill="none" stroke="#ec4899" stroke-dasharray="4 3"/>
+                        <text x="300" y="44" fill="#f472b6" text-anchor="middle" font-size="10">外圈：Layer 层（熔断/额度/观测/日志）</text>
+                        <rect x="185" y="54" width="230" height="110" rx="9" fill="rgba(28,100,242,.08)" stroke="#1c64f2"/>
+                        <text x="300" y="72" fill="#c7d2fe" text-anchor="middle">GraphEngine（graphon · 通用引擎）</text>
+                        <text x="300" y="90" fill="#94a3b8" text-anchor="middle" font-size="9.5">只懂图论：并行调度 / 按边推进 / 发事件</text>
+                        <rect x="205" y="100" width="90" height="54" rx="7" fill="rgba(34,197,94,.1)" stroke="#22c55e"/>
+                        <text x="250" y="122" fill="#86efac" text-anchor="middle" font-size="10">节点</text>
+                        <text x="250" y="138" fill="#cbd5e1" text-anchor="middle" font-size="8.5">只讲"引擎语"</text>
+                        <rect x="305" y="100" width="90" height="54" rx="7" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="350" y="118" fill="#c084fc" text-anchor="middle" font-size="9.5">适配器</text>
+                        <text x="350" y="132" fill="#cbd5e1" text-anchor="middle" font-size="8">PreparedLLM</text>
+                        <text x="350" y="145" fill="#cbd5e1" text-anchor="middle" font-size="8">ToolRuntime</text>
+                        <path d="M295 127 L305 127" stroke="#94a3b8" stroke-width="1.2"/>
+                        <path d="M395 127 L470 127" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#a10)"/>
+                        <defs><marker id="a10" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker></defs>
+                        <rect x="472" y="96" width="118" height="64" rx="8" fill="rgba(96,165,250,.1)" stroke="#60a5fa"/>
+                        <text x="531" y="118" fill="#93c5fd" text-anchor="middle" font-size="9.5">Dify 能力</text>
+                        <text x="531" y="133" fill="#cbd5e1" text-anchor="middle" font-size="8">ModelInstance(D05)</text>
+                        <text x="531" y="146" fill="#cbd5e1" text-anchor="middle" font-size="8">ToolManager</text>
+                        <text x="300" y="196" fill="#94a3b8" text-anchor="middle">节点讲引擎语 → 适配器翻译 → 调 Dify 真本事</text>
+                        <text x="300" y="216" fill="#94a3b8" text-anchor="middle">引擎/Dify 互不 import，只靠 Protocol 契约相连</text>
+                    </svg>
+                    <div class="cap">图注：引擎在中间只懂图论，适配器在边界当翻译官，Dify 能力在右边。层包在最外圈。</div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍：拆出通用引擎，值不值？</span>把图执行拆成独立的 graphon 引擎，代价明显：多了一整层适配器（node_runtime.py 这一堆翻译官）、多了协议定义、调试要跨两个代码库。收益是：<strong>引擎可独立测试/演进/复用</strong>，Dify 的模型/工具怎么重构都不碰引擎，反之亦然。对一个要长期迭代、团队分工的大型产品，"用一层适配换清晰边界"通常划算——但对小项目就是过度设计。<strong>架构没有绝对好坏，只有匹配不匹配规模。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>阶段3 收官 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：一个 LLM 节点在引擎里跑完整一圈</span>
+                引擎推进到 <code>llm_1</code> 节点（Day09 的 <code>create_node</code> 已把 <code>DifyPreparedLLM(ModelInstance)</code> 注入好）。→ 引擎调节点的 <code>run()</code> → 节点从 Day08 的变量池取上游输出、按 Day07 思路拼出 <code>prompt_messages</code> → 调手里的 <code>self._llm.invoke_llm(prompt_messages=..., stream=True)</code>（它是 <code>DifyPreparedLLM</code>）→ 适配器转调 <code>model_instance.invoke_llm(...)</code>（Day05）→ 进 <code>_round_robin_invoke</code> 挑 key（Day05 负载均衡）→ 真正请求模型 → 流式结果一段段回来 → 节点把每段包成引擎事件 <code>yield</code> → 引擎再 <code>yield</code> 给 Day08 的 <code>run()</code> → task_pipeline 转 SSE → 前端。<strong>从 Day05 到 Day10，六天的知识在这一次节点执行里全部咬合。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：为啥不让引擎直接调 ModelInstance，非要中间加一层？不是多此一举吗？</p>
+                    <p class="a">👨‍🏫 老师：恰恰相反，这层是"值钱"的。想象引擎直接 <code>import ModelInstance</code>：那引擎就永远绑死 Dify 了，Dify 改一下 <code>ModelInstance</code> 引擎就得跟着改，引擎也没法拿去跑别的系统的图。加一层适配器后，引擎只认<strong>协议（Protocol）</strong>——它说"给我一个能 invoke_llm 的东西"，至于那东西背后是 Dify 的 ModelInstance 还是别的什么，引擎不关心。<strong>这就是"依赖接口而非实现"</strong>：多写一个转接头，换来引擎和 Dify 各自能独立演进、独立测试、独立复用。系统越大、活得越久，这层隔离越划算。你以后设计模块边界，记住这个手感：<strong>让双方都只依赖一份薄薄的契约。</strong></p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>通用引擎为什么不能直接用 Dify 的 ModelInstance？（会被绑死，失去通用性）</li>
+                        <li>引擎和 Dify 靠什么解耦？（引擎定义 Protocol，Dify 写适配器实现它）</li>
+                        <li>DifyPreparedLLM 干什么？（把胖 ModelInstance 收窄成引擎认的 LLMProtocol，转调 invoke_llm）</li>
+                        <li>轮询式 LLM 的模式？（start 拿凭据 → check 查结果，支持长任务/可恢复）</li>
+                        <li>工具适配器除了转调还翻译什么？（异常：未知错包成引擎认的错误类型）</li>
+                        <li>"通用引擎 + 适配层"的取舍？（多一层换清晰边界/独立演进，匹配大型产品）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/dify
+
+# 1. 一排适配器
+grep -n "^class Dify" api/core/workflow/node_runtime.py     # 看这层有哪些翻译官
+
+# 2. LLM 适配器（收窄 + 转调）
+sed -n '150,197p' api/core/workflow/node_runtime.py         # DifyPreparedLLM
+sed -n '219,235p' api/core/workflow/node_runtime.py         # invoke_llm 转调
+
+# 3. 轮询式长任务
+sed -n '285,337p' api/core/workflow/node_runtime.py         # DifyPreparedPollingLLM
+
+# 4. 工具运行时 + 回看引擎装配
+sed -n '478,530p' api/core/workflow/node_runtime.py         # DifyToolNodeRuntime.get_runtime
+sed -n '213,228p' api/core/workflow/workflow_entry.py       # GraphEngine(...) 全景</code></pre>
+                    <div class="tip"><strong>阶段3 收官 · 明日预告 Day 11</strong>：模型运行时（阶段2）+ 工作流引擎（阶段3）都通关了！从明天起进阶段4——RAG（检索增强）。工作流里那个"知识检索"节点背后，文档是怎么切块、向量化、存进向量库、又怎么被检索回来拼进 prompt 的。你会看到 Day06 的 Embedding 模型、Day07 的 context 拼接在这里落地。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="dify-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 节点体系</a>
+                    <a href="dify-day11.html" style="color:var(--accent-green);">Day 11 · 阶段4 RAG &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
