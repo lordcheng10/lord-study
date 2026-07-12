@@ -11,6 +11,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"></script>
     <style>
         .stages { display:flex; gap:0; flex-direction:column; }
         .stg { border:1px solid var(--border-color); padding:14px; }
@@ -44,6 +45,12 @@
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{font-family:'SF Mono',monospace;font-size:11px;color:var(--accent-purple);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:5px;padding:2px 8px;display:inline-block;margin:10px 0 2px}
+        .fields{border:1px solid var(--border-color);border-radius:10px;overflow:hidden;margin:10px 0}
+        .fields .fr{display:grid;grid-template-columns:210px 1fr;gap:0;border-bottom:1px solid var(--border-color)} .fields .fr:last-child{border-bottom:none}
+        .fields .fk{background:var(--bg-secondary);padding:8px 12px;font-family:'SF Mono',monospace;font-size:12px;color:var(--accent-cyan)}
+        .fields .fv{padding:8px 12px;font-size:12.5px;color:var(--text-secondary)}
+        @media(max-width:768px){ .fields .fr{grid-template-columns:1fr} }
     </style>
 </head>
 <body>
@@ -51,18 +58,19 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#f59e0b,#ec4899);">17</div>
             <h2>Day 17</h2>
-            <p class="version">配置 / Docker / 部署 · 8 讲</p>
+            <p class="version">配置 / Docker / 部署 · 9 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
+            <li class="nav-group-title">本日 9 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 部署全景</a></li>
-            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 配置 profile 深合并</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 多阶段 Dockerfile</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · docker-compose</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · K8s Kustomize</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 两种部署形态</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · uv.lock 的分量</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · config.py 深合并走读</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · base/dev/prod 真实合并</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 多阶段 Dockerfile 走读</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · docker-compose</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · K8s Kustomize</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 两种部署形态</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · uv.lock 的分量</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="gov-agents-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 门户</a></li>
             <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -106,79 +114,203 @@
         </section>
 
         <section id="l02" class="section">
-            <div class="section-header"><span class="section-number">L02</span><h1>配置 profile 深合并（Day 02 进阶）</h1></div>
+            <div class="section-header"><span class="section-number">L02</span><h1>config.py 深合并走读（Day 02 进阶）</h1></div>
             <div class="card">
-                <p>Day 02 讲过 <code>load_config()</code> 的 5 步。今天补两个部署相关的关键点：</p>
-                <ul>
-                    <li><strong>深合并（deep merge）</strong>：<code>_deep_merge()</code> 是<strong>递归</strong>的——嵌套字典逐层合并，不是整块覆盖。所以 env profile 只写差异字段，base 里同层的其它字段仍保留。</li>
-                    <li><strong>${VAR} 环境变量注入</strong>：secret 不写死在 yaml，而是 <code>${DB_PASSWORD}</code> / <code>${VAR:-默认值}</code> 从环境变量取。生产靠 K8s Secret / Vault 注入这些变量。</li>
-                    <li><strong>app_env 强制 SSOT</strong>：合并后代码强制 <code>merged["app_env"] = app_env</code>，不被 yaml 内的值覆盖——保证"当前环境"这个真相唯一。</li>
-                    <li><strong>Pydantic <code>extra="forbid"</code></strong>：拼错 key 启动即报错。</li>
-                </ul>
-                <div class="essence"><span class="t">💡 还是 Day 02 那个「公司报销制度」类比</span>
-                <code>base.yaml</code> = <strong>公司统一报销总则</strong>；<code>&lt;env&gt;.yaml</code> = <strong>某小区/部门只写差异的特批</strong>。「深合并」的意思是<strong>逐条比对、只覆盖同名条目</strong>，而不是拿特批整本换掉总则——特批没提到的条款，全部沿用总则。<code>_deep_merge()</code>（<code>config.py:255</code>，<code>load_config</code> 在 <code>config.py:332</code> 调它）就是那个逐条比对的会计。最后再强制 <code>merged["app_env"]=app_env</code>，等于"报销单上'哪个部门'这一栏以系统登记为准，谁也别想在特批里偷改"。</div>
-                <div class="card warn-card" style="border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.05);">
-                    <p style="margin:0;color:var(--text-secondary);">🚨 <strong>再次点名</strong>：<code>dev/prod/test.yaml</code> 里硬编码了明文密码和真实 API key，违反了 base.yaml 自己声明的"secret 走 ${VAR}"规范。<strong>部署真实系统时务必用环境变量/Secret 注入，绝不能像仓库里这样明文写死。</strong>这是 Day 01 说的"理想 vs 现实"反面教材。</p>
-                </div>
+                <div class="ask"><span class="t">🤔 痛点</span>同一套代码要在 dev/staging/prod 三个环境跑，参数各不相同（数据库地址、限额、密钥）。最笨的办法是每个环境抄一整份配置——抄三份就要维护三份，改个公共项要同步改三处，迟早漂移。怎么做到"公共的只写一遍，各环境只写差异"？答案就在 <code>config.py</code> 两百来行里。</div>
+                <p>入口是 <code>load_config()</code>（<code>config.py:291</code>），Day 02 讲过它的 5 步，今天把核心三段真代码逐行读透。先看主流程（裁剪）：</p>
+                <div class="fileref">packages/ai-trust-toolkit/src/ai_trust_toolkit/config.py:303-339</div>
+<pre><code class="language-python">app_env = env or os.environ.get("APP_ENV", "dev")     # ① 当前环境从 APP_ENV 来，默 dev
+configs_dir = _find_configs_dir()                     # 向上找 configs/base.yaml
+base_path = configs_dir / "base.yaml"
+env_path = configs_dir / f"{app_env}.yaml"            # 如 prod.yaml
+
+if not env_path.exists():                             # ② 找不到 profile → 回退 dev（不硬崩）
+    log.warning("profile %s.yaml not found ... falling back to dev", app_env)
+    env_path = configs_dir / "dev.yaml"
+
+base_data = yaml.safe_load(_expand_env_vars(base_path.read_text(...))) or {}   # ③ 展开 ${VAR} 再解析
+env_data  = yaml.safe_load(_expand_env_vars(env_path.read_text(...)))  or {}
+
+merged = _deep_merge(base_data, env_data)             # ④ base 打底，profile 覆盖差异
+merged["app_env"] = app_env                           # ⑤ config.py:334 · 强制回填，SSOT
+return Config(**merged)                               # ⑥ Pydantic 校验（extra=forbid）</code></pre>
+                <p>逐步讲：<strong>①</strong> "当前是哪个环境"只认环境变量 <code>APP_ENV</code>。<strong>②</strong> 找不到对应 profile 不报错崩掉，而是打个 warning 退回 <code>dev.yaml</code>——容错。<strong>③</strong> 读文件后先做 <code>${VAR}</code> 环境变量展开、再交给 yaml 解析（见下 L03）。<strong>④</strong> 用 <code>_deep_merge</code> 把 base 和 profile 合并。<strong>⑤</strong> 合并后<strong>强制</strong>把 <code>app_env</code> 覆盖成入参值。<strong>⑥</strong> 最后过一遍 Pydantic 校验。</p>
+                <p>核心是那个"逐条比对"的会计——<code>_deep_merge</code>（<code>config.py:255</code>），只有 8 行但很关键：</p>
+                <div class="fileref">config.py:255-267</div>
+<pre><code class="language-python">def _deep_merge(base: dict, override: dict) -> dict:
+    """deep merge · dict 递归 · list / scalar 走 override 覆盖."""
+    result = dict(base)
+    for key, value in override.items():
+        if (key in result
+                and isinstance(result[key], dict)
+                and isinstance(value, dict)):
+            result[key] = _deep_merge(result[key], value)   # 两边都是 dict → 递归往下合
+        else:
+            result[key] = value                              # 否则 override 直接覆盖
+    return result</code></pre>
+                <p>大白话：它<strong>递归</strong>地比对两个字典。遇到"两边同名、且都是字典"的键，就钻进去继续逐层合并（而不是整块替换）；遇到标量或列表，就用 override 的值直接盖掉。这意味着 profile 里只要写 <code>database.arch_compliance.host</code> 一个字段，base 里 <code>database</code> 下的其它字段（port、user、其它 pool）<strong>全部原样保留</strong>——这就是"只写差异"的技术底座。</p>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么 dict 递归合并，但 list 直接覆盖，而不是也把 list 逐项合并？</span>因为 list 合并语义是模糊的——两个列表该"拼接"还是"逐项覆盖"？按 index 对齐还是按某个 key 对齐？没有唯一正确答案，容易出反直觉的 bug。<strong>索性规定 list 一律整块覆盖（override 说了算）</strong>，语义简单、可预测。看 <code>dev.yaml</code> 的 <code>gitlab_instances</code> 是个列表，profile 要改就得整块重写——这正是这个取舍的体现：宁可写全一点，也不要"合了一半"的诡异结果。</div>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么合并后要 <code>merged["app_env"] = app_env</code> 强制回填（<code>:334</code>）？</span>因为 base.yaml 里写着 <code>app_env: ${APP_ENV:-dev}</code>，万一环境变量没设、或者有人在某个 profile 里手抖写了个不一致的值，合并结果里的 <code>app_env</code> 就可能跟"真正传进来的环境"对不上。强制回填等于宣布：<strong>"当前是哪个环境"这个真相，以 <code>load_config</code> 的入参为唯一来源（SSOT），谁也别想在 yaml 里偷改</strong>。一个字段的归属权攥在代码手里，避免了一整类"环境判断错乱"的诡异 bug。</div>
             </div>
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>多阶段 Dockerfile</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>base/dev/prod 真实合并 + secret 反面教材</h1></div>
             <div class="card">
-                <p>根目录 <code>Dockerfile</code> 用 <strong>多阶段构建（multi-stage）</strong>+ uv。核心思想是"把重的依赖装在 builder 阶段，运行镜像只带必要的东西"：</p>
-                <div class="stages">
-                    <div class="stg b">
-                        <h4>Stage 1 · builder（python:3.12-slim）</h4>
-                        <ul>
-                            <li>先<strong>只 COPY 所有 pyproject.toml + uv.lock</strong>，跑一次 <code>uv sync --frozen --no-install-workspace</code> 装第三方依赖——<strong>利用 layer 缓存，依赖不变就不重装</strong></li>
-                            <li>再 COPY 全部源码 + configs + docs（门户页内渲染）+ examples（模板 zip），第二次 <code>uv sync</code> editable 装 workspace</li>
-                        </ul>
-                    </div>
-                    <div class="stg r">
-                        <h4>Stage 2 · runtime（python:3.12-slim）</h4>
-                        <ul>
-                            <li>装 git（供 coding agent 用）、建<strong>非 root 用户 app</strong>、只拷 venv + 源码</li>
-                            <li>启动：<code>uvicorn gov_agents_server.main:app --port 8080 --workers 2 --proxy-headers</code></li>
-                            <li>HEALTHCHECK 打 <code>/healthz</code></li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="glossary"><b>为什么"先拷依赖清单、后拷源码"？</b> Docker 是分层缓存的。把"很少变的依赖安装"放在"经常变的源码拷贝"之前，只要 <code>pyproject.toml</code>/<code>uv.lock</code> 没变，这一层缓存就命中——改业务代码重新构建时，跳过耗时的依赖安装。这是 Dockerfile 优化的头号技巧。<code>--frozen</code> 表示严格按 uv.lock 装、不重新解析版本。</div>
+                <p>光看 <code>_deep_merge</code> 的代码不够直观。直接拿仓库里三个真实文件跑一遍合并，你就彻底懂了。先看 <code>base.yaml</code> 的 database 段（<code>configs/base.yaml:8-27</code>）：</p>
+                <div class="fileref">configs/base.yaml:8-16（公共默认，secret 走 ${VAR}）</div>
+<pre><code class="language-yaml">database:
+  arch_compliance:
+    host: ${MYSQL_HOST:-mysql}          # ${VAR:-默认值} 形式
+    port: 3306
+    user: ${MYSQL_USER:-app}
+    password: ${MYSQL_PASSWORD:-app_local}
+    database: ${MYSQL_DATABASE:-arch_compliance}
+    autocommit: true</code></pre>
+                <p>这是"标准做法"：password 不写死，用 <code>${MYSQL_PASSWORD:-app_local}</code> 从环境变量取（没设就用本地默认）。<code>_expand_env_vars</code>（<code>config.py:239</code>）就是干这个展开的，正则只认大写下划线的变量名（<code>config.py:236</code> 的 <code>_VAR_PATTERN</code>）。</p>
+                <p>再看 <code>dev.yaml</code> 只写了 database 的<strong>差异部分</strong>（<code>configs/dev.yaml:4-10</code>）：</p>
+                <div class="fileref">configs/dev.yaml:4-10</div>
+<pre><code class="language-yaml">database:
+  arch_compliance:
+    host: bmdevdb.czmaueomanj2.ap-northeast-1.rds.amazonaws.com
+    port: 3306
+    user: dev
+    password: 27gErtSiE5jy#NxCUeLQ     # ← 明文密码，违反 base 自己的规范！
+    database: obelisk</code></pre>
+                <div class="example"><span class="t">📝 举个例子：APP_ENV=dev 时这段怎么合出来（真实值）</span>
+                <code>_deep_merge(base, dev)</code> 走到 <code>database.arch_compliance</code>：两边都是 dict → 递归逐字段合。<br>
+                → <code>host</code>：dev 有 → 用 dev 的 <code>bmdevdb...rds.amazonaws.com</code>（覆盖 base 的 <code>${MYSQL_HOST}</code>）<br>
+                → <code>user</code>：dev 有 → <code>dev</code>；<code>database</code>：dev 有 → <code>obelisk</code><br>
+                → <code>autocommit</code>：<strong>dev 没写 → 保留 base 的 <code>true</code></strong>（这就是"深合并只覆盖差异"的威力）<br>
+                最终 dev 的这个 pool = dev 写的 5 个字段 + base 兜底的 <code>autocommit: true</code>。</div>
                 <div class="svgbox">
-                    <svg viewBox="0 0 640 190" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
-                        <rect x="20" y="30" width="270" height="130" rx="10" fill="rgba(6,182,212,.06)" stroke="#06b6d4"/>
-                        <text x="155" y="50" fill="#67e8f9" text-anchor="middle" font-weight="700">Stage 1 · builder（施工场地）</text>
-                        <rect x="38" y="62" width="234" height="26" rx="5" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
-                        <text x="155" y="79" fill="#e2e8f0" text-anchor="middle">① 只拷 pyproject+uv.lock → 装第三方依赖</text>
-                        <rect x="38" y="94" width="234" height="26" rx="5" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
-                        <text x="155" y="111" fill="#e2e8f0" text-anchor="middle">② 再拷源码 → editable 装 workspace</text>
-                        <text x="155" y="140" fill="#f59e0b" text-anchor="middle">脚手架/水泥袋/编译缓存 全留在这里</text>
-                        <path d="M290 95 L360 95" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#a3)"/>
-                        <text x="325" y="86" fill="#86efac" text-anchor="middle">只搬 venv+源码</text>
-                        <rect x="365" y="45" width="255" height="100" rx="10" fill="rgba(34,197,94,.06)" stroke="#22c55e"/>
-                        <text x="492" y="65" fill="#86efac" text-anchor="middle" font-weight="700">Stage 2 · runtime（精装房）</text>
-                        <text x="492" y="88" fill="#cbd5e1" text-anchor="middle">非 root 用户 app + git</text>
-                        <text x="492" y="107" fill="#cbd5e1" text-anchor="middle">uvicorn …main:app :8080 --workers 2</text>
-                        <text x="492" y="126" fill="#cbd5e1" text-anchor="middle">HEALTHCHECK 打 /healthz</text>
-                        <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#34d399"/></marker></defs>
-                        <text x="320" y="178" fill="#94a3b8" text-anchor="middle">最终镜像 = 干净的 runtime；builder 那堆构建垃圾不进最终镜像 → 镜像小、启动快</text>
+                    <svg viewBox="0 0 640 190" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="10.5">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">_deep_merge：dict 递归合、只覆盖同名字段</text>
+                        <rect x="20" y="34" width="180" height="140" rx="10" fill="rgba(6,182,212,.06)" stroke="#06b6d4"/>
+                        <text x="110" y="52" fill="#67e8f9" text-anchor="middle" font-weight="700">base.yaml（打底）</text>
+                        <text x="110" y="74" fill="#cbd5e1" text-anchor="middle">host: ${MYSQL_HOST}</text>
+                        <text x="110" y="92" fill="#cbd5e1" text-anchor="middle">port: 3306</text>
+                        <text x="110" y="110" fill="#cbd5e1" text-anchor="middle">user: ${MYSQL_USER}</text>
+                        <text x="110" y="128" fill="#cbd5e1" text-anchor="middle">database: ...</text>
+                        <text x="110" y="146" fill="#34d399" text-anchor="middle" font-weight="700">autocommit: true</text>
+                        <rect x="230" y="52" width="150" height="100" rx="10" fill="rgba(245,158,11,.06)" stroke="#f59e0b" stroke-dasharray="4 3"/>
+                        <text x="305" y="70" fill="#fbbf24" text-anchor="middle" font-weight="700">dev.yaml（只写差异）</text>
+                        <text x="305" y="92" fill="#cbd5e1" text-anchor="middle">host: bmdevdb...rds</text>
+                        <text x="305" y="110" fill="#cbd5e1" text-anchor="middle">user: dev</text>
+                        <text x="305" y="128" fill="#cbd5e1" text-anchor="middle">database: obelisk</text>
+                        <text x="305" y="146" fill="#64748b" text-anchor="middle">（没写 autocommit）</text>
+                        <path d="M200 104 L228 104" stroke="#f59e0b" stroke-width="1.4" marker-end="url(#dm)"/>
+                        <path d="M380 104 L438 104" stroke="#34d399" stroke-width="1.8" marker-end="url(#dm2)"/>
+                        <text x="409" y="96" fill="#86efac" text-anchor="middle">merge</text>
+                        <rect x="440" y="34" width="180" height="140" rx="10" fill="rgba(34,197,94,.07)" stroke="#22c55e"/>
+                        <text x="530" y="52" fill="#86efac" text-anchor="middle" font-weight="700">merged 结果</text>
+                        <text x="530" y="74" fill="#fbbf24" text-anchor="middle">host: bmdevdb（dev 覆盖）</text>
+                        <text x="530" y="92" fill="#e2e8f0" text-anchor="middle">port: 3306（base 保留）</text>
+                        <text x="530" y="110" fill="#fbbf24" text-anchor="middle">user: dev（dev 覆盖）</text>
+                        <text x="530" y="128" fill="#fbbf24" text-anchor="middle">database: obelisk</text>
+                        <text x="530" y="146" fill="#34d399" text-anchor="middle" font-weight="700">autocommit: true（base 兜）</text>
+                        <text x="530" y="166" fill="#64748b" text-anchor="middle">app_env 最后强制回填=SSOT</text>
+                        <defs>
+                          <marker id="dm" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#f59e0b"/></marker>
+                          <marker id="dm2" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#34d399"/></marker>
+                        </defs>
                     </svg>
-                    <div class="cap">图注：多阶段构建 = 在施工场地把东西做好，只把成品搬进精装房；构建垃圾留在场地不交付。</div>
+                    <div class="cap">图注（数据结构）：profile 只写差异字段，深合并逐字段覆盖同名项，base 里没被覆盖的（如 autocommit）原样保留。</div>
                 </div>
-                <div class="anno">⚠️ 小白常误以为「多阶段 = 最后会得到两个镜像」。<b>其实只产出一个最终镜像（runtime 那个）</b>；builder 阶段只是构建过程中的"临时脚手架层"，用完即弃，不会出现在你 <code>docker images</code> 的交付产物里。</div>
-                <div class="example"><span class="t">📝 举个例子：改一行业务代码，重建快在哪</span>
-                你只改了 <code>sre_rca/nodes/triage.py</code> 一行、没动任何 <code>pyproject.toml</code>/<code>uv.lock</code>：<br>
-                → 重新 <code>docker build</code> 时，「装第三方依赖」那层因为清单没变 <strong>命中缓存直接跳过</strong>（省下几分钟联网装包）<br>
-                → 只有「拷源码 + editable 装 workspace」这层重跑（几秒）。<br>
-                反例：你加了一个依赖改了 <code>uv.lock</code> → 依赖层缓存失效 → 那几分钟就得重花。这就是为什么<strong>拷贝顺序 = 构建速度</strong>。</div>
+                <p>合并完，整个结果交给 <code>Config(**merged)</code> 做 Pydantic 校验。注意每个配置模型都写了 <code>model_config = ConfigDict(extra="forbid")</code>（如 <code>config.py:218</code>）：</p>
+                <div class="fileref">config.py:215-228（root Config）</div>
+<pre><code class="language-python">class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # ← 多写/拼错一个 key 就启动报错
+    app_env: str = "dev"
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    redis: RedisConfig = ...
+    cost: CostConfig = ...
+    # ...</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍：<code>extra="forbid"</code> 为什么值得？</span>默认 Pydantic 对多余字段是<strong>忽略</strong>的。假设你想改 <code>ratelimit_rpm</code> 却手抖写成 <code>ratelimit_rmp</code>——默认行为下这个拼错的键被静默忽略，你的限流配置<strong>压根没生效</strong>，还毫无报错，上线才发现。<code>extra="forbid"</code> 把这类拼写错误变成<strong>启动即崩</strong>（fail-fast），错误在部署前就暴露。用"启动时严格一点"换"运行时少一整类隐蔽 bug"，非常划算。</div>
+                <div class="card warn-card" style="border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.05);">
+                    <p style="margin:0;color:var(--text-secondary);">🚨 <strong>反面教材（仓库真实存在）</strong>：<code>dev.yaml:9</code> 的 <code>password: 27gErtSiE5jy#NxCUeLQ</code>、<code>prod.yaml:26</code> 的明文 <code>llm.api_key: sk-ant-api03-...</code>、<code>prod.yaml:10</code> 的 DB 密码，全都<strong>明文写死在 yaml 里</strong>，直接违反了 <code>base.yaml:2</code> 自己声明的"secret SHALL NOT hardcode · 走 ${VAR}"规范。<strong>真实系统务必用环境变量 / K8s Secret / Vault 注入，绝不能像仓库里这样明文写死。</strong>这是 Day 01 讲的"理想 vs 现实"的活标本——规范写了，落地时有人图省事没遵守。</p>
+                </div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>docker-compose：本地全栈</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>多阶段 Dockerfile 走读（真代码）</h1></div>
+            <div class="card">
+                <p>根目录 <code>Dockerfile</code> 用<strong>多阶段构建（multi-stage）</strong> + uv。核心思想：把重的依赖装在 builder 阶段，运行镜像只带必要的东西。先看 builder 的关键顺序（<code>Dockerfile:15-59</code>）：</p>
+                <div class="fileref">Dockerfile:15-59（builder 阶段，裁剪）</div>
+<pre><code class="language-dockerfile">FROM python:3.12-slim AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.11.13 /uv /uvx /bin/    # 装 uv
+ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PROJECT_ENVIRONMENT=/opt/venv
+WORKDIR /app
+
+# ① 先只 copy lock + 各包的 pyproject.toml（不含源码）
+COPY pyproject.toml uv.lock ./
+COPY packages/ai-trust-toolkit/pyproject.toml packages/ai-trust-toolkit/
+# ... 20 多个 app/包的 pyproject.toml 一个个 COPY ...
+
+# ② 纯依赖安装（无源码）→ 这一层能被缓存
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-workspace --all-extras --all-packages   # Dockerfile:59
+
+# ③ 再 copy 全部源码 + configs + docs + examples
+COPY packages/ packages/
+COPY apps/ apps/
+COPY configs/ configs/
+
+# ④ 第二次 sync：editable 装 workspace 自身
+RUN uv sync --frozen --all-extras --all-packages          # Dockerfile:74</code></pre>
+                <p>逐步讲：<strong>①</strong> 先只拷"依赖清单"（各 <code>pyproject.toml</code> + <code>uv.lock</code>），<strong>不拷源码</strong>。<strong>②</strong> 第一次 <code>uv sync --no-install-workspace</code> 只装第三方依赖。<strong>③</strong> 这之后才拷源码。<strong>④</strong> 第二次 sync 把本仓 workspace 的包 editable 装进去。</p>
+                <div class="glossary"><b>为什么"先拷依赖清单、后拷源码"？</b> Docker 是分层缓存的：某层的输入没变，这层就直接命中缓存不重跑。把"很少变的依赖安装（②）"放在"经常变的源码拷贝（③）"之前——只要 <code>pyproject.toml</code>/<code>uv.lock</code> 没变，②这一层就命中缓存，改业务代码重新构建时跳过耗时的联网装包。<code>--frozen</code> 表示严格按 <code>uv.lock</code> 装、不重新解析版本（呼应 L08）。</div>
+                <p>再看 runtime 阶段——只拿 builder 的成品（<code>Dockerfile:77-113</code>）：</p>
+                <div class="fileref">Dockerfile:77-113（runtime 阶段，裁剪）</div>
+<pre><code class="language-dockerfile">FROM python:3.12-slim AS runtime
+RUN apt-get install -y git ...                            # 装 git（coding agent 用）
+RUN groupadd -r app && useradd -r -g app ... app          # ① 非 root 用户
+COPY --from=builder /opt/venv /opt/venv                   # ② 只拷 venv + 源码
+COPY --from=builder --chown=app:app /app/apps /app/apps
+USER app                                                  # 切非 root
+HEALTHCHECK --interval=30s ... CMD python -c "... /healthz ... == 200"   # ③ 健康检查
+CMD ["python", "-m", "uvicorn", "gov_agents_server.main:app",
+     "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "--proxy-headers"]</code></pre>
+                <p>runtime 只做三件事：<strong>①</strong> 建一个非 root 用户 <code>app</code>（安全，符合 K8s <code>runAsNonRoot</code>）；<strong>②</strong> 从 builder <code>COPY --from=builder</code> 拿现成的 venv 和源码——<strong>builder 那堆构建缓存、编译产物一概不搬</strong>；<strong>③</strong> 挂 HEALTHCHECK 打 <code>/healthz</code>，启动 uvicorn。</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <rect x="20" y="30" width="270" height="140" rx="10" fill="rgba(6,182,212,.06)" stroke="#06b6d4"/>
+                        <text x="155" y="50" fill="#67e8f9" text-anchor="middle" font-weight="700">Stage 1 · builder（施工场地）</text>
+                        <rect x="38" y="60" width="234" height="24" rx="5" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
+                        <text x="155" y="76" fill="#e2e8f0" text-anchor="middle">① 只拷 pyproject+uv.lock</text>
+                        <rect x="38" y="88" width="234" height="24" rx="5" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
+                        <text x="155" y="104" fill="#e2e8f0" text-anchor="middle">② uv sync 装依赖（可缓存层）</text>
+                        <rect x="38" y="116" width="234" height="24" rx="5" fill="var(--bg-card,#1e293b)" stroke="#475569"/>
+                        <text x="155" y="132" fill="#e2e8f0" text-anchor="middle">③④ 拷源码 → editable 装 workspace</text>
+                        <text x="155" y="158" fill="#f59e0b" text-anchor="middle">编译缓存/构建垃圾 全留这里</text>
+                        <path d="M290 95 L360 95" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#a3)"/>
+                        <text x="325" y="86" fill="#86efac" text-anchor="middle">只搬 /opt/venv+源码</text>
+                        <rect x="365" y="45" width="255" height="110" rx="10" fill="rgba(34,197,94,.06)" stroke="#22c55e"/>
+                        <text x="492" y="65" fill="#86efac" text-anchor="middle" font-weight="700">Stage 2 · runtime（精装房）</text>
+                        <text x="492" y="88" fill="#cbd5e1" text-anchor="middle">非 root 用户 app + git</text>
+                        <text x="492" y="107" fill="#cbd5e1" text-anchor="middle">uvicorn main:app :8080 --workers 2</text>
+                        <text x="492" y="126" fill="#cbd5e1" text-anchor="middle">HEALTHCHECK 打 /healthz</text>
+                        <text x="492" y="145" fill="#94a3b8" text-anchor="middle">CMD 用 ENABLED_AGENTS 选组合</text>
+                        <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#34d399"/></marker></defs>
+                        <text x="320" y="188" fill="#94a3b8" text-anchor="middle">最终镜像 = 干净 runtime；builder 层用完即弃不进交付产物 → 镜像小、启动快</text>
+                    </svg>
+                    <div class="cap">图注：多阶段 = 在施工场地把东西做好，只把成品搬进精装房；构建垃圾留在场地不交付。</div>
+                </div>
+                <div class="anno">⚠️ 小白常误以为「多阶段 = 最后会得到两个镜像」。<b>其实只产出一个最终镜像（runtime 那个）</b>；builder 阶段只是构建过程中的临时层，用完即弃，不出现在你 <code>docker images</code> 的交付产物里。</div>
+                <div class="example"><span class="t">📝 举个例子：改一行业务代码，重建快在哪</span>
+                你只改了 <code>sre_rca/nodes/triage.py</code> 一行、没动任何 <code>pyproject.toml</code>/<code>uv.lock</code>：<br>
+                → 重新 <code>docker build</code> 时，<code>Dockerfile:59</code> 那层"装第三方依赖"因清单没变 <strong>命中缓存直接跳过</strong>（省几分钟联网装包）<br>
+                → 只有 <code>:74</code> 那层"拷源码 + editable 装"重跑（几秒）。<br>
+                反例：你加了个依赖改了 <code>uv.lock</code> → 依赖层缓存失效 → 那几分钟就得重花。这就是为什么<strong>拷贝顺序 = 构建速度</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>docker-compose：本地全栈</h1></div>
             <div class="card">
                 <p>Day 02 提过。<code>docker-compose.yml</code> 实际两个服务（README 说四个是漂移）：</p>
+                <div class="fileref">docker-compose.yml（裁剪）</div>
 <pre><code class="language-yaml">services:
   redis:                        # Working Memory 的 checkpointer 后端
     image: redis:7-alpine
@@ -190,16 +322,17 @@
     depends_on:
       redis: { condition: service_healthy }   # 等 redis 健康才起
     environment:
-      APP_ENV: ${APP_ENV:-dev}                 # ← 打通 config profile
-      ENABLED_AGENTS: sre-rca,risk-reviewer,... # 16 个 agent
+      APP_ENV: ${APP_ENV:-dev}                 # ← 打通 config profile（L02）
+      ENABLED_AGENTS: sre-rca,risk-reviewer,... # 选 agent 组合
       REDIS_URL: redis://redis:6379
       # 一堆 ${VAR:-} 占位透传 DB/Anthropic/Lark</code></pre>
-                <p>关键：<code>APP_ENV: ${APP_ENV:-dev}</code> 把 compose 和 Day 02 的配置系统打通——<code>APP_ENV=prod docker compose up</code> 就切生产配置，同一份 compose 文件。</p>
+                <p>关键：<code>APP_ENV: ${APP_ENV:-dev}</code> 把 compose 和 L02 的配置系统打通——<code>APP_ENV=prod docker compose up</code> 就切生产配置，同一份 compose 文件。<code>ENABLED_AGENTS</code> 则接上 Day 12 的"一个镜像挂任意 agent 组合"。</p>
+                <div class="essence"><span class="t">💡 设计取舍：为什么 platform 要 <code>depends_on: redis: {condition: service_healthy}</code>？</span>Working Memory 的 checkpointer 落在 redis 上（Day 09）。如果 platform 先起、redis 还没就绪，第一批请求写 checkpoint 就会失败。<code>condition: service_healthy</code> 让 compose <strong>等 redis 的 healthcheck 通过</strong>才启动 platform——把"启动顺序依赖"显式声明出来，而不是靠 sleep 碰运气。这是编排工具存在的意义之一。</div>
             </div>
         </section>
 
-        <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>K8s Kustomize</h1></div>
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>K8s Kustomize</h1></div>
             <div class="card">
                 <p>生产部署清单在 <code>deploy/k8s/</code>，用 <strong>Kustomize</strong> 组织——和配置 profile 一样的"base + overlay 覆盖"思想：</p>
                 <ul>
@@ -207,71 +340,74 @@
                     <li><code>overlays/&lt;env&gt;/</code>：每个环境的差异（副本数、资源、镜像 tag、环境专属配置）叠加在 base 上。</li>
                 </ul>
                 <p><code>deploy/grafana/</code> 还有现成的监控面板（<code>cache-dashboard.json</code>）——对接 Day 11 的 Prometheus 指标。</p>
-                <div class="glossary"><b>Kustomize 是什么？</b> K8s 官方的配置管理工具，思路和本项目 config profile 一模一样：写一份 base，各环境只写"跟 base 的差异"，用 overlay 打补丁。避免了给每个环境复制粘贴一整套 YAML。看到这你应该有种熟悉感——<strong>"base + 差异覆盖"是这个项目从配置到部署一以贯之的模式</strong>。</div>
+                <div class="glossary"><b>Kustomize 是什么？</b> K8s 官方的配置管理工具，思路和本项目 config profile / <code>_deep_merge</code> 一模一样：写一份 base，各环境只写"跟 base 的差异"，用 overlay 打补丁。避免了给每个环境复制粘贴一整套 YAML。<strong>"base + 差异覆盖"是这个项目从 config.py 到 K8s 一以贯之的模式</strong>——你在 L02 学的深合并思想，在部署层又复用了一次。</div>
             </div>
         </section>
 
-        <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>两种部署形态</h1></div>
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>两种部署形态</h1></div>
             <div class="card">
                 <div class="forms">
                     <div class="form m"><h5>① 多 agent 平台（推荐）</h5>一个进程挂多个 agent，共享资源。<code>gov_agents_server.main:app</code><code>+ ENABLED_AGENTS=a,b,c</code></div>
                     <div class="form s"><h5>② 单 agent 独立</h5>一个 agent 独立部署，用它自己的 main.py。<code>&lt;pkg&gt;.main:app</code><code>（如 sre_rca.main:app）</code></div>
                 </div>
-                <p style="margin-top:12px;">这就是 Day 05 讲的"一个 agent 有 <code>server.py</code>（给平台挂）和 <code>main.py</code>（独立跑）两个入口"的部署对应。<code>ENABLED_AGENTS</code> 未设=挂全部；写非法名快速失败报错。</p>
+                <p style="margin-top:12px;">这就是 Day 05 讲的"一个 agent 有 <code>server.py</code>（给平台挂）和 <code>main.py</code>（独立跑）两个入口"的部署对应。Dockerfile 默认 CMD（<code>Dockerfile:111</code>）跑的就是形态①；<code>ENABLED_AGENTS</code> 未设=挂全部，写非法名快速失败报错。</p>
                 <div class="tip"><strong>怎么选？</strong> 大多数用形态①——一个平台进程按需挂一组 agent，运维简单、资源共享。只有当某个 agent 特别重、需要独立扩缩容/隔离时，才用形态②单独部署。同一份 agent 代码两种形态都支持，不用改。</div>
             </div>
         </section>
 
-        <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>uv.lock 的分量</h1></div>
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>uv.lock 的分量</h1></div>
             <div class="card">
-                <p>最后强调一个部署可靠性的基石——那个 890KB 的 <code>uv.lock</code>。<code>docs/deployment.md</code> 有句话点透了它的本质：</p>
+                <p>最后强调一个部署可靠性的基石——那个 <strong>890KB 的 <code>uv.lock</code></strong>（仓库里真实大小）。<code>docs/deployment.md</code> 有句话点透了它的本质：</p>
                 <div class="final-quote"><strong>"uv.lock 不是版本，是版本组合的精确快照。任何 pyproject.toml 改动都要重跑 <code>uv lock</code> 写进同一个 PR。"</strong></div>
-                <p style="margin-top:12px;">它锁死了几百个包的精确版本 + 哈希。所以你本地、同事机器、CI、生产镜像装出来的东西<strong>字节级一致</strong>——彻底消灭"在我机器上是好的"。这也是为什么 Dockerfile 用 <code>--frozen</code>（严格按 lock 装）、CI 有专门的 gate 校验 lock 与 BOM 一致（Day 18）。</p>
-                <div class="note"><strong>操作纪律</strong>：改任何依赖（加一个 agent、升一个库），都必须 <code>uv lock</code> 重新生成 lock 文件、并和代码改动<strong>放进同一个 PR</strong>。否则别人拉下来装的依赖和你不一样，就埋下"环境不一致"的雷。</div>
+                <p style="margin-top:12px;">它锁死了几百个包的精确版本 + 哈希。所以你本地、同事机器、CI、生产镜像装出来的东西<strong>字节级一致</strong>——彻底消灭"在我机器上是好的"。这也是为什么 Dockerfile 用 <code>--frozen</code>（<code>:59/74</code>，严格按 lock 装）、CI 有专门的 gate 校验 lock 与 BOM 一致（Day 18）。</p>
                 <div class="ask"><span class="t">🤔 如果没有 uv.lock，会出什么事故？</span>假设只写"要 pydantic ≥2" 不锁死精确版本：你本机三个月前装的是 pydantic 2.5，同事今天新装解析到了 2.9，2.9 改了个默认行为——<strong>同一份代码，你机器上测试全绿，同事机器上和生产镜像里却崩了</strong>，排查半天发现是"依赖版本悄悄漂了"。uv.lock 把几百个包的精确版本+哈希钉死，就是为了让这种"在我机器上是好的"彻底不可能发生。</div>
                 <div class="baby"><span class="t">👶 一句话记住</span>uv.lock 不是"版本号"，是"整套建材采购单的精确快照（含螺丝型号）"——<strong>改建材必须同时更新采购单，还要和图纸放进同一个 PR 一起交</strong>；Dockerfile 用 <code>--frozen</code> 就是"严格按这张单子买、不许现场临时换料"。</div>
             </div>
         </section>
 
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>今日小结 + 动手</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
+                    <li><code>_deep_merge</code> 为什么 dict 递归、list 覆盖？（<code>config.py:255</code>）</li>
+                    <li>合并后为什么强制 <code>merged["app_env"]=app_env</code>？（SSOT，<code>config.py:334</code>）</li>
+                    <li><code>extra="forbid"</code> 拦住了哪一类 bug？（拼错的 key 启动即崩）</li>
+                    <li>多阶段 Dockerfile 为什么先拷依赖清单再拷源码？（layer 缓存，<code>Dockerfile:59</code>）</li>
                     <li>"一个镜像跑任意组合×任意环境"靠哪两个环境变量？（ENABLED_AGENTS + APP_ENV）</li>
-                    <li>配置深合并、${VAR} 注入分别解决什么？</li>
-                    <li>多阶段 Dockerfile 为什么先拷依赖清单再拷源码？（layer 缓存）</li>
-                    <li>Kustomize 和 config profile 的共同思想？（base + 差异覆盖）</li>
-                    <li>两种部署形态怎么选？</li>
                     <li>uv.lock 为什么必须和代码改动进同一 PR？</li>
                 </ul>
             </div>
             <div class="card">
-                <h3>✋ 动手</h3>
-<pre><code class="language-bash"># 1. 读多阶段 Dockerfile
+                <h3>✋ 动手：读今天走读过的真代码</h3>
+<pre><code class="language-bash"># 1. 配置深合并三段核心
+sed -n '236,267p' packages/ai-trust-toolkit/src/ai_trust_toolkit/config.py   # _expand_env_vars + _deep_merge
+sed -n '291,339p' packages/ai-trust-toolkit/src/ai_trust_toolkit/config.py   # load_config
+
+# 2. 三个真实 profile（看深合并 + secret 反面教材）
+cat configs/base.yaml
+cat configs/dev.yaml
+cat configs/prod.yaml
+
+# 3. 多阶段 Dockerfile
 cat Dockerfile
 
-# 2. 读 compose 两个服务
+# 4. compose 两个服务
 cat docker-compose.yml
-
-# 3. 看配置深合并逻辑
-sed -n '236,340p' packages/ai-trust-toolkit/src/ai_trust_toolkit/config.py
-
-# 4. 看 K8s 部署清单
-find deploy -type f
 
 # 5. 本地起全栈（有 Docker 的话）
 APP_ENV=dev docker compose up -d
 curl localhost:8080/healthz</code></pre>
-                <div class="tip"><strong>明天预告 · Day 18</strong>：部署清楚了，那"怎么保证合进来的代码不破坏平台"？Day 18 讲 <strong>CI 流水线的治理闸门</strong>——7 个 stage、BOM 审计、评测回归、成本红线、敏感度红线、金丝雀发布，把前面所有"可信"承诺在合并前强制执行。</div>
+                <div class="tip"><strong>明天预告 · Day 18</strong>：部署清楚了，那"怎么保证合进来的代码不破坏平台"？Day 18 读 <code>.gitlab-ci.yml</code> 和 <code>scripts/ci/*</code> 真脚本——7 个 stage、<code>allow_failure: false</code> 默认失败、评测回归、成本红线、敏感度红线，把前面所有"可信"承诺在合并前强制执行。</div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:24px;">
                 <a href="gov-agents-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 门户</a>
                 <a href="gov-agents-day18.html" style="color:var(--accent-green);">Day 18 · CI 流水线与治理闸门 &rarr;</a>
             </div>
         </section>
+
     </main>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
