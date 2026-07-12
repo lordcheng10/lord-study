@@ -52,6 +52,15 @@
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:150px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -59,18 +68,19 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">08</div>
             <h2>Day 08</h2>
-            <p class="version">失败闸门 Failsafe · 8 讲</p>
+            <p class="version">失败闸门 Failsafe · 9 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
+            <li class="nav-group-title">本日 9 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 防御纵深思想</a></li>
             <li><a href="#l02" class="nav-link" data-section="l02">L02 · 6 道闸门总览</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 闸①节点兜底</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 闸②③④</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 闸⑥预算硬熔断</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 第 7 道敏感度闸门</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 成本治理四件套</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 闸① 节点兜底走读</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 闸③ 三态路由走读</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 闸④ 写回守门走读</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 闸⑥ 预算硬熔断走读</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 第 7 道敏感度闸门</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 成本治理四件套</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 小结 + 动手</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="gov-agents-day07.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 07 Critic</a></li>
             <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -136,10 +146,36 @@
         <section id="l03" class="section">
             <div class="section-header"><span class="section-number">L03</span><h1>闸① 节点兜底：让节点永不抛异常</h1></div>
             <div class="card">
-                <p>代码 <code>failsafe/node_fallback.py:33</code>。<code>wrap_with_fallback(node_fn, config)</code> 把任意 async 节点包一层：正常就正常返回，一旦抛异常，就<strong>捕获掉、返回一个占位 finding</strong>，让整张图能继续往下跑。</p>
-<pre><code class="language-python"># 占位结果长这样（FallbackConfig 默认值）：
-{"fallback": True, "health": "broken", "confidence": "低"}</code></pre>
-                <p>回忆 Day 05：专家工厂 <code>make_specialist_node</code> 内部<strong>自动</strong>给每个专家包了这道闸（<code>specialists/factory.py:125</code>）。所以哪怕 trace 专家的接口彻底挂了，它也只是返回一个"health=broken"的降级 finding，其它 3 个专家照常工作，Agent 依然能给出（标注了证据不全的）结论。</p>
+                <p>代码 <code>failsafe/node_fallback.py</code>。先看配置类 <code>FallbackConfig</code>（<code>node_fallback.py:12</code>）和包装器 <code>wrap_with_fallback</code>（<code>node_fallback.py:33</code>）的真身：</p>
+<pre><code class="language-python">@dataclass
+class FallbackConfig:                         # node_fallback.py:12
+    state_field: str                          # 这个节点往哪个 state 字段写（如 'trace_finding'）
+    fallback_finding: dict = field(default_factory=lambda: {
+        "fallback": True,                     # ← 关键标记！Critic L1 靠它排除假证据
+        "health": "broken", "confidence": "低",
+        "evidence_ids": [], "hint": "节点执行失败，建议人工核实",
+    })
+    log_level: int = logging.WARNING
+
+def wrap_with_fallback(node_fn, config):      # node_fallback.py:33
+    async def wrapped(state: dict) -> dict:
+        try:
+            return await node_fn(state)       # 正常路径：原样返回
+        except Exception as e:                # ← 兜住"任何"异常
+            logger.log(config.log_level, "Node failed for state_field=%s: %s",
+                       config.state_field, e, exc_info=True)
+            return {config.state_field: dict(config.fallback_finding, error=str(e))}
+    wrapped.__name__ = getattr(node_fn, "__name__", "wrapped_node")
+    wrapped.__wrapped__ = node_fn             # 留原函数引用，便于测试/内省
+    return wrapped</code></pre>
+                <div class="walk">
+                    <div class="r"><code>except Exception</code><span>兜住<b>所有</b>异常（不是某几类）。因为节点内可能抛任何东西——超时、网络、解析错。安全兜底就该"无差别接住"。</span></div>
+                    <div class="r"><code>"fallback": True</code><span>占位 finding 带这个标记。它<b>不是给人看的</b>，是给 Day 07 Critic ② <code>check_min_specialists</code> 看的——那里靠它把降级假数据排除出"有效专家数"。两处代码靠这个字段咬合。</span></div>
+                    <div class="r"><code>dict(config.fallback_finding, error=str(e))</code><span>复制默认占位并塞进真实错误信息。用 <code>dict(...)</code> 拷贝而非直接改，避免污染共享的默认字典。</span></div>
+                    <div class="r"><code>__wrapped__ = node_fn</code><span>把原函数挂上去，测试时可以直接拿到没包装的版本单独测。工程细节。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么"吞掉异常返回 dict"、而不是让它抛？</span>因为 Agent 是<strong>多路取证再综合</strong>的结构。一路 trace 挂了，不代表整次分析废了——另外 3 路可能已够定位。如果任由异常上抛，整张 LangGraph 图会崩、直接 500。把失败<strong>就地转成一条"标记了 broken 的数据"</strong>，图就能继续跑完。这叫"把故障局部化"。而"该不该信这条降级数据"的判断，交给下游 Critic——各司其职。</div>
+                <p>回忆 Day 05：专家工厂 <code>make_specialist_node</code> 内部<strong>自动</strong>给每个专家包了这道闸（<code>specialists/factory.py:125</code>）。所以哪怕 trace 专家接口彻底挂了，它也只返回一个 <code>health=broken</code> 的降级 finding，其它 3 个专家照常工作。</p>
                 <div class="ask"><span class="t">🤔 错误驱动：如果没有这道闸，会出什么事故？</span>假设 trace 专家调用的 SkyWalking 接口<strong>超时抛异常</strong>。没有兜底时：这个异常会一路往上冒，让整张 LangGraph 图崩溃 → 这次故障分析<strong>直接失败返回 500</strong>，哪怕另外 3 个专家其实已经查到了根因。就因为一路取证挂了，整单报废——这显然不可接受。</div>
                 <div class="example"><span class="t">📝 举个例子：兜底把"崩溃"变成"带伤跑完"</span>
                 trace 专家接口超时 → <code>wrap_with_fallback</code> 捕获异常 → 回写 <code>{"trace_finding":{"fallback":True,"health":"broken","confidence":"低"}}</code> → 图<strong>继续跑</strong> → metric/deploy/log 三位专家照常产出 → synthesizer 基于 3 路证据给出结论（并标注"trace 证据缺失"）。<strong>一路挂，不等于整单废。</strong>
@@ -174,41 +210,120 @@
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>闸②③④：证据开关 / Critic 路由 / 写回守门</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>闸③ Critic 三态路由（防无限重试）</h1></div>
             <div class="card">
-                <h3>闸② 证据不足开关（synth_safeguard.py）</h3>
-                <p><code>check_evidence_sufficient(state)</code>（<code>synth_safeguard.py:10</code>）数一数有几个专家真出了结果（real）、几个是降级的（fallback）。<code>build_synth_safeguard(inner)</code>（<code>synth_safeguard.py:44</code>）包在综合节点外面：<strong>如果真实证据不够，直接返回"信息不足"，根本不调那个贵的综合 LLM</strong>——既省钱又诚实。</p>
-                <h3>闸③ Critic 三态路由</h3>
-                <p>就是 Day 07 讲的 <code>build_critic_router</code>（<code>retry_router.py:12</code>）。它算失败闸门，因为"触顶 → END 诚实收尾"本质是防止"无限重试烧钱 + 硬憋结论"。</p>
-                <h3>闸④ 写回守门（retry_router.py:46）</h3>
-                <p><code>should_writeback(state)</code> —— 只有 <code>critique_passed 且 info_sufficient</code> 才允许把这次 case 写进记忆库。</p>
-                <div class="note"><strong>闸④为什么关键？</strong> 记忆库是 Agent 的"经验沉淀"，会被未来的调用召回参考（Day 09）。如果把一个"没通过质检/证据不足"的结论也写进去，等于<strong>把错误经验固化，未来会反复污染</strong>。所以写回前必须守门——这是保护知识库长期质量的闸。</p>
+                <p>Day 07 见过它的三态行为，今天看它作为"失败闸门"的真身。代码 <code>failsafe/retry_router.py</code>：工厂 <code>build_critic_router</code>（<code>retry_router.py:12</code>）返回真正的路由函数 <code>critic_router</code>（<code>retry_router.py:35</code>）：</p>
+<pre><code class="language-python">def build_critic_router(*, pass_dest="writeback", retry_dest="synthesizer",
+                        end_dest="__end__", max_retries=2):   # retry_router.py:12
+    def critic_router(state: dict) -> str:                    # retry_router.py:35
+        if state.get("critique_passed"):
+            return pass_dest                    # 通过 → writeback
+        if state.get("retry_count", 0) >= max_retries:
+            return end_dest                     # 触顶 → END（诚实收尾）
+        return retry_dest                       # 没到顶 → synthesizer 重做
+    critic_router.__name__ = "critic_router"
+    return critic_router</code></pre>
+                <div class="walk">
+                    <div class="r"><code>工厂返回函数</code><span>"工厂 + 闭包"套路：<code>build_critic_router(...)</code> 先把目的地/上限配好，返回一个只吃 <code>state</code> 的路由函数，正好塞进 LangGraph 的 <code>add_conditional_edges</code>。</span></div>
+                    <div class="r"><code>顺序 if</code><span>判定顺序有讲究：<b>先看通过、再看触顶、最后才重试</b>。通过优先级最高；没通过再问"还能不能重试"。</span></div>
+                    <div class="r"><code>retry_count &gt;= max_retries</code><span>靠 Day 07 累加的 <code>retry_count</code> 判断触顶。<b>它作为失败闸门的意义</b>：防止"改不好就无限重试"——每重试一次都要花钱调综合 LLM+Critic，不设上限会烧穿预算。</span></div>
+                    <div class="r"><code>end_dest 默认 "__end__"</code><span>触顶就走 END，agent 诚实输出"信息不足"，绝不硬憋一个可能误导的结论。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么它既是"路由"又算"失败闸门"？</span>路由是它的形式（决定下一个节点），闸门是它的作用——<strong>它拦住了两种失败：无限重试烧钱、以及低质量结论强行输出</strong>。同一段代码，从控制流角度是条件边，从可信角度是安全闸。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>闸⑥ 预算硬熔断（v0.6 新增）</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>闸④ 写回守门（保护记忆库不被污染）</h1></div>
             <div class="card">
-                <p>代码 <code>failsafe/budget_gate.py:63</code>。<code>budget_gate</code> 是一个上下文管理器（<code>with</code> 块），进入时读取当前的成本追踪器，块内花的钱超过阈值就抛 <code>BudgetExceeded</code>：</p>
-<pre><code class="language-python">async def my_node(state):
-    with budget_gate(per_node=0.5):        # 这个节点最多花 $0.5
-        return await llm.ainvoke(...)      # 超了就抛 BudgetExceeded 中断
-
-# invoke 级的预算由 build_v1_router(per_invoke_budget=2.0) 自动注入</code></pre>
-                <p>两个贴心细节：<strong>没有成本追踪器时静默放行</strong>（<code>budget_gate.py:85</code>，测试/独立调用不会炸）；超限时会打 Prometheus 计数器 + 记 warning 日志 + 抛带 <code>scope/used/limit</code> 的异常，便于排查。</p>
-                <div class="note"><strong>诚实的局限</strong>：代码注释（<code>budget_gate.py:24</code>）明说——<code>with</code> 块执行期间没法中途打断一次正在进行的 LLM 调用。所以"单次 LLM 就超限"这种拦不住，只能在它返回后检查。这种把局限性写进注释的诚实，本身就是工程素养的体现。</p>
-                <div class="example"><span class="t">📝 举个例子：电表跳闸的一次触发</span>
-                进入 <code>with budget_gate(per_node=0.5)</code> 时拍快照 <code>start=1.20</code>（美元累计）→ 块内综合节点连调两次 Sonnet，退出时累计 <code>1.95</code> → 块内花了 <code>0.75 &gt; 0.5</code> → <strong>抛 <code>BudgetExceeded(scope="per_node", used=0.75, limit=0.5)</code></strong> + 打 Prometheus 计数器 + 记 warning 日志。就像这一路用电超了额定值，闸刀"啪"地跳下来。
+                <p><code>should_writeback</code>（<code>retry_router.py:46</code>）是写进记忆库前的最后一道门——只有"质检通过且信息充分"才准入库：</p>
+<pre><code class="language-python">def should_writeback(state, *, require_critique_passed=True,
+                     require_info_sufficient=True,
+                     conclusion_field="conclusion") -> bool:   # retry_router.py:46
+    if require_critique_passed and not state.get("critique_passed"):
+        return False                            # 没过 Critic → 不写
+    conclusion = state.get(conclusion_field) or {}
+    return not (require_info_sufficient
+                and not conclusion.get("info_sufficient", True))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>not critique_passed → False</code><span>第一关：没过 Critic 的结论一律不入库。防止"错误经验"被固化。</span></div>
+                    <div class="r"><code>info_sufficient, True</code><span><b>边界细节</b>：注意默认值是 <code>True</code>——如果结论<b>没显式声明</b>"信息不足"，就<b>默认当作充分</b>放行。设计上宁可"没声明就放"，把"不充分"的举证责任交给上游明确标记。</span></div>
+                    <div class="r"><code>require_* 参数</code><span>两道校验都能独立关掉——某些不需要记忆库质量那么严的 agent 可以放宽。默认全开。</span></div>
                 </div>
-                <div class="qa">
-                    <p class="q">👶 小白：软闸门都"降级不中断"，为什么偏偏预算这道要用"硬中断"？带伤跑完不好吗？</p>
-                    <p class="a">👨‍🏫 老师：因为其它失败最多让这<strong>一次结果差一点</strong>，而烧钱是<strong>真金白银、不可逆</strong>的。带伤跑完一个亏钱的调用，等于让损失继续扩大。财务安全是<strong>底线</strong>，底线只能"啪"地拉闸，不能温柔降级。所以①-⑤是软的（尽量把活干完），只有⑥是硬的（触底立刻停）。</p>
-                </div>
+                <div class="note"><strong>闸④为什么关键？</strong> 记忆库是 Agent 的"经验沉淀"，会被未来调用召回参考（Day 09）。若把"没过质检/证据不足"的结论也写进去，等于<strong>把错误经验固化、未来反复污染</strong>。写回前守门，是保护知识库长期质量的闸。它和 Day 09 的 <code>EpisodicStore.writeback</code> 配套——writeback 的 docstring 明确要求"调用前先用 should_writeback 守门"。</p>
+                <div class="anno">⚠️ 提一句闸②：证据不足开关 <code>check_evidence_sufficient</code>（<code>synth_safeguard.py:10</code>）+ <code>build_synth_safeguard</code>（<code>synth_safeguard.py:44</code>）。它数有几个专家真出结果、几个是 fallback 降级；真实证据不够就<b>直接返回"信息不足"、不调那个贵的综合 LLM</b>——既省钱又诚实。逻辑和 Critic ② 同源，都靠 <code>fallback</code> 标记数数。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>第 7 道：数据敏感度闸门</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>闸⑥ 预算硬熔断走读（v0.6 新增）</h1></div>
+            <div class="card">
+                <p>代码 <code>failsafe/budget_gate.py</code>。先看异常类 <code>BudgetExceeded</code>（<code>budget_gate.py:42</code>）——它带上 <code>scope/used/limit</code> 三个字段，出错时一眼看清"哪个范围、花了多少、上限多少"：</p>
+<pre><code class="language-python">class BudgetExceeded(Exception):              # budget_gate.py:42
+    def __init__(self, *, scope: str, used: float, limit: float):
+        self.scope = scope                    # "per_invoke" 或 "per_node"
+        self.used = used
+        self.limit = limit
+        super().__init__(f"budget_gate scope={scope} exceeded: ${used:.4f}/${limit:.4f}")</code></pre>
+                <p>核心是上下文管理器 <code>budget_gate</code>（<code>budget_gate.py:63</code>），用 <code>@contextmanager</code> 装饰，<code>yield</code> 前后各做一次成本快照对比：</p>
+<pre><code class="language-python">@contextmanager
+def budget_gate(*, per_invoke=None, per_node=None, on_exceed="raise"):  # budget_gate.py:63
+    tracker = current_tracker()               # 从 ContextVar 取当前成本追踪器
+    if tracker is None:
+        yield                                 # ← 边界：没绑 tracker（测试/独立调用）静默放行
+        return
+    start_cost = tracker.cost_usd             # 进块时拍快照
+    yield                                     # ← with 块内的代码在这里执行
+    used_in_block = tracker.cost_usd - start_cost   # 出块后算差值
+    if per_node is not None and used_in_block > per_node:
+        _trigger("per_node", tracker, used_in_block, per_node, on_exceed)
+    if per_invoke is not None and tracker.cost_usd > per_invoke:
+        _trigger("per_invoke", tracker, tracker.cost_usd, per_invoke, on_exceed)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>tracker is None → yield</code><span><b>边界①</b>：测试或没接成本闭环的 agent 里没有 tracker——此时<b>静默放行</b>，绝不因为"想省钱"反而把测试搞崩。默认对无关场景零副作用。</span></div>
+                    <div class="r"><code>start_cost / used_in_block</code><span><code>per_node</code> 看的是<b>块内增量</b>（差值），<code>per_invoke</code> 看的是<b>累计总额</b>。两种口径对应"单节点别失控"和"整次调用别超顶"。</span></div>
+                    <div class="r"><code>yield</code><span>这是上下文管理器的分界点——<code>with</code> 块里的代码在 <code>yield</code> 处执行，回来才检查。所以只能<b>事后</b>发现超支。</span></div>
+                    <div class="r"><code>on_exceed="raise"</code><span>默认超了就抛。也可传 <code>"log"</code> 只告警不中断（观察期用）。</span></div>
+                </div>
+                <p>触发处理 <code>_trigger</code>（<code>budget_gate.py:103</code>）：先打 Prometheus 计数器、记 warning 日志，最后按 <code>on_exceed</code> 决定抛不抛：</p>
+<pre><code class="language-python">def _trigger(scope, tracker, used, limit, on_exceed):   # budget_gate.py:103
+    BUDGET_EXCEEDED_TOTAL.labels(agent=..., tenant=..., scope=scope).inc()  # 指标
+    log.warning("budget_gate %s exceeded: $%.4f / $%.4f ...", scope, used, limit)
+    if on_exceed == "raise":
+        raise BudgetExceeded(scope=scope, used=used, limit=limit)</code></pre>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 150" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：进块拍快照 → 块内执行 → 出块算差值判定</text>
+                        <line x1="40" y1="80" x2="560" y2="80" stroke="#475569" stroke-width="1.5"/>
+                        <circle cx="90" cy="80" r="5" fill="#06b6d4"/>
+                        <text x="90" y="62" fill="#67e8f9" text-anchor="middle">进 with</text>
+                        <text x="90" y="102" fill="#94a3b8" text-anchor="middle">start_cost=1.20</text>
+                        <rect x="150" y="66" width="230" height="28" rx="6" fill="rgba(139,92,246,.10)" stroke="#8b5cf6"/>
+                        <text x="265" y="84" fill="#c4b5fd" text-anchor="middle">yield：块内跑（连调两次 Sonnet）</text>
+                        <circle cx="430" cy="80" r="5" fill="#f59e0b"/>
+                        <text x="430" y="62" fill="#fbbf24" text-anchor="middle">出 with</text>
+                        <text x="430" y="102" fill="#94a3b8" text-anchor="middle">cost=1.95</text>
+                        <rect x="410" y="115" width="180" height="28" rx="6" fill="rgba(239,68,68,.10)" stroke="#ef4444"/>
+                        <text x="500" y="133" fill="#f87171" text-anchor="middle">diff=0.75 &gt; 0.5 → 抛异常</text>
+                        <path d="M430 94 L470 113" stroke="#ef4444" stroke-width="1.2" marker-end="url(#ab)"/>
+                        <defs><marker id="ab" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#ef4444"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：budget_gate 只能"事后"判定——yield 前后各拍一次成本快照，差值超阈值才熔断。</div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么用"抛异常"而不是返回错误码？</span>因为 <code>budget_gate</code> 是包在<strong>业务节点代码外层</strong>的 <code>with</code> 块，它没法强迫每个调用点都去检查返回值——返回码很容易被忽略，钱就继续烧了。<strong>抛异常是"不可忽略"的中断</strong>：它会一路上抛，被 <code>wrap_with_fallback</code>（节点级）或 router 工厂（invoke 级）接住，转成降级路径。用异常正是要那种"啪一下强制刹车"的语义。</div>
+                <div class="note"><strong>诚实的局限</strong>（<code>budget_gate.py:24</code> 注释明说）：<code>yield</code> 期间没法中途打断<strong>一次正在进行的</strong> LLM 调用。所以"单次 LLM 就超限"拦不住，只能在它返回后检查。把局限如实写进注释，本身就是工程素养。</p>
+                <div class="example"><span class="t">📝 电表跳闸的一次触发</span>
+                进 <code>with budget_gate(per_node=0.5)</code> 时 <code>start_cost=1.20</code>（美元累计）→ 块内综合节点连调两次 Sonnet，出块时累计 <code>1.95</code> → <code>used_in_block=0.75 &gt; 0.5</code> → 打指标 + warning + <strong>抛 <code>BudgetExceeded(scope="per_node", used=0.75, limit=0.5)</code></strong>。就像这一路用电超额，闸刀"啪"地跳下来。
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：软闸门都"降级不中断"，为什么偏偏预算这道要"硬中断"？带伤跑完不好吗？</p>
+                    <p class="a">👨‍🏫 老师：其它失败最多让这<strong>一次结果差一点</strong>，而烧钱是<strong>真金白银、不可逆</strong>的。带伤跑完一个亏钱的调用，只会让损失继续扩大。财务安全是<strong>底线</strong>，底线只能"啪"地拉闸。所以①-⑤软（尽量干完活），只有⑥硬（触底立停）。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>第 7 道：数据敏感度闸门</h1></div>
             <div class="card">
                 <p>除了上面 6 道，还有一道正交的安全闸——<strong>敏感度分级闸门</strong>（<code>sensitivity/</code>，架构文档里的 DD-001 第 7 道闸）。它在请求进来时就对输入内容分级：</p>
                 <table>
@@ -229,8 +344,8 @@
             </div>
         </section>
 
-        <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>成本治理四件套（别混淆）</h1></div>
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>成本治理四件套（别混淆）</h1></div>
             <div class="card">
                 <p>框架里跟"钱/量"相关的机制有 4 个，容易搞混，一张表理清（<code>api/budget.py</code> 的 docstring 有对照）：</p>
                 <table>
@@ -252,15 +367,16 @@
             </div>
         </section>
 
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>今日小结 + 动手</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
                     <li>"防御纵深"是什么？6 道闸门各防什么？</li>
                     <li>软闸门和硬闸门的区别？（降级不中断 vs 触底直接停）</li>
-                    <li>节点兜底怎么保证单点失败不搞垮全图？（捕获异常返回占位 finding）</li>
-                    <li>写回守门为什么重要？（防止错误结论污染记忆库）</li>
+                    <li>节点兜底怎么保证单点失败不搞垮全图？（<code>except Exception</code> 就地转成带 <code>fallback:True</code> 的占位 finding）</li>
+                    <li>为什么预算闸用"抛异常"而不是返回错误码？（异常不可忽略、强制中断，被 fallback/router 接住）</li>
+                    <li>写回守门为什么重要？<code>info_sufficient</code> 默认值是啥？（防污染记忆库；默认 True，没声明不足就放行）</li>
                     <li>敏感度 L2 为什么必须排在预算闸门之前？（先拦机密，防恶意输入耗预算）</li>
                     <li>成本治理四件套分别限什么？（次数/token量/成本归因/租户月度USD）</li>
                 </ul>

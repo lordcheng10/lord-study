@@ -48,6 +48,15 @@
         .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
         .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
         .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:150px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -55,18 +64,19 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">09</div>
             <h2>Day 09</h2>
-            <p class="version">四层 Memory Protocol · 8 讲</p>
+            <p class="version">四层 Memory Protocol · 9 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
+            <li class="nav-group-title">本日 9 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Agent 为什么要记忆</a></li>
             <li><a href="#l02" class="nav-link" data-section="l02">L02 · 四层记忆总图</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 向量检索是什么</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Protocol 解耦厂商</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 情景 & 语义记忆</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 工作记忆 checkpointer</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 在 sre-rca 里的运用</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 向量检索与 Record</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · VectorStore Protocol</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 内存实现走读</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · pgvector 生产实现</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 情景 & 语义记忆走读</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 工作记忆 checkpointer</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · sre-rca 串联 + 小结</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="gov-agents-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 失败闸门</a></li>
             <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -143,6 +153,18 @@
                 查询 <code>"支付服务响应变慢"</code> → Embedder 转成向量 <code>[0.12,-0.8,…]</code> → 向量库找最近邻 top_k=3 →命中历史 case <code>c-874「payment-svc 连接池被调小导致 P99 飙升」</code>（用词完全不同，但"意思"相近）。<br>
                 <strong>关键字匹配</strong>会因为"变慢"≠"P99飙升"而漏掉它；<strong>向量检索</strong>因为语义相近照样能翻出来。
                 </div>
+                <p>向量库里存的每一条叫 <code>Record</code>（<code>vector_store.py:17</code>），是最基础的数据结构：</p>
+<pre><code class="language-python">@dataclass
+class Record:                                 # vector_store.py:17
+    id: str                                   # 唯一主键（如 case_id "abc-2025-04-15"）
+    text: str                                 # 原文（召回后要塞进 prompt 的那段）
+    embedding: list[float]                    # 文本转成的向量（一串浮点数）
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # 常用 metadata：type(case/sop)、service、alert_type、created_at</code></pre>
+                <div class="walk">
+                    <div class="r"><code>id + text + embedding</code><span>三件套：主键、原文、向量。搜的时候比 <code>embedding</code>，返回的时候给 <code>text</code>。</span></div>
+                    <div class="r"><code>metadata.type</code><span><b>最关键的一个 metadata 字段</b>：情景记忆(type=case)和语义记忆(type=sop)<b>共用同一个向量库</b>，全靠这个字段区分（见 L07）。</span></div>
+                </div>
             </div>
         </section>
 
@@ -150,13 +172,23 @@
             <div class="section-header"><span class="section-number">L04</span><h1>Protocol 解耦：换厂商不动业务</h1></div>
             <div class="card">
                 <p>问题来了：本地开发想用"内存里的假向量库 + 假 embedder"（快、免费、可复现），生产想用"PostgreSQL+pgvector + Ollama 真 embedder"。怎么做到<strong>切换存储时业务代码一行都不用改</strong>？</p>
-                <p>答案是 Python 的 <strong>Protocol（协议/接口）</strong>——只约定"必须有哪些方法"，不关心具体实现。业务只依赖协议，跑时注入哪个实现都行：</p>
-<pre><code class="language-python"># memory/vector_store.py:28 —— 只定义"长什么样"，不管怎么实现
+                <p>答案是 Python 的 <strong>Protocol（协议/接口）</strong>——只约定"必须有哪些方法"，不关心具体实现。业务只依赖协议，跑时注入哪个实现都行。真身在 <code>vector_store.py:28</code>：</p>
+<pre><code class="language-python">@runtime_checkable                            # vector_store.py:28
 class VectorStore(Protocol):
-    async def search(self, embedding, top_k, filter) -&gt; list[Record]: ...
-    async def add(self, records): ...
-    async def delete(self, ids): ...
-    def count(self) -&gt; int: ...</code></pre>
+    async def search(self, query_embedding, top_k=3, filter=None,
+                     min_score=-1.0) -> list[tuple[Record, float]]:
+        """返回 [(record, similarity), ...] 按相似度降序。"""
+        ...
+    async def add(self, records: list[Record]) -> None: ...
+    async def delete(self, ids: list[str]) -> int: ...
+    async def count(self, filter=None) -> int: ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>class ...(Protocol)</code><span>继承 <code>Protocol</code>=声明"这是个协议"。方法体全是 <code>...</code>（省略号）——<b>只写签名、不写实现</b>。它规定"想当 VectorStore 必须有这 4 个方法"。</span></div>
+                    <div class="r"><code>@runtime_checkable</code><span>允许运行时用 <code>isinstance(x, VectorStore)</code> 检查某对象是否满足协议。没它 Protocol 只能给类型检查器用。</span></div>
+                    <div class="r"><code>search 返回 list[tuple[Record, float]]</code><span>约定返回值是 <b>(记录, 相似度) 的列表</b>、按相似度降序。任何实现都必须遵守这个形状。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么用 Protocol，而不是定义一个抽象基类让两个实现去 <code>extends</code>？</span>
+                Protocol 是<strong>"鸭子类型 + 静态检查"</strong>：<code>InMemoryVectorStore</code> 和 <code>PgVectorStore</code> <strong>压根不用继承 <code>VectorStore</code></strong>，只要方法签名对得上，就自动算"满足协议"。好处是<strong>零侵入</strong>——将来接第三方的向量库（比如别人写的、你改不了源码的类），只要它的方法长得对，不用改它一行就能塞进来。抽象基类则强制"必须继承我"，第三方类没法用。这就是"结构化子类型"胜过"名义子类型"的地方。</div>
                 <div class="swap">
                     <div class="c local"><h5>本地/测试</h5><code>InMemoryVectorStore</code>（<code>vector_store.py:58</code>，dict + 余弦）<br><code>MockEmbedder</code>（<code>embedder.py:26</code>，SHA256 切片，<strong>确定性、可复现</strong>）</div>
                     <div class="c prod"><h5>生产</h5><code>PgVectorStore</code>（<code>vector_store.py:112</code>，PG16 + pgvector，ivfflat/hnsw 索引）<br><code>BgeM3Embedder</code>（<code>embedder.py:58</code>，接 Ollama，1024 维）</div>
@@ -191,42 +223,191 @@ class VectorStore(Protocol):
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>情景记忆 & 语义记忆</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>内存实现走读：InMemoryVectorStore</h1></div>
             <div class="card">
-                <h3>Episodic 情景记忆（episodic.py）</h3>
-                <p><code>EpisodicStore</code>（<code>episodic.py:16</code>）持有一个向量库 + 一个 embedder，两个方法：</p>
-                <ul>
-                    <li><code>recall(query, top_k)</code>（<code>episodic.py:39</code>）：把查询 embed 后在向量库搜，<strong>只搜 type=case 的记录</strong>，返回相似历史故障。</li>
-                    <li><code>writeback(case_id, text, metadata)</code>（<code>episodic.py:58</code>）：把这次的 case 存进去。注意——调用前必须先过 Day 08 的 <code>should_writeback</code> 守门。</li>
-                </ul>
-                <h3>Semantic 语义记忆（semantic.py）</h3>
-                <p><code>SemanticStore</code>（<code>semantic.py:16</code>）和情景记忆<strong>共用同一个向量库</strong>，靠 <code>metadata.type</code> 区分（sop/runbook/topology 等）：</p>
-                <ul>
-                    <li><code>seed(records)</code>（<code>semantic.py:40</code>）：团队离线把 SOP、手册灌进去。</li>
-                    <li><code>lookup(query, record_type)</code>（<code>semantic.py:60</code>）：在线召回，就是 RAG 检索。</li>
-                </ul>
-                <div class="glossary"><b>RAG（检索增强生成）</b>：调 LLM 前，先从知识库里检索出相关资料，塞进 prompt 一起给模型。好处是让模型基于"真实资料"回答，而不是凭记忆瞎编——这也是一种防幻觉手段。sre-rca 的 <code>rag</code> 节点干的就是这事。</div>
-                <div class="anno">⚠️ 小白常误以为情景记忆和语义记忆是"两个数据库"。<b>其实它俩共用同一个向量库</b>，只靠一条 <code>metadata.type</code> 区分（case vs sop/runbook/topology）：召回历史故障时只搜 <code>type=case</code>，RAG 查手册时只搜 <code>type=sop</code>。一套底座、两种用法——这也是"渐进抽象"省下的重复。</div>
+                <p>测试/本地用的实现 <code>InMemoryVectorStore</code>（<code>vector_store.py:58</code>）——用一个 <code>dict</code> 当数据库，纯 Python、0 外部依赖。最能说明"向量搜索到底在算什么"的是它的 <code>search</code>（<code>vector_store.py:87</code>）：</p>
+<pre><code class="language-python">class InMemoryVectorStore:                     # vector_store.py:58
+    def __init__(self):
+        self._records: dict[str, Record] = {}  # 就是个字典当库
+
+    async def search(self, query_embedding, top_k=3, filter=None, min_score=-1.0):
+        results = []
+        for r in self._records.values():
+            if filter and not _match_filter(r, filter):   # 先按 metadata 过滤
+                continue
+            score = _cosine_similarity(query_embedding, r.embedding)  # 算余弦相似度
+            if score < min_score:              # 低于阈值丢掉
+                continue
+            results.append((r, score))
+        results.sort(key=lambda x: x[1], reverse=True)     # 按相似度降序
+        return results[:top_k]                 # 取前 K 条</code></pre>
+                <div class="walk">
+                    <div class="r"><code>遍历全部 records</code><span>内存实现就是<b>暴力全扫</b>：每条都算一次相似度。数据量小无所谓，量大就得靠 L06 的数据库索引。</span></div>
+                    <div class="r"><code>_match_filter</code><span>先按 <code>metadata</code> 精确匹配过滤（如只要 <code>type=case</code>），再算相似度。省得给不相关的记录白算。</span></div>
+                    <div class="r"><code>_cosine_similarity</code><span>核心数学：算两个向量的"夹角余弦"。方向越一致值越接近 1，即"意思越像"。</span></div>
+                    <div class="r"><code>min_score 边界</code><span>低于阈值直接丢。默认 <code>-1.0</code>（余弦下限）=不过滤；业务要"至少像到某程度才召回"就调高它。</span></div>
+                    <div class="r"><code>sort + [:top_k]</code><span>降序排，取最像的前 K 条返回。</span></div>
+                </div>
+                <p>余弦相似度的真实实现（<code>vector_store.py:367</code>）也很朴素——点积除以两个模长：</p>
+<pre><code class="language-python">def _cosine_similarity(a, b):                  # vector_store.py:367
+    if not a or not b or len(a) != len(b):
+        return 0.0                             # ← 边界：空/长度不齐直接判 0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    if not na or not nb:
+        return 0.0                             # ← 边界：零向量除零保护
+    return dot / (na * nb)</code></pre>
+                <div class="anno">⚠️ 两处边界值得注意：<b>长度不齐返回 0</b>（维度对不上不该崩，判"完全不像"最安全）；<b>零向量返回 0</b>（避免除以 0 的崩溃）。这些"防御性 0"让内存实现在脏输入下也不会抛异常——和生产实现严格校验维度形成对比（见 L06）。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 90" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">控制流：search 内部五步流水线</text>
+                        <rect x="12" y="34" width="98" height="34" rx="7" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/><text x="61" y="49" fill="#67e8f9" text-anchor="middle">遍历</text><text x="61" y="63" fill="#94a3b8" text-anchor="middle">全部 records</text>
+                        <rect x="130" y="34" width="98" height="34" rx="7" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="179" y="49" fill="#cbd5e1" text-anchor="middle">filter</text><text x="179" y="63" fill="#94a3b8" text-anchor="middle">按 metadata</text>
+                        <rect x="248" y="34" width="104" height="34" rx="7" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="300" y="49" fill="#cbd5e1" text-anchor="middle">cosine</text><text x="300" y="63" fill="#94a3b8" text-anchor="middle">算相似度</text>
+                        <rect x="372" y="34" width="104" height="34" rx="7" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="424" y="49" fill="#cbd5e1" text-anchor="middle">min_score</text><text x="424" y="63" fill="#94a3b8" text-anchor="middle">阈值过滤</text>
+                        <rect x="496" y="34" width="92" height="34" rx="7" fill="rgba(34,197,94,.08)" stroke="#22c55e"/><text x="542" y="49" fill="#34d399" text-anchor="middle">sort</text><text x="542" y="63" fill="#94a3b8" text-anchor="middle">取 top_k</text>
+                        <path d="M110 51 L128 51" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#ac)"/>
+                        <path d="M228 51 L246 51" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#ac)"/>
+                        <path d="M352 51 L370 51" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#ac)"/>
+                        <path d="M476 51 L494 51" stroke="#8b5cf6" stroke-width="1.3" marker-end="url(#ac)"/>
+                        <defs><marker id="ac" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#8b5cf6"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：内存版 search 就是"全扫→过滤→算分→卡阈值→排序取前 K"这条流水线。</div>
+                </div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>工作记忆：checkpointer 工厂</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>生产实现走读：PgVectorStore</h1></div>
             <div class="card">
-                <p>第①层工作记忆就是 Day 03 讲的 checkpointer（存档器），管"会话内的 state + 断点续跑"。框架把它的选择做成工厂 <code>make_checkpointer_from_env()</code>（<code>checkpointer.py:24</code>）：</p>
-<pre><code class="language-python"># 按环境变量自动选后端：
-# 有 REDIS_URL → 用 Redis
-# 有 CHECKPOINTER_PG_DSN → 用 PostgreSQL
-# 都没有 → 用内存版（本地/测试）
-checkpointer = make_checkpointer_from_env()
-graph = builder.compile(checkpointer=checkpointer)</code></pre>
-                <p>又是"Protocol 解耦"的套路——同一份业务代码，本地用内存、生产用 Redis/PG，靠环境变量切换。</p>
-                <div class="note"><strong>又一处诚实注释</strong>：<code>checkpointer.py:44</code> 说明 redis 0.4+ 需要 lifespan 集成、当前暂时降级到内存版。框架把"还没完全做好的地方"如实写在注释里，而不是假装完美——读代码时看到这种注释要特别留意，它告诉你哪些是"现状"而非"终态"。</p>
+                <p>生产用 <code>PgVectorStore</code>（<code>vector_store.py:112</code>）——PostgreSQL 16+ 加 pgvector 扩展。它和内存实现<strong>满足同一个协议、方法签名一模一样</strong>，但内部是真数据库。先看构造函数里的两处安全校验（<code>vector_store.py:144-150</code>）：</p>
+<pre><code class="language-python">def __init__(self, dsn, *, table="vector_records", dim=768,
+             index_type="ivfflat", ...):       # vector_store.py:133
+    if dim <= 0:
+        raise ValueError(f"dim 必须 > 0 · got {dim}")
+    if index_type not in ("ivfflat", "hnsw"):
+        raise ValueError(f"index_type 必须 ivfflat 或 hnsw · got {index_type!r}")
+    # 防 SQL 注入 · table 名严格限白名单字符
+    if not table.replace("_", "").isalnum():   # vector_store.py:149
+        raise ValueError(f"table 名只接受 [A-Za-z0-9_] · got {table!r}")</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么表名要白名单校验，参数却用占位符？</span>
+                因为 SQL 里<strong>表名不能用参数占位符</strong>（<code>%s</code> 只能占值、不能占表名/列名），只能字符串拼接进 SQL。而拼接就有<strong>SQL 注入</strong>风险——万一表名来自不可信输入，可能被注入恶意语句。所以这里<strong>用 <code>isalnum()</code> 白名单把关</strong>：只允许字母数字和下划线。而查询里的向量、filter 等"值"仍然走 <code>%s</code> 占位符（见下），由驱动安全转义。"能占位的占位、不能占位的白名单"是防注入的标准姿势。</div>
+                <p>它的 <code>search</code>（<code>vector_store.py:287</code>）把相似度计算<strong>下推给数据库</strong>，用 pgvector 的 <code>&lt;=&gt;</code> 距离算子 + 索引，不再全扫：</p>
+<pre><code class="language-python">async def search(self, query_embedding, top_k=3, filter=None, min_score=-1.0):
+    if len(query_embedding) != self.dim:       # ← 边界：维度不符直接报错（不像内存版返回0）
+        raise ValueError("query_embedding dim mismatch ...")
+    if filter:
+        sql = ("SELECT id, text, embedding, metadata, "
+               "1 - (embedding <=> %s::vector) AS sim "   # 1 - 余弦距离 = 相似度
+               "FROM {table} WHERE metadata @> %s::jsonb "  # @> = jsonb 包含，走 GIN 索引
+               "ORDER BY embedding <=> %s::vector LIMIT %s")
+        args = (query_embedding, json.dumps(filter), query_embedding, top_k)
+    ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>len != dim → raise</code><span>生产实现<b>严格校验维度</b>——对不上就报错，而不是像内存版那样返回 0。因为生产环境维度不匹配是<b>配置错误</b>，早报早发现，别悄悄给个假结果。</span></div>
+                    <div class="r"><code>embedding &lt;=&gt; %s</code><span>pgvector 的距离算子，配合 <code>ivfflat</code>/<code>hnsw</code> 索引，让数据库<b>用索引找最近邻</b>，不用把百万条全扫一遍。</span></div>
+                    <div class="r"><code>metadata @&gt; %s::jsonb</code><span>jsonb "包含"操作符，配 GIN 索引，快速按 <code>type</code> 等过滤。</span></div>
+                    <div class="r"><code>%s 占位符</code><span>所有"值"都走占位符，驱动负责转义——和上面表名白名单一起构成防注入两道防线。</span></div>
+                </div>
+                <div class="ask"><span class="t">🤔 边界：pgvector 没装、或 store 没 init 会怎样？</span>两处真实处理：① <code>init()</code> 里 <code>import psycopg_pool</code> 失败会抛清晰的 <code>ImportError("...跑 uv sync --extra postgres")</code>（<code>vector_store.py:170</code>），告诉你缺哪个依赖；② 没先 <code>await store.init()</code> 就用，<code>_ensure_pool()</code> 抛 <code>RuntimeError("PgVectorStore 未 init()...")</code>（<code>vector_store.py:256</code>）。都是"早失败 + 给出可操作的错误信息"，而不是让你对着一个莫名其妙的 <code>NoneType</code> 报错发懵。</div>
+                <div class="baby"><span class="t">🍼 两个实现一句话对比</span>内存版=<strong>暴力全扫 + 防御性返回 0</strong>（图省事、图不崩，测试用）；生产版=<strong>数据库索引 + 严格校验报错</strong>（图快、图早发现错，线上用）。但它俩<strong>方法签名完全相同</strong>，所以业务代码换谁都不用改——这就是 L04 Protocol 的威力。</div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>在 sre-rca 里怎么串起来</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>情景记忆 & 语义记忆走读</h1></div>
+            <div class="card">
+                <p>这两层都是薄薄一层封装——持有一个 <code>VectorStore</code> + 一个 <code>Embedder</code>，把"embed 再搜/存"的样板包好。</p>
+                <h3>Episodic 情景记忆（<code>episodic.py</code>）</h3>
+                <p><code>EpisodicStore</code>（<code>episodic.py:16</code>）是个 dataclass，<code>recall</code>（<code>episodic.py:39</code>）读、<code>writeback</code>（<code>episodic.py:58</code>）写：</p>
+<pre><code class="language-python">@dataclass
+class EpisodicStore:                           # episodic.py:16
+    vector_store: VectorStore                  # 依赖协议，不认具体实现
+    embedder: Embedder
+    record_type: str = "case"                  # 本层固定 type=case
+
+    async def recall(self, query, top_k=3, extra_filter=None, min_score=-1.0):
+        [embedding] = await self.embedder.embed([query])   # ① 查询转向量
+        filter = {"type": self.record_type}    # ② 只搜 type=case！
+        if extra_filter: filter.update(extra_filter)
+        return await self.vector_store.search(query_embedding=embedding,
+                                              top_k=top_k, filter=filter, min_score=min_score)
+
+    async def writeback(self, case_id, text, metadata=None):
+        [embedding] = await self.embedder.embed([text])    # 原文转向量
+        meta = {"type": self.record_type}      # 打上 type=case 标记
+        if metadata: meta.update(metadata)
+        await self.vector_store.add([Record(id=case_id, text=text,
+                                            embedding=embedding, metadata=meta)])</code></pre>
+                <div class="walk">
+                    <div class="r"><code>filter={"type":"case"}</code><span>召回时<b>强制只搜 case</b>——这就是"和语义记忆共用一个库、靠 type 区分"的落地点。历史故障绝不会翻出 SOP。</span></div>
+                    <div class="r"><code>[embedding] = await ...embed([query])</code><span>embed 接收列表、返回列表，这里用解包语法取出唯一一条。查询和写入都要先转向量。</span></div>
+                    <div class="r"><code>writeback 打 type 标记</code><span>写入时也盖上 <code>type=case</code>，这样它才只会被 recall 搜到。docstring 明确要求：调用前先过 Day 08 的 <code>should_writeback</code> 守门。</span></div>
+                </div>
+                <h3>Semantic 语义记忆（<code>semantic.py</code>）</h3>
+                <p><code>SemanticStore</code>（<code>semantic.py:16</code>）和情景记忆<strong>共用同一个向量库</strong>，<code>seed</code>（<code>semantic.py:40</code>）离线灌库、<code>lookup</code>（<code>semantic.py:60</code>）在线检索：</p>
+<pre><code class="language-python">    async def lookup(self, query, record_type=None, top_k=3,
+                     extra_filter=None, min_score=-1.0):    # semantic.py:60
+        [embedding] = await self.embedder.embed([query])
+        filter = {}
+        if record_type: filter["type"] = record_type       # 传 "sop" 就只搜 SOP
+        if extra_filter: filter.update(extra_filter)
+        return await self.vector_store.search(query_embedding=embedding, top_k=top_k,
+                                              filter=filter or None, min_score=min_score)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>record_type 参数</code><span>和 Episodic 写死 <code>case</code> 不同，语义记忆<b>按需传 type</b>：<code>lookup(q, "sop")</code> 查手册、<code>"topology"</code> 查拓扑。一个库装多种知识。</span></div>
+                    <div class="r"><code>filter or None</code><span>没传 type 时 <code>filter</code> 是空字典 <code>{}</code>，<code>{} or None</code> 变成 <code>None</code>=不过滤，全库搜。</span></div>
+                </div>
+                <div class="glossary"><b>RAG（检索增强生成）</b>：调 LLM 前先从知识库检索相关资料、塞进 prompt。让模型基于"真实资料"回答而非凭记忆瞎编——也是一种防幻觉手段。sre-rca 的 <code>rag</code> 节点干的就是 <code>lookup</code>。</div>
+                <div class="anno">⚠️ 小白常误以为情景记忆和语义记忆是"两个数据库"。<b>看代码就明白它俩共用同一个 <code>vector_store</code></b>，只靠一条 <code>metadata.type</code> 区分：Episodic 写死 <code>type=case</code>，Semantic 按 <code>type=sop/topology</code> 检索。一套底座、两种用法——这正是 Day 06 讲的"渐进抽象"省下的重复。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>工作记忆：checkpointer 工厂</h1></div>
+            <div class="card">
+                <p>第①层工作记忆就是 Day 03 讲的 checkpointer（存档器），管"会话内 state + 断点续跑"。框架把后端选择做成工厂 <code>make_checkpointer_from_env()</code>（<code>checkpointer.py:24</code>），按环境变量自动挑：</p>
+<pre><code class="language-python">def make_checkpointer_from_env():              # checkpointer.py:24
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        log.info("...REDIS_URL 设但需 lifespan 集成 · 降级 memory...")  # 见下方诚实注释
+    pg_dsn = os.environ.get("CHECKPOINTER_PG_DSN")
+    if pg_dsn:
+        log.info("checkpointer · backend=postgres")
+        try:
+            saver = make_checkpointer("postgres", url=pg_dsn)
+            ...
+            return saver
+        except ImportError as e:
+            log.warning("postgres backend 不可用(%s)· 降级 memory ...", e)
+    return make_checkpointer("memory")         # 兜底：内存版</code></pre>
+                <p>底层 <code>make_checkpointer(backend)</code>（<code>checkpointer.py:70</code>）是真正 new 出实例的地方，三种后端惰性 import：</p>
+<pre><code class="language-python">def make_checkpointer(backend="memory", *, url=None, **kwargs):  # checkpointer.py:70
+    if backend == "memory":
+        from langgraph.checkpoint.memory import InMemorySaver
+        return InMemorySaver(**kwargs)
+    if backend == "redis":
+        if not url: raise ValueError("redis backend 需要 url='redis://...'")
+        try:
+            from langgraph.checkpoint.redis import RedisSaver
+        except ImportError as e:
+            raise ImportError("redis backend 需要 `pip install langgraph-checkpoint-redis`") from e
+        return RedisSaver.from_conn_string(url, **kwargs)
+    ...  # postgres 同理
+    raise ValueError(f"未知 backend: {backend!r}（支持 memory/redis/postgres）")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>惰性 import</code><span>redis/postgres 的库<b>只在真用到时才 import</b>。这样只装内存版的环境不会因为缺 redis 库而报错——按需付费。</span></div>
+                    <div class="r"><code>ImportError → 友好提示</code><span>缺库时抛的错<b>直接告诉你该 pip install 什么</b>，不让你猜。</span></div>
+                    <div class="r"><code>from_env 逐级降级</code><span>REDIS_URL → CHECKPOINTER_PG_DSN → memory，任何一级不可用就往下退，保证<b>永远能返回一个能用的 checkpointer</b>。</span></div>
+                </div>
+                <p>又是"依赖倒置"套路——同一份业务代码，本地用内存、生产用 Redis/PG，靠环境变量切换，业务 <code>builder.compile(checkpointer=...)</code> 一行不改。</p>
+                <div class="note"><strong>一处诚实注释</strong>：<code>checkpointer.py:44</code> 说明 langgraph-checkpoint-redis 0.4+ 的 <code>from_conn_string</code> 返回的是需要 lifespan with-block 管理的上下文管理器，当前简化方案<strong>暂时降级到内存版</strong>、真 redis 跨进程持久化留作 follow-up。框架把"还没完全做好的地方"如实写进注释，而不是假装完美——读代码时看到这种注释要留意：它标的是"现状"而非"终态"。</p>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>sre-rca 串联 + 小结 + 动手</h1></div>
             <div class="card">
                 <p>回到 Day 05 的 sre-rca，四层记忆在它的图里各就各位：</p>
                 <div class="flow-chart">
@@ -242,17 +423,15 @@ checkpointer = make_checkpointer_from_env()
 graph = builder.compile(checkpointer=checkpointer)</code></pre>
                 <div class="tip"><strong>闭环</strong>：情景记忆形成了一个自我改进的闭环——每处理一次故障就沉淀一条经验，下次遇到相似的先召回参考。加上 Day 08 的写回守门（只沉淀"通过质检的"），这个闭环不会被错误经验污染。这就是"越用越聪明"又"不会学坏"。</div>
             </div>
-        </section>
-
-        <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
                     <li>四层记忆分别是什么、各管什么？（工作/情景/语义/向量底座）</li>
                     <li>向量检索为什么能"按意思找"？（Embedder 把文本转向量，找最近邻）</li>
-                    <li>Protocol 解耦解决了什么？（换存储不改业务：本地内存+Mock，生产 pgvector+Ollama）</li>
-                    <li>情景和语义记忆的区别？（具体 case vs 通用知识，共用向量库靠 type 区分）</li>
+                    <li>为什么用 Protocol 而不是抽象基类？（结构化子类型、零侵入，第三方类不改也能塞进来）</li>
+                    <li>内存版和 pgvector 版对脏输入的态度差别？（内存版返回 0 不崩、生产版严格校验维度报错）</li>
+                    <li>pgvector 为何表名白名单、值用占位符？（表名不能占位只能拼、拼要防注入；值走 %s 转义）</li>
+                    <li>情景和语义记忆的区别？（Episodic 写死 type=case vs Semantic 按 type 检索，共用一个向量库）</li>
                     <li>写回守门 + 情景记忆怎么形成"越用越聪明又不学坏"的闭环？</li>
                 </ul>
             </div>

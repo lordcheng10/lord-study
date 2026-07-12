@@ -53,6 +53,15 @@
         .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
         .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
         .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:150px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fld{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .fld th,.fld td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .fld th{background:var(--bg-secondary);color:var(--accent-purple)}
+        .fld code{color:var(--accent-cyan)}
     </style>
 </head>
 <body>
@@ -60,18 +69,19 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">07</div>
             <h2>Day 07</h2>
-            <p class="version">Critic 双层防幻觉 · 8 讲</p>
+            <p class="version">Critic 双层防幻觉 · 9 讲</p>
         </div>
         <ul class="nav-list">
-            <li class="nav-group-title">本日 8 讲</li>
+            <li class="nav-group-title">本日 9 讲</li>
             <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 什么是幻觉</a></li>
             <li><a href="#l02" class="nav-link" data-section="l02">L02 · 双层拦截总图</a></li>
-            <li><a href="#l03" class="nav-link" data-section="l03">L03 · L1 代码层 4 项检查</a></li>
-            <li><a href="#l04" class="nav-link" data-section="l04">L04 · L2 LLM 层 & 短路</a></li>
-            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 三态路由与重试循环</a></li>
-            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 业务规则 L1</a></li>
-            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三档 Critic 强度</a></li>
-            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · L1 数据结构与常量</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 收集合法证据 ID</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · L1 四项检查逐个走读</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 汇总 run_layer1_checks</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · L2 LLM 层与短路</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 三态路由 + 业务规则 L1</a></li>
+            <li><a href="#l09" class="nav-link" data-section="l09">L09 · 三档强度 + 小结</a></li>
             <li class="nav-group-title">导航</li>
             <li><a href="gov-agents-day06.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 06 toolkit 总览</a></li>
             <li><a href="gov-agents-tutorial.html" class="nav-link">20 天总目录</a></li>
@@ -112,6 +122,13 @@
                     <li>对高风险动作（重启、回滚）不加"先验证"的提示。</li>
                 </ul>
                 <p>对一个要给 SRE 做故障根因的 Agent 来说，幻觉是致命的——你不能让它把运维人员带到错误方向。所以框架专门设了 <strong>Critic 节点</strong>：在综合出结论后、返回给用户前，先自我审查一遍。代码在 <code>packages/ai-trust-toolkit/src/ai_trust_toolkit/critic/</code>。</p>
+                <div class="ask"><span class="t">🤔 痛点：为什么不能"信任模型自己会说实话"？</span>因为模型的目标是"生成流畅合理的文本"，不是"只说有证据的话"。当证据不足时，它倾向于<strong>补全一个听起来对的答案</strong>——比如你问它根因，它会顺手编一个 <code>trace_id</code> 来"圆场"。你没法靠调 prompt 让它 100% 不编，只能在它输出之后<strong>用另一套机制去核对</strong>。这就是 Critic 存在的根本理由：把"生成"和"审查"拆成两件事、由不同逻辑负责。</div>
+                <div class="essence"><span class="t">💡 本质：Critic = 结论的"事后对账"</span>它不参与"想答案"，只在答案出来后做一件事——<strong>拿结论去和真实证据、格式规则、风险约束逐条对账</strong>。对不上就打回。所以 Critic 的强弱，取决于"对账规则"有多硬。今天就是拆开这套对账规则。</div>
+                <div class="example"><span class="t">📝 一个真实结论长什么样（后面全程用它举例）</span>
+                综合节点产出的 <code>conclusion</code> 大致是：<br>
+                <code>{"confidence": "高", "hypotheses": [{"risk_level": "high", "actions": [{"name": "restart", "verify_first": true}]}], "evidence_ids": ["ev-1", "ev-2"]}</code><br>
+                Critic 要回答的问题就是：这里的 <code>confidence:"高"</code> 合法吗？<code>evidence_ids:["ev-1"]</code> 是真的还是编的？<code>risk_level:"high"</code> 的动作带没带 <code>verify_first</code>？——全是可以用代码逐条核对的。
+                </div>
             </div>
         </section>
 
@@ -170,120 +187,363 @@
         </section>
 
         <section id="l03" class="section">
-            <div class="section-header"><span class="section-number">L03</span><h1>L1 代码层：4 项确定性检查</h1></div>
+            <div class="section-header"><span class="section-number">L03</span><h1>L1 的数据结构与三个常量</h1></div>
             <div class="card">
-                <p>代码在 <code>critic/layer1.py</code>。汇总入口 <code>run_layer1_checks()</code>（<code>layer1.py:135</code>）跑 4 项检查，返回 <code>(是否通过, 违规列表, 详情)</code>：</p>
-                <div class="checks">
-                    <div class="chk"><h5>① check_evidence_ids</h5><p>结论里引用的证据 ID，必须都在"合法 ID 集合"里。<code>fabricated = 引用的 - 合法的</code>，只要有编造的就挂（<code>layer1.py:75</code>）。</p></div>
-                    <div class="chk"><h5>② check_min_specialists</h5><p>至少 N 个（默认 2）专家真的产出了 finding（排除 fallback 降级的），防止只凭一个证据下结论（<code>layer1.py:88</code>）。</p></div>
-                    <div class="chk"><h5>③ check_schema</h5><p>置信度必须 ∈ {高,中,低}，风险等级 ∈ {high,medium,low}——格式非法直接拦（<code>layer1.py:101</code>）。</p></div>
-                    <div class="chk"><h5>④ check_high_risk_verify_first</h5><p>高风险动作（重启/回滚等）必须带 <code>verify_first</code> 提示，不能让 Agent 直接叫人干危险操作（<code>layer1.py:121</code>）。</p></div>
+                <p>先看 L1 用到的<strong>数据结构和"标准答案表"</strong>——不理解它们，后面 4 项检查会看不懂。代码在 <code>critic/layer1.py</code> 开头（<code>layer1.py:24-41</code>）：</p>
+<pre><code class="language-python"># layer1.py:24 —— 哪些 state 字段装着专家产出的 finding（业务可覆盖）
+DEFAULT_SP_FIELDS: tuple[str, ...] = (
+    "trace_finding", "metric_finding", "deploy_finding", "log_finding",
+)
+
+# layer1.py:31 —— 置信度 / 风险等级的"合法取值表"
+VALID_CONFIDENCE_VALUES: frozenset[str] = frozenset({"高", "中", "低"})
+VALID_RISK_LEVELS: frozenset[str] = frozenset({"high", "medium", "low"})
+
+@dataclass  # layer1.py:35
+class Layer1CheckResult:
+    passed: bool
+    violations: list[str] = field(default_factory=list)
+    detail: dict[str, Any] = field(default_factory=dict)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>DEFAULT_SP_FIELDS</code><span>4 位专家把结果分别写在 state 的这 4 个字段里。它是<b>参数默认值</b>而非写死——因为不同 agent 的专家字段名不同（Day 05 的 sre-rca 用这四个，别的 agent 可以传自己的）。</span></div>
+                    <div class="r"><code>VALID_CONFIDENCE_VALUES</code><span>置信度只允许中文 <code>"高"/"中"/"低"</code>三个值。模型要是输出 <code>"very high"</code> 或 <code>"0.9"</code> 就算 schema 违规。</span></div>
+                    <div class="r"><code>VALID_RISK_LEVELS</code><span>风险等级只允许英文 <code>"high"/"medium"/"low"</code>。注意和置信度<b>一个中文一个英文</b>——这是真实代码的约定，别记混。</span></div>
+                    <div class="r"><code>Layer1CheckResult</code><span>4 项检查跑完的<b>汇总结果</b>：<code>passed</code>=整体过没过；<code>violations</code>=人话违规列表；<code>detail</code>=诊断数据（合法 ID 数、实际专家数等）。</span></div>
                 </div>
-                <p style="margin-top:12px;">"合法 ID 集合"从哪来？<code>collect_valid_evidence_ids(state)</code>（<code>layer1.py:44</code>）会把 4 个专家 finding 里的真实证据 ID 全部收集起来。所以只要结论引用了不在这个集合里的 ID，就一定是编造的——<strong>这是用代码 100% 抓幻觉的关键机制</strong>。</p>
-                <div class="example"><span class="t">📝 举个例子：编造的证据 ID 怎么被 100% 抓出</span>
-                4 个专家真实产出的 ID 集合 = <code>{"T-1","M-2","D-3"}</code>（这就是"现场真有的材料"）。<br>
-                大模型给的结论引用了 <code>["T-1","M-9"]</code> → <code>fabricated = {"M-9"}</code>（不在合法集合里）→ <strong>L1 立刻判 FAIL</strong>，<code>critique_layer=1</code>，<code>retry_count += 1</code>，<strong>根本不调 Haiku</strong>。<br>
-                就像验收员一清点，发现报告里写的"M-9 号材料"现场压根没有——当场打回。
-                </div>
+                <table class="fld">
+                    <thead><tr><th>字段</th><th>类型</th><th>作用</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>passed</code></td><td>bool</td><td>只要 violations 为空就是 True（见 L06）</td></tr>
+                        <tr><td><code>violations</code></td><td>list[str]</td><td>每条是一句人话，如 <code>"① 编造 evidence_id: ['M-9']"</code></td></tr>
+                        <tr><td><code>detail</code></td><td>dict</td><td>如 <code>{"valid_ids_count":3,"actual_specialists":2}</code>，给可观测用</td></tr>
+                    </tbody>
+                </table>
+                <div class="essence"><span class="t">💡 设计取舍①：为什么用 <code>frozenset</code> 而不是普通 <code>set</code> / <code>list</code>？</span>
+                三点。① <strong>不可变</strong>：这是"标准答案表"，任何代码都不该往里加值，<code>frozenset</code> 从语言层面禁止 <code>.add()</code>，防止被意外污染；② <strong>可当模块级常量安全共享</strong>：可变 <code>set</code> 做全局常量有"被某处偷偷改掉"的风险，冻结后天然线程安全；③ <strong>成员判断 O(1)</strong>：<code>confidence not in VALID_CONFIDENCE_VALUES</code> 是哈希查找，比 <code>list</code> 的逐个比对快。用 <code>list</code> 也能跑，但语义上"这是一张不该变的表"就丢了。</div>
+                <div class="essence"><span class="t">💡 设计取舍②：为什么 <code>sp_fields</code> 做成参数、而不是写死在函数里？</span>
+                因为 toolkit 要被<strong>多个业务 agent 复用</strong>。sre-rca 的专家字段叫 <code>trace_finding</code> 等，但 alert-triage 可能叫别的。做成"默认值 + 可覆盖参数"，既让 90% 的 agent 开箱即用（用默认），又给剩下 10% 留了口子（传自己的）。这就是"约定优于配置，但配置永远可覆盖"。</div>
             </div>
         </section>
 
         <section id="l04" class="section">
-            <div class="section-header"><span class="section-number">L04</span><h1>L2 LLM 层 & 短路优化</h1></div>
+            <div class="section-header"><span class="section-number">L04</span><h1>先收集"合法证据 ID 集合"</h1></div>
             <div class="card">
-                <p>代码在 <code>critic/layer2.py</code>。<code>build_critic_node(config)</code>（<code>layer2.py:51</code>）返回一个 async 节点。它的执行逻辑最能体现"双层"设计——<strong>先跑 L1，L1 不过直接返回、根本不烧 LLM</strong>：</p>
-<pre><code class="language-python">async def critic_node(state):
-    valid_ids = collect_valid_evidence_ids(state)
-    l1 = run_layer1_checks(state, valid_ids)      # 先跑代码层
-    if not l1.passed:
-        return {"critique_passed": False,
-                "critique_layer": 1,               # ← 标记：被代码层拦下
-                "retry_count": 1, ...}             # 不调 LLM，直接返回
-    # 只有 L1 通过，才调 Haiku 做语义审查（6 项铁律）
-    llm = config.llm_factory()                    # 通常 get_llm("haiku")
-    response = await llm.ainvoke([system, user])
-    ...                                            # critique_layer=2 表示 LLM 层结果</code></pre>
-                <p>配置项 <code>CriticConfig</code>（<code>layer2.py:30</code>）业务需要提供：<code>system_prompt</code>（审查用的 prompt，就是 Day 05 见过的 <code>critic-v1.md</code>）、<code>llm_factory</code>、<code>conclusion_field</code>（结论存在 state 哪个字段）、<code>soft_fail</code>（默认 True）。</p>
-                <div class="glossary"><b>critique_layer 这个字段很妙</b>：它记录"是被哪一层拦下的"——0=通过、1=代码层拦下、2=LLM 层拦下。回忆 Day 05，sre-rca 的 State 里就有这个字段。它让你事后能分析"我们的幻觉大多是机械错误(1)还是语义错误(2)"，从而针对性优化。</div>
-                <p>拿三条不同的结论<strong>单步走一遍 critic_node</strong>，看清"短路"省了什么：</p>
-                <table class="ttable">
-                    <thead><tr><th>输入结论</th><th>L1 代码检查</th><th>调 Haiku？</th><th>结果 (critique_passed / layer)</th></tr></thead>
-                    <tbody>
-                        <tr><td>引用了编造 ID <code>M-9</code></td><td>❌ 不过</td><td><b>不调</b>（省 ¥0.04）</td><td>False / <code>layer=1</code></td></tr>
-                        <tr><td>ID 都真，但只有 1 个专家出结果</td><td>❌ 不过(min_specialists)</td><td><b>不调</b></td><td>False / <code>layer=1</code></td></tr>
-                        <tr><td>ID 真、专家够、格式对</td><td>✓ 过</td><td>✅ 调，做语义审查</td><td>看 Haiku 判 / <code>layer=2 或 0</code></td></tr>
-                    </tbody>
-                </table>
-                <div class="qa">
-                    <p class="q">👶 小白：既然 L2 的 Haiku 更聪明，为什么不直接全交给它，省得写 L1 那堆规则？</p>
-                    <p class="a">👨‍🏫 老师：三个原因。① <strong>钱</strong>：每条都调 Haiku 要花 ¥0.04，机械错误占很大比例，用代码 0 成本就拦了，何必花钱？② <strong>快</strong>：L1 毫秒级，LLM 要几百毫秒。③ <strong>准</strong>：编造 ID 这种是"确定性错误"，代码 100% 抓得准，反而 LLM 有概率看走眼。所以是"能用尺子量的绝不请老师傅"——把贵的留给真需要判断力的语义问题。</p>
+                <p>4 项检查里最硬核的一项——抓编造 ID——依赖一个前置步骤：<strong>先把 4 位专家真实产出的证据 ID 全收集起来</strong>，组成"现场真有的材料清单"。这就是 <code>collect_valid_evidence_ids()</code>（<code>layer1.py:44</code>）：</p>
+<pre><code class="language-python">def collect_valid_evidence_ids(state, sp_fields=DEFAULT_SP_FIELDS, id_extractor=None):
+    if id_extractor is not None:          # 业务可自定义抽取逻辑
+        return id_extractor(state)
+    valid: set[str] = set()
+    for field_name in sp_fields:          # 遍历 4 个专家字段
+        finding = state.get(field_name)
+        if not finding or not isinstance(finding, dict):
+            continue                      # ← 边界：空 finding / 非 dict 直接跳过
+        # 形态 1：finding["evidence_ids"] = ["ev-1", "ev-2"]
+        for eid in finding.get("evidence_ids", []) or []:
+            if isinstance(eid, str):
+                valid.add(eid)
+        # 形态 2：finding["evidences"] = [{"id": "ev-1"}, ...]
+        for evidence in finding.get("evidences", []) or []:
+            if isinstance(evidence, dict):
+                eid = evidence.get("id")
+                if isinstance(eid, str):
+                    valid.add(eid)
+    return valid</code></pre>
+                <div class="walk">
+                    <div class="r"><code>id_extractor 分支</code><span>又是"可覆盖"套路：默认按下面两种形态抽，业务想自定义就传个函数进来。</span></div>
+                    <div class="r"><code>not finding or not isinstance(...,dict)</code><span><b>边界处理</b>：某专家没出结果（<code>None</code>）、或出的不是字典（脏数据）——直接 <code>continue</code> 跳过，绝不报错。宁可少收几个 ID，也不能让收集过程本身崩掉。</span></div>
+                    <div class="r"><code>两种 finding 形态</code><span>真实项目里专家写法不统一：有的把 ID 平铺成 <code>evidence_ids</code> 列表，有的包成 <code>evidences:[{id:...}]</code> 对象。函数<b>两种都认</b>，兼容历史写法。</span></div>
+                    <div class="r"><code>isinstance(eid, str)</code><span>层层 <code>isinstance</code> 校验——只收字符串 ID。防止专家误塞进 <code>None</code>/数字污染集合。</span></div>
+                    <div class="r"><code>or []</code><span>小技巧：<code>finding.get("evidence_ids")</code> 可能返回 <code>None</code>，<code>None or []</code> 兜成空列表，for 循环就不会炸。</span></div>
                 </div>
+                <div class="example"><span class="t">📝 真实值走一遍</span>
+                trace 专家：<code>{"evidence_ids":["ev-1","ev-2"]}</code>；metric 专家：<code>{"evidences":[{"id":"ev-3"}]}</code>；deploy 专家：<code>None</code>（挂了）；log 专家：<code>{"evidence_ids":["ev-2"]}</code>（重复 ev-2）。<br>
+                收集结果 = <code>{"ev-1","ev-2","ev-3"}</code>——两种形态都抽到了、<code>None</code> 被跳过、重复自动去重（因为是 <code>set</code>）。这个集合就是下一讲"抓编造 ID"的标准答案。
+                </div>
+                <div class="essence"><span class="t">💡 设计取舍③：为什么返回 <code>set</code> 而不是 <code>list</code>？</span>因为下一步要做的核心运算是<strong>集合差集</strong> <code>引用的ID - 合法的ID</code>（找出编造的）。差集是 <code>set</code> 的原生操作、O(1) 成员判断；而且天然去重（多个专家引同一 ID 不会重复）。用 <code>list</code> 就得手写双重循环，又慢又啰嗦。</div>
             </div>
         </section>
 
         <section id="l05" class="section">
-            <div class="section-header"><span class="section-number">L05</span><h1>三态路由：形成重试循环</h1></div>
+            <div class="section-header"><span class="section-number">L05</span><h1>L1 四项检查逐个走读</h1></div>
             <div class="card">
-                <p>Critic 审完，怎么决定下一步？回忆 Day 03 的"条件边"和 Day 05 builder 里那句 <code>build_critic_router(...)</code>。它就是把 Critic 结果翻译成三种走向（代码在 <code>failsafe/retry_router.py:12</code>，属于失败闸门，Day 08 会再提）：</p>
-                <div class="tri">
-                    <div class="s pass"><h4>✓ 通过</h4><p><code>critique_passed=True</code><br>→ 去 <strong>writeback</strong> 沉淀经验，正常结束</p></div>
-                    <div class="s retry"><h4>↻ 不过 & 没超次数</h4><p>回 <strong>synthesizer</strong> 重新综合<br>（把 Critic 的意见带回去改）</p></div>
-                    <div class="s end"><h4>■ 不过 & 超 2 次</h4><p>→ <strong>END</strong><br>诚实输出"信息不足，无法给出可靠结论"</p></div>
+                <p>有了合法 ID 集合，现在逐个拆开 4 项检查。每项都是一个独立小函数，返回 <code>(是否通过, 附加信息)</code>——<strong>纯代码、0 成本、100% 确定</strong>。</p>
+
+                <h3>① check_evidence_ids —— 抓编造证据 ID（<code>layer1.py:75</code>）</h3>
+<pre><code class="language-python">def check_evidence_ids(conclusion, valid_ids) -> tuple[bool, list[str]]:
+    cited_ids: set[str] = set()
+    for eid in conclusion.get("evidence_ids", []) or []:
+        if isinstance(eid, str):
+            cited_ids.add(eid)
+    fabricated = cited_ids - valid_ids     # ← 核心：集合差集
+    return (not fabricated, sorted(fabricated))</code></pre>
+                <p><b>一句话</b>：把结论引用的 ID 减去合法 ID，剩下的就是<strong>凭空编的</strong>。<code>fabricated</code> 非空 → 不通过。这就是"用代码 100% 抓幻觉"最漂亮的一行。</p>
+                <div class="example"><span class="t">📝</span>合法 <code>{"ev-1","ev-2","ev-3"}</code>，结论引用 <code>["ev-1","ev-9"]</code> → <code>fabricated={"ev-9"}</code> → 返回 <code>(False, ["ev-9"])</code>，当场判违规。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 560 170" width="100%" style="max-width:560px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="280" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">数据结构：集合差集 = 编造的 ID</text>
+                        <circle cx="200" cy="95" r="62" fill="rgba(6,182,212,.10)" stroke="#06b6d4"/>
+                        <circle cx="330" cy="95" r="62" fill="rgba(239,68,68,.10)" stroke="#ef4444"/>
+                        <text x="150" y="55" fill="#67e8f9" text-anchor="middle" font-weight="700">合法集合 valid_ids</text>
+                        <text x="165" y="92" fill="#cbd5e1" text-anchor="middle">ev-1</text>
+                        <text x="165" y="110" fill="#cbd5e1" text-anchor="middle">ev-2 · ev-3</text>
+                        <text x="265" y="95" fill="#e2e8f0" text-anchor="middle" font-weight="700">ev-1</text>
+                        <text x="378" y="55" fill="#f87171" text-anchor="middle" font-weight="700">结论引用 cited</text>
+                        <text x="368" y="100" fill="#fca5a5" text-anchor="middle" font-weight="700">ev-9</text>
+                        <text x="265" y="150" fill="#94a3b8" text-anchor="middle">交集 ev-1 = 有据可查</text>
+                        <text x="415" y="150" fill="#f87171" text-anchor="middle">cited − valid = {ev-9} 编造！</text>
+                    </svg>
+                    <div class="cap">图注：cited − valid 这个差集里剩下的，就是"现场没有、凭空编"的证据 ID。</div>
                 </div>
-<pre><code class="language-python">def critic_router(state):                    # retry_router.py:12
-    if state.get("critique_passed"):
-        return "writeback"                   # 通过
-    if state.get("retry_count", 0) &gt;= max_retries:
-        return END                           # 触顶，诚实收尾
-    return "synthesizer"                     # 打回重做</code></pre>
-                <div class="note"><strong>"触顶诚实收尾"是可信设计的点睛之笔</strong>：如果重试了 2 次还是过不了 Critic，框架<strong>不会硬憋出一个结论</strong>，而是老实说"我信息不足"。宁可承认不知道，也不给一个可能误导人的答案——这正是"可信"二字的分量。<code>retry_count</code> 用 Day 05 讲的累加 Reducer 计数，所以能可靠判断是否触顶。</div>
+
+                <h3>② check_min_specialists —— 至少 2 位专家印证（<code>layer1.py:88</code>）</h3>
+<pre><code class="language-python">def check_min_specialists(conclusion, state, min_count=2, sp_fields=DEFAULT_SP_FIELDS):
+    actual = sum(
+        1 for f in sp_fields
+        if state.get(f) and isinstance(state[f], dict)
+        and not state[f].get("fallback", False)   # ← 排除降级的假 finding
+    )
+    return (actual >= min_count, actual)</code></pre>
+                <p><b>一句话</b>：数一数几个专家<strong>真的出了结果</strong>。关键是 <code>not ...get("fallback")</code>——Day 08 兜底闸给的降级 finding 带 <code>fallback:True</code>，这里要<strong>排除掉</strong>，否则"4 个专家全挂、全是兜底占位"也会被误判成"证据充分"。默认要求 ≥2，防止单一证据下大结论。</p>
+
+                <h3>③ check_schema —— 格式合法性（<code>layer1.py:101</code>）</h3>
+<pre><code class="language-python">def check_schema(conclusion) -> tuple[bool, list[str]]:
+    violations = []
+    confidence = conclusion.get("confidence")
+    if confidence not in VALID_CONFIDENCE_VALUES:      # 用上 L03 的常量表
+        violations.append(f"confidence={confidence!r} 不在 {VALID_CONFIDENCE_VALUES}")
+    hypotheses = conclusion.get("hypotheses") or []
+    if not isinstance(hypotheses, list):
+        violations.append("hypotheses 必须是 list")
+    else:
+        for i, h in enumerate(hypotheses):
+            if not isinstance(h, dict): continue
+            risk = h.get("risk_level")
+            if risk is not None and risk not in VALID_RISK_LEVELS:
+                violations.append(f"hypotheses[{i}].risk_level={risk!r} 非法")
+    return (not violations, violations)</code></pre>
+                <p><b>一句话</b>：置信度必须 ∈ {高,中,低}，每条假设的风险等级（若填了）必须 ∈ {high,medium,low}。注意 <code>risk is not None</code>——<strong>风险等级允许不填，但填了就必须合法</strong>（区分"没提供"和"提供了非法值"）。</p>
+
+                <h3>④ check_high_risk_verify_first —— 高危动作必须先验证（<code>layer1.py:121</code>）</h3>
+<pre><code class="language-python">def check_high_risk_verify_first(conclusion) -> tuple[bool, list[str]]:
+    violations = []
+    for h in conclusion.get("hypotheses", []) or []:
+        if not isinstance(h, dict): continue
+        if h.get("risk_level") == "high":              # 只管高危假设
+            for j, a in enumerate(h.get("actions") or []):
+                if isinstance(a, dict) and not a.get("verify_first"):
+                    violations.append(f"...actions[{j}] high-risk 缺少 verify_first")
+    return (not violations, violations)</code></pre>
+                <p><b>一句话</b>：凡是标了 <code>risk_level:"high"</code> 的假设，它下面每个动作都必须带 <code>verify_first:true</code>。这是一条<strong>安全红线</strong>——不能让 Agent 直接叫人"重启/回滚"却不提示先核实。</p>
+                <div class="example"><span class="t">📝 用 L01 那个结论试</span>
+                <code>risk_level:"high"</code> 的动作是 <code>{"name":"restart","verify_first":true}</code> → 带了 <code>verify_first</code> → ④ 通过。<br>若模型漏写成 <code>{"name":"restart"}</code> → ④ 立刻违规：<code>"high-risk 缺少 verify_first"</code>。
+                </div>
+                <div class="ask"><span class="t">🤔 边界：4 项里最容易被绕过的是哪项？</span>其实是 ②。如果某 agent 的专家<b>忘了给降级 finding 打 <code>fallback:True</code></b>，那 ② 就会把"占位假数据"当成真证据，导致"证据充分"误判。所以 Day 08 的兜底闸和这里是<strong>强约定关系</strong>：兜底闸必须打标记，L1 才敢信任这个标记去数数。两处代码看似无关，实则靠一个字段咬合。</div>
             </div>
         </section>
 
         <section id="l06" class="section">
-            <div class="section-header"><span class="section-number">L06</span><h1>业务规则 L1：不调 LLM 的轻量 Critic</h1></div>
+            <div class="section-header"><span class="section-number">L06</span><h1>汇总入口 run_layer1_checks + 控制流</h1></div>
             <div class="card">
-                <p>有些高频、低延迟的 agent（比如 alert-triage 告警治理，要求 P99 &lt; 5 秒）<strong>连 Haiku 都嫌慢</strong>。于是 v0.3 抽出了纯规则版的 <code>business_layer1.py</code>——用几条业务规则做校验，<strong>0 成本、&lt; 1 毫秒、不调任何 LLM</strong>。</p>
-                <p>核心是 <code>Rule</code>（<code>business_layer1.py:34</code>）+ <code>build_business_critic_l1(rules)</code>（<code>business_layer1.py:51</code>）。业务用几个 helper 声明规则即可：</p>
-<pre><code class="language-python">critic_l1 = build_business_critic_l1([
-    # 决策必须在允许集合内
-    rule_in_allowed_set("routing_decision", ALLOWED_DECISIONS),
-    # 如果决定"立即呼叫"，就必须填了业务影响字段
-    rule_conditional_field(
-        when=lambda s: s["routing_decision"] == "page_immediately",
-        require_field="business_impact"),
-])
-builder.add_node("critic", critic_l1)</code></pre>
-                <p>提供的 helper 有：<code>rule_in_allowed_set</code>（值在枚举内）、<code>rule_field_not_empty</code>（非空）、<code>rule_conditional_field</code>（条件必填）、<code>rule_field_in_range</code>（数值范围）、<code>rule_list_min_length</code>（列表最短长度）。规则本身崩了也视为违规（<code>business_layer1.py:86</code>），绝不放过。</p>
+                <p>4 项检查由总入口 <code>run_layer1_checks()</code>（<code>layer1.py:135</code>）串起来，顺序跑、攒违规、打包成 <code>Layer1CheckResult</code>：</p>
+<pre><code class="language-python">def run_layer1_checks(state, valid_ids=None, *, min_specialists=2,
+                      sp_fields=DEFAULT_SP_FIELDS, conclusion_field="conclusion"):
+    conclusion = state.get(conclusion_field) or {}
+    if valid_ids is None:                              # 没传就现场收集
+        valid_ids = collect_valid_evidence_ids(state, sp_fields)
+    violations = []
+    detail = {"valid_ids_count": len(valid_ids)}
+
+    ok, fab = check_evidence_ids(conclusion, valid_ids)          # ①
+    if not ok: violations.append(f"① 编造 evidence_id: {fab}")
+    detail["fabricated_ids"] = fab
+
+    ok, n = check_min_specialists(conclusion, state, min_specialists, sp_fields)  # ②
+    if not ok: violations.append(f"② 仅 {n} 位 Specialist 印证（需 ≥ {min_specialists}）")
+    detail["actual_specialists"] = n
+
+    ok, schema_v = check_schema(conclusion)                      # ③
+    if not ok: violations.append(f"③ schema 违规: {schema_v}")
+
+    ok, risk_v = check_high_risk_verify_first(conclusion)        # ④
+    if not ok: violations.append(f"④ 高风险动作缺 verify_first: {risk_v}")
+
+    return Layer1CheckResult(passed=not violations, violations=violations, detail=detail)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>valid_ids=None 时现场收集</code><span>调用方可以先算好 <code>valid_ids</code> 传进来（省一次重算），也可以不传让它自己收集。灵活。</span></div>
+                    <div class="r"><code>不短路、跑完 4 项</code><span>注意它<b>不是</b>"第一项挂就 return"，而是 4 项全跑、把所有违规攒进 <code>violations</code>。这样一次就能告诉模型"你哪几处都错了"，重试时能一次改全，减少来回。</span></div>
+                    <div class="r"><code>passed = not violations</code><span>违规列表空 = 通过。极简判据。</span></div>
+                    <div class="r"><code>detail</code><span>顺手记下"合法 ID 数、编造的 ID、实际专家数"——这些数据后面进日志/指标，用来分析"我们的幻觉主要是哪类"。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 600 210" width="100%" style="max-width:600px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="300" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">L1 控制流：collect → 4 项检查攒违规 → 打包</text>
+                        <rect x="20" y="34" width="150" height="34" rx="7" fill="rgba(6,182,212,.08)" stroke="#06b6d4"/>
+                        <text x="95" y="55" fill="#67e8f9" text-anchor="middle">collect_valid_evidence_ids</text>
+                        <text x="95" y="86" fill="#94a3b8" text-anchor="middle">→ 合法 ID 集合</text>
+                        <path d="M95 68 L95 96" stroke="#06b6d4" stroke-width="1.3"/>
+                        <rect x="200" y="34" width="90" height="30" rx="6" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="245" y="53" fill="#cbd5e1" text-anchor="middle">① 编造ID</text>
+                        <rect x="300" y="34" width="90" height="30" rx="6" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="345" y="53" fill="#cbd5e1" text-anchor="middle">② ≥2专家</text>
+                        <rect x="400" y="34" width="80" height="30" rx="6" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="440" y="53" fill="#cbd5e1" text-anchor="middle">③ schema</text>
+                        <rect x="490" y="34" width="90" height="30" rx="6" fill="var(--bg-card,#1e293b)" stroke="#475569"/><text x="535" y="53" fill="#cbd5e1" text-anchor="middle">④ verify</text>
+                        <rect x="200" y="105" width="380" height="30" rx="7" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                        <text x="390" y="124" fill="#fbbf24" text-anchor="middle">每项挂 → append 一条 violations（不短路，跑满 4 项）</text>
+                        <path d="M245 64 L245 103" stroke="#f59e0b" stroke-width="1"/><path d="M345 64 L345 103" stroke="#f59e0b" stroke-width="1"/>
+                        <path d="M440 64 L440 103" stroke="#f59e0b" stroke-width="1"/><path d="M535 64 L535 103" stroke="#f59e0b" stroke-width="1"/>
+                        <rect x="200" y="150" width="185" height="46" rx="8" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="292" y="170" fill="#34d399" text-anchor="middle" font-weight="700">violations 空</text>
+                        <text x="292" y="186" fill="#94a3b8" text-anchor="middle">passed=True → 进 L2</text>
+                        <rect x="400" y="150" width="180" height="46" rx="8" fill="rgba(239,68,68,.08)" stroke="#ef4444"/>
+                        <text x="490" y="170" fill="#f87171" text-anchor="middle" font-weight="700">violations 非空</text>
+                        <text x="490" y="186" fill="#94a3b8" text-anchor="middle">passed=False → 打回，不调 LLM</text>
+                        <path d="M390 135 L292 148" stroke="#22c55e" stroke-width="1.2"/><path d="M390 135 L490 148" stroke="#ef4444" stroke-width="1.2"/>
+                    </svg>
+                    <div class="cap">图注：L1 一次跑完 4 项、攒齐所有违规再判定；全过才进 L2 花钱调 LLM。</div>
+                </div>
             </div>
         </section>
 
         <section id="l07" class="section">
-            <div class="section-header"><span class="section-number">L07</span><h1>三档 Critic 强度：按场景取舍</h1></div>
+            <div class="section-header"><span class="section-number">L07</span><h1>L2 LLM 层与"短路"设计</h1></div>
             <div class="card">
-                <p>框架并不强制每个 agent 都上"双层完整 Critic"。它按场景提供三档强度，这本身就是一个很好的"权衡"教学案例：</p>
-                <table>
-                    <thead><tr><th>档位</th><th>代表 agent</th><th>配置</th><th>为什么</th></tr></thead>
+                <p>L1 全过了，才轮到 L2。代码在 <code>critic/layer2.py</code>。<code>build_critic_node(config)</code>（<code>layer2.py:51</code>）返回一个 async 节点，节点内部先跑 L1、L1 不过<strong>直接返回、根本不烧 LLM</strong>（<code>layer2.py:59-71</code>）：</p>
+<pre><code class="language-python">async def critic_node(state):                       # layer2.py:59
+    # ① Layer 1：代码层硬检查
+    valid_ids = (config.valid_ids_extractor(state) if config.valid_ids_extractor
+                 else collect_valid_evidence_ids(state))
+    l1 = run_layer1_checks(state, valid_ids)
+    if not l1.passed:
+        return {"critique_passed": False,
+                "critique_feedback": "Layer 1 failed: " + " | ".join(l1.violations),
+                "critique_layer": 1,                # ← 标记：被代码层拦下
+                "retry_count": 1}                   # 不调 LLM，直接返回！
+    # ② Layer 2：只有 L1 过了才调 Haiku
+    conclusion = state.get(config.conclusion_field) or {}
+    try:
+        llm = config.llm_factory()                  # 通常 get_llm("haiku")
+        response = await llm.ainvoke([{"role":"system","content":config.system_prompt},
+                                      {"role":"user","content": user_msg}])
+        parsed = _parse_critic_response(getattr(response, "content", str(response)))
+        return {"critique_passed": parsed["critique_passed"],
+                "critique_layer": 2, "retry_count": 1, ...}
+    except Exception as e:
+        if config.soft_fail:                        # ← 边界：LLM 挂了怎么办
+            return {"critique_passed": False, "critique_layer": 2,
+                    "critique_feedback": f"Layer 2 error: {e}", "retry_count": 1}
+        raise</code></pre>
+                <div class="walk">
+                    <div class="r"><code>if not l1.passed: return</code><span>这就是"短路"——L1 挂了立刻返回，<code>llm_factory()</code> 那行<b>根本不会执行</b>，省下这 ¥0.04。</span></div>
+                    <div class="r"><code>critique_layer=1 / 2</code><span>记录"被哪层拦的"：1=代码层、2=LLM 层。事后能统计"幻觉大多是机械错(1)还是语义错(2)"，针对性优化。</span></div>
+                    <div class="r"><code>retry_count: 1</code><span>每次审查都 +1。它配的是 Day 05 讲的累加 Reducer <code>Annotated[int, add]</code>，所以多次审查会累加，L08 的路由靠它判断是否触顶。</span></div>
+                    <div class="r"><code>soft_fail 分支</code><span><b>边界：Haiku 调用本身失败（超时/限流）</b>。默认 <code>soft_fail=True</code>：不抛异常，而是当成"审查不通过"返回，让流程走重试而不是整图崩。</span></div>
+                </div>
+                <p><code>CriticConfig</code>（<code>layer2.py:30</code>）业务要提供：<code>system_prompt</code>（6 项铁律 prompt）、<code>llm_factory</code>、<code>conclusion_field</code>、<code>valid_ids_extractor</code>、<code>soft_fail</code>。</p>
+                <p>Haiku 返回的可能不是干净 JSON，所以有个<strong>三级兜底解析器</strong> <code>_parse_critic_response()</code>（<code>layer2.py:112</code>）：</p>
+<pre><code class="language-python">def _parse_critic_response(content):
+    try:
+        return json.loads(content)                  # ① 先当纯 JSON
+    except (json.JSONDecodeError, TypeError):
+        pass
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)  # ② markdown 代码块
+    if m:
+        try: return json.loads(m.group(1))
+        except json.JSONDecodeError: pass
+    passed = "critique_passed: true" in content.lower() or "PASS" in content[:200]  # ③ 关键字兜底
+    return {"critique_passed": passed, "critique_feedback": content[:500]}</code></pre>
+                <div class="essence"><span class="t">💡 设计取舍④：为什么值得写这个啰嗦的三级解析？</span>因为 LLM 输出<strong>天生不稳定</strong>——同一个 prompt，它有时给纯 JSON、有时用 <code>```json</code> 包起来、有时前面还啰嗦两句。如果只 <code>json.loads()</code> 一次，稍不规范就抛异常、整个审查报废。三级兜底把"解析失败"的概率压到极低，最后还有关键字兜底不至于崩。这是"与不确定的 LLM 打交道"的通用防御姿势。</div>
+                <table class="ttable">
+                    <thead><tr><th>输入结论</th><th>L1 代码检查</th><th>调 Haiku？</th><th>结果</th></tr></thead>
                     <tbody>
-                        <tr><td><strong>满配</strong></td><td>sre-rca</td><td>L1 + L2 + 三态重试</td><td>根因分析责任重，值得花时间反复审</td></tr>
-                        <tr><td><strong>仅 L1</strong></td><td>alert-triage</td><td>只跑代码规则，不调 LLM</td><td>高频在线，P99&lt;5s，延迟敏感</td></tr>
-                        <tr><td><strong>无 Critic</strong></td><td>risk-reviewer</td><td>不设 Critic 节点</td><td>刻意验证"toolkit 在无 Critic 场景也可复用"</td></tr>
+                        <tr><td>引用编造 ID <code>ev-9</code></td><td>❌ 不过</td><td><b>不调</b>（省 ¥0.04）</td><td>False / <code>layer=1</code></td></tr>
+                        <tr><td>ID 都真，但只 1 个专家出结果</td><td>❌ 不过</td><td><b>不调</b></td><td>False / <code>layer=1</code></td></tr>
+                        <tr><td>ID 真、专家够、格式对</td><td>✓ 过</td><td>✅ 调，做语义审查</td><td>看 Haiku / <code>layer=2</code></td></tr>
                     </tbody>
                 </table>
-                <div class="tip"><strong>设计智慧</strong>：可信不等于"处处堆满最重的防护"，而是<strong>按场景选择合适的防护强度</strong>。责任重的多审、延迟敏感的用轻量、有些故意做减法来验证框架弹性。这种"因地制宜"比"一刀切"更成熟。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：Haiku 更聪明，为什么不直接全交给它，省得写 L1 那堆规则？</p>
+                    <p class="a">👨‍🏫 老师：三个原因。① <strong>钱</strong>：每条都调 Haiku 要 ¥0.04，机械错误占很大比例，代码 0 成本就拦了；② <strong>快</strong>：L1 毫秒级，LLM 要几百毫秒；③ <strong>准</strong>：编造 ID 是确定性错误，代码 100% 抓得准，LLM 反而有概率看走眼。所以"能用尺子量的绝不请老师傅"——贵的判断力只留给语义问题。</p>
+                </div>
             </div>
         </section>
 
         <section id="l08" class="section">
-            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手</h1></div>
+            <div class="section-header"><span class="section-number">L08</span><h1>三态路由 + 业务规则 L1</h1></div>
+            <div class="card">
+                <h3>三态路由：把审查结果变成"下一步走哪"</h3>
+                <p>Critic 审完，<code>critic_router</code>（<code>retry_router.py:35</code>，工厂 <code>build_critic_router</code> 在 <code>retry_router.py:12</code>）把结果翻译成三种走向：</p>
+                <div class="tri">
+                    <div class="s pass"><h4>✓ 通过</h4><p><code>critique_passed=True</code><br>→ 去 <strong>writeback</strong> 沉淀经验</p></div>
+                    <div class="s retry"><h4>↻ 不过 & 没超次数</h4><p>回 <strong>synthesizer</strong> 带着意见重做</p></div>
+                    <div class="s end"><h4>■ 不过 & 超 2 次</h4><p>→ <strong>END</strong><br>诚实说"信息不足"</p></div>
+                </div>
+<pre><code class="language-python">def critic_router(state) -> str:             # retry_router.py:35
+    if state.get("critique_passed"):
+        return pass_dest                     # "writeback"：通过
+    if state.get("retry_count", 0) &gt;= max_retries:
+        return end_dest                      # END：触顶，诚实收尾
+    return retry_dest                        # "synthesizer"：打回重做</code></pre>
+                <div class="note"><strong>"触顶诚实收尾"是可信设计的点睛之笔</strong>：重试 2 次仍过不了，框架<strong>不硬憋结论</strong>，而是老实说"我信息不足"。宁可承认不知道也不误导——这就是"可信"二字。判断靠的正是 L07 里累加的 <code>retry_count</code>。（这道路由也算 Day 08 的失败闸③。）</p>
+
+                <h3>业务规则 L1：连 Haiku 都不调的轻量 Critic</h3>
+                <p>有些高频 agent（如 alert-triage，P99 &lt; 5 秒）<strong>连 Haiku 都嫌慢</strong>。于是 v0.3 抽出纯规则版 <code>business_layer1.py</code>——用 Python 规则校验，<strong>0 成本、&lt;1ms、不调任何 LLM</strong>。核心是 <code>Rule</code> 数据类（<code>business_layer1.py:34</code>）+ <code>build_business_critic_l1</code>（<code>business_layer1.py:51</code>）：</p>
+<pre><code class="language-python">@dataclass
+class Rule:                                   # business_layer1.py:34
+    name: str                                 # 出现在违规报告里，便于追踪
+    predicate: Callable[[dict], bool]         # state -> 通过与否
+    error_msg: str | Callable[[dict], str]    # 违规描述（可静态可动态）
+    severity: str = "error"                   # error 计入违规 / warn 只记日志
+
+async def critic_l1_node(state):              # business_layer1.py:81
+    violations = []
+    for rule in rules:
+        try:
+            ok = rule.predicate(state)
+        except Exception as e:                # ← 边界：规则本身崩了
+            violations.append(f"{rule.name}: 规则计算异常 {type(e).__name__}: {e}")
+            continue                          # 视为违规，绝不放过
+        if not ok and rule.severity == "error":
+            msg = rule.error_msg(state) if callable(rule.error_msg) else rule.error_msg
+            violations.append(f"{rule.name}: {msg}")
+    return {"layer1_passed": len(violations) == 0, "layer1_violations": violations}</code></pre>
+                <div class="walk">
+                    <div class="r"><code>predicate</code><span>一个 <code>state -> bool</code> 的函数，True 表示通过。规则的"判断逻辑"就装在这。</span></div>
+                    <div class="r"><code>except → 视为违规</code><span><b>边界与安全默认</b>：规则函数自己抛异常（比如访问了不存在的字段），<b>不当作通过</b>，而是记一条违规。安全系统的默认永远是"拿不准就拦"，不是"拿不准就放"。</span></div>
+                    <div class="r"><code>severity: warn</code><span>非 error 的规则只记不阻断——给"建议类"检查留了空间。</span></div>
+                </div>
+                <p>业务用 5 个 helper 声明规则即可（都在 <code>business_layer1.py</code>）：<code>rule_in_allowed_set</code>(:107 值在白名单)、<code>rule_field_not_empty</code>(:119)、<code>rule_conditional_field</code>(:128 条件必填)、<code>rule_field_in_range</code>(:152)、<code>rule_list_min_length</code>(:180)：</p>
+<pre><code class="language-python">critic_l1 = build_business_critic_l1([
+    rule_in_allowed_set("routing_decision", ALLOWED_DECISIONS),
+    rule_conditional_field(                   # 决定"立即呼叫"就必须填业务影响
+        when=lambda s: s["routing_decision"] == "page_immediately",
+        require_field="business_impact"),
+])
+builder.add_node("critic", critic_l1)</code></pre>
+            </div>
+        </section>
+
+        <section id="l09" class="section">
+            <div class="section-header"><span class="section-number">L09</span><h1>三档强度 + 今日小结 + 动手</h1></div>
+            <div class="card">
+                <p>框架并不强制每个 agent 都上"双层完整 Critic"。它按场景提供三档强度，本身就是很好的"权衡"教学案例：</p>
+                <table>
+                    <thead><tr><th>档位</th><th>代表 agent</th><th>配置</th><th>为什么</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>满配</strong></td><td>sre-rca</td><td><code>build_critic_node</code>：L1 + L2 + 三态重试</td><td>根因分析责任重，值得反复审</td></tr>
+                        <tr><td><strong>仅 L1</strong></td><td>alert-triage</td><td><code>build_business_critic_l1</code>：纯规则不调 LLM</td><td>高频在线，P99&lt;5s，延迟敏感</td></tr>
+                        <tr><td><strong>无 Critic</strong></td><td>risk-reviewer</td><td>不设 Critic 节点</td><td>刻意验证"toolkit 无 Critic 也可复用"</td></tr>
+                    </tbody>
+                </table>
+                <div class="tip"><strong>设计智慧</strong>：可信不等于"处处堆满最重的防护"，而是<strong>按场景选择合适的防护强度</strong>。责任重的多审、延迟敏感的用轻量、有些故意做减法验证弹性。因地制宜比一刀切更成熟。</div>
+            </div>
             <div class="card highlight-card">
                 <h3>🧠 今天你应该能回答</h3>
                 <ul>
                     <li>幻觉有哪些典型形式？（编造证据 ID、过度自信、证据不足下大结论）</li>
                     <li>为什么先 L1 后 L2？（L1 用代码 0 成本拦机械错误，通过了才花钱让 LLM 审语义）</li>
-                    <li>L1 怎么 100% 抓出编造的证据 ID？（收集所有专家真实 ID 组成合法集合，引用不在集合里就是编造）</li>
+                    <li>L1 怎么 100% 抓出编造的证据 ID？（<code>collect_valid_evidence_ids</code> 收集合法集合，<code>cited - valid</code> 差集就是编造的）</li>
+                    <li>为什么常量用 <code>frozenset</code>、<code>sp_fields</code> 做成参数？（不可变防污染 + O(1) 查找；跨 agent 复用可覆盖）</li>
+                    <li>L2 为什么要写三级 JSON 解析、soft_fail 又是干嘛的？（LLM 输出不稳定要兜底；LLM 挂了当"不通过"而非崩图）</li>
                     <li>三态路由是哪三态？触顶为什么诚实收尾？（通过/重试/触顶；宁可说不知道也不误导）</li>
-                    <li>三档 Critic 强度对应什么场景？（满配/仅L1/无Critic）</li>
+                    <li>三档 Critic 强度对应什么场景？（满配 build_critic_node / 仅 L1 build_business_critic_l1 / 无 Critic）</li>
                 </ul>
             </div>
             <div class="card">
