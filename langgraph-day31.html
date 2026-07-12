@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 31 · 不持久化通道 EphemeralValue & UntrackedValue — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">31</div>
+            <h2>Day 31</h2>
+            <p class="version">不持久化通道 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 两种"不完整持久化"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Ephemeral 只活一步</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 空更新即清空</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · guard 一步几写</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Untracked 存档返 MISSING</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · from_checkpoint 空手</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 三者对比 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day30.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 30 Topic</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day32.html" class="nav-link" style="color:var(--accent-green);">Day 32 同步屏障 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 31 / 共 60 天 · 阶段 5 Channels 通道</span>
+            <h1 class="part-title">EphemeralValue & UntrackedValue：故意"不完整持久化"的通道</h1>
+            <p class="part-desc">前面的通道都努力把状态完整存进 checkpoint。今天看两个反其道而行的——<strong>EphemeralValue</strong>（只活当前这一步、下一步自动清空）和 <strong>UntrackedValue</strong>（内存里明明有值，但 <code>checkpoint()</code> 永远返回 <code>MISSING</code>、根本不进存档）。它们把 Day 27 埋下的"内存态可以 ≠ 存档态"这条伏笔玩到极致。搞懂它们，你就理解了：为什么有些中间量不该被时间旅行"复活"、为什么有些巨大对象不该塞进数据库。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置（阶段 5：Channels 通道 D27-32）</div>
+        <div class="steps">
+            <span class="st">D27 通道抽象</span><span class="sep">→</span>
+            <span class="st">D28 LastValue</span><span class="sep">→</span>
+            <span class="st">D29 累加/Delta</span><span class="sep">→</span>
+            <span class="st">D30 Topic</span><span class="sep">→</span>
+            <span class="st on">D31 不持久化</span><span class="sep">→</span>
+            <span class="st">D32 同步屏障</span>
+        </div></div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 类比先兜住（延续"公司信箱"世界观）</span>
+        LastValue 是"贴在墙上的便利贴，一直在"。今天两位是<strong>"临时便签"</strong>：<br>
+        · <strong>EphemeralValue</strong> = 一张<strong>桌面便签</strong>：只在这一轮会议上有用，散会（超步结束）就撕掉。它<em>会</em>被拍照存档，但下一轮开始时是空白的。<br>
+        · <strong>UntrackedValue</strong> = 一句<strong>口头传话</strong>：这一步告诉下一步"喂，用这个连接对象"，但<strong>拍照存档时它压根不入镜</strong>——因为它是个数据库连接、文件句柄这种"存下来也没意义、甚至没法存"的东西。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>两种"不完整持久化"分别解决什么</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：不是所有状态都该被永久保存。有些值"只在这一步有用"、有些值"根本不该进数据库"，怎么办？</span>
+                这就是今天两个通道的分工。先看它们的类头 docstring 一句话点题：</div>
+<pre><code class="language-python"># ephemeral_value.py:15
+class EphemeralValue(Generic[Value], BaseChannel[Value, Value, Value]):
+    """Stores the value received in the step immediately preceding, clears after."""
+    #  存"紧邻的上一步"收到的值，之后清空
+
+# untracked_value.py:15
+class UntrackedValue(Generic[Value], BaseChannel[Value, Value, Value]):
+    """Stores the last value received, never checkpointed."""
+    #  存最后收到的值，但永不进 checkpoint</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Ephemeral：clears after</code><span>关键词"clears after"——<b>用完即清</b>。它主要服务于"这一步产生、下一步消费、消费完就该消失"的中间信号（比如某个只在相邻两步间传递的临时标记）。</span></div>
+                    <div class="r"><code>Untracked：never checkpointed</code><span>关键词"never checkpointed"——<b>永不入档</b>。内存里正常有值、正常读写，但存 checkpoint 时假装没有。给"不可/不宜序列化的对象"（DB 连接、大模型客户端、临时缓存）准备的。</span></div>
+                    <div class="r"><code>三泛型全相同 [Value,Value,Value]</code><span>和 LastValue 一样，写、读、存同类型。它俩本质都是"存最后一个值"的 LastValue 变体，只是在<b>生命周期</b>和<b>是否入档</b>上做了手脚。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：持久化不是"全有或全无"，而是"每个通道自己说了算"</span>Day 27 讲通道有独立的 <code>checkpoint()</code> 方法——这不是摆设。正因为每个通道能<strong>自主决定"存什么/存不存"</strong>，框架才能同时容纳"完整存"（LastValue）、"存哨兵靠回放"（DeltaChannel，Day 29）、"存了但下步清"（Ephemeral）、"根本不存"（Untracked）四种策略。今天就是把后两种看透。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>EphemeralValue：会存档，但只活一步</h1></div>
+            <div class="card">
+                <p>先建立直觉：Ephemeral <strong>会</strong>被写进 checkpoint（它的 <code>checkpoint()</code> 老实返回值），但它靠"空更新即清空"实现"只活一步"。看构造和存档（<span class="fileref">channels/ephemeral_value.py:23-26,78-79</span>）：</p>
+<pre><code class="language-python"># ephemeral_value.py:23
+def __init__(self, typ: Any, guard: bool = True) -> None:
+    super().__init__(typ)
+    self.guard = guard            # 是否禁止"一步多写"，默认 True
+    self.value = MISSING          # 起点：没有值
+
+# ephemeral_value.py:78
+def checkpoint(self) -> Value:
+    return self.value             # 和 LastValue 一样，有啥存啥（可能是 MISSING）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self.value = MISSING</code><span>初值是 <code>MISSING</code> 哨兵——表示"当前没有值"，读它会抛 EmptyChannelError。这点和 LastValue 完全一致。</span></div>
+                    <div class="r"><code>guard: bool = True</code><span>多一个参数 <code>guard</code>：控制"一个超步内能不能收到多个值"。默认 True = 只能一个（L04 详解）。</span></div>
+                    <div class="r"><code>checkpoint 返回 self.value</code><span>划重点：Ephemeral <b>确实进存档</b>！它把当前值交出去存。它的"短命"不是靠"不存"实现的，而是靠<b>下一步开头的空更新把自己清掉</b>（L03）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 "只活一步"到底怎么做到的？</span>引擎在每个超步会给"上一步被写过、这一步没人写"的通道发一个<strong>空更新 <code>update([])</code></strong>。EphemeralValue 收到空更新时，会主动把自己清成 MISSING（下一讲的代码）。所以它的值<strong>最多存活到"写入后的下一个超步开始"</strong>——存档里能看到它，但流程往前走一步它就没了。这正是"clears after"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>核心：空更新即清空</h1></div>
+            <div class="card">
+                <p>Ephemeral 的灵魂在 update 的前几行，它对"空更新"的处理和别人不一样（<span class="fileref">channels/ephemeral_value.py:55-68</span>）：</p>
+<pre><code class="language-python"># ephemeral_value.py:55
+def update(self, values: Sequence[Value]) -> bool:
+    if len(values) == 0:                 # ← 没人给我写（空更新）
+        if self.value is not MISSING:
+            self.value = MISSING         #   把上一步存的值清掉！
+            return True                  #   "从有到无"是一次变化
+        else:
+            return False                 #   本来就没有 → 无变化
+    if len(values) != 1 and self.guard:  # guard 检查（下一讲）
+        raise InvalidUpdateError(...)
+    self.value = values[-1]              # 有值：取最后一个
+    return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>len(values) == 0 → 清空</code><span>核心差异！<b>LastValue 收到空更新是"啥也不做、保持原值"，Ephemeral 却把原值清成 MISSING</b>。这一行就是"只活一步"的全部秘密——下一步没人续写，它就自我了断。</span></div>
+                    <div class="r"><code>return True（从有到无）</code><span>清空后返回 True，告诉引擎"这个通道变了"（从有值变成无值），好让订阅它的下游正确感知。</span></div>
+                    <div class="r"><code>self.value = values[-1]</code><span>有值时：取<b>最后一个</b>。多个值时哪个是"最后"取决于遍历顺序（这也是 guard 要管的事）。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 620 200" width="100%" role="img" aria-label="EphemeralValue 生命周期">
+                    <text x="310" y="20" text-anchor="middle" fill="#e5e5e5" font-size="13" font-weight="bold">控制流：EphemeralValue 只活一步</text>
+                    <rect x="30" y="55" width="120" height="46" rx="8" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                    <text x="90" y="75" text-anchor="middle" fill="#93c5fd" font-size="11">步 N: 节点写入 "go"</text>
+                    <text x="90" y="92" text-anchor="middle" fill="#94a3b8" font-size="9">value="go", 存档记下</text>
+                    <rect x="200" y="55" width="150" height="46" rx="8" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                    <text x="275" y="75" text-anchor="middle" fill="#6ee7b7" font-size="11">步 N 末尾: 下游读到 "go"</text>
+                    <text x="275" y="92" text-anchor="middle" fill="#94a3b8" font-size="9">值可用一次</text>
+                    <rect x="400" y="55" width="190" height="46" rx="8" fill="rgba(239,68,68,.10)" stroke="#ef4444"/>
+                    <text x="495" y="75" text-anchor="middle" fill="#fca5a5" font-size="11">步 N+1: 没人写 → update([])</text>
+                    <text x="495" y="92" text-anchor="middle" fill="#94a3b8" font-size="9">value=MISSING（自动清空）</text>
+                    <line x1="150" y1="78" x2="198" y2="78" stroke="#6366f1" marker-end="url(#a31)"/>
+                    <line x1="350" y1="78" x2="398" y2="78" stroke="#ef4444" marker-end="url(#a31)"/>
+                    <text x="310" y="140" text-anchor="middle" fill="#64748b" font-size="10">对比 LastValue：步 N+1 收到 update([]) 时 LastValue 保持 "go" 不变</text>
+                    <text x="310" y="160" text-anchor="middle" fill="#64748b" font-size="10">差别仅在 update 里"空更新是否清空"这一个判断</text>
+                    <defs><marker id="a31" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b5cf6"/></marker></defs>
+                </svg>
+                <div class="cap">Ephemeral 的"短命"完全由"空更新 → 清空"这一个分支实现</div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：为什么要"存档 + 下步清空"，而不是干脆像 Untracked 那样不存？</span>
+                因为 Ephemeral 的值<strong>在"它被写入的那个 checkpoint"里是有意义的、必须能被恢复的</strong>。设想崩溃恰好发生在"步 N 写了值、下游还没读"之间——恢复时必须能读回那个值，下游才能继续。如果像 Untracked 那样不存，崩溃恢复后值就丢了，下游拿不到、流程断裂。所以 Ephemeral 选择"<strong>存这一步的值以保证崩溃可恢复，靠下一步的空更新保证不会赖着不走</strong>"。这是"短命"与"可恢复"之间的精确平衡。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>guard：一个超步能收几个值？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 并行的两个节点同一步都往这个通道写，算谁的？</span>
+                看 guard 的处理（<span class="fileref">channels/ephemeral_value.py:62-67</span>，UntrackedValue 一模一样在 <span class="fileref">untracked_value.py:59-64</span>）：</div>
+<pre><code class="language-python"># ephemeral_value.py:62
+    if len(values) != 1 and self.guard:
+        raise InvalidUpdateError(
+            f"At key '{self.key}': EphemeralValue(guard=True) can receive "
+            f"only one value per step. Use guard=False if you want to store "
+            f"any one of multiple values."
+        )
+    self.value = values[-1]      # guard=False 时：多写不报错，取最后一个</code></pre>
+                <div class="walk">
+                    <div class="r"><code>guard=True（默认）</code><span>一步收到<b>不是恰好 1 个</b>值就<b>报错</b> InvalidUpdateError。这是保护：并行多写同一个 Ephemeral，语义歧义（该信谁？），默认宁可报错让你显式处理。和 Day 28 LastValue 的 INVALID_CONCURRENT 是同一个哲学。</span></div>
+                    <div class="r"><code>guard=False</code><span>关掉保护：多写不报错，<b>取 <code>values[-1]</code>（遍历到的最后一个）</b>。报错信息里明说"想存多个中的任意一个就用 guard=False"——即"我不在乎是哪个，随便留一个"。</span></div>
+                    <div class="r"><code>__eq__ 也比较 guard</code><span>两个 Ephemeral 相等要求 <code>guard</code> 也相同（<span class="fileref">ephemeral_value.py:28-29</span>）——guard 是通道身份的一部分，不是无关紧要的开关。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：guard=True 下并行写会直接抛异常，不是"默默取一个"</span>
+                很多人以为"一步多写顶多结果不确定"，但对 <code>guard=True</code> 的 Ephemeral/Untracked，<strong>多写是直接 <code>InvalidUpdateError</code> 崩掉整个超步</strong>。如果你的图里有两个并行节点可能同时写同一个这类通道，要么改用能容纳多写的通道（binop/Topic），要么显式设 <code>guard=False</code> 接受"随机留一个"。默认的严格是好事——它逼你在设计阶段就想清楚"并发写这里到底该怎么办"，而不是上线后 debug 飘忽的结果。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>UntrackedValue：checkpoint 返回 MISSING</h1></div>
+            <div class="card">
+                <p>Untracked 和 Ephemeral 的 update/get 几乎一样，唯一的灵魂差异在 <code>checkpoint()</code>（<span class="fileref">channels/untracked_value.py:48-49</span>）：</p>
+<pre><code class="language-python"># untracked_value.py:48
+def checkpoint(self) -> Value | Any:
+    return MISSING                # ← 无论内存里有啥，存档时永远交白卷！
+
+# 对比 EphemeralValue（会交出真实值）：
+# ephemeral_value.py:78
+def checkpoint(self) -> Value:
+    return self.value
+
+# UntrackedValue 的 update 照常存值（untracked_value.py:56）
+def update(self, values):
+    if len(values) == 0:
+        return False              # 注意：空更新啥也不做，不清空（和 Ephemeral 不同）
+    if len(values) != 1 and self.guard:
+        raise InvalidUpdateError(...)
+    self.value = values[-1]       # 内存里正常存
+    return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>checkpoint 恒返回 MISSING</code><span>灵魂一句：<b>存档时假装自己没有值</b>。内存里 <code>self.value</code> 明明有东西（比如一个数据库连接对象），但 checkpoint 交白卷。于是这个通道在 checkpoint blob 里完全不占地方。</span></div>
+                    <div class="r"><code>update 空更新 return False</code><span>细节对比：Untracked 收到空更新是 <b>return False（保持原值）</b>，不像 Ephemeral 会清空。因为 Untracked 语义是"存最后一个值"（LastValue 式），不是"只活一步"。它的"临时"体现在<b>不入档</b>，而非"下步清空"。</span></div>
+                    <div class="r"><code>update 正常存值</code><span>可用性正常：本次运行内，写进去就能读出来。它只是<b>跨 checkpoint 边界会消失</b>——重启/恢复后就没了。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为谁而设计：不可序列化、或大到不值得存的对象</span>想象你把一个 <code>psycopg</code> 数据库连接、一个初始化好的大模型客户端放进 State。这些东西<strong>要么根本没法 pickle/msgpack（Day 39），要么序列化了也毫无意义</strong>（连接重启后失效）。UntrackedValue 让它们"在一次运行内的节点间传递"成为可能，同时<strong>绝不污染 checkpoint</strong>——恢复时你重新构造一个新连接即可。这是"内存态 ≠ 存档态"最实用的一个落点。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>from_checkpoint：Untracked 恢复时空手而归</h1></div>
+            <div class="card">
+                <p>既然存档里没有 Untracked 的值，从存档恢复时它自然拿不回任何东西（<span class="fileref">channels/untracked_value.py:51-54</span>）：</p>
+<pre><code class="language-python"># untracked_value.py:51
+def from_checkpoint(self, checkpoint: Value) -> Self:
+    empty = self.__class__(self.typ, self.guard)
+    empty.key = self.key
+    return empty                  # 直接返回空通道，连 checkpoint 参数都不看！
+
+# 对比 EphemeralValue（会灌回存档的值）：
+# ephemeral_value.py:48
+def from_checkpoint(self, checkpoint: Value) -> Self:
+    empty = self.__class__(self.typ, self.guard)
+    empty.key = self.key
+    if checkpoint is not MISSING:
+        empty.value = checkpoint  # 存了就恢复
+    return empty</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Untracked 忽略 checkpoint 参数</code><span>它<b>连传进来的 checkpoint 都不读</b>，直接造个空通道返回。因为它存的时候就交白卷，恢复时当然无从恢复——逻辑自洽。</span></div>
+                    <div class="r"><code>Ephemeral 会 if checkpoint is not MISSING 恢复</code><span>对照：Ephemeral 存了值，所以恢复时<b>会把值灌回去</b>（前提是存档里确实有，不是 MISSING）。这保证了 L03 说的"崩溃可恢复"。</span></div>
+                    <div class="r"><code>两者都新建实例</code><span>共同点：都是"造新的空壳 + 按需灌值"。这是 <code>from_checkpoint</code> 的统一契约——不复用旧实例，避免状态串味。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：Untracked 恢复后是空的，会不会让流程出错？</span>
+                这是有意的、由使用约定兜底。UntrackedValue 的正确用法是"<strong>在一次运行内的相邻节点间传递、且每次运行都会被重新赋值</strong>"——比如入口节点建好连接、放进 Untracked 通道，后续节点使用。恢复运行时，入口节点<strong>会重新执行、重新建连接</strong>，Untracked 又被填满。所以"恢复后为空"不是 bug，而是"这类值本就该在每次运行时重建"的正确表达。反过来说：<strong>如果一个值恢复后为空会导致流程崩溃，那它就不该用 Untracked</strong>——这是使用者的责任边界。框架用"不存"的简单实现，把"重建"的责任清晰地交还给业务。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>三通道对比 + 小结</h1></div>
+            <div class="card">
+                <p>把 LastValue（Day 28）、EphemeralValue、UntrackedValue 三个"存最后一个值"的兄弟并排看，差异一目了然：</p>
+                <table class="ttable">
+                    <tr><th>维度</th><th>LastValue</th><th>EphemeralValue</th><th>UntrackedValue</th></tr>
+                    <tr><td>存最后一个值</td><td>✅</td><td>✅</td><td>✅</td></tr>
+                    <tr><td>进 checkpoint？</td><td>✅ 存</td><td>✅ 存</td><td>❌ 返回 MISSING</td></tr>
+                    <tr><td>空更新 update([])</td><td>保持原值</td><td><b>清空</b>（只活一步）</td><td>保持原值</td></tr>
+                    <tr><td>恢复后有值？</td><td>✅ 有</td><td>✅ 有（若存了）</td><td>❌ 空，靠重建</td></tr>
+                    <tr><td>guard 参数</td><td>无（直接报 INVALID_CONCURRENT）</td><td>✅ 有</td><td>✅ 有</td></tr>
+                    <tr><td>典型用途</td><td>普通状态字段</td><td>相邻步间的临时信号</td><td>连接/客户端等不可序列化对象</td></tr>
+                </table>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 160" width="100%" role="img" aria-label="三通道存档行为对比">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：同一个值在三种通道里"进不进存档"</text>
+                    <rect x="40" y="42" width="150" height="90" rx="8" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/><text x="115" y="62" fill="#93c5fd" text-anchor="middle" font-size="11" font-weight="bold">LastValue</text><text x="115" y="84" fill="#94a3b8" text-anchor="middle" font-size="10">内存: "go"</text><text x="115" y="102" fill="#34d399" text-anchor="middle" font-size="10">存档: "go" ✓</text><text x="115" y="120" fill="#94a3b8" text-anchor="middle" font-size="9">恢复后仍在</text>
+                    <rect x="225" y="42" width="150" height="90" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/><text x="300" y="62" fill="#fbbf24" text-anchor="middle" font-size="11" font-weight="bold">EphemeralValue</text><text x="300" y="84" fill="#94a3b8" text-anchor="middle" font-size="10">内存: "go"</text><text x="300" y="102" fill="#34d399" text-anchor="middle" font-size="10">存档: "go" ✓</text><text x="300" y="120" fill="#f87171" text-anchor="middle" font-size="9">下一步空更新即清</text>
+                    <rect x="410" y="42" width="150" height="90" rx="8" fill="rgba(168,85,247,.08)" stroke="#a855f7"/><text x="485" y="62" fill="#c084fc" text-anchor="middle" font-size="11" font-weight="bold">UntrackedValue</text><text x="485" y="84" fill="#94a3b8" text-anchor="middle" font-size="10">内存: 连接对象</text><text x="485" y="102" fill="#f87171" text-anchor="middle" font-size="10">存档: MISSING ✗</text><text x="485" y="120" fill="#94a3b8" text-anchor="middle" font-size="9">恢复后空,靠重建</text>
+                </svg>
+                <div class="cap">三者都"存最后一个值"，差别全在 checkpoint() 返不返、以及空更新清不清</div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：我平时写图会直接用到这两个吗？</p>
+                    <p class="a">👨‍🏫 老师：直接实例化的机会不多——它们更多是框架内部或高级场景在用。但理解它们价值巨大：当你疑惑"为什么某个中间量时间旅行回去后消失了"（可能是 Ephemeral），或"为什么把连接对象放 State 会序列化报错、该怎么绕"（答案就是 Untracked），你就能秒懂。它们是"持久化不是非黑即白"这句话的活教材。</p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>EphemeralValue 靠什么实现"只活一步"？（下一步的空更新 update([]) 把 value 清成 MISSING）</li>
+                    <li>Ephemeral 会进 checkpoint 吗？为什么？（会，为保证"写入后立即崩溃"也能恢复那一步的值）</li>
+                    <li>UntrackedValue 的 checkpoint() 返回什么？（永远 MISSING，内存有值但不入档）</li>
+                    <li>Untracked 恢复后是空的，为何不算 bug？（约定它每次运行都由节点重建，如连接对象）</li>
+                    <li>guard 参数管什么？（一个超步能否收多个值；默认 True 多写报 InvalidUpdateError，False 则取最后一个）</li>
+                    <li>Ephemeral 和 Untracked 面对空更新的区别？（Ephemeral 清空，Untracked 保持原值）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 两个文件都很短，通读
+sed -n '1,80p' libs/langgraph/langgraph/channels/ephemeral_value.py
+sed -n '1,74p' libs/langgraph/langgraph/channels/untracked_value.py
+
+# 2. 对照两处 checkpoint() —— 一个返回值、一个返回 MISSING
+grep -n "def checkpoint" libs/langgraph/langgraph/channels/*.py
+
+# 3. 亲手验证 Ephemeral 空更新清空
+python - <<'PY'
+from langgraph.channels.ephemeral_value import EphemeralValue
+e = EphemeralValue(str)
+e.update(["go"]); print("写入后:", e.get())     # go
+print("空更新变化?", e.update([]))               # True（清空了）
+try: e.get()
+except Exception as ex: print("再读:", type(ex).__name__)  # EmptyChannelError
+PY</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 32 AnyValue & NamedBarrierValue</span>今天两个通道玩"是否/多久持久化"。明天两个玩"<strong>什么时候才算就绪</strong>"：<code>AnyValue</code>（假设多个写入都相等，随便留一个，专治"多路都会写同一个值"）和 <code>NamedBarrierValue</code>——一个真正的<strong>同步屏障</strong>：必须<em>集齐一组指定的名字</em>才算就绪、下游才被放行。我们会看 <code>seen</code> 集合怎么攒名字、<code>consume()</code> 如何过闸后重置，以及带 <code>finish()</code> 的进阶变体。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day30.html" style="color:var(--accent-cyan);">&larr; Day 30 Topic</a>
+                <a href="langgraph-day32.html" style="color:var(--accent-green);">Day 32 · 同步屏障 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

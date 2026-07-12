@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 38 · thread / checkpoint_ns / 超步 坐标体系 — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">38</div>
+            <h2>Day 38</h2>
+            <p class="version">id 体系与超步 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 三元组坐标</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · thread_id 隔离对话</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · checkpoint_ns 分隔符</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · checkpoint_id = uuid6</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 超步 = 一份 checkpoint</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 版本号与 versions_seen</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 家谱链 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day37.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 37 PostgresSaver</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day39.html" class="nav-link" style="color:var(--accent-green);">Day 39 序列化 serde &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 38 / 共 60 天 · 阶段 6 持久化与记忆</span>
+            <h1 class="part-title">坐标体系：thread_id / checkpoint_ns / checkpoint_id 与超步</h1>
+            <p class="part-desc">前三天的 saver 全都围着一个三元组转：<code>(thread_id, checkpoint_ns, checkpoint_id)</code>。今天专门拆这套<strong>寻址坐标</strong>——它就像档案馆的"柜号-抽屉号-档案编号"。<code>thread_id</code> 隔离不同对话、<code>checkpoint_ns</code> 用 <code>|</code> 分隔符表达主图/子图的层级、<code>checkpoint_id</code> 用 <strong>uuid6（时间有序 UUID）</strong>保证单调递增。再往下钻一层：一个 <strong>超步（super-step）</strong>怎么对应一份 checkpoint，checkpoint 又是怎么在 <code>pregel/_checkpoint.py</code> 里被"造"出来的。搞懂坐标，时间旅行、子图隔离、恢复重放才不再是黑魔法。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 6 · 持久化与记忆（8 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D33 概念</span><span class="sep">→</span>
+                <span class="st">D34 接口</span><span class="sep">→</span>
+                <span class="st">D35 InMemory</span><span class="sep">→</span>
+                <span class="st">D36 Sqlite</span><span class="sep">→</span>
+                <span class="st">D37 Postgres</span><span class="sep">→</span>
+                <span class="st on">D38 id体系</span><span class="sep">→</span>
+                <span class="st">D39 serde</span><span class="sep">→</span>
+                <span class="st">D40 Store</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        想在档案馆里唯一定位一份档案，需要三级地址：<br>
+        · <strong>thread_id</strong> = <strong>柜号</strong>：一个对话/一个用户会话一个柜子，柜子之间互不干扰。<br>
+        · <strong>checkpoint_ns</strong> = <strong>抽屉的层级路径</strong>：主图的档放最外层抽屉（<code>""</code> 空串），子图的档放"抽屉里的小格子"，格子路径用 <code>|</code> 串起来（<code>子图A|子子图B</code>）。<br>
+        · <strong>checkpoint_id</strong> = <strong>档案流水号</strong>：每存一份档给一个"越晚越大"的编号（uuid6），排一下就知道谁先谁后、能倒着往回翻（时间旅行）。<br>
+        而"<strong>超步</strong>"就是"每开一次组会（所有该跑的节点跑一轮），就拍一张全家福存进抽屉"——一次超步 = 一份 checkpoint。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>三元组：一份档案的完整地址</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：为什么每个 saver 的表主键、每个 config 都反复出现这三个字段？它们各管什么？</span>
+                因为它们合起来才能<strong>唯一定位一份 checkpoint</strong>。回看 Day 36/37 的表主键就是它仨（<span class="fileref">checkpoint/sqlite/__init__.py:150</span>、<span class="fileref">checkpoint/postgres/base.py:55</span>）：</div>
+<pre><code class="language-python"># 每次调用图时，你传的 config 长这样：
+config = {"configurable": {
+    "thread_id": "chat-42",        # 哪个对话/会话
+    "checkpoint_ns": "",           # 哪一层图（主图=空串）
+    "checkpoint_id": "1efab...c3", # 哪一份档（不传则取最新）
+}}
+
+# saver 返回的"新坐标"也永远是这三件套（sqlite/__init__.py:437）：
+return {"configurable": {
+    "thread_id": thread_id,
+    "checkpoint_ns": checkpoint_ns,
+    "checkpoint_id": checkpoint["id"],
+}}</code></pre>
+                <div class="walk">
+                    <div class="r"><code>三者缺一不可</code><span>光有 thread_id 定位到"哪个对话"、加 ns 定位到"哪一层图"、再加 id 才定位到"这层图的哪一份档"。<b>少任何一级都会歧义</b>。</span></div>
+                    <div class="r"><code>checkpoint_id 可省略</code><span>调用时只有 <code>thread_id</code> 是必须的。不给 <code>checkpoint_id</code> 时 saver 取"最新档"（Day 36 的 <code>ORDER BY checkpoint_id DESC LIMIT 1</code>）；不给 <code>checkpoint_ns</code> 默认空串（主图）。</span></div>
+                    <div class="r"><code>put 返回带 id 的新坐标</code><span>存完档，saver 把 config 里的 checkpoint_id <b>换成刚存的新档 id</b> 返回——这样下一步就知道"当前站在哪份档上"，也为下一份档提供父 id。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：checkpoint 是"内容寻址"的持久状态</span>这三元组就是 LangGraph 的"状态地址"。<strong>时间旅行</strong>（Day 44）本质就是"换一个 checkpoint_id 去读"、<strong>子图隔离</strong>本质是"换一个 checkpoint_ns"、<strong>多用户</strong>本质是"换一个 thread_id"。理解这套坐标，上层那些花哨功能就都是"改地址的哪一段"而已。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>thread_id：对话之间的隔离墙</h1></div>
+            <div class="card">
+                <p>thread_id 是三级里最外层、也是唯一必填的。基类 docstring 专门解释了它（<span class="fileref">checkpoint/base/__init__.py:182-198</span>）：</p>
+<pre><code class="language-python"># checkpoint/base/__init__.py:186 附近（docstring）
+# "The thread_id is the primary key used to store and retrieve checkpoints."
+# 用法举例：
+config = {"configurable": {"thread_id": "my-thread"}}
+# - 对话记忆：同一个 thread_id 跨多次 invoke 复用 → 记得上下文
+# - 不同用户/会话：用不同 thread_id → 状态互相隔离，谁也读不到谁
+
+# saver 里 delete_thread 按 thread_id 整柜删除（sqlite/__init__.py:484）
+def delete_thread(self, thread_id: str) -> None:
+    cur.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+    cur.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>thread_id = 隔离单位</code><span>一个 thread_id 就是一条独立的"状态时间线"。<b>同一个复用 → 有记忆；换一个 → 全新开始</b>。这是 LangGraph 实现"多轮对话记忆"的根基。</span></div>
+                    <div class="r"><code>怎么选 thread_id 由你定</code><span>docstring 说：对话记忆就复用同一个；多用户就一人一个（如 <code>f"user-{uid}"</code>）；一次性任务就每次随机一个。<b>它是业务语义，框架不替你决定</b>。</span></div>
+                    <div class="r"><code>delete_thread 整柜删</code><span>删除以 thread_id 为单位——一条 SQL 干掉这个对话的所有档和半成品。对应"用户要求删除我的会话数据"这类需求。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：不传 thread_id 但配了 checkpointer = 直接报错</span>
+                如果你给图配了 checkpointer，却在 invoke 时<strong>忘了传 thread_id</strong>，LangGraph 会报错——因为 saver 不知道该往哪个"柜子"存。反过来，两个本该独立的用户<strong>不小心用了同一个 thread_id</strong>，会导致他们的对话状态串台（B 读到 A 的历史）。所以 <strong>thread_id 的生成策略是安全边界</strong>：多租户系统里务必保证不同用户的 thread_id 不可能碰撞（常见做法是拼上用户 id）。这是"隔离"落到实处的关键，也是最容易埋隐私事故的地方。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>checkpoint_ns：用 | 和 : 编码图层级</h1></div>
+            <div class="card">
+                <p>中间那级 <code>checkpoint_ns</code>（namespace 命名空间）表达"这份档属于哪一层图"。它的分隔符定义在常量里（<span class="fileref">_internal/_constants.py:87-90</span>）：</p>
+<pre><code class="language-python"># _internal/_constants.py:59
+CONFIG_KEY_CHECKPOINT_NS = "checkpoint_ns"   # "" 表示根图（主图）
+
+# _internal/_constants.py:87
+NS_SEP = "|"     # 分隔各层级：  graph | subgraph | subsubgraph
+# _internal/_constants.py:89
+NS_END = ":"     # 每一层里，分隔"命名空间"和"任务 id"
+
+# 例子：主图里有个子图节点叫 "planner"，某次任务 id 是 abc：
+#   主图的 checkpoint_ns    = ""
+#   子图 planner 的 ns      = "planner:abc"
+#   子图里再套子图 "search" = "planner:abc|search:def"</code></pre>
+                <div class="walk">
+                    <div class="r"><code>主图 ns = 空串 ""</code><span>最外层主图的所有 checkpoint，<code>checkpoint_ns</code> 都是空字符串。这就是为什么你平时不传 ns 也能跑——默认 <code>""</code> 就是主图。</span></div>
+                    <div class="r"><code>NS_SEP = "|"</code><span>层级分隔符：子图套子图时，各层的命名空间用 <code>|</code> 串起来，像文件路径的 <code>/</code>。<code>a|b|c</code> 表示三层嵌套。</span></div>
+                    <div class="r"><code>NS_END = ":"</code><span>每一层内部，用 <code>:</code> 把"子图节点名"和"该次调用的任务 id"分开。<b>为什么要带任务 id？</b>因为同一个子图可能被 Send 并行调用多次（Day 16 map-reduce），每次是独立的一份状态，靠任务 id 区分。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 200" width="100%" role="img" aria-label="checkpoint_ns 层级编码">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：checkpoint_ns 把图的嵌套层级编码成字符串</text>
+                    <rect x="30" y="45" width="540" height="50" rx="9" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/>
+                    <text x="55" y="66" fill="#93c5fd" font-size="12" font-weight="bold">主图</text>
+                    <text x="55" y="84" fill="#94a3b8" font-size="10">checkpoint_ns = ""（空串）</text>
+                    <rect x="80" y="105" width="490" height="46" rx="9" fill="rgba(168,85,247,.08)" stroke="#a855f7"/>
+                    <text x="105" y="125" fill="#c084fc" font-size="12" font-weight="bold">子图 planner（Send 第 abc 次调用）</text>
+                    <text x="105" y="142" fill="#94a3b8" font-size="10">checkpoint_ns = "planner:abc"</text>
+                    <rect x="130" y="160" width="440" height="30" rx="8" fill="rgba(52,211,153,.08)" stroke="#34d399"/>
+                    <text x="155" y="179" fill="#6ee7b7" font-size="11">子子图 search → ns = "planner:abc|search:def"</text>
+                    <text x="300" y="36" fill="#f59e0b" font-size="10" text-anchor="middle">| 分层级、: 分（节点名 : 任务id）</text>
+                </svg>
+                <div class="cap">同一 thread 里，不同层级的图靠 checkpoint_ns 字符串区分，天然形成树状路径</div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：为什么把图层级编码进一个字符串，而不是给子图单独开表/单独 thread？</span>
+                因为<strong>子图状态和主图状态是"同一次运行、同一个 thread"的一部分</strong>，必须能一起存、一起恢复、一起时间旅行。如果给子图单开 thread，它们就成了孤立的时间线，无法表达"主图跑到第 3 步时，其子图内部跑到第几步"这种从属关系。把层级编码进 <code>checkpoint_ns</code> 字符串，让所有层级的 checkpoint <strong>共享同一 thread_id、存在同一张表里，靠 ns 前缀区分</strong>——恢复主图时能顺藤摸瓜找到所有子图的 checkpoint。用一个字符串字段承载"树形层级 + 并行实例 id"，是拿"字符串解析的小复杂度"换"统一存储模型"的漂亮取舍。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>checkpoint_id：为什么是 uuid6 而非普通 UUID</h1></div>
+            <div class="card">
+                <p>最内层 <code>checkpoint_id</code> 用的不是常见的 uuid4，而是 <strong>uuid6</strong>——一种<strong>按时间排序</strong>的 UUID（<span class="fileref">pregel/_checkpoint.py:28-36</span>、<span class="fileref">checkpoint/base/id.py:79-109</span>）：</p>
+<pre><code class="language-python"># pregel/_checkpoint.py:28
+def empty_checkpoint() -> Checkpoint:
+    return Checkpoint(
+        v=LATEST_VERSION,
+        id=str(uuid6(clock_seq=-2)),   # ← 用 uuid6 生成 id
+        ts=datetime.now(timezone.utc).isoformat(),
+        channel_values={}, channel_versions={}, versions_seen={},
+    )
+
+# checkpoint/base/id.py:79  uuid6 的核心：时间戳放在 UUID 高位
+def uuid6(node=None, clock_seq=None):
+    nanoseconds = time.time_ns()
+    timestamp = nanoseconds // 100 + 0x01B21DD213814000
+    if _last_v6_timestamp is not None and timestamp <= _last_v6_timestamp:
+        timestamp = _last_v6_timestamp + 1     # ← 同一纳秒内也强制递增，保证单调
+    ...
+    uuid_int = time_high_and_time_mid << 80    # 时间戳占据最高位
+    uuid_int |= time_low_and_version << 64</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Checkpoint 的 id 字段</code><span>Day 33 讲的 <code>Checkpoint</code> TypedDict 里，<code>id</code> 的文档就写着（<span class="fileref">checkpoint/base/__init__.py:97-101</span>）"<b>both unique and monotonically increasing, so can be used for sorting</b>"——既唯一又单调递增，可直接排序。</span></div>
+                    <div class="r"><code>uuid6 时间戳在高位</code><span>普通 uuid4 是纯随机、无序。uuid6 <b>把时间戳放在 UUID 的最高位</b>——于是"越晚生成的 id 字符串越大"，字典序排序 = 时间序排序。这正是 <code>ORDER BY checkpoint_id DESC</code> 能取到"最新档"的根本原因（Day 36）。</span></div>
+                    <div class="r"><code>timestamp <= last → +1</code><span>关键的单调保证：即使<b>同一纳秒生成两个 id</b>，也强制把后一个的时间戳 +1，确保<b>严格递增、绝不相等</b>。持久执行/时间旅行都依赖"id 能严格排序"。</span></div>
+                    <div class="r"><code>clock_seq=step</code><span><code>create_checkpoint</code> 里生成 id 时传 <code>clock_seq=step</code>（<span class="fileref">pregel/_checkpoint.py:209</span>）——把超步序号也编进去，进一步降低碰撞、隐含步序信息。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：为什么不用简单的自增整数（1,2,3…）当 checkpoint_id？</span>
+                自增整数看起来更简单，但有致命问题：<strong>它需要一个"中心计数器"来分配下一个号</strong>。在分布式/并发/多进程写同一个 thread 的场景下，维护全局自增计数器要么加分布式锁（慢），要么依赖数据库序列（把 id 生成和特定数据库绑死）。uuid6 <strong>纯本地生成、无需协调</strong>：任何进程随时都能造出一个"全局唯一且大致时间有序"的 id，不用问任何人。它用"128 位空间 + 时间戳高位"同时买到了<strong>唯一性、有序性、无中心化</strong>三个属性。这是分布式 id 生成的经典权衡——牺牲一点点"完美严格递增"（跨机器时钟可能微小乱序）换取"零协调成本"，而 LangGraph 又用 <code>last+1</code> 补上了单机内的严格递增。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>超步 → checkpoint：create_checkpoint 造档</h1></div>
+            <div class="card">
+                <p>坐标讲完，看 checkpoint 本身怎么"诞生"。每个<strong>超步（super-step，Day 19-20）</strong>结束都会造一份新 checkpoint，主力函数是 <code>create_checkpoint</code>（<span class="fileref">pregel/_checkpoint.py:149-214</span>）：</p>
+<pre><code class="language-python"># pregel/_checkpoint.py:149
+def create_checkpoint(checkpoint, channels, step, *, id=None,
+                      updated_channels=None, get_next_version=None,
+                      channels_to_snapshot=None) -> Checkpoint:
+    ts = datetime.now(timezone.utc).isoformat()
+    ...
+    values = {}
+    channel_versions = dict(checkpoint["channel_versions"])
+    for k in channels:
+        if k not in channel_versions:
+            continue
+        ch = channels[k]
+        ...
+        v = ch.checkpoint()               # ← 逐个通道调 checkpoint() 取当前存档值
+        if v is not MISSING:
+            values[k] = v                 #   MISSING（如 UntrackedValue）就不收进来
+    return Checkpoint(
+        v=LATEST_VERSION,
+        ts=ts,
+        id=id or str(uuid6(clock_seq=step)),   # 用超步号造 id
+        channel_values=values,
+        channel_versions=channel_versions,
+        versions_seen=checkpoint["versions_seen"],
+        updated_channels=None if updated_channels is None else sorted(updated_channels),
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>一超步 → 一次 create_checkpoint</code><span>Pregel 每跑完一个超步（一批节点并行执行 + 写入通道），就调一次这个函数<b>给当前全体通道状态拍张快照</b>。所以 checkpoint 链的每一环对应一个超步。</span></div>
+                    <div class="r"><code>for k in channels: ch.checkpoint()</code><span>核心：<b>遍历每个通道、调它的 <code>checkpoint()</code> 方法</b>（阶段 5 反复讲的那个）收集存档值。这里正是"每个通道自主决定存什么"落地的地方——Topic 交列表、Untracked 交 MISSING、Delta 交哨兵。</span></div>
+                    <div class="r"><code>v is not MISSING 才收</code><span>呼应 Day 31：<b>返回 MISSING 的通道（UntrackedValue）不会被收进 channel_values</b>——它就这样从存档里"消失"了。这一行代码把 Day 31 的"不持久化"变成现实。</span></div>
+                    <div class="r"><code>id = uuid6(clock_seq=step)</code><span>用超步序号 <code>step</code> 当 clock_seq 造 id，把"这是第几个超步"编进 id。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 把阶段 5 和阶段 6 缝合起来</span>看这一段你应该"啊哈"一下：阶段 5 学的每个通道的 <code>checkpoint()</code> 方法，就是在<strong>这里</strong>被超步循环逐个调用、汇总成一份 <code>channel_values</code> 的。通道负责"我这一格存什么"，<code>create_checkpoint</code> 负责"把所有格子的存档值收拢成一张全家福"，saver（Day 35-37）再负责"把全家福写进数据库"。<strong>三层职责一条链，到这里彻底闭环。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>checkpoint 里还有什么：版本号与 versions_seen</h1></div>
+            <div class="card">
+                <p>checkpoint 存的不止 channel_values。看 <code>Checkpoint</code> TypedDict 全貌（<span class="fileref">checkpoint/base/__init__.py:92-123</span>）：</p>
+<pre><code class="language-python"># checkpoint/base/__init__.py:92
+class Checkpoint(TypedDict):
+    v: int                                  # 格式版本号（当前 LATEST_VERSION=4）
+    id: str                                 # uuid6，单调递增（L04）
+    ts: str                                 # ISO 8601 时间戳
+    channel_values: dict[str, Any]          # 各通道的存档值（L05 收集来的）
+    channel_versions: ChannelVersions       # 各通道当前的版本号（"通道→版本"）
+    versions_seen: dict[str, ChannelVersions]  # 每个节点"看过"各通道到哪个版本
+    updated_channels: list[str] | None      # 这一步更新了哪些通道</code></pre>
+                <div class="walk">
+                    <div class="r"><code>channel_versions</code><span>"通道名 → 当前版本号"的映射。Day 35/37 里 saver 就是靠它去 blobs 表捞对应版本的通道值。版本号就是 Day 35 讲的"32 位数字.16 位随机"。</span></div>
+                    <div class="r"><code>versions_seen（灵魂字段）</code><span>"<b>节点 → (它已经看过每个通道到哪个版本)</b>"。引擎靠它决定<b>下一个超步该触发哪些节点</b>：如果某通道的当前版本 &gt; 某节点已看过的版本，说明"有它没消费的新数据"→ 触发它。<b>这是 Pregel 判断"谁该跑"的核心依据。</b></span></div>
+                    <div class="r"><code>updated_channels</code><span>记录"这一步哪些通道被更新了"，用于优化和调试——不用对比整个 versions 就知道本步动了啥。</span></div>
+                    <div class="r"><code>v: int 格式版本</code><span>checkpoint 结构本身也会演进（当前 v=4）。存下格式版本号，读回时能判断"这是老格式还是新格式"，做兼容转换（Day 39 会看到 <code>v < 4</code> 的迁移处理）。</span></div>
+                </div>
+                <div class="anno">一句话：<b>channel_versions 记"数据现在什么版本"，versions_seen 记"每个节点消费到什么版本"，两者一比就知道"谁还有新活要干"。</b>这就是 Day 19 讲的 BSP/Pregel"按数据变化触发节点"在存档层面的落点。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>家谱链：parent_checkpoint_id 串起时间线 + 小结</h1></div>
+            <div class="card">
+                <p>最后一块拼图：checkpoint 之间靠 <code>parent_checkpoint_id</code> 连成一条链，这就是时间旅行的轨道。回看 saver 里怎么串（<span class="fileref">checkpoint/sqlite/__init__.py:431</span>）：</p>
+<pre><code class="language-python"># put 时：新档的父 = 当前 config 里携带的 checkpoint_id
+config["configurable"].get("checkpoint_id")   # 这就是"上一份档"的 id → 当父
+
+# get_tuple 时：把父 id 组装成 parent_config 返回（sqlite/__init__.py:278-288）
+parent_config = ({"configurable": {"thread_id": ..., "checkpoint_ns": ...,
+                                    "checkpoint_id": parent_checkpoint_id}}
+                 if parent_checkpoint_id else None)   # 第一份档没有父 → None</code></pre>
+                <div class="walk">
+                    <div class="r"><code>父 = 写入时的当前 id</code><span>存新档时，config 里带的 checkpoint_id 正是"刚才那份档"，拿它当父。一步步累积，就串成 <code>档1 ← 档2 ← 档3 …</code> 的单向链。</span></div>
+                    <div class="r"><code>parent_config 让你能往回走</code><span>读档时返回父坐标，<code>get_state_history</code>（Day 44）就靠顺着 parent 一路往回翻，实现"查看/回到任意历史步"。</span></div>
+                    <div class="r"><code>第一份档 parent=None</code><span>链的起点（<code>empty_checkpoint</code> 之后的首个真档）没有父，标记 None——遍历历史到这就到头了。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 130" width="100%" role="img" aria-label="checkpoint 家谱链">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">控制流：checkpoint 家谱链（时间旅行的轨道）</text>
+                    <rect x="30" y="45" width="110" height="44" rx="8" fill="rgba(52,211,153,.10)" stroke="#34d399"/><text x="85" y="64" fill="#6ee7b7" text-anchor="middle" font-size="11">档1 (超步0)</text><text x="85" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">parent=None</text>
+                    <rect x="185" y="45" width="110" height="44" rx="8" fill="rgba(59,130,246,.10)" stroke="#3b82f6"/><text x="240" y="64" fill="#93c5fd" text-anchor="middle" font-size="11">档2 (超步1)</text><text x="240" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">parent=档1</text>
+                    <rect x="340" y="45" width="110" height="44" rx="8" fill="rgba(168,85,247,.10)" stroke="#a855f7"/><text x="395" y="64" fill="#c084fc" text-anchor="middle" font-size="11">档3 (超步2)</text><text x="395" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">parent=档2</text>
+                    <rect x="495" y="45" width="80" height="44" rx="8" fill="rgba(245,158,11,.10)" stroke="#f59e0b"/><text x="535" y="70" fill="#fbbf24" text-anchor="middle" font-size="11">最新</text>
+                    <line x1="185" y1="67" x2="142" y2="67" stroke="#94a3b8" marker-end="url(#a38)"/>
+                    <line x1="340" y1="67" x2="297" y2="67" stroke="#94a3b8" marker-end="url(#a38)"/>
+                    <line x1="495" y1="67" x2="452" y2="67" stroke="#94a3b8" marker-end="url(#a38)"/>
+                    <text x="300" y="112" fill="#64748b" text-anchor="middle" font-size="10">parent 指针指向上一份 → get_state_history 顺着它倒着翻 = 时间旅行</text>
+                    <defs><marker id="a38" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker></defs>
+                </svg>
+                <div class="cap">checkpoint_id 单调递增（uuid6）决定"新旧"，parent_checkpoint_id 决定"谁的上一步"</div>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>唯一定位一份 checkpoint 需要哪三个坐标？（thread_id / checkpoint_ns / checkpoint_id）</li>
+                    <li>checkpoint_ns 里 | 和 : 分别分隔什么？（| 分图层级、: 分"子图节点名 : 任务 id"，主图为空串）</li>
+                    <li>为什么 checkpoint_id 用 uuid6 而非 uuid4/自增整数？（时间戳在高位保证单调有序可排序，且纯本地生成无需中心协调）</li>
+                    <li>一个超步和 checkpoint 是什么关系？（一超步结束 create_checkpoint 造一份档，遍历通道 checkpoint() 收集值）</li>
+                    <li>返回 MISSING 的通道会怎样？（不被收进 channel_values，即 Day 31 的"不持久化"落地）</li>
+                    <li>versions_seen 干什么用？（记每个节点消费到各通道哪个版本，和 channel_versions 一比决定下步触发谁）</li>
+                    <li>时间旅行靠什么串起来？（parent_checkpoint_id 家谱链，第一份档 parent=None）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. Checkpoint 结构 + uuid6 生成
+sed -n '92,123p' libs/checkpoint/langgraph/checkpoint/base/__init__.py
+sed -n '79,109p' libs/checkpoint/langgraph/checkpoint/base/id.py
+
+# 2. create_checkpoint 怎么遍历通道造档
+sed -n '149,214p' libs/langgraph/langgraph/pregel/_checkpoint.py
+
+# 3. 亲手观察坐标与家谱链
+python - <<'PY'
+from langgraph.graph import StateGraph, START
+from langgraph.checkpoint.memory import InMemorySaver
+g=StateGraph(dict); g.add_node("a",lambda s:{"n":s.get("n",0)+1}); g.add_edge(START,"a")
+app=g.compile(checkpointer=InMemorySaver())
+cfg={"configurable":{"thread_id":"t1"}}
+app.invoke({"n":0}, cfg); app.invoke({"n":0}, cfg)
+for st in app.get_state_history(cfg):
+    print("id=", st.config["configurable"]["checkpoint_id"][:8],
+          "parent=", (st.parent_config or {}).get("configurable",{}).get("checkpoint_id","None")[:8])
+PY</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 39 序列化 serde</span>今天反复出现 <code>dumps_typed / loads_typed</code>——把 checkpoint 变成字节、再变回来。明天钻进 <code>JsonPlusSerializer</code>：看它怎么用 <strong>ormsgpack</strong> 高效编码、遇到 datetime/UUID/Pydantic 模型/numpy 数组等"非 JSON 原生类型"如何用 <strong>Ext 扩展</strong>编解码、<code>_DeltaSnapshot</code> 这种自定义类型怎么带类型标记往返，以及 <code>LANGGRAPH_STRICT_MSGPACK</code> 的安全考量——为什么"能反序列化任意类型"是把双刃剑。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day37.html" style="color:var(--accent-cyan);">&larr; Day 37 PostgresSaver</a>
+                <a href="langgraph-day39.html" style="color:var(--accent-green);">Day 39 · 序列化 serde &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

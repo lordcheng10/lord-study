@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 36 · SqliteSaver 落盘实现 — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">36</div>
+            <h2>Day 36</h2>
+            <p class="version">SqliteSaver · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 字典换成两张表</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · setup 建表与 WAL</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · cursor + 锁保线程安全</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · put 一条 SQL 落盘</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · get_tuple 两次查询</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · put_writes 两种插入</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 异步不支持 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day35.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 35 InMemorySaver</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day37.html" class="nav-link" style="color:var(--accent-green);">Day 37 PostgresSaver &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 36 / 共 60 天 · 阶段 6 持久化与记忆</span>
+            <h1 class="part-title">SqliteSaver：把内存字典换成真数据库</h1>
+            <p class="part-desc">昨天 InMemorySaver 把档案存在内存字典里——进程一关就没了。今天看第一个<strong>真落盘</strong>的实现 <code>SqliteSaver</code>。你会发现"套路和 InMemory 一模一样，只是介质变了"：三层字典变成两张 SQL 表、拆值存 blob 变成 INSERT 语句。同时它带来内存版没有的新问题：<strong>建表迁移、并发线程安全、事务</strong>。我们逐段读它 646 行里的核心，看清"一次 checkpoint 落盘到底跑了哪几条 SQL"。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 6 · 持久化与记忆（8 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D33 概念</span><span class="sep">→</span>
+                <span class="st">D34 接口</span><span class="sep">→</span>
+                <span class="st">D35 InMemory</span><span class="sep">→</span>
+                <span class="st on">D36 Sqlite</span><span class="sep">→</span>
+                <span class="st">D37 Postgres</span><span class="sep">→</span>
+                <span class="st">D38 id体系</span><span class="sep">→</span>
+                <span class="st">D39 serde</span><span class="sep">→</span>
+                <span class="st">D40 Store</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        InMemorySaver 是"把档案摊在你的办公桌上"——拿取飞快，但下班（进程退出）保洁一扫就没了。SqliteSaver 是把档案<strong>装进办公室角落的一个铁皮文件柜（一个 <code>.sqlite</code> 文件）</strong>：柜子里有两个抽屉——<strong>checkpoints 抽屉</strong>放档案本体、<strong>writes 抽屉</strong>放半成品写入。第一次用要先"打柜子、贴好抽屉标签"（<code>setup</code> 建表）。多人同时开柜子会打架，所以配了<strong>一把锁</strong>（threading.Lock）。缺点：它是单机文件柜、不适合多人高并发——那要等明天的 Postgres。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>存储从"三层字典"变成"两张表"</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：昨天 InMemory 用 storage/writes/blobs 三个字典。换到 Sqlite，数据结构怎么对应？</span>
+                看类定义和它的两个核心属性（<span class="fileref">checkpoint/sqlite/__init__.py:45,82-95</span>）：</div>
+<pre><code class="language-python"># sqlite/__init__.py:45
+class SqliteSaver(BaseCheckpointSaver[str]):
+    conn: sqlite3.Connection      # 数据库连接
+    is_setup: bool                # 是否已建过表（懒建表用）
+
+    def __init__(self, conn, *, serde=None) -> None:
+        super().__init__(serde=serde)
+        self.jsonplus_serde = JsonPlusSerializer()
+        self.conn = conn
+        self.is_setup = False
+        self.lock = threading.Lock()   # ← 线程锁，保证并发安全</code></pre>
+                <div class="walk">
+                    <div class="r"><code>BaseCheckpointSaver[str]</code><span>和 InMemory 一样继承基类、泛型参数是 <code>str</code>——表示它用<b>字符串版本号</b>（"数字.随机"，Day 35 讲过）。</span></div>
+                    <div class="r"><code>conn / is_setup / lock</code><span>三个家当：数据库连接、"建表了没"标志、一把线程锁。注意<b>没有 blobs</b>——Sqlite 版把通道值<b>直接内联进 checkpoint 这一列</b>（序列化后整包存），不像 InMemory 单独拆 blob。</span></div>
+                    <div class="r"><code>jsonplus_serde 另开一个</code><span>除了继承来的 <code>self.serde</code>（存通道值用），还单独建一个 JsonPlus 序列化器——metadata 用 <code>json.dumps</code> 存成人类可读的 JSON（方便 SQL 里过滤查询）。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：为什么 Sqlite 版把通道值内联进 checkpoint 列，不像 InMemory 那样拆 blob 去重？</span>
+                InMemory 拆 blob 是为了"多份档共享没变的通道值"省内存（Day 35）。Sqlite 却选择<strong>把整个 checkpoint（含通道值）序列化成一个 BLOB 整包存进一列</strong>。原因：Sqlite 定位是<strong>轻量、单机、demo/小项目</strong>（docstring 明说 "lightweight, synchronous use cases"）。整包存的实现最简单——一条 INSERT 搞定、读时一条 SELECT 拿回，不用像 Postgres 那样写复杂的 JOIN 去拼 blob。代价是长对话下存储会有冗余（没变的通道每份档都存一遍）。这是"实现简单性 vs 存储效率"的取舍：小项目不在乎那点冗余，要的是零心智负担。真要省空间和高并发，去用 Postgres（明天）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>setup：建两张表 + 开 WAL 模式</h1></div>
+            <div class="card">
+                <p>第一次操作前要先建表。<code>setup</code> 用一段 SQL 脚本一次建好（<span class="fileref">checkpoint/sqlite/__init__.py:129-166</span>）：</p>
+<pre><code class="language-sql">-- sqlite/__init__.py:139  (self.conn.executescript 里)
+PRAGMA journal_mode=WAL;                      -- ① 开启 WAL 日志模式
+CREATE TABLE IF NOT EXISTS checkpoints (      -- ② 档案本体表
+    thread_id TEXT NOT NULL,
+    checkpoint_ns TEXT NOT NULL DEFAULT '',
+    checkpoint_id TEXT NOT NULL,
+    parent_checkpoint_id TEXT,                -- 父档 id，串起家谱链
+    type TEXT,
+    checkpoint BLOB,                          -- 序列化后的档（含通道值）
+    metadata BLOB,
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)   -- 三元组主键
+);
+CREATE TABLE IF NOT EXISTS writes (           -- ③ 半成品写入表
+    thread_id TEXT NOT NULL,
+    checkpoint_ns TEXT NOT NULL DEFAULT '',
+    checkpoint_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    idx INTEGER NOT NULL,
+    channel TEXT NOT NULL,
+    type TEXT,
+    value BLOB,
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+);</code></pre>
+                <div class="walk">
+                    <div class="r"><code>if self.is_setup: return</code><span>方法开头就判断（<span class="fileref">:136</span>）——<b>只建一次</b>。建过就直接返回，避免每次操作都跑建表。这叫"懒初始化"。</span></div>
+                    <div class="r"><code>PRAGMA journal_mode=WAL</code><span>开 <b>WAL（Write-Ahead Log 预写日志）</b>模式：写操作先写日志、读操作不被写阻塞。让"一边写 checkpoint、一边读状态"能并发，大幅提升读写不打架的能力。</span></div>
+                    <div class="r"><code>checkpoints 表主键三元组</code><span><b>(thread_id, checkpoint_ns, checkpoint_id)</b> 联合主键——正是 Day 35 三层字典的三层键！字典嵌套在关系库里就表达成"联合主键"。</span></div>
+                    <div class="r"><code>writes 表主键五元组</code><span>多了 <code>task_id, idx</code>——对应 Day 35 writes 字典的内层键 <code>(task_id, idx)</code>。主键唯一性正是"幂等去重"的数据库级保证（L06）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 CREATE TABLE IF NOT EXISTS 的深意</span>加了 <code>IF NOT EXISTS</code>，建表语句<strong>可以安全地反复执行</strong>——表已存在就跳过、不报错。这让"懒建表"即使在多次调用/多进程下也不会因为"表已存在"而崩。这是一种朴素但极其实用的<strong>幂等 DDL</strong>：把"初始化"写成"运行多少次结果都一样"，是数据库工程的基本功。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>cursor：用一把锁串行化所有 DB 操作</h1></div>
+            <div class="card">
+                <p>所有 SQL 都通过一个统一的 <code>cursor</code> 上下文管理器执行（<span class="fileref">checkpoint/sqlite/__init__.py:168-189</span>）：</p>
+<pre><code class="language-python"># sqlite/__init__.py:168
+@contextmanager
+def cursor(self, transaction: bool = True) -> Iterator[sqlite3.Cursor]:
+    with self.lock:                    # ① 先抢锁 —— 同一时刻只有一个线程能进
+        self.setup()                   # ② 确保表已建（懒建表就发生在这）
+        cur = self.conn.cursor()
+        try:
+            yield cur                  # ③ 把游标交给调用方执行 SQL
+        finally:
+            if transaction:
+                self.conn.commit()     # ④ 默认提交事务（写操作要）
+            cur.close()                # ⑤ 无论如何都关游标</code></pre>
+                <div class="walk">
+                    <div class="r"><code>with self.lock</code><span>核心：<b>每次 DB 操作都要先拿到那把 Lock</b>。同一时刻只有一个线程能操作数据库——把并发访问"串行化"，避免 sqlite3 连接被多线程同时使用出问题。</span></div>
+                    <div class="r"><code>self.setup()</code><span>锁内调 setup——保证"建表"这个动作也是线程安全的（<code>is_setup</code> 标志的读写都在锁保护下）。</span></div>
+                    <div class="r"><code>transaction 参数</code><span>写操作（put/put_writes）传 <code>transaction=True</code>，finally 里 <code>commit()</code> 落盘；纯读操作（get_tuple/list）传 <code>False</code>，不需要提交，省一次 commit 开销。</span></div>
+                    <div class="r"><code>finally 里 close</code><span>无论 SQL 成功还是抛异常，游标都会被关闭——上下文管理器保证资源不泄漏。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 150" width="100%" role="img" aria-label="cursor 锁串行化控制流">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">控制流：所有 DB 操作经 cursor 排成一队</text>
+                    <rect x="20" y="55" width="70" height="30" rx="6" fill="rgba(99,102,241,.10)" stroke="#6366f1"/><text x="55" y="74" fill="#a5b4fc" text-anchor="middle" font-size="10">线程A put</text>
+                    <rect x="20" y="95" width="70" height="30" rx="6" fill="rgba(99,102,241,.10)" stroke="#6366f1"/><text x="55" y="114" fill="#a5b4fc" text-anchor="middle" font-size="10">线程B get</text>
+                    <rect x="150" y="70" width="90" height="42" rx="8" fill="rgba(239,68,68,.10)" stroke="#ef4444"/><text x="195" y="88" fill="#fca5a5" text-anchor="middle" font-size="10">with self.lock</text><text x="195" y="103" fill="#94a3b8" text-anchor="middle" font-size="9">一次只放一个进</text>
+                    <rect x="290" y="70" width="90" height="42" rx="8" fill="rgba(245,158,11,.10)" stroke="#f59e0b"/><text x="335" y="88" fill="#fbbf24" text-anchor="middle" font-size="10">setup()</text><text x="335" y="103" fill="#94a3b8" text-anchor="middle" font-size="9">懒建表(锁内)</text>
+                    <rect x="430" y="70" width="90" height="42" rx="8" fill="rgba(52,211,153,.10)" stroke="#34d399"/><text x="475" y="88" fill="#6ee7b7" text-anchor="middle" font-size="10">执行 SQL</text><text x="475" y="103" fill="#94a3b8" text-anchor="middle" font-size="9">写则 commit</text>
+                    <line x1="90" y1="70" x2="148" y2="86" stroke="#94a3b8" marker-end="url(#a36)"/>
+                    <line x1="90" y1="110" x2="148" y2="94" stroke="#94a3b8" stroke-dasharray="3 2" marker-end="url(#a36)"/>
+                    <line x1="240" y1="91" x2="288" y2="91" stroke="#94a3b8" marker-end="url(#a36)"/>
+                    <line x1="380" y1="91" x2="428" y2="91" stroke="#94a3b8" marker-end="url(#a36)"/>
+                    <text x="300" y="140" fill="#64748b" text-anchor="middle" font-size="10">check_same_thread=False 允许跨线程共享连接，一把锁保证同一时刻只有一个真正操作</text>
+                    <defs><marker id="a36" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker></defs>
+                </svg>
+                <div class="cap">cursor 上下文管理器把"抢锁→建表→执行→提交→关游标"固化成统一流程</div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：为什么用一把粗粒度的全局锁，而不是更细的锁？</span>
+                一把锁把<strong>所有</strong>数据库操作串成一队，并发度其实很低——但这正是 SqliteSaver 有意的选择。它连接时用 <code>check_same_thread=False</code>（<span class="fileref">:124</span>）允许跨线程共享连接，代价就是必须自己保证串行访问，于是用锁兜底。为什么不做细粒度锁提升并发？因为 <strong>Sqlite 本身就不是为高并发写设计的</strong>（它是单文件、写时基本要独占）。花力气做细锁，底层 Sqlite 也扛不住并发写。所以"一把大锁 + 定位轻量场景"是自洽的：<strong>不假装能高并发，把简单和正确做到位</strong>。需要真并发？明天的 Postgres 用连接池 + pipeline。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>put：一条 INSERT OR REPLACE 落盘</h1></div>
+            <div class="card">
+                <p>存一份档案，核心就一条 SQL（<span class="fileref">checkpoint/sqlite/__init__.py:387,418-443</span>）：</p>
+<pre><code class="language-python"># sqlite/__init__.py:418
+thread_id = config["configurable"]["thread_id"]
+checkpoint_ns = config["configurable"]["checkpoint_ns"]
+type_, serialized_checkpoint = self.serde.dumps_typed(checkpoint)   # ① 整包序列化档
+serialized_metadata = json.dumps(
+    get_checkpoint_metadata(config, metadata), ensure_ascii=False
+).encode("utf-8", "ignore")                                          # ② metadata 存 JSON
+with self.cursor() as cur:
+    cur.execute(
+        "INSERT OR REPLACE INTO checkpoints "
+        "(thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            str(thread_id), checkpoint_ns, checkpoint["id"],
+            config["configurable"].get("checkpoint_id"),   # ③ 父 id = 当前 config 的 id
+            type_, serialized_checkpoint, serialized_metadata,
+        ),
+    )
+return {"configurable": {"thread_id": thread_id, "checkpoint_ns": checkpoint_ns,
+                         "checkpoint_id": checkpoint["id"]}}          # ④ 返回新坐标</code></pre>
+                <div class="walk">
+                    <div class="r"><code>dumps_typed(checkpoint)</code><span>把整个 checkpoint（<b>含通道值</b>，不拆 blob）序列化成 <code>(类型标记, 字节)</code>。类型标记单独存 type 列，方便读回时知道用什么反序列化（Day 39）。</span></div>
+                    <div class="r"><code>INSERT OR REPLACE</code><span>Sqlite 特有语法：主键冲突就<b>整行替换</b>。这让 put 天然幂等——同一个 checkpoint_id 重复 put（比如恢复重跑），覆盖即可，不会插出两行。</span></div>
+                    <div class="r"><code>父 id = config 里的 checkpoint_id</code><span>和 InMemory 一样的巧思：写新档时，config 里携带的 checkpoint_id 正是"上一份档"，拿它当 <code>parent_checkpoint_id</code>，家谱链就串起来了。</span></div>
+                    <div class="r"><code>参数化 ? 占位</code><span>全用 <code>?</code> 占位 + 元组传参——<b>防 SQL 注入</b>的标准做法，值永远作为数据传入，不拼进 SQL 字符串。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 走一遍</span>
+                第 3 步存档：thread_id="chat-1"、checkpoint_ns=""、id="1efab...c3"、父 id="1efab...b2"。执行一条 INSERT OR REPLACE，checkpoints 表多一行；返回的 config 把 checkpoint_id 换成新的 "1efab...c3"，供下一步当父。整个通道值（messages 等）全在那一列的 BLOB 里。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>get_tuple：一查档、二查半成品</h1></div>
+            <div class="card">
+                <p>取档比存档多一步——档和它的 pending_writes 在两张表，要查两次（<span class="fileref">checkpoint/sqlite/__init__.py:191,226-293</span>）：</p>
+<pre><code class="language-python"># sqlite/__init__.py:226
+checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+with self.cursor(transaction=False) as cur:            # 读操作，不开事务
+    if checkpoint_id := get_checkpoint_id(config):     # 给了 id → 查指定档
+        cur.execute("SELECT ... FROM checkpoints WHERE thread_id=? AND checkpoint_ns=? AND checkpoint_id=?", ...)
+    else:                                               # 没给 id → 查最新档
+        cur.execute("SELECT ... FROM checkpoints WHERE thread_id=? AND checkpoint_ns=? "
+                    "ORDER BY checkpoint_id DESC LIMIT 1", ...)   # ← 按 id 降序取第一条
+    if value := cur.fetchone():
+        (thread_id, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata) = value
+        # 第二次查询：捞这份档的 pending_writes
+        cur.execute("SELECT task_id, channel, type, value FROM writes "
+                    "WHERE thread_id=? AND checkpoint_ns=? AND checkpoint_id=? ORDER BY task_id, idx", ...)
+        return CheckpointTuple(
+            config,
+            self.serde.loads_typed((type, checkpoint)),      # ① 反序列化档（通道值就在里面）
+            json.loads(metadata) if metadata else {},        # ② metadata 反序列化
+            ({...parent...} if parent_checkpoint_id else None),  # ③ 父坐标
+            [(task_id, channel, self.serde.loads_typed((type, value)))    # ④ 半成品
+             for task_id, channel, type, value in cur],
+        )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>ORDER BY checkpoint_id DESC LIMIT 1</code><span>不给 id 时取"最新档"——因为 checkpoint_id 单调递增（Day 35/38），<b>降序排第一条就是最后写的</b>。等价于 InMemory 里的 <code>max(keys)</code>，只是交给 SQL 做。</span></div>
+                    <div class="r"><code>两次 execute</code><span>先查 checkpoints 表拿档本体，再查 writes 表拿这份档的所有半成品写入。两张表分别查、在 Python 里组装成 CheckpointTuple。</span></div>
+                    <div class="r"><code>loads_typed((type, checkpoint))</code><span>用存时记下的 type 标记 + 字节，反序列化回完整 checkpoint。<b>通道值不用像 InMemory 那样 _load_blobs 逐个捞</b>——因为它当初就是整包存的，一次性解开。</span></div>
+                    <div class="r"><code>ORDER BY task_id, idx</code><span>查半成品时按 <code>(task_id, idx)</code> 排序——保证 pending_writes 的顺序稳定、可复现（和写入时的 idx 对齐）。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 190" width="100%" role="img" aria-label="SqliteSaver 两表结构">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：一个 .sqlite 文件里的两张表</text>
+                    <rect x="40" y="40" width="240" height="120" rx="9" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/>
+                    <text x="160" y="60" fill="#93c5fd" text-anchor="middle" font-size="12" font-weight="bold">checkpoints（档本体）</text>
+                    <text x="160" y="82" fill="#94a3b8" text-anchor="middle" font-size="10">PK: thread_id + ns + checkpoint_id</text>
+                    <text x="160" y="100" fill="#94a3b8" text-anchor="middle" font-size="10">parent_checkpoint_id（家谱）</text>
+                    <text x="160" y="118" fill="#94a3b8" text-anchor="middle" font-size="10">checkpoint BLOB（含通道值）</text>
+                    <text x="160" y="136" fill="#94a3b8" text-anchor="middle" font-size="10">metadata（JSON）</text>
+                    <rect x="320" y="40" width="240" height="120" rx="9" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/>
+                    <text x="440" y="60" fill="#fbbf24" text-anchor="middle" font-size="12" font-weight="bold">writes（半成品写入）</text>
+                    <text x="440" y="82" fill="#94a3b8" text-anchor="middle" font-size="10">PK: …+ checkpoint_id + task_id + idx</text>
+                    <text x="440" y="100" fill="#94a3b8" text-anchor="middle" font-size="10">channel / value BLOB</text>
+                    <text x="440" y="122" fill="#94a3b8" text-anchor="middle" font-size="10">get_tuple 第二次查询捞它</text>
+                    <text x="440" y="140" fill="#94a3b8" text-anchor="middle" font-size="10">主键唯一 → 幂等去重</text>
+                    <line x1="280" y1="100" x2="320" y2="100" stroke="#64748b" stroke-dasharray="4 3"/>
+                    <text x="300" y="178" fill="#64748b" text-anchor="middle" font-size="10">两次 SELECT：先取档、再取该档 pending_writes，Python 里组装成 CheckpointTuple</text>
+                </svg>
+                <div class="cap">Day 35 的三层字典 → Sqlite 的两张表；blobs 字典被"内联进 checkpoint 列"省略了</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>put_writes：REPLACE 还是 IGNORE 二选一</h1></div>
+            <div class="card">
+                <p>存半成品写入时，它会根据"是不是特殊写"切换 SQL（<span class="fileref">checkpoint/sqlite/__init__.py:445,462-482</span>）：</p>
+<pre><code class="language-python"># sqlite/__init__.py:462
+query = (
+    "INSERT OR REPLACE INTO writes (...) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    if all(w[0] in WRITES_IDX_MAP for w in writes)     # ① 全是特殊写 → 允许覆盖
+    else "INSERT OR IGNORE INTO writes (...) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"  # ② 含普通写 → 已存在则忽略
+)
+with self.cursor() as cur:
+    cur.executemany(
+        query,
+        [
+            (str(thread_id), str(checkpoint_ns), str(checkpoint_id),
+             task_id,
+             WRITES_IDX_MAP.get(channel, idx),          # ③ 特殊写用负数 idx，普通写用序号
+             channel, *self.serde.dumps_typed(value))
+            for idx, (channel, value) in enumerate(writes)
+        ],
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>WRITES_IDX_MAP</code><span>Day 34/35 见过：<code>{ERROR:-1, SCHEDULED:-2, INTERRUPT:-3, RESUME:-4}</code>（<span class="fileref">checkpoint/base/__init__.py:795</span>）。特殊写用<b>负数 idx</b>，普通通道写用它在列表里的<b>正序号</b>。</span></div>
+                    <div class="r"><code>全特殊 → INSERT OR REPLACE</code><span>如果这批写全是特殊写（如 RESUME 恢复值），用 REPLACE <b>允许覆盖</b>——恢复值该被最新的更新。</span></div>
+                    <div class="r"><code>含普通写 → INSERT OR IGNORE</code><span>只要有普通写，用 IGNORE：主键已存在就<b>静默跳过</b>不覆盖。这就是 Day 35 InMemory "普通写幂等去重"在 SQL 层的等价实现——<b>靠五元组主键唯一性 + IGNORE 兜底</b>。</span></div>
+                    <div class="r"><code>executemany</code><span>一批写入用 <code>executemany</code> 一次提交，比逐条 execute 高效。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：幂等靠"主键 + IGNORE"，而不是先查再插</span>
+                注意它<strong>没有"先 SELECT 看在不在、再决定插不插"</strong>——那样有竞态（查和插之间别的线程可能插了）。它直接 <code>INSERT OR IGNORE</code>：<strong>把幂等交给数据库主键约束</strong>，冲突了数据库自己忽略。这是数据库工程里的黄金法则：<strong>能用约束保证的正确性，绝不用应用层的"查了再改"去凑</strong>——后者几乎必有竞态。SqliteSaver 用一行 IGNORE 就把"重放不重复"做对了。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>异步方法直接拒绝 + 小结</h1></div>
+            <div class="card">
+                <p>还记得 Day 35 InMemory 的异步方法"直接调同步"吗？SqliteSaver 更干脆——<strong>直接不支持异步</strong>（<span class="fileref">checkpoint/sqlite/__init__.py:585-624</span>）：</p>
+<pre><code class="language-python"># sqlite/__init__.py:585
+async def aget_tuple(self, config) -> CheckpointTuple | None:
+    raise NotImplementedError(_AIO_ERROR_MSG)     # 抛异常，附带指路信息
+
+# _AIO_ERROR_MSG（:34）大意：
+# "SqliteSaver 不支持 async。请改用 AsyncSqliteSaver（需装 aiosqlite）：
+#  from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver"
+
+async def aput(self, config, checkpoint, metadata, new_versions):
+    raise NotImplementedError(_AIO_ERROR_MSG)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>raise NotImplementedError</code><span>异步方法<b>直接抛错，附一段清晰的指路信息</b>——告诉你去用 <code>AsyncSqliteSaver</code>。不假装支持、不静默降级。</span></div>
+                    <div class="r"><code>为什么不像 InMemory 那样"异步调同步"？</code><span>因为 Sqlite 有<b>真磁盘 IO</b>。若在异步事件循环里同步调 sqlite（会阻塞 IO），会卡住整个 event loop、拖垮所有协程。所以它宁可报错，逼你用基于 <code>aiosqlite</code> 的真异步实现。</span></div>
+                    <div class="r"><code>get_next_version 同 InMemory</code><span>版本号生成（<span class="fileref">:626-645</span>）和 InMemory 完全一样："32 位数字.16 位随机"，复用同款"单调 + 抗碰撞"策略（Day 35 L06）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：有真 IO 时，"同步实现塞进异步接口"是有害的</span>Day 35 InMemory 无 IO，异步直接调同步没问题。Sqlite 有磁盘 IO，同步调用会阻塞 event loop——所以它选择"报错 + 指路"而非"凑合支持"。这是一条重要的工程判断：<strong>是否该提供某个接口，取决于能不能正确地提供，而不是能不能勉强跑通。</strong>明天的 Postgres 会展示"真异步该怎么认真实现"。</div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>Sqlite 用几张表？分别对应 InMemory 的什么？（两张：checkpoints=档本体、writes=半成品；blobs 被内联进 checkpoint 列省略）</li>
+                    <li>setup 为什么用 IF NOT EXISTS？（幂等 DDL，可反复安全执行）</li>
+                    <li>WAL 模式解决什么？（读写不互相阻塞，提升并发读写能力）</li>
+                    <li>cursor 里的锁作用是什么？（把所有 DB 操作串行化，配合 check_same_thread=False 保证线程安全）</li>
+                    <li>put_writes 的幂等靠什么？（五元组主键 + INSERT OR IGNORE，让数据库约束保证不重复，避免应用层竞态）</li>
+                    <li>为什么异步方法直接报错而不是调同步？（Sqlite 有真磁盘 IO，同步调用会阻塞 event loop）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 setup 建表 + cursor 锁
+sed -n '129,189p' libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/__init__.py
+
+# 2. put / put_writes 两段对照读
+sed -n '418,443p;462,482p' libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/__init__.py
+
+# 3. 亲手落盘一个对话，再用 sqlite3 命令行看两张表
+python - <<'PY'
+from langgraph.graph import StateGraph, START
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+g=StateGraph(dict); g.add_node("a",lambda s:{"n":s.get("n",0)+1}); g.add_edge(START,"a")
+conn=sqlite3.connect("demo.sqlite", check_same_thread=False)
+app=g.compile(checkpointer=SqliteSaver(conn))
+app.invoke({"n":0}, {"configurable":{"thread_id":"t1"}})
+print("表:", conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall())
+print("档数:", conn.execute("SELECT count(*) FROM checkpoints").fetchone())
+PY</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 37 PostgresSaver</span>Sqlite 是单机文件柜、串行化、不支持异步。明天看<strong>生产级</strong>的 <code>PostgresSaver</code>：你会看到它<strong>真的把通道值拆进 checkpoint_blobs 表去重</strong>（回到 InMemory 的做法）、用 <strong>MIGRATIONS 版本化迁移</strong>管理表结构演进、用 <strong>JSONB + 一条带 JOIN 的 SELECT</strong> 在数据库里就把通道值拼好、还有 <code>Pipeline</code> 批量提交和连接池。它是"同样的套路，工业强度实现"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day35.html" style="color:var(--accent-cyan);">&larr; Day 35 InMemorySaver</a>
+                <a href="langgraph-day37.html" style="color:var(--accent-green);">Day 37 · PostgresSaver &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

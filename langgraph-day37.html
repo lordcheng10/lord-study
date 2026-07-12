@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 37 · PostgresSaver 生产级持久化 — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:180px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">37</div>
+            <h2>Day 37</h2>
+            <p class="version">PostgresSaver · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 四张表 + blob 去重</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · MIGRATIONS 版本迁移</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · setup 断点续跑</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SELECT 里 JOIN 拼值</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · put 内联小值拆大值</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Pipeline + 连接池</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · ON CONFLICT 幂等 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day36.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 36 SqliteSaver</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day38.html" class="nav-link" style="color:var(--accent-green);">Day 38 id 体系与超步 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 37 / 共 60 天 · 阶段 6 持久化与记忆</span>
+            <h1 class="part-title">PostgresSaver：同样套路的工业强度实现</h1>
+            <p class="part-desc">Sqlite 是单机文件柜、串行化。今天看<strong>生产环境真正在用</strong>的 <code>PostgresSaver</code>。它做了 Sqlite 偷懒没做的事：把通道值<strong>拆进独立的 <code>checkpoint_blobs</code> 表按版本去重</strong>（回到 InMemory 的思路）、用 <strong>MIGRATIONS 列表管理表结构演进</strong>、用一条带 <strong>JSONB + JOIN</strong> 的 SELECT 在数据库里就把通道值拼好、用 <strong>Pipeline 批量提交 + 连接池</strong>扛并发。看懂它，你就理解了"一个持久化后端要上生产，除了存取还要操心哪些工程问题"。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 6 · 持久化与记忆（8 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D33 概念</span><span class="sep">→</span>
+                <span class="st">D34 接口</span><span class="sep">→</span>
+                <span class="st">D35 InMemory</span><span class="sep">→</span>
+                <span class="st">D36 Sqlite</span><span class="sep">→</span>
+                <span class="st on">D37 Postgres</span><span class="sep">→</span>
+                <span class="st">D38 id体系</span><span class="sep">→</span>
+                <span class="st">D39 serde</span><span class="sep">→</span>
+                <span class="st">D40 Store</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        如果 Sqlite 是"办公室角落的单人铁皮柜"，Postgres 就是"<strong>专业档案馆</strong>"：<br>
+        · 档案本体、通道值、半成品、迁移记录<strong>分四个库房</strong>（四张表）分门别类；<br>
+        · 通道值单独存一个库房，并<strong>按版本去重</strong>——没变的值多份档共享一份，省地方；<br>
+        · 有一本"<strong>装修施工日志</strong>"（MIGRATIONS），记录档案馆每次改造到第几版，换了新版软件能<strong>从上次停的地方接着施工</strong>；<br>
+        · 取档时档案馆<strong>后台自动把散落的通道值 JOIN 拼齐</strong>再一次性交给你，不用你自己跑腿捞。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>四张表：档 / 通道值 / 半成品 / 迁移</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：Sqlite 两张表就够了，为什么 Postgres 要四张？</span>
+                因为它要做 Sqlite 省掉的两件事：<strong>通道值去重</strong>（多一张 blobs 表）和<strong>表结构版本管理</strong>（多一张 migrations 表）。看建表定义（<span class="fileref">checkpoint/postgres/base.py:43-91</span>）：</div>
+<pre><code class="language-sql">-- postgres/base.py:47  checkpoints：档本体（注意 checkpoint 列是 JSONB！）
+CREATE TABLE IF NOT EXISTS checkpoints (
+    thread_id TEXT NOT NULL,
+    checkpoint_ns TEXT NOT NULL DEFAULT '',
+    checkpoint_id TEXT NOT NULL,
+    parent_checkpoint_id TEXT,
+    checkpoint JSONB NOT NULL,            -- 档（不含大通道值），JSONB 可被 SQL 内部查询
+    metadata JSONB NOT NULL DEFAULT '{}',
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+);
+-- postgres/base.py:57  checkpoint_blobs：通道值单独存，按 (channel, version) 去重
+CREATE TABLE IF NOT EXISTS checkpoint_blobs (
+    thread_id TEXT NOT NULL, checkpoint_ns TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL, version TEXT NOT NULL,
+    type TEXT NOT NULL, blob BYTEA,
+    PRIMARY KEY (thread_id, checkpoint_ns, channel, version)   -- ← 版本去重的关键
+);
+-- postgres/base.py:66  checkpoint_writes：半成品写入（同 Sqlite 的 writes）
+-- postgres/base.py:44  checkpoint_migrations：只有一列 v，记录已迁移到第几版</code></pre>
+                <div class="walk">
+                    <div class="r"><code>checkpoint 列是 JSONB</code><span>不是 Sqlite 的 BLOB（不透明字节），而是 <b>JSONB</b>——Postgres 能<b>直接在 SQL 里查询/索引 JSON 内部字段</b>。这让"取档时用 SQL JOIN 拼通道值"成为可能（L04）。</span></div>
+                    <div class="r"><code>checkpoint_blobs 独立表</code><span>回到 InMemory 的做法：<b>通道值从档里抠出来，按 <code>(thread, ns, channel, version)</code> 存</b>。主键含 version → <b>同一通道同一版本只存一份，多份档共享</b>，跨档去重。</span></div>
+                    <div class="r"><code>checkpoint_migrations 表</code><span>只有一列 <code>v INTEGER PRIMARY KEY</code>——记录"这个数据库已经迁移到第几版表结构"。这是 Sqlite 完全没有的（Sqlite 靠 IF NOT EXISTS 硬扛，改结构就麻烦）。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 180" width="100%" role="img" aria-label="Postgres 四张表结构">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：Postgres 的四张表分工</text>
+                    <rect x="20" y="40" width="135" height="66" rx="8" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/><text x="87" y="60" fill="#93c5fd" text-anchor="middle" font-size="11" font-weight="bold">checkpoints</text><text x="87" y="78" fill="#94a3b8" text-anchor="middle" font-size="9">档本体 JSONB</text><text x="87" y="93" fill="#94a3b8" text-anchor="middle" font-size="9">(不含大通道值)</text>
+                    <rect x="170" y="40" width="135" height="66" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/><text x="237" y="60" fill="#fbbf24" text-anchor="middle" font-size="11" font-weight="bold">checkpoint_blobs</text><text x="237" y="78" fill="#94a3b8" text-anchor="middle" font-size="9">通道值按版本去重</text><text x="237" y="93" fill="#94a3b8" text-anchor="middle" font-size="9">PK 含 version</text>
+                    <rect x="320" y="40" width="135" height="66" rx="8" fill="rgba(52,211,153,.08)" stroke="#34d399"/><text x="387" y="60" fill="#6ee7b7" text-anchor="middle" font-size="11" font-weight="bold">checkpoint_writes</text><text x="387" y="78" fill="#94a3b8" text-anchor="middle" font-size="9">半成品写入</text><text x="387" y="93" fill="#94a3b8" text-anchor="middle" font-size="9">五元组主键</text>
+                    <rect x="470" y="40" width="115" height="66" rx="8" fill="rgba(168,85,247,.08)" stroke="#a855f7"/><text x="527" y="60" fill="#c084fc" text-anchor="middle" font-size="11" font-weight="bold">..migrations</text><text x="527" y="78" fill="#94a3b8" text-anchor="middle" font-size="9">迁移版本记录</text><text x="527" y="93" fill="#94a3b8" text-anchor="middle" font-size="9">单列 v</text>
+                    <path d="M170 82 L155 82" stroke="#64748b" stroke-dasharray="3 2" marker-end="url(#a37a)"/>
+                    <text x="300" y="135" fill="#64748b" text-anchor="middle" font-size="10">取档时 SELECT 用 JSONB 里的 channel_versions JOIN blobs 表把通道值拼回（L04）</text>
+                    <text x="300" y="153" fill="#64748b" text-anchor="middle" font-size="10">对比 Sqlite：只有前两张的合并版（通道值内联进 checkpoint 列，无 blobs/migrations）</text>
+                    <defs><marker id="a37a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/></marker></defs>
+                </svg>
+                <div class="cap">四张表各司其职；blobs 表按 (channel, version) 去重是比 Sqlite 多做的关键一步</div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：Postgres 为何愿意付出"四张表 + JOIN"的复杂度换 blob 去重，而 Sqlite 不愿？</span>
+                因为定位不同。Sqlite 面向 demo/小项目，<strong>数据量小、图省事</strong>，整包存的冗余无所谓。Postgres 面向<strong>生产</strong>：可能有成千上万个长对话线程，messages 这类大通道若每份 checkpoint 都整包重存，磁盘和 IO 成本会爆炸。此时"多一张 blobs 表 + 取档时 JOIN 拼"的复杂度，换来的是<strong>没变的通道跨 checkpoint 只存一份</strong>——在长对话场景能省下数量级的存储。这是"实现复杂度 vs 规模化存储成本"的取舍，随规模上升，天平必然倒向去重。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>MIGRATIONS：用列表下标当版本号</h1></div>
+            <div class="card">
+                <p>Postgres 用一个<strong>字符串列表</strong>管理所有历史表结构变更（<span class="fileref">checkpoint/postgres/base.py:43-91</span>）：</p>
+<pre><code class="language-python"># postgres/base.py:40 注释：
+#   "To add a new migration, add a new string to the MIGRATIONS list.
+#    The position of the migration in the list is the version number."
+MIGRATIONS = [
+    "CREATE TABLE IF NOT EXISTS checkpoint_migrations (v INTEGER PRIMARY KEY);",   # v=0
+    "CREATE TABLE IF NOT EXISTS checkpoints (...);",                              # v=1
+    "CREATE TABLE IF NOT EXISTS checkpoint_blobs (...);",                         # v=2
+    "CREATE TABLE IF NOT EXISTS checkpoint_writes (...);",                        # v=3
+    "ALTER TABLE checkpoint_blobs ALTER COLUMN blob DROP not null;",              # v=4
+    "SELECT 1;",   # v=5  故意的 no-op（历史遗留，占位保证后续版本号对齐）
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoints_thread_id_idx ...;",      # v=6
+    "... checkpoint_blobs_thread_id_idx ...",                                     # v=7
+    "... checkpoint_writes_thread_id_idx ...",                                    # v=8
+    "ALTER TABLE checkpoint_writes ADD COLUMN IF NOT EXISTS task_path TEXT ...;", # v=9
+]</code></pre>
+                <div class="walk">
+                    <div class="r"><code>列表下标 = 版本号</code><span>精妙：<b>迁移在列表里的位置就是它的版本号</b>。第 0 个建 migrations 表本身，第 1 个建 checkpoints……新增变更只需往列表末尾追加一条 SQL，版本号自动是新下标。</span></div>
+                    <div class="r"><code>v=5 的 "SELECT 1;"</code><span>一个<b>故意的空操作</b>——注释说因为历史上曾加过一条空迁移，为保证"老数据库里记的版本号"和"列表下标"仍对齐，留一个 no-op 占位。<b>这是"迁移一旦发布就不能删改、只能往后加"的活教材</b>。</span></div>
+                    <div class="r"><code>CREATE INDEX CONCURRENTLY</code><span>后几条加索引用 <code>CONCURRENTLY</code>——<b>建索引时不锁表</b>，生产环境在线加索引不阻塞读写。这是 Sqlite 完全不需要操心的生产级细节。</span></div>
+                    <div class="r"><code>ADD COLUMN IF NOT EXISTS</code><span>v=9 给 writes 表加 <code>task_path</code> 列——表结构<b>演进</b>的典型：新功能需要新列，老数据库跑迁移补上，老数据用 DEFAULT 值兜底。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么"版本化迁移"是生产持久化的刚需？</span>软件会升级，表结构会变。Sqlite 靠 <code>IF NOT EXISTS</code> 能建新表，但<strong>改已有表（加列、加索引）就没法幂等地"只对没改过的库执行"</strong>。MIGRATIONS + migrations 表记录版本号，让每个数据库都能"<strong>从我当前的版本，把之后的迁移依次补跑一遍</strong>"——无论它停在哪一版。这是所有严肃数据库应用（Django/Rails/Flyway…）的标准范式，LangGraph 用最朴素的"列表下标当版本"实现了它。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>setup：从当前版本断点续跑迁移</h1></div>
+            <div class="card">
+                <p>setup 的核心就是"查当前版本 → 把之后的迁移补跑"（<span class="fileref">checkpoint/postgres/__init__.py:85-110</span>）：</p>
+<pre><code class="language-python"># postgres/__init__.py:85
+def setup(self) -> None:
+    with self._cursor() as cur:
+        cur.execute(self.MIGRATIONS[0])         # ① 先确保 migrations 表存在（第 0 条）
+        results = cur.execute(
+            "SELECT v FROM checkpoint_migrations ORDER BY v DESC LIMIT 1")
+        row = results.fetchone()
+        version = -1 if row is None else row["v"]   # ② 查"已迁到第几版"，没有则 -1
+        for v, migration in zip(
+            range(version + 1, len(self.MIGRATIONS)),      # ③ 从"下一版"到"最新版"
+            self.MIGRATIONS[version + 1 :],
+            strict=False,
+        ):
+            cur.execute(migration)                          # 跑这条迁移
+            cur.execute("INSERT INTO checkpoint_migrations (v) VALUES (%s)", (v,))  # 记账
+    if self.pipe:
+        self.pipe.sync()</code></pre>
+                <div class="walk">
+                    <div class="r"><code>先跑 MIGRATIONS[0]</code><span>第 0 条建 migrations 表本身——鸡生蛋问题：得先有记账的表，才能查"迁到哪了"。它自带 IF NOT EXISTS，重复跑无害。</span></div>
+                    <div class="r"><code>SELECT v ... ORDER BY v DESC LIMIT 1</code><span>查已记录的最大版本号 = "这个库当前在第几版"。<b>全新库查不到 → version=-1</b>（表示啥都没迁）。</span></div>
+                    <div class="r"><code>range(version+1, len(MIGRATIONS))</code><span>核心：<b>只跑"当前版本之后"的迁移</b>。新库从 0 全跑；已在 v=6 的老库，只补跑 7/8/9。这就是"断点续跑"。</span></div>
+                    <div class="r"><code>跑一条就 INSERT 记一版</code><span>每成功执行一条迁移，就往 migrations 表插一行版本号。<b>这样中途崩了，下次 setup 会从崩溃点继续</b>，不会重跑已完成的。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 160" width="100%" role="img" aria-label="setup 断点续跑迁移">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">控制流：setup 从当前版本断点续跑迁移</text>
+                    <rect x="30" y="42" width="150" height="40" rx="8" fill="rgba(59,130,246,.10)" stroke="#3b82f6"/><text x="105" y="60" fill="#93c5fd" text-anchor="middle" font-size="10">查 migrations 表</text><text x="105" y="75" fill="#94a3b8" text-anchor="middle" font-size="9">当前版本 = 6</text>
+                    <rect x="215" y="42" width="180" height="40" rx="8" fill="rgba(245,158,11,.10)" stroke="#f59e0b"/><text x="305" y="60" fill="#fbbf24" text-anchor="middle" font-size="10">range(7, len(MIGRATIONS))</text><text x="305" y="75" fill="#94a3b8" text-anchor="middle" font-size="9">只跑 7,8,9 三条</text>
+                    <rect x="430" y="42" width="140" height="40" rx="8" fill="rgba(52,211,153,.10)" stroke="#34d399"/><text x="500" y="60" fill="#6ee7b7" text-anchor="middle" font-size="10">跑一条记一版</text><text x="500" y="75" fill="#94a3b8" text-anchor="middle" font-size="9">INSERT v=7,8,9</text>
+                    <line x1="180" y1="62" x2="213" y2="62" stroke="#94a3b8" marker-end="url(#a37b)"/>
+                    <line x1="395" y1="62" x2="428" y2="62" stroke="#94a3b8" marker-end="url(#a37b)"/>
+                    <text x="300" y="112" fill="#64748b" text-anchor="middle" font-size="10">全新库：version=-1 → 从 0 全跑；老库：只补跑没跑过的 → 幂等、可中途崩溃续跑</text>
+                    <text x="300" y="132" fill="#64748b" text-anchor="middle" font-size="10">MIGRATIONS 列表只增不改，下标即版本号（v=5 是历史 no-op 占位）</text>
+                    <defs><marker id="a37b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker></defs>
+                </svg>
+                <div class="cap">"查当前版本 → 跑之后的迁移 → 记账"三步，让任何版本的库都能平滑升级</div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：setup 必须由用户显式调用一次，且迁移顺序不可逆</span>
+                docstring 明确（<span class="fileref">postgres/__init__.py:89-90</span>）：<code>setup()</code> <strong>MUST be called directly by the user the first time</strong>——不像 Sqlite 懒建表，Postgres 要你主动调一次。更重要的坑：<strong>MIGRATIONS 列表是"只增不改"的历史</strong>。你绝不能删除或修改中间某条已发布的迁移——因为线上数据库可能已经跑过它、记了版本号。改了会导致"新库和老库的表结构分叉"。想改结构？只能<strong>在列表末尾追加新迁移</strong>。这也是 v=5 那条 no-op 存在的原因：历史包袱一旦背上，就只能小心翼翼往后走。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SELECT_SQL：一条查询里 JOIN 拼好通道值</h1></div>
+            <div class="card">
+                <p>Sqlite 取档要查两次（档 + 半成品）并在 Python 里组装。Postgres 更狠——<strong>一条 SQL 用子查询把通道值和半成品全 JOIN 拼好</strong>（<span class="fileref">checkpoint/postgres/base.py:93-118</span>）：</p>
+<pre><code class="language-sql">-- postgres/base.py:93
+select
+    thread_id, checkpoint, checkpoint_ns, checkpoint_id, parent_checkpoint_id, metadata,
+    (   -- ① 子查询：按 channel_versions 把 blobs 表里的通道值 JOIN 出来
+        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+        from jsonb_each_text(checkpoint -> 'channel_versions')      -- 展开档里的"通道→版本"
+        inner join checkpoint_blobs bl
+            on bl.thread_id = checkpoints.thread_id
+            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+            and bl.channel = jsonb_each_text.key         -- 通道名对上
+            and bl.version = jsonb_each_text.value       -- 版本号也对上
+    ) as channel_values,
+    (   -- ② 子查询：把这份档的 pending_writes 也一起捞出来
+        select array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob]
+                         order by cw.task_id, cw.idx)
+        from checkpoint_writes cw
+        where cw.thread_id = checkpoints.thread_id and ... = checkpoints.checkpoint_id
+    ) as pending_writes
+from checkpoints</code></pre>
+                <div class="walk">
+                    <div class="r"><code>jsonb_each_text(checkpoint -> 'channel_versions')</code><span>灵魂操作：<b>直接在 SQL 里展开档 JSONB 里的 channel_versions 字段</b>（通道名→版本号）。这就是为什么 checkpoint 列要用 JSONB 而非不透明 BLOB——SQL 能读进去。</span></div>
+                    <div class="r"><code>inner join checkpoint_blobs on channel + version</code><span>用展开出的每个 <code>(通道, 版本)</code> 去 blobs 表<b>精确 JOIN</b> 出对应那份通道值。等价于 Day 35 InMemory 的 <code>_load_blobs</code>，但整个过程在数据库内完成、一次返回。</span></div>
+                    <div class="r"><code>array_agg(...)</code><span>把 JOIN 出的多个通道值聚合成一个数组，作为 <code>channel_values</code> 列随档一起返回。Python 侧拿到就是"档 + 已拼好的通道值 + 半成品"一整包。</span></div>
+                    <div class="r"><code>order by cw.task_id, cw.idx</code><span>半成品子查询里排序——和 Sqlite 一样保证 pending_writes 顺序稳定可复现。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：为什么把"拼通道值"下推到数据库 SQL 里做，而不是像 Sqlite/InMemory 在 Python 里拼？</span>
+                因为<strong>减少网络往返和数据传输</strong>。Sqlite 在同进程、Python 里拼没成本；但 Postgres 是<strong>远程数据库</strong>，每次查询都要走网络。如果先查档、再回 Python 逐个通道发查询捞 blob，就是"N+1 次网络往返"——延迟灾难。把 JOIN 下推到一条 SQL，<strong>一次往返拿回全部所需数据</strong>，让数据库（离数据最近、最擅长 JOIN）干这活。这是分布式系统"能在数据端算的就别拉回来算"的通用智慧。代价是这条 SQL 相当复杂、可读性差——但性能收益在生产规模下完全值得。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>put：小值内联、大值拆进 blobs</h1></div>
+            <div class="card">
+                <p>存档时它比 Sqlite 多一个聪明判断——<strong>不是所有通道值都拆 blob，小的基本类型直接内联进 JSONB</strong>（<span class="fileref">checkpoint/postgres/__init__.py:299-345</span>）：</p>
+<pre><code class="language-python"># postgres/__init__.py:299
+copy = checkpoint.copy()
+copy["channel_values"] = copy["channel_values"].copy()
+blob_values = {}
+for k, v in checkpoint["channel_values"].items():
+    if isinstance(v, _DeltaSnapshot):                 # DeltaChannel 快照 → 拆 blob
+        blob_values[k] = copy["channel_values"].pop(k)
+        copy["channel_values"][k] = True              #   档里留个占位 True
+    elif v is None or isinstance(v, (str, int, float, bool)):
+        pass                                          # ← 小基本类型：留在档 JSONB 里，不拆
+    else:
+        blob_values[k] = copy["channel_values"].pop(k)   # 其他（大对象）→ 拆进 blobs
+with self._cursor(pipeline=True) as cur:
+    if blob_versions := {k: v for k, v in new_versions.items() if k in blob_values}:
+        cur.executemany(self.UPSERT_CHECKPOINT_BLOBS_SQL,
+                        self._dump_blobs(thread_id, checkpoint_ns, blob_values, blob_versions))
+    cur.execute(self.UPSERT_CHECKPOINTS_SQL,
+                (thread_id, checkpoint_ns, checkpoint["id"], checkpoint_id,
+                 Jsonb(copy), Jsonb(get_serializable_checkpoint_metadata(config, metadata))))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>小基本类型 pass（不拆）</code><span>关键优化：<code>None/str/int/float/bool</code> 这些<b>小值直接留在 checkpoint JSONB 里</b>，不进 blobs 表。因为拆一个小整数进独立表反而更费——多一行、多一次 JOIN。只有<b>大对象（list/dict 等）才值得拆</b>。</span></div>
+                    <div class="r"><code>_DeltaSnapshot → 拆 blob + 占位 True</code><span>Day 29 的 DeltaChannel 快照特殊处理：拆进 blobs，档里留个 <code>True</code> 当"这里有个 delta 快照"的标记。</span></div>
+                    <div class="r"><code>只对 blob_versions 写 blobs</code><span>和 InMemory 一样：<b>只把"本次变了版本 & 需要拆 blob"的通道</b>写进 blobs 表——没变的复用旧 blob，去重就发生在这。</span></div>
+                    <div class="r"><code>Jsonb(copy)</code><span>档以 JSONB 形式存（<code>psycopg</code> 的 Jsonb 包装），这样 L04 的 SQL 才能查它内部字段。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 "小值内联、大值外拆"是分层存储的精髓</span>这是 Postgres 版比 InMemory/Sqlite 更进一步的优化：<strong>不搞一刀切</strong>。小标量内联省去 JOIN、大对象外拆享受去重，两头的好处都占。判断标准就是简单的 <code>isinstance</code> 基本类型检查。这体现了成熟系统的特征——<strong>针对数据的实际形态做差异化处理，而不是用一个统一但次优的策略糊弄所有情况</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Pipeline + 连接池：扛并发的两件武器</h1></div>
+            <div class="card">
+                <p>Sqlite 用"一把锁串行化"，Postgres 用真正的并发机制。核心在 <code>_cursor</code>（<span class="fileref">checkpoint/postgres/__init__.py:404-443</span>）：</p>
+<pre><code class="language-python"># postgres/__init__.py:404
+@contextmanager
+def _cursor(self, *, pipeline: bool = False):
+    with self.lock, _internal.get_connection(self.conn) as conn:   # 从连接池取连接
+        if self.pipe:
+            # 连接已处于 pipeline 模式：可被多协程并发使用，但一次一个游标
+            try:
+                with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                    yield cur
+            finally:
+                if pipeline:
+                    self.pipe.sync()             # 一次性把批量攒的命令发出去
+        elif pipeline:
+            if self.supports_pipeline:
+                with conn.pipeline(), conn.cursor(binary=True, row_factory=dict_row) as cur:
+                    yield cur                    # 临时开 pipeline，批量发送减少往返
+            else:
+                with conn.transaction(), conn.cursor(...) as cur:   # 不支持则退回普通事务
+                    yield cur
+        else:
+            with conn.cursor(binary=True, row_factory=dict_row) as cur:
+                yield cur</code></pre>
+                <div class="walk">
+                    <div class="r"><code>get_connection(self.conn)</code><span>它可以接一个 <b>ConnectionPool 连接池</b>——多个请求各拿一条连接<b>真并发</b>操作数据库，而非 Sqlite 那样全挤一把锁。这是生产吞吐的关键。</span></div>
+                    <div class="r"><code>Pipeline 模式</code><span>psycopg 的 <b>pipeline</b>：把多条 SQL <b>攒成一批一次性发给数据库</b>，最后 <code>pipe.sync()</code> 统一同步。省掉每条 SQL 一次网络往返——put 里同时写 blobs 和 checkpoints 两条，pipeline 下一次往返搞定。</span></div>
+                    <div class="r"><code>supports_pipeline 降级</code><span>健壮性：<b>检测数据库/驱动是否支持 pipeline</b>，不支持就退回普通 <code>conn.transaction()</code>。保证在各种 Postgres 版本上都能跑，只是慢一点。</span></div>
+                    <div class="r"><code>binary=True, row_factory=dict_row</code><span>用二进制协议（更快）+ 行返回成 dict（好取字段）。都是面向性能和易用的生产细节。</span></div>
+                </div>
+                <div class="anno">对比记忆：<b>Sqlite = 一把锁串行 + 不支持异步；Postgres = 连接池并发 + Pipeline 批量 + 真异步（aio.py 里有 AsyncPostgresSaver）。</b>这正是 Day 36 结尾说的"有真 IO 时，异步要认真实现"——Postgres 就认真实现了。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>ON CONFLICT：SQL 级的幂等 + 小结</h1></div>
+            <div class="card">
+                <p>最后看幂等——Postgres 用标准 <code>ON CONFLICT</code>（Sqlite 是 INSERT OR REPLACE/IGNORE）（<span class="fileref">checkpoint/postgres/base.py:131-159</span>）：</p>
+<pre><code class="language-sql">-- postgres/base.py:131  通道值：主键冲突 → 什么都不做（版本相同即同值，无需覆盖）
+INSERT INTO checkpoint_blobs (...) VALUES (...)
+ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING;
+
+-- postgres/base.py:137  档：主键冲突 → 更新（同一 checkpoint_id 重存，覆盖）
+INSERT INTO checkpoints (...) VALUES (...)
+ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+DO UPDATE SET checkpoint = EXCLUDED.checkpoint, metadata = EXCLUDED.metadata;
+
+-- put_writes 两条（:146 UPSERT / :155 INSERT ... DO NOTHING）
+-- 全特殊写 → DO UPDATE（允许覆盖）；含普通写 → DO NOTHING（幂等去重）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>blobs: DO NOTHING</code><span>通道值主键含 version，<b>版本相同 = 值相同</b>，冲突了不用管——直接 DO NOTHING。这既是幂等、也是去重。</span></div>
+                    <div class="r"><code>checkpoints: DO UPDATE</code><span>档冲突则<b>用新值覆盖</b>（EXCLUDED 指本次要插的值）。同一 checkpoint_id 重存就更新，对应 Sqlite 的 INSERT OR REPLACE。</span></div>
+                    <div class="r"><code>put_writes 两种</code><span>和 Sqlite 完全同构：全特殊写用 <code>DO UPDATE</code> 覆盖（如 RESUME）、含普通写用 <code>DO NOTHING</code> 幂等去重。<b>思想跨数据库一致，只是语法从 OR IGNORE 换成 ON CONFLICT DO NOTHING</b>。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 一条主线：幂等永远交给"主键约束 + 冲突策略"</span>从 InMemory 的"字典键判存在"、Sqlite 的"INSERT OR IGNORE"、到 Postgres 的"ON CONFLICT DO NOTHING"——<strong>三个后端实现不同，但幂等的思想完全一致</strong>：用唯一键定义"什么算重复"，用冲突策略定义"重复了怎么办"，绝不用应用层"查了再改"。这就是为什么 Day 35 说 put_writes 幂等是"持久执行的地基"——它在每个后端都被一丝不苟地实现。</div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>Postgres 四张表分别是什么？（checkpoints 档 / checkpoint_blobs 通道值去重 / checkpoint_writes 半成品 / checkpoint_migrations 迁移记录）</li>
+                    <li>MIGRATIONS 列表的版本号怎么来？（列表下标就是版本号，只增不改，v=5 是历史遗留 no-op 占位）</li>
+                    <li>setup 如何做到"断点续跑"？（查 migrations 表当前版本，只跑之后的迁移，每跑一条记一版）</li>
+                    <li>为什么 checkpoint 列用 JSONB？（SQL 能查其内部 channel_versions，从而 JOIN blobs 拼通道值）</li>
+                    <li>put 为什么不拆所有通道值？（小基本类型内联进 JSONB 更省，只拆大对象和 Delta 快照）</li>
+                    <li>Postgres 靠什么扛并发？（连接池真并发 + Pipeline 批量减少往返 + 真异步实现，而非 Sqlite 的一把锁）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 四张表定义 + MIGRATIONS 列表
+sed -n '43,91p' libs/checkpoint-postgres/langgraph/checkpoint/postgres/base.py
+
+# 2. 那条"JOIN 拼通道值"的 SELECT_SQL
+sed -n '93,118p' libs/checkpoint-postgres/langgraph/checkpoint/postgres/base.py
+
+# 3. setup 断点续跑 + put 小值内联
+sed -n '85,110p' libs/checkpoint-postgres/langgraph/checkpoint/postgres/__init__.py
+sed -n '308,320p' libs/checkpoint-postgres/langgraph/checkpoint/postgres/__init__.py
+
+# 4. 对照 Sqlite/Postgres 的幂等语法差异
+grep -n "OR IGNORE\|OR REPLACE" libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/__init__.py
+grep -n "ON CONFLICT" libs/checkpoint-postgres/langgraph/checkpoint/postgres/base.py</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 38 thread / checkpoint_ns / 超步</span>三个 saver 都围着 <code>(thread_id, checkpoint_ns, checkpoint_id)</code> 三元组转。明天专门拆这套<strong>坐标体系</strong>：<code>thread_id</code> 怎么隔离不同对话、<code>checkpoint_ns</code> 如何用 <code>|</code> 分隔符表达主图/子图的层级、<code>checkpoint_id</code> 为什么用 <strong>uuid6</strong>（时间有序 UUID）保证单调递增，以及"超步（super-step）"和 checkpoint 是怎么对应的。你会看到 <code>pregel/_checkpoint.py</code> 里 checkpoint 是怎么被"造"出来的。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day36.html" style="color:var(--accent-cyan);">&larr; Day 36 SqliteSaver</a>
+                <a href="langgraph-day38.html" style="color:var(--accent-green);">Day 38 · id 体系与超步 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

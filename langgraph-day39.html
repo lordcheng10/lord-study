@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 39 · 序列化 serde（JsonPlusSerializer） — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:175px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">39</div>
+            <h2>Day 39</h2>
+            <p class="version">序列化 serde · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么要 serde</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · dumps_typed 带类型标记</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · loads_typed 按标记还原</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Ext 编码非原生类型</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ext_hook 反向重建</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 严格模式与安全</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 兼容与降级 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day38.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 38 id 体系与超步</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day40.html" class="nav-link" style="color:var(--accent-green);">Day 40 Store 长期记忆 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 39 / 共 60 天 · 阶段 6 持久化与记忆</span>
+            <h1 class="part-title">序列化 serde：checkpoint 怎么变成字节、又变回来</h1>
+            <p class="part-desc">前四天 saver 里反复出现 <code>self.serde.dumps_typed(...)</code> 和 <code>loads_typed(...)</code>——把 checkpoint 变成字节存进数据库、读回时再变成对象。今天钻进这个"翻译官" <code>JsonPlusSerializer</code>。它用 <strong>ormsgpack</strong>（比 JSON 快得多的二进制格式）做主力，遇到 <code>datetime</code>、<code>UUID</code>、Pydantic 模型、numpy 数组这些"JSON 装不下"的类型时，用 <strong>Ext 扩展</strong>带类型标记编解码。你还会看到一个关键安全权衡：<strong>"能反序列化任意 Python 类型"是把双刃剑</strong>，以及 <code>LANGGRAPH_STRICT_MSGPACK</code> 为此设的闸。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 阶段 6 · 持久化与记忆（8 天）你在这里</div>
+            <div class="steps">
+                <span class="st">D33 概念</span><span class="sep">→</span>
+                <span class="st">D34 接口</span><span class="sep">→</span>
+                <span class="st">D35 InMemory</span><span class="sep">→</span>
+                <span class="st">D36 Sqlite</span><span class="sep">→</span>
+                <span class="st">D37 Postgres</span><span class="sep">→</span>
+                <span class="st">D38 id体系</span><span class="sep">→</span>
+                <span class="st on">D39 serde</span><span class="sep">→</span>
+                <span class="st">D40 Store</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 用一个类比先兜住今天</span>
+        数据库只认"字节"，不认 Python 对象。serde 就是<strong>档案馆的打包/拆包工</strong>：存档前把一箱杂物（含日期、UUID、AI 消息对象、numpy 数组……）<strong>打包成一个标准快递箱（字节流）</strong>，取档时再<strong>照着箱子上的标签一件件还原</strong>。难点在"杂物里有不少非标准件"——普通快递（JSON）只收字符串/数字/列表/字典，装不下 datetime 这类东西。serde 的办法是给每个非标准件<strong>贴一张"这是什么、怎么重装"的标签（Ext 类型码）</strong>，拆包时照标签复原。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么需要专门的序列化器</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：直接 <code>json.dumps(checkpoint)</code> 不行吗？为什么要造 JsonPlusSerializer？</span>
+                因为 checkpoint 里塞满了 JSON 装不下的东西。看类定义和它选的底层格式（<span class="fileref">serde/jsonplus.py:82-95</span>）：</div>
+<pre><code class="language-python"># serde/jsonplus.py:82
+class JsonPlusSerializer(SerializerProtocol):
+    """Serializer that uses ormsgpack, with optional fallbacks.
+
+    !!! warning
+        Security note: ... It should not be used on untrusted python objects.
+        If an attacker can write directly to your checkpoint database,
+        they may be able to trigger code execution when data is deserialized.
+        Set LANGGRAPH_STRICT_MSGPACK=true to restrict deserialization
+        to a built-in allowlist of safe types.
+    """</code></pre>
+                <div class="walk">
+                    <div class="r"><code>uses ormsgpack</code><span>底层不是 JSON 而是 <b>ormsgpack</b>——MessagePack 的高性能实现。它是<b>二进制</b>格式：比 JSON 文本更小、编解码更快，还原生支持 bytes、非字符串 key 等 JSON 做不到的东西。</span></div>
+                    <div class="r"><code>"JsonPlus" 这个名字</code><span>"JSON 加强版"——语义上像 JSON（结构化数据往返），但<b>加了对 datetime/UUID/Pydantic/自定义类等一大堆类型的支持</b>。checkpoint 里 AI 消息、工具调用结果全是这类对象。</span></div>
+                    <div class="r"><code>warning: 安全提示</code><span>docstring 头就挂了红色警告：<b>能反序列化任意 Python 类型 → 若攻击者能写你的 checkpoint 库，反序列化时可能触发代码执行</b>。这是 L06 要展开的核心安全权衡。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：序列化是"对象 ↔ 字节"的可逆翻译，难点全在"非原生类型"</span>纯字符串/数字/列表/字典的往返谁都会。真正的工程难题是：一个 <code>AIMessage</code> 对象、一个 <code>datetime</code>、一个用户自定义的 Pydantic 模型，<strong>怎么变成字节存下、又原样活过来</strong>。JsonPlusSerializer 存在的全部价值，就是把这些"非原生类型"的往返做对、做快、做安全。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>dumps_typed：字节 + 一个"格式标记"</h1></div>
+            <div class="card">
+                <p>注意 saver 里存的从来不是"光秃秃的字节"，而是 <code>(type, bytes)</code> 二元组。看 <code>dumps_typed</code>（<span class="fileref">serde/jsonplus.py:258-271</span>）：</p>
+<pre><code class="language-python"># serde/jsonplus.py:258
+def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
+    if obj is None:
+        return "null", EMPTY_BYTES          # ① None → 标记 "null" + 空字节
+    elif isinstance(obj, bytes):
+        return "bytes", obj                  # ② 本来就是字节 → 标记 "bytes"，原样
+    elif isinstance(obj, bytearray):
+        return "bytearray", obj
+    else:
+        try:
+            return "msgpack", _msgpack_enc(obj)   # ③ 其他一律走 msgpack 编码
+        except ormsgpack.MsgpackEncodeError as exc:
+            if self.pickle_fallback:
+                return "pickle", pickle.dumps(obj)  # ④ 编不了 & 开了兜底 → pickle
+            raise exc</code></pre>
+                <div class="walk">
+                    <div class="r"><code>返回 (type, bytes) 二元组</code><span>关键设计：<b>第一个元素是"用什么格式编的"字符串标记</b>（"null"/"bytes"/"msgpack"/"pickle"），第二个才是字节。存数据库时 type 单独存一列（Day 36/37 表里的 type 列）——读回时靠它决定怎么解。</span></div>
+                    <div class="r"><code>None / bytes 短路</code><span>特判：None 存个空标记省事；已经是字节的（比如某些通道值）直接原样存，不多此一举编一遍。</span></div>
+                    <div class="r"><code>主力走 _msgpack_enc</code><span>绝大多数对象走 <code>"msgpack"</code> 分支——用 ormsgpack 编码（下一讲看它怎么处理非原生类型）。</span></div>
+                    <div class="r"><code>pickle 是最后兜底</code><span>连 msgpack 都编不了（极罕见的怪类型）、且用户显式开了 <code>pickle_fallback</code>，才退回 pickle。<b>默认不开</b>——因为 pickle 更慢、更不安全、跨版本更脆。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：为什么要带一个"格式标记"，而不是固定用一种格式？</span>
+                因为<strong>不同数据用不同格式最优，而且格式会演进</strong>。已经是字节的东西再包一层 msgpack 是浪费；None 编码毫无必要；而老版本存的可能是 <code>"json"</code> 格式（msgpack 迁移前）。带上 type 标记，<code>loads_typed</code> 就能<strong>对每份数据用当初编它的那套解码器</strong>——既支持"按数据形态选最优格式"，又天然支持"多种历史格式并存的向后兼容"（L07）。代价只是每份数据多存一个短字符串。这是"自描述数据"的经典好处：<strong>数据自己带着"我该怎么被读"的说明</strong>，解码方不用猜。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>loads_typed：照标记分派解码器</h1></div>
+            <div class="card">
+                <p><code>loads_typed</code> 就是 dumps 的镜像——按 type 标记选对应解码路径（<span class="fileref">serde/jsonplus.py:273-290</span>）：</p>
+<pre><code class="language-python"># serde/jsonplus.py:273
+def loads_typed(self, data: tuple[str, bytes]) -> Any:
+    type_, data_ = data
+    if type_ == "null":
+        return None
+    elif type_ == "bytes":
+        return data_
+    elif type_ == "bytearray":
+        return bytearray(data_)
+    elif type_ == "json":                     # ← 老格式：msgpack 迁移前的 JSON
+        return json.loads(data_, object_hook=self._reviver)
+    elif type_ == "msgpack":
+        return ormsgpack.unpackb(
+            data_, ext_hook=self._unpack_ext_hook,     # ★ 遇到 Ext 扩展类型时的回调
+            option=ormsgpack.OPT_NON_STR_KEYS)          # 允许非字符串 key
+    elif self.pickle_fallback and type_ == "pickle":
+        return pickle.loads(data_)
+    else:
+        raise NotImplementedError(f"Unknown serialization type: {type_}")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>type_ 分派</code><span>核心结构：<b>一个大 if 按 type 标记选解码方式</b>。dumps 存了什么标记，这里就走对应分支——完美镜像。</span></div>
+                    <div class="r"><code>"json" 分支（兼容老档）</code><span>还留着 <code>"json"</code> 分支：老版本 LangGraph 用 JSON 存的 checkpoint，升级后仍能读——用 <code>_reviver</code> 把 JSON 里的类型标记还原成对象。<b>向后兼容的活证据</b>。</span></div>
+                    <div class="r"><code>ext_hook=self._unpack_ext_hook</code><span>msgpack 解码时传入一个<b>回调</b>：碰到 Ext 扩展类型码（datetime/UUID/自定义类等）就调它去重建对象（L05）。这是"非原生类型能活过来"的钩子。</span></div>
+                    <div class="r"><code>OPT_NON_STR_KEYS</code><span>允许字典用<b>非字符串 key</b>（如整数 key）——JSON 做不到，msgpack 可以。checkpoint 里确实有这种字典。</span></div>
+                    <div class="r"><code>未知 type → 报错</code><span>兜底：碰到不认识的 type 标记直接 <code>NotImplementedError</code>——宁可明确失败，也不静默返回错误数据。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 170" width="100%" role="img" aria-label="serde 往返流程">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">控制流：dumps_typed / loads_typed 对称往返</text>
+                    <rect x="30" y="45" width="130" height="44" rx="8" fill="rgba(52,211,153,.10)" stroke="#34d399"/><text x="95" y="64" fill="#6ee7b7" text-anchor="middle" font-size="11">Python 对象</text><text x="95" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">checkpoint / 通道值</text>
+                    <rect x="235" y="45" width="130" height="44" rx="8" fill="rgba(59,130,246,.10)" stroke="#3b82f6"/><text x="300" y="64" fill="#93c5fd" text-anchor="middle" font-size="11">(type, bytes)</text><text x="300" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">带格式标记的字节</text>
+                    <rect x="440" y="45" width="130" height="44" rx="8" fill="rgba(245,158,11,.10)" stroke="#f59e0b"/><text x="505" y="64" fill="#fbbf24" text-anchor="middle" font-size="11">数据库</text><text x="505" y="80" fill="#94a3b8" text-anchor="middle" font-size="9">type 列 + blob 列</text>
+                    <line x1="160" y1="60" x2="233" y2="60" stroke="#34d399" marker-end="url(#a39)"/><text x="196" y="53" fill="#34d399" text-anchor="middle" font-size="9">dumps_typed</text>
+                    <line x1="365" y1="60" x2="438" y2="60" stroke="#3b82f6" marker-end="url(#a39)"/>
+                    <line x1="438" y1="78" x2="365" y2="78" stroke="#f59e0b" marker-end="url(#a39b)"/>
+                    <line x1="233" y1="78" x2="160" y2="78" stroke="#f59e0b" marker-end="url(#a39b)"/><text x="196" y="95" fill="#f59e0b" text-anchor="middle" font-size="9">loads_typed（照 type 分派）</text>
+                    <text x="300" y="130" fill="#64748b" text-anchor="middle" font-size="10">非原生类型（datetime/UUID/AIMessage…）在 msgpack 分支里靠 Ext 标记往返（L04/L05）</text>
+                    <defs>
+                      <marker id="a39" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3b82f6"/></marker>
+                      <marker id="a39b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b"/></marker>
+                    </defs>
+                </svg>
+                <div class="cap">type 标记贯穿存取两端，让"按格式解码"和"多格式兼容"都成为可能</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Ext：给非原生类型贴"重装标签"</h1></div>
+            <div class="card">
+                <p>msgpack 本身也只认基本类型。碰到 datetime、UUID、Pydantic、numpy、以及 LangGraph 自己的 <code>_DeltaSnapshot</code>，靠一个 <code>default</code> 钩子把它们编成带类型码的 <strong>Ext</strong>（<span class="fileref">serde/jsonplus.py:295-307,859-860</span>）：</p>
+<pre><code class="language-python"># serde/jsonplus.py:295  —— 每种非原生类型分配一个整数"类型码"
+EXT_CONSTRUCTOR_SINGLE_ARG = 0    # 单参数构造（如 UUID(str)）
+EXT_CONSTRUCTOR_POS_ARGS   = 1    # 位置参数构造
+EXT_CONSTRUCTOR_KW_ARGS    = 2    # 关键字参数构造
+EXT_METHOD_SINGLE_ARG      = 3
+EXT_PYDANTIC_V1            = 4    # Pydantic v1 模型
+EXT_PYDANTIC_V2            = 5    # Pydantic v2 模型
+EXT_NUMPY_ARRAY           = 6    # numpy 数组
+EXT_DELTA_SNAPSHOT        = 7    # LangGraph 的 DeltaChannel 快照
+
+# serde/jsonplus.py:305  编码钩子：ormsgpack 遇到不认识的对象就调它
+def _msgpack_default(obj: Any) -> str | ormsgpack.Ext:
+    if isinstance(obj, _DeltaSnapshot):
+        return ormsgpack.Ext(EXT_DELTA_SNAPSHOT, _msgpack_enc(obj.value))
+    # ... 往下依次判断 Pydantic v2 / v1 / datetime / UUID / numpy / 各种类型 ...
+
+# serde/jsonplus.py:859  编码入口：把 _msgpack_default 作为 default 传给 packb
+def _msgpack_enc(data: Any) -> bytes:
+    return ormsgpack.packb(data, default=_msgpack_default, option=_option)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>每种类型一个整数码</code><span>0~7 各代表一种"重建方式"。<b>Ext = (类型码, 该类型的内容字节)</b>——类型码就是"重装标签"，告诉解码方"这块字节该怎么变回对象"。</span></div>
+                    <div class="r"><code>default=_msgpack_default</code><span>ormsgpack 编码时，<b>凡遇到它不认识的对象，就回调 <code>_msgpack_default</code></b>。这个函数一路 isinstance 判断，命中哪种类型就返回对应的 Ext。</span></div>
+                    <div class="r"><code>构造方式分三档</code><span>码 0/1/2 分别对应"单参/位置参/关键字参"构造——因为不同类的 <code>__init__</code> 签名不同。编码时记下 <b>(模块名, 类名, 构造参数)</b>，解码时照着重新构造（L05）。</span></div>
+                    <div class="r"><code>_DeltaSnapshot 递归编码</code><span>Ext 内容可以再套 Ext：<code>_DeltaSnapshot</code> 把它内部的 <code>value</code> <b>递归再编一次</b> msgpack。所以嵌套的复杂对象也能层层打包。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 160" width="100%" role="img" aria-label="Ext 编码数据结构">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：一个非原生对象怎么变成 Ext</text>
+                    <rect x="30" y="45" width="140" height="60" rx="8" fill="rgba(168,85,247,.08)" stroke="#a855f7"/><text x="100" y="66" fill="#c084fc" text-anchor="middle" font-size="11">UUID("abc-...")</text><text x="100" y="86" fill="#94a3b8" text-anchor="middle" font-size="9">msgpack 不认识</text><text x="100" y="100" fill="#94a3b8" text-anchor="middle" font-size="9">→ 回调 _msgpack_default</text>
+                    <rect x="220" y="45" width="360" height="60" rx="8" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/><text x="400" y="64" fill="#93c5fd" text-anchor="middle" font-size="11">Ext(类型码, 内容字节)</text>
+                    <text x="400" y="84" fill="#94a3b8" text-anchor="middle" font-size="9">码=0 (SINGLE_ARG) | 内容 = msgpack(("uuid","UUID","abc-..."))</text>
+                    <text x="400" y="99" fill="#94a3b8" text-anchor="middle" font-size="9">即 (模块名, 类名, 构造参数)</text>
+                    <line x1="170" y1="75" x2="218" y2="75" stroke="#8b5cf6" marker-end="url(#a39c)"/>
+                    <text x="300" y="135" fill="#64748b" text-anchor="middle" font-size="10">类型码 = "重装标签"；解码时照码 import 模块→取类→用参数构造，还原成真 UUID</text>
+                    <defs><marker id="a39c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b5cf6"/></marker></defs>
+                </svg>
+                <div class="cap">Ext 把"这是什么类型 + 怎么重建"打包进字节，是非原生类型能往返的关键</div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么用"记下构造方式"而不是直接存对象的字段？</span>因为要保证"<strong>还原出来的是同一个类的实例，而不是一个字典</strong>"。存 <code>(模块, 类名, 参数)</code> 后，解码时能 <code>import 那个模块 → 取那个类 → 用参数调构造</code>，得到一个<strong>类型正确、行为完整的对象</strong>（比如一个真的 <code>AIMessage</code>，而不是长得像它的 dict）。这也正是安全风险的来源——"照字节里写的模块名去 import 并调用"，如果字节被篡改，就可能 import 恶意模块。下一讲和 L06 会看到这个双刃剑。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ext_hook：照标签把对象重装回来</h1></div>
+            <div class="card">
+                <p>解码时，msgpack 每碰到一个 Ext 就调 <code>ext_hook</code>，按类型码重建对象（<span class="fileref">serde/jsonplus.py:633-666</span>）：</p>
+<pre><code class="language-python"># serde/jsonplus.py:633
+def ext_hook(code: int, data: bytes) -> Any:
+    if code == EXT_DELTA_SNAPSHOT:
+        return _DeltaSnapshot(
+            ormsgpack.unpackb(data, ext_hook=ext_hook, option=ormsgpack.OPT_NON_STR_KEYS))
+    elif code == EXT_CONSTRUCTOR_SINGLE_ARG:
+        try:
+            tup = ormsgpack.unpackb(data, ext_hook=ext_hook, ...)  # tup = (模块, 类名, 参数)
+            if not _check_allowed(tup[0], tup[1]):     # ① 安全检查：这个类允许 import 吗？
+                return tup[2]                          #    不允许 → 只还原原始数据，不构造对象
+            return getattr(importlib.import_module(tup[0]), tup[1])(tup[2])   # ② import 并构造
+        except Exception:
+            return None                                # ③ 构造失败 → 返回 None，不崩
+    elif code == EXT_CONSTRUCTOR_POS_ARGS:
+        ...
+        if tup[0] == "langgraph.types" and tup[1] == "Send":
+            return _send_from_args(tup[2])             # 特殊类型走专门重建
+        return getattr(importlib.import_module(tup[0]), tup[1])(*tup[2])</code></pre>
+                <div class="walk">
+                    <div class="r"><code>code 对应 dumps 的类型码</code><span>完美镜像 L04：编码时贴的类型码，这里照码分派到对应的重建逻辑。</span></div>
+                    <div class="r"><code>importlib.import_module + getattr</code><span>核心重建：<b>照字节里记的 (模块名, 类名) 去 import 那个类，再用参数调它的构造</b>。UUID、datetime、AIMessage 就这样活过来。</span></div>
+                    <div class="r"><code>_check_allowed 安全闸</code><span>关键：import 前先问 <code>_check_allowed</code> "<b>这个模块.类名在允许名单里吗</b>"。不在名单 → <b>不 import、只返回原始数据 tuple</b>（<code>return tup[2]</code>），避免加载不受信任的代码。</span></div>
+                    <div class="r"><code>try/except → None</code><span>健壮性：重建过程任何异常都吞掉返回 None，<b>不让一个坏字段崩掉整份 checkpoint 的加载</b>。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：不在允许名单的类型，会"降级成原始数据"而非报错——静默行为要留心</span>
+                注意 <code>if not _check_allowed(...): return tup[2]</code> 这一行：当某个类不被允许 import 时，它<strong>不是抛异常，而是安静地返回构造参数本身</strong>（一个 dict 或 tuple）。好处是加载不会崩、且注释说"如果用在 Pydantic state 里，构造时会被重新校验"。但坑在于：<strong>你以为读回来的是一个 <code>MyModel</code> 对象，实际拿到的可能是一个 dict</strong>——后续代码 <code>obj.some_attr</code> 就会 AttributeError。所以如果你在 State 里放了自定义类型，又开了严格模式没把它加进允许名单，要有"读回来可能是裸数据"的心理准备。安全和"无感恢复"在这里有张力。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>严格模式：能反序列化任意类型的双刃剑</h1></div>
+            <div class="card">
+                <p>回到那条 docstring 警告。默认行为其实是"宽松"的，安全靠一个环境变量收紧（<span class="fileref">serde/jsonplus.py:97-119</span>）：</p>
+<pre><code class="language-python"># serde/jsonplus.py:107
+if allowed_msgpack_modules is _lg_msgpack._SENTINEL:
+    if _lg_msgpack.STRICT_MSGPACK_ENABLED:       # 环境变量 LANGGRAPH_STRICT_MSGPACK=true
+        allowed_msgpack_modules = None           # 严格：只允许内置的 SAFE_MSGPACK_TYPES
+    else:
+        # 宽松（默认）：所有类型都允许（带一条 warning）
+        allowed_msgpack_modules = True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>默认 = True（宽松）</code><span>开箱即用为了不给用户添麻烦：<b>默认允许反序列化任意类型</b>——你放什么自定义对象进 State 都能无感往返。代价是安全性放宽。</span></div>
+                    <div class="r"><code>STRICT_MSGPACK_ENABLED</code><span>设环境变量 <code>LANGGRAPH_STRICT_MSGPACK=true</code> → 切到严格模式：<b>只允许一个内置的"安全类型白名单"</b>（SAFE_MSGPACK_TYPES，如 datetime/UUID/LangChain 核心消息类型）。名单外的类型走 L05 的"降级成原始数据"。</span></div>
+                    <div class="r"><code>也能显式传 allowed_msgpack_modules</code><span>不想用环境变量的粗粒度开关，可以在构造 <code>JsonPlusSerializer</code> 时<b>精确传入你信任的模块/类列表</b>——只放行你自己那些类型。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：为什么默认宽松而非默认安全？把安全交给用户主动开启，对吗？</span>
+                这是一个真实且有争议的取舍。<strong>默认宽松</strong>让绝大多数用户（自己控制 checkpoint 数据库、不面对攻击者）零配置就能用任意类型——体验丝滑。<strong>默认严格</strong>会让很多人一上来就撞"我的自定义类型读不回来了"的墙。LangGraph 的判断是：<strong>"攻击者能直接写你的 checkpoint 数据库"这个前提，在多数部署里不成立</strong>（数据库本就该受保护），所以把默认设成宽松、用 docstring 警告 + 一个环境变量把"收紧"的开关交给真正面临风险的用户（如多租户、数据库可能被污染的场景）。这是"默认易用 vs 默认安全"的经典分歧——它选了易用，但<strong>把风险说清楚、把闸留好</strong>。判断对错取决于你的威胁模型：生产多租户环境，你应该主动开严格模式。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>兼容与降级：老档、坏档都要能扛 + 小结</h1></div>
+            <div class="card">
+                <p>把今天散落的兼容/降级点收拢——一个生产序列化器要扛住"格式演进"和"数据不完美"：</p>
+                <table class="ttable">
+                    <tr><th>场景</th><th>serde 的应对</th><th>出处</th></tr>
+                    <tr><td>老版本用 JSON 存的 checkpoint</td><td>loads_typed 保留 "json" 分支，用 _reviver 还原</td><td><span class="fileref">jsonplus.py:281-282</span></td></tr>
+                    <tr><td>msgpack 编不了的怪类型</td><td>可选 pickle_fallback 兜底（默认关）</td><td><span class="fileref">jsonplus.py:268-271</span></td></tr>
+                    <tr><td>某个 Ext 类型重建失败</td><td>try/except 返回 None，不崩整份档</td><td><span class="fileref">jsonplus.py:652-653</span></td></tr>
+                    <tr><td>类型不在安全名单</td><td>降级返回原始数据（dict/tuple），交给上层校验</td><td><span class="fileref">jsonplus.py:645-649</span></td></tr>
+                    <tr><td>安全类型即使无名单也放行</td><td>_is_safe_json_type 白名单绕过 gate</td><td><span class="fileref">jsonplus.py:60-70</span></td></tr>
+                    <tr><td>checkpoint 格式 v&lt;4</td><td>saver 层做 pending_sends 迁移（Day 37 见过）</td><td><span class="fileref">postgres/__init__.py:165-168</span></td></tr>
+                </table>
+                <div class="qa">
+                    <p class="q">👶 小白：这些兼容代码看着好啰嗦，真有必要吗？</p>
+                    <p class="a">👨‍🏫 老师：太有必要了。checkpoint 是<strong>会在数据库里躺很久</strong>的——用户今天存的对话，半年后升级了三个版本的 LangGraph 还要能读回来。序列化格式一旦"写进过别人的数据库"，就<strong>永远不能简单地改</strong>，只能"新格式往前兼容老格式"。这些啰嗦的 if 分支，就是"不抛弃任何一份历史存档"的承诺。你会发现整个持久化层（Day 30 Topic 的 tuple 兼容、Day 37 的 MIGRATIONS、今天的多格式解码）都在反复做同一件事：<strong>演进时带着历史一起走。</strong></p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>为什么不用 json 而用 ormsgpack？（二进制更快更小，支持 bytes/非字符串 key，且能挂 Ext 扩展类型）</li>
+                    <li>dumps_typed 为什么返回 (type, bytes) 而非光字节？（type 标记让读回时按格式分派，并支持多历史格式兼容）</li>
+                    <li>非原生类型（datetime/UUID/AIMessage）怎么往返？（编码时贴 Ext 类型码 + 记(模块,类名,参数)，解码时 import 重构造）</li>
+                    <li>ext_hook 里 import 前为什么先 _check_allowed？（防止反序列化时 import 不受信任的代码，安全闸）</li>
+                    <li>类型不在名单会怎样？（降级返回原始 dict/tuple，不报错——静默行为，读回可能不是对象）</li>
+                    <li>LANGGRAPH_STRICT_MSGPACK 管什么？（默认宽松允许任意类型；设 true 切严格模式只允许安全白名单）</li>
+                    <li>为什么保留这么多兼容分支？（checkpoint 长期躺库，格式演进必须向后兼容老存档）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. dumps_typed / loads_typed 对照读
+sed -n '258,290p' libs/checkpoint/langgraph/checkpoint/serde/jsonplus.py
+
+# 2. Ext 类型码 + 编码/解码钩子
+sed -n '295,307p' libs/checkpoint/langgraph/checkpoint/serde/jsonplus.py
+sed -n '633,666p' libs/checkpoint/langgraph/checkpoint/serde/jsonplus.py
+
+# 3. 亲手看非原生类型的往返
+python - <<'PY'
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from datetime import datetime, timezone
+from uuid import uuid4
+s = JsonPlusSerializer()
+obj = {"when": datetime.now(timezone.utc), "id": uuid4(), "nums": [1,2,3]}
+t, b = s.dumps_typed(obj)
+print("格式标记:", t, "| 字节数:", len(b))
+back = s.loads_typed((t, b))
+print("还原类型:", type(back["when"]).__name__, type(back["id"]).__name__)  # datetime UUID
+PY</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 40 Store 长期记忆（阶段 6 收官）</span>checkpoint 是"某个 thread 的状态时间线"——换个 thread 就读不到。但真实应用需要"<strong>跨 thread、跨会话共享的长期记忆</strong>"（比如"记住这个用户偏好"，无论他开哪个对话）。明天看 <code>BaseStore</code>：它用<strong>分层 namespace</strong> 组织键值、支持 <strong>语义检索（向量搜索）</strong>，是 LangGraph 里和 checkpointer 并列的第二套持久化设施。你会看到 <code>get/search/put</code> 如何统一走 <code>batch</code>、以及 InMemoryStore 里用余弦相似度做语义搜索的真实代码。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day38.html" style="color:var(--accent-cyan);">&larr; Day 38 id 体系与超步</a>
+                <a href="langgraph-day40.html" style="color:var(--accent-green);">Day 40 · Store 长期记忆 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

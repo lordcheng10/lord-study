@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 32 · AnyValue & 同步屏障 NamedBarrierValue — LangGraph 60 天深度版</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 7px;margin:2px 0;font-family:monospace}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">32</div>
+            <h2>Day 32</h2>
+            <p class="version">AnyValue & 同步屏障 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 从"存值"到"控就绪"</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · AnyValue 不设 guard</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 屏障：集齐名字才放行</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · seen 集合与 update</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · consume 过闸后重置</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · AfterFinish 变体</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 通道全景收官 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day31.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 31 不持久化通道</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day33.html" class="nav-link" style="color:var(--accent-green);">Day 33 Checkpoint 概念 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 32 / 共 60 天 · 阶段 5 Channels 通道</span>
+            <h1 class="part-title">AnyValue & NamedBarrierValue：从"存什么"到"何时就绪"</h1>
+            <p class="part-desc">阶段 5 的收官两讲。前面的通道都在回答"值怎么存"，今天两个通道回答一个新问题——<strong>"什么时候这个通道才算就绪、下游才该被放行"</strong>。<code>AnyValue</code> 很随和：多个写入它假设都相等，随便留一个，永不因并发多写报错；<code>NamedBarrierValue</code> 则是一道严格的<strong>同步屏障</strong>——必须<em>集齐一组指定的名字</em>才算就绪，专门实现"等所有上游分支都到齐了，才往下走"。理解它，你就懂了 LangGraph 里"多个分支汇合成一个节点"背后的同步机制。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置（阶段 5：Channels 通道 D27-32）</div>
+        <div class="steps">
+            <span class="st">D27 通道抽象</span><span class="sep">→</span>
+            <span class="st">D28 LastValue</span><span class="sep">→</span>
+            <span class="st">D29 累加/Delta</span><span class="sep">→</span>
+            <span class="st">D30 Topic</span><span class="sep">→</span>
+            <span class="st">D31 不持久化</span><span class="sep">→</span>
+            <span class="st on">D32 同步屏障</span>
+        </div></div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 类比先兜住（延续"公司信箱"世界观）</span>
+        · <strong>AnyValue</strong> = 一个"<strong>随便签收</strong>"的前台：三个快递员送来三份一模一样的文件，前台不纠结签谁的，随便留一份就行、绝不因为"来了好几份"而报错。<br>
+        · <strong>NamedBarrierValue</strong> = 一道"<strong>点名到齐才开门</strong>"的会议室：门口挂着参会名单（names），每来一个人就在签到表（seen）上勾一个。<strong>只有当签到表和名单完全一致，门才开</strong>（就绪）。开完门进场后，签到表擦掉、等下一轮重新点名（consume）。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>通道的第二重职责：控制"就绪"</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：三个并行分支都指向同一个汇合节点，怎么保证"三个都跑完"才触发它，而不是先到一个就触发？</span>
+                这就要用到通道的一个我们之前没细讲的方法——<code>is_available()</code>。Day 27 提过每个通道除了存值，还负责回答"我现在算不算有值、下游能不能读"。<code>NamedBarrierValue</code> 把这个方法用到了极致（<span class="fileref">channels/named_barrier_value.py:74-75</span>）：</div>
+<pre><code class="language-python"># named_barrier_value.py:13
+class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
+    """A channel that waits until all named values are received
+       before making the value available."""
+
+# named_barrier_value.py:74
+def is_available(self) -> bool:
+    return self.seen == self.names       # ← 只有"签到 == 名单"才算就绪</code></pre>
+                <div class="walk">
+                    <div class="r"><code>三泛型 [Value, Value, set]</code><span>注意存档类型是 <code>set[Value]</code>——它存的不是"某个值"，而是<b>一个"已经见过哪些名字"的集合</b>。这是屏障类通道的特征。</span></div>
+                    <div class="r"><code>docstring: waits until all ... received</code><span>一句话点题：<b>等到所有指定的值都收到，才让自己变得可用</b>。这是"同步屏障"的教科书定义。</span></div>
+                    <div class="r"><code>is_available = (seen == names)</code><span>灵魂：就绪与否<b>不看有没有值，看"该到的名字是不是都到齐了"</b>。差一个都不行。下游节点是否被触发，直接由这个布尔决定。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：通道 = 值容器 + 就绪判定器</span>到今天你应该彻底看透 Day 27 的抽象了：一个通道有两条独立的线——"<strong>存什么值</strong>"（update/get/checkpoint）和"<strong>什么时候算就绪</strong>"（is_available）。前面的通道 is_available 基本就是"有没有值"；而 NamedBarrierValue 把就绪判定做成了"集齐一组名字"的复杂条件。<strong>正是这个可自定义的就绪判定，让通道能表达 map-reduce 的汇合、并行分支的同步。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>AnyValue：随和的"随便留一个"</h1></div>
+            <div class="card">
+                <p>先看简单的 AnyValue，它是 LastValue 的"佛系版"（<span class="fileref">channels/any_value.py:15-17,52-61</span>）：</p>
+<pre><code class="language-python"># any_value.py:15
+class AnyValue(Generic[Value], BaseChannel[Value, Value, Value]):
+    """Stores the last value received, assumes that if multiple values
+       are received, they are all equal."""
+
+# any_value.py:52
+def update(self, values: Sequence[Value]) -> bool:
+    if len(values) == 0:                 # 空更新
+        if self.value is MISSING:
+            return False                 #   本来就没值 → 无变化
+        else:
+            self.value = MISSING         #   本来有值 → 清空（类似 Ephemeral）
+            return True
+    self.value = values[-1]              # ★ 有值：直接取最后一个，不检查数量！
+    return True</code></pre>
+                <div class="walk">
+                    <div class="r"><code>"assumes ... they are all equal"</code><span>关键假设：<b>如果收到多个值，它假设这些值全都相等</b>。基于这个假设，随便留哪个都一样，所以它<b>不需要 guard、永不报并发多写的错</b>。</span></div>
+                    <div class="r"><code>self.value = values[-1]（无数量检查）</code><span>对比 Day 31：Ephemeral/Untracked 在 <code>guard=True</code> 时多写会 <b>报错</b>；AnyValue <b>压根没有这个检查</b>，多写就取最后一个，安静接受。</span></div>
+                    <div class="r"><code>空更新会清空</code><span>它的空更新处理和 Ephemeral 一样——本来有值就清空、返回 True。所以它也是"用完这步、下步没人写就清"的短命型。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠ 边界：AnyValue 只是"假设"相等，不会真去校验——不等时静默留最后一个</span>
+                注意 <code>self.value = values[-1]</code> 前<strong>没有任何"这些值是否真相等"的检查</strong>。docstring 的 "assumes ... they are all equal" 是<strong>对使用者的约定，不是运行时保证</strong>。如果并行分支实际写入了<strong>不同</strong>的值，AnyValue 既不报错也不警告，安静地留下遍历顺序里的最后一个——而顺序不保证（Day 27），于是结果<strong>随执行时序漂移、不可复现</strong>。这比 LastValue 的 INVALID_CONCURRENT 报错更隐蔽：报错至少炸给你看，AnyValue 是"信任你、出了错也不吭声"。所以只在你能<strong>确信写入必然相等</strong>时才用它，否则宁可用会报错的通道。</div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍①：为什么要一个"假设都相等所以不报错"的通道？直接用 guard=False 的 LastValue 不行吗？</span>
+                差别在<strong>意图的表达</strong>。<code>guard=False</code> 的语义是"我知道可能多写，随便留一个我不在乎"——带着一丝将就。而 AnyValue 的语义是"<strong>我保证这些写入本来就相等，留哪个都是同一个东西</strong>"——这是一个更强的正确性断言。典型场景：多个并行分支各自独立算出了<strong>同一个确定性结果</strong>（比如都读同一份配置、算出同一个派生值），汇合到一个通道。用 AnyValue 表达"它们本应相等"，比用 guard=False 表达"随便留一个"更准确，也让读代码的人明白"这里不该出现不一致"。当断言被违反（值其实不等）时，是业务逻辑 bug，而不是通道该管的事——通道选择信任你。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>NamedBarrierValue：名单 + 签到表</h1></div>
+            <div class="card">
+                <p>回到主角。屏障的两个字段就是"名单"和"签到表"（<span class="fileref">channels/named_barrier_value.py:21-24</span>）：</p>
+<pre><code class="language-python"># named_barrier_value.py:16
+__slots__ = ("names", "seen")
+
+# named_barrier_value.py:21
+def __init__(self, typ: type[Value], names: set[Value]) -> None:
+    super().__init__(typ)
+    self.names = names               # 参会名单：必须集齐这些名字
+    self.seen: set[str] = set()      # 签到表：目前见过哪些，起点为空
+
+# named_barrier_value.py:69
+def get(self) -> Value:
+    if self.seen != self.names:      # 没到齐
+        raise EmptyChannelError()    #   → 视为"无值"，下游不被触发
+    return None                      # 到齐了也只返回 None —— 它是纯信号，不携带数据</code></pre>
+                <div class="walk">
+                    <div class="r"><code>names（名单，构造时定死）</code><span>创建通道时就传入"必须集齐哪些名字"。比如三个上游节点 <code>{"a","b","c"}</code>。</span></div>
+                    <div class="r"><code>seen（签到表，从空开始）</code><span>运行中动态累积"已经见过的名字"。每有一个上游写入，就往里加一个名字。</span></div>
+                    <div class="r"><code>get 返回 None</code><span>耐人寻味：到齐后 get 也只<b>返回 None</b>。因为屏障是<b>纯粹的"就绪信号"，不携带业务数据</b>——它只回答"该放行了吗"，不回答"值是多少"。没到齐则抛 EmptyChannelError（等于"没值"）。</span></div>
+                </div>
+                <div class="anno">读法：<b>NamedBarrierValue 是"控制流通道"，不是"数据通道"。</b>它存在的唯一目的是让"汇合节点"在所有上游都完成前保持"未就绪"，从而不被触发。它是 Pregel 引擎实现"多入边节点等齐才跑"的底层积木。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>update：往签到表勾名字，勾错就报错</h1></div>
+            <div class="card">
+                <p>update 就是"签到"过程（<span class="fileref">channels/named_barrier_value.py:56-67</span>）：</p>
+<pre><code class="language-python"># named_barrier_value.py:56
+def update(self, values: Sequence[Value]) -> bool:
+    updated = False
+    for value in values:
+        if value in self.names:              # ① 是名单上的人
+            if value not in self.seen:        #    且还没签到过
+                self.seen.add(value)          #    → 勾上，记一次变化
+                updated = True
+        else:
+            raise InvalidUpdateError(          # ② 不在名单上的名字 → 直接报错
+                f"At key '{self.key}': Value {value} not in {self.names}"
+            )
+    return updated</code></pre>
+                <div class="walk">
+                    <div class="r"><code>value in self.names</code><span>先校验：写进来的名字<b>必须是名单里的</b>。这保证签到表不会被无关名字污染。</span></div>
+                    <div class="r"><code>value not in self.seen: add</code><span>幂等地签到：已经签过的名字<b>不重复计入</b>（用 set 天然去重），也不算"新变化"。这样同一个上游因重试重复写入，不会破坏屏障状态。</span></div>
+                    <div class="r"><code>else: raise InvalidUpdateError</code><span>边界处理：<b>名单外的名字直接报错</b>。宁可炸也不静默接受——因为"来了个不该来的信号"通常意味着图的连线配错了，早报错早发现。</span></div>
+                    <div class="r"><code>return updated</code><span>只有"新签到了名字"才返回 True。这让引擎知道屏障状态推进了，需要重新评估"是否到齐"。</span></div>
+                </div>
+                <div class="svgbox">
+                <svg viewBox="0 0 620 220" width="100%" role="img" aria-label="NamedBarrierValue 屏障机制">
+                    <text x="310" y="20" text-anchor="middle" fill="#e5e5e5" font-size="13" font-weight="bold">数据结构 & 控制流：集齐名单才放行</text>
+                    <rect x="30" y="45" width="80" height="34" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="70" y="66" text-anchor="middle" fill="#a5b4fc" font-size="11">节点 a</text>
+                    <rect x="30" y="90" width="80" height="34" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="70" y="111" text-anchor="middle" fill="#a5b4fc" font-size="11">节点 b</text>
+                    <rect x="30" y="135" width="80" height="34" rx="6" fill="rgba(99,102,241,.12)" stroke="#6366f1"/><text x="70" y="156" text-anchor="middle" fill="#a5b4fc" font-size="11">节点 c</text>
+                    <rect x="200" y="70" width="180" height="80" rx="10" fill="rgba(245,158,11,.10)" stroke="#f59e0b"/>
+                    <text x="290" y="92" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="bold">Barrier</text>
+                    <text x="290" y="112" text-anchor="middle" fill="#94a3b8" font-size="10">names = {a, b, c}</text>
+                    <text x="290" y="130" text-anchor="middle" fill="#94a3b8" font-size="10">seen = {a, b} … 还差 c</text>
+                    <rect x="460" y="90" width="130" height="42" rx="8" fill="rgba(52,211,153,.10)" stroke="#34d399"/>
+                    <text x="525" y="108" text-anchor="middle" fill="#6ee7b7" font-size="11">汇合节点</text>
+                    <text x="525" y="124" text-anchor="middle" fill="#94a3b8" font-size="9">seen==names 才触发</text>
+                    <line x1="110" y1="62" x2="198" y2="90" stroke="#6366f1" marker-end="url(#a32)"/>
+                    <line x1="110" y1="107" x2="198" y2="107" stroke="#6366f1" marker-end="url(#a32)"/>
+                    <line x1="110" y1="152" x2="198" y2="128" stroke="#94a3b8" stroke-dasharray="4 3" marker-end="url(#a32b)"/>
+                    <line x1="380" y1="110" x2="458" y2="110" stroke="#94a3b8" stroke-dasharray="4 3" marker-end="url(#a32b)"/>
+                    <text x="310" y="195" text-anchor="middle" fill="#64748b" font-size="10">c 未到 → is_available()=False → 汇合节点保持"未就绪"、不被放行</text>
+                    <defs>
+                      <marker id="a32" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8b5cf6"/></marker>
+                      <marker id="a32b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/></marker>
+                    </defs>
+                </svg>
+                <div class="cap">seen 逐个累积名字，只有等于 names 时下游才被放行 —— 这就是"扇入同步"</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>consume：过闸后清空签到表</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 屏障放行一次后，如果这个汇合点还会被再次触发（比如在循环里），怎么重新开始点名？</span>
+                靠 <code>consume()</code>（<span class="fileref">channels/named_barrier_value.py:77-81</span>）。它是 Day 27 讲的"消费"钩子——通道被下游读取/消费后的自我复位：</div>
+<pre><code class="language-python"># named_barrier_value.py:77
+def consume(self) -> bool:
+    if self.seen == self.names:      # 只有"已到齐"的屏障才需要重置
+        self.seen = set()            #   签到表清空，回到起点
+        return True                  #   返回 True 表示"我确实消费/重置了"
+    return False                     # 没到齐 → 不动，返回 False</code></pre>
+                <div class="walk">
+                    <div class="r"><code>if seen == names</code><span>先确认<b>确实到齐并放行过</b>。只有过了闸的屏障才需要重置——没到齐的屏障 consume 不应破坏它累积到一半的签到。</span></div>
+                    <div class="r"><code>self.seen = set()</code><span>清空签到表，屏障<b>回到"一个都没签"的初始态</b>。下一轮循环里，三个上游又得重新集齐。</span></div>
+                    <div class="r"><code>返回值语义</code><span>返回 <code>bool</code> 告诉引擎"这次 consume 有没有真的改变通道状态"——引擎据此决定是否需要把这个变化记进新的 checkpoint。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🅰 设计取舍②：为什么用 set 攒名字，而不是简单计数"到了几个"？</span>
+                用计数器（"到齐 3 个就放行"）看似更省内存，但会漏掉一个关键正确性：<strong>无法区分"三个不同上游各来一次"和"同一个上游因重试来了三次"</strong>。持久执行会重放已完成任务（Day 46 幂等），如果用计数器，一个上游重试三次就把计数刷到 3、屏障误开、另外两个真上游还没跑就放行了——灾难。用 <code>set</code> 存<strong>名字</strong>，天然幂等：同一个名字加几次都只算一个，只有<strong>三个不同名字</strong>才能凑齐。这是"用集合的去重性换取重放安全"的经典权衡，和 Day 35 put_writes 的幂等去重是同一个思想。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>NamedBarrierValueAfterFinish：多一道 finish 闸</h1></div>
+            <div class="card">
+                <p>文件里还有个进阶变体 <code>NamedBarrierValueAfterFinish</code>（<span class="fileref">channels/named_barrier_value.py:84</span>）：集齐名字<strong>还不够</strong>，得再显式调 <code>finish()</code> 才真放行。看差异（<span class="fileref">named_barrier_value.py:147-153,162-167</span>）：</p>
+<pre><code class="language-python"># named_barrier_value.py:89
+__slots__ = ("names", "seen", "finished")    # 多一个 finished 标志
+
+# named_barrier_value.py:147
+def get(self) -> Value:
+    if not self.finished or self.seen != self.names:  # ← 两个条件都要满足
+        raise EmptyChannelError()
+    return None
+
+# named_barrier_value.py:162
+def finish(self) -> bool:
+    if not self.finished and self.seen == self.names: # 集齐了才允许 finish
+        self.finished = True                           # 拉下"完成"闸
+        return True
+    else:
+        return False</code></pre>
+                <div class="walk">
+                    <div class="r"><code>多一个 finished 标志</code><span>普通屏障"集齐即就绪"；这个变体<b>集齐后还要等一个显式的 finish() 信号</b>才就绪。相当于"人到齐了，但还得等主持人宣布开会"。</span></div>
+                    <div class="r"><code>is_available = finished and seen==names</code><span>就绪条件变成<b>两个 AND</b>（<span class="fileref">named_barrier_value.py:152-153</span>）：既要到齐、又要 finished。多一道闸。</span></div>
+                    <div class="r"><code>consume 同时重置 finished 和 seen</code><span>过闸后（<span class="fileref">named_barrier_value.py:155-160</span>）两个状态一起清零，下一轮重新走"集齐 → finish"两步。checkpoint 存的也变成 <code>(seen, finished)</code> 二元组（<span class="fileref">named_barrier_value.py:124-125</span>）。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么需要"到齐后还要 finish"这一步？</span>用于更精细的执行编排：有些场景下，"所有上游都写完"不等于"可以立刻往下走"——可能还需要引擎在超步的某个特定阶段（比如所有写入都落盘之后）才拉下 finish 闸。把"到齐"和"放行"拆成两个动作，给了引擎<strong>插入额外协调步骤的余地</strong>。你日常不会碰它，但它体现了通道抽象的表达力：连"两阶段就绪"这种复杂时序，都能塞进同一套 update/get/consume/is_available 接口里。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>阶段 5 通道全景收官 + 小结</h1></div>
+            <div class="card">
+                <p>六天走完，把 Channels 家族一张表收束。记住它们其实只在两件事上有差别：<strong>update 怎么合并</strong>、<strong>is_available/checkpoint 怎么定义就绪与存档</strong>。</p>
+                <table class="ttable">
+                    <tr><th>通道</th><th>合并语义</th><th>就绪判定</th><th>进 checkpoint</th></tr>
+                    <tr><td>LastValue (D28)</td><td>覆盖，取最新</td><td>有值即就绪</td><td>✅</td></tr>
+                    <tr><td>BinaryOperatorAggregate (D29)</td><td>算子折叠累加</td><td>有值即就绪</td><td>✅</td></tr>
+                    <tr><td>Topic (D30)</td><td>摊平追加进 list</td><td>列表非空即就绪</td><td>✅</td></tr>
+                    <tr><td>EphemeralValue (D31)</td><td>取最新，空更新清空</td><td>有值即就绪</td><td>✅（只活一步）</td></tr>
+                    <tr><td>UntrackedValue (D31)</td><td>取最新</td><td>有值即就绪</td><td>❌ 返回 MISSING</td></tr>
+                    <tr><td>AnyValue (D32)</td><td>取最新，假设都相等</td><td>有值即就绪</td><td>✅</td></tr>
+                    <tr><td>NamedBarrierValue (D32)</td><td>往 seen 集合加名字</td><td><b>seen==names 才就绪</b></td><td>✅（存 seen 集合）</td></tr>
+                </table>
+                <div class="svgbox">
+                <svg viewBox="0 0 600 150" width="100%" role="img" aria-label="就绪判定数据结构对比">
+                    <text x="300" y="18" fill="#e5e5e5" text-anchor="middle" font-size="13" font-weight="bold">数据结构：is_available 判定的两种形态</text>
+                    <rect x="40" y="42" width="230" height="80" rx="8" fill="rgba(52,211,153,.08)" stroke="#34d399"/><text x="155" y="62" fill="#6ee7b7" text-anchor="middle" font-size="11" font-weight="bold">大多数通道 / AnyValue</text><text x="155" y="84" fill="#94a3b8" text-anchor="middle" font-size="10">状态: value = 某个值</text><text x="155" y="104" fill="#94a3b8" text-anchor="middle" font-size="10">就绪 = (value is not MISSING)</text>
+                    <rect x="330" y="42" width="230" height="80" rx="8" fill="rgba(245,158,11,.08)" stroke="#f59e0b"/><text x="445" y="62" fill="#fbbf24" text-anchor="middle" font-size="11" font-weight="bold">NamedBarrierValue</text><text x="445" y="84" fill="#94a3b8" text-anchor="middle" font-size="10">状态: seen ⊆ names（集合）</text><text x="445" y="104" fill="#94a3b8" text-anchor="middle" font-size="10">就绪 = (seen == names)</text>
+                    <text x="300" y="140" fill="#64748b" text-anchor="middle" font-size="10">"有值即就绪" vs "集齐一组名字才就绪" —— 就绪判定的可自定义性，是扇入同步的根基</text>
+                </svg>
+                <div class="cap">通道的就绪判定不必是"有没有值"，屏障把它做成"集合是否相等"</div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：这么多通道，我到底该记住什么？</p>
+                    <p class="a">👨‍🏫 老师：记住一句话——<strong>"通道 = 一段状态的合并规则 + 就绪规则 + 存档规则"</strong>。你平时在 State 里写 <code>Annotated[list, add]</code>，编译后就是 binop；写普通字段就是 LastValue。而 Topic/Barrier 这些多是引擎内部用来实现 Send 扇出、分支汇合的。今天之后，当你看到"图里三条边汇到一个节点、它却等齐了才跑"，你就知道背后是 NamedBarrierValue 在用 <code>seen==names</code> 把关。</p>
+                </div>
+            </div>
+            <div class="card highlight-card">
+                <h3>🧠 今日小结自测</h3>
+                <ul>
+                    <li>AnyValue 为什么不需要 guard、不因多写报错？（它假设多个写入本来就相等，留哪个都一样）</li>
+                    <li>NamedBarrierValue 的 is_available 判定是什么？（seen == names，即签到集合等于名单才就绪）</li>
+                    <li>update 遇到名单外的名字会怎样？（抛 InvalidUpdateError，宁炸不静默，暴露连线错误）</li>
+                    <li>consume() 什么时候清空 seen？（已到齐并放行后重置，让循环里的屏障能重新点名）</li>
+                    <li>为什么用 set 存名字而不是计数器？（幂等：同一上游重试多次不会误凑齐，保证重放安全）</li>
+                    <li>AfterFinish 变体多了什么条件？（集齐后还要显式 finish()，就绪 = finished and seen==names）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 两个屏障类 + AnyValue 通读
+sed -n '1,72p' libs/langgraph/langgraph/channels/any_value.py
+sed -n '1,82p' libs/langgraph/langgraph/channels/named_barrier_value.py
+
+# 2. 亲手体验屏障"集齐才就绪"
+python - <<'PY'
+from langgraph.channels.named_barrier_value import NamedBarrierValue
+from langgraph.errors import EmptyChannelError
+b = NamedBarrierValue(str, names={"a","b","c"})
+b.update(["a"]); b.update(["b"])
+print("到齐了吗?", b.is_available())            # False（差 c）
+b.update(["c"])
+print("现在呢?", b.is_available())              # True
+b.consume(); print("过闸重置后 seen:", b.seen)   # set()（空）
+try: b.update(["x"])
+except Exception as e: print("名单外:", type(e).__name__)  # InvalidUpdateError
+PY</code></pre>
+                <div class="essence"><span class="t">🔮 明日预告 · Day 33 Checkpoint 概念（进入阶段 6）</span>通道讲完，我们把镜头拉远：这些通道的值<strong>如何被打包、存进数据库、又原样恢复</strong>？明天进入阶段 6"持久化与记忆"——先讲 Checkpoint 的概念与 <code>Checkpoint</code> TypedDict 结构（channel_values / channel_versions / versions_seen），搞懂"一次存档到底存了哪些东西、为什么要存版本号"。你今天记住的"通道有独立 checkpoint 策略"，正是持久化层的地基。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day31.html" style="color:var(--accent-cyan);">&larr; Day 31 不持久化通道</a>
+                <a href="langgraph-day33.html" style="color:var(--accent-green);">Day 33 · Checkpoint 概念 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
