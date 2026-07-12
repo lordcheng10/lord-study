@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 23 · PregelNode 读写与 ChannelWrite — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:#818cf8}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#22d3ee;flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 6px;margin:0 2px}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">23</div>
+            <h2>Day 23</h2>
+            <p class="version">PregelNode 读写 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 节点被包了一层</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · PregelNode 的字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · node：读—算—写组装</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · flat_writers 合并优化</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · ChannelRead 读通道</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · ChannelWrite 写通道</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · Send 变成 TASKS 写入</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day22.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 22 执行器</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day24.html" class="nav-link" style="color:var(--accent-green);">Day 24 IO映射 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 23 / 共 60 天 · 阶段 4 Pregel 执行引擎（核心深水区）</span>
+            <h1 class="part-title">PregelNode：一个节点的"读—算—写"三段式</h1>
+            <p class="part-desc">Day 22 说执行器跑的不是"你的函数"，而是包了一层的 <code>PregelNode</code>。这一层负责：跑之前从 channel <strong>读</strong>好输入，跑完把输出 <strong>写</strong>回 channel。今天拆 <span class="fileref">_read.py</span> 的 <code>PregelNode</code>/<code>ChannelRead</code> 和 <span class="fileref">_write.py</span> 的 <code>ChannelWrite</code>——看清你写的那个普通函数，是怎么被"读器 + 你 + 写器"串成一根 Runnable 链条的，以及 <code>Send</code> 到底怎么变成通道里的一条写入。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置</div>
+        <div class="steps">
+            <span class="st">①入门 D1-6</span><span class="sep">·</span>
+            <span class="st">②状态 D7-12</span><span class="sep">·</span>
+            <span class="st">③控制流 D13-18</span><span class="sep">·</span>
+            <span class="st on">④Pregel D19-26</span><span class="sep">·</span>
+            <span class="st">⑤通道 D27-32</span><span class="sep">·</span>
+            <span class="st">⑥持久化 D33-40</span><span class="sep">·</span>
+            <span class="st">⑦中断 D41-46</span><span class="sep">·</span>
+            <span class="st">⑧函数式 D47-52</span><span class="sep">·</span>
+            <span class="st">⑨预制件 D53-58</span><span class="sep">·</span>
+            <span class="st">⑩收官 D59-60</span>
+        </div>
+        <div class="steps" style="margin-top:8px">
+            <span class="st">D19 BSP模型</span><span class="sep">→</span>
+            <span class="st">D20 主循环</span><span class="sep">→</span>
+            <span class="st">D21 任务准备</span><span class="sep">→</span>
+            <span class="st">D22 执行器</span><span class="sep">→</span>
+            <span class="st on">D23 读写</span><span class="sep">→</span>
+            <span class="st">D24 IO映射</span><span class="sep">→</span>
+            <span class="st">D25 重试超时</span><span class="sep">→</span>
+            <span class="st">D26 调试画图</span>
+        </div></div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>你的函数被包了一层：为什么需要 PregelNode</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：我 add_node 传的就是个普通函数 <code>def foo(state): return {...}</code>，它怎么知道去哪读 state、又怎么把返回值写进 channel？</span>
+                你写的函数只认识"一个 state 字典进、一个更新字典出"。可引擎的世界里没有"state 字典"这个现成东西——状态是拆散在一个个 channel 里的。所以必须有人在你函数<strong>之前</strong>把相关 channel 读出来拼成 state 喂给你，在你函数<strong>之后</strong>把你的返回值拆开写回对应 channel。这个"前后夹层"就是 <code>PregelNode</code> 干的活。</div>
+                <p>一个 PregelNode 本质是三段 Runnable 串起来的链条：</p>
+                <div class="baby"><span class="t">类比：翻译官 + 你 + 记录员</span>
+                <strong>读器 ChannelRead</strong>（翻译官）：把 channel 里的原始数据翻译成你函数能懂的 state 字典，递给你；<strong>你的函数 bound</strong>（你）：按业务逻辑算出一个更新；<strong>写器 ChannelWrite</strong>（记录员）：把你的更新拆开、按字段写回对应 channel。你只需要"看着 state 说话"，读进来、写出去这些脏活都被两头的夹层接管了。</div>
+                <div class="essence"><span class="t">💡 本质：PregelNode 把"通道世界"和"函数世界"隔开</span>
+                你的业务函数活在"state 字典"的世界里，引擎活在"channel + 版本号"的世界里。PregelNode 是两个世界之间的<strong>适配器</strong>：它让你写普通函数，同时让引擎拿到它需要的 channel 读写。注释原文说得直白（<span class="fileref">_read.py:98-100</span>）——它"不会被图当 runnable 直接调用，而是作为造出 PregelExecutableTask 所需组件的容器"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>PregelNode 的字段：一个节点由什么构成</h1></div>
+            <div class="card">
+                <p>先认识它的核心字段（<span class="fileref">_read.py:97-126</span>）：</p>
+<pre><code class="language-python"># _read.py:97
+class PregelNode:
+    channels: str | list[str]      # 102 读哪些通道当输入（str=单值；list=拼成 dict）
+    triggers: list[str]            # 107 哪些通道被写就触发我（Day 21 _triggers 用的就是它）
+    mapper: Callable | None        # 111 读到输入后先转换一下（可选）
+    writers: list[Runnable]        # 114 跑完后执行的写器们（把输出写回通道）
+    bound: Runnable[Any, Any]      # 118 节点的主逻辑 = 你的函数
+    retry_policy: Sequence[RetryPolicy] | None   # 122 重试策略（Day 25）
+    cache_policy: CachePolicy | None             # 125 缓存策略（Day 51）</code></pre>
+                <div class="walk">
+                    <div class="r"><code>channels</code><span>声明"我要读哪些通道"。是 <code>str</code> 就把那个通道的值直接当输入；是 <code>list</code> 就把这几个通道拼成一个 dict 当输入。StateGraph 编译时会把它设成"整个 state 的所有字段通道"。</span></div>
+                    <div class="r"><code>triggers</code><span>声明"哪些通道更新就唤醒我"。<b>注意 channels 和 triggers 是两回事</b>：triggers 决定"要不要跑我"，channels 决定"跑我时读什么"。二者常常但不总是一样。</span></div>
+                    <div class="r"><code>bound</code><span>你的函数。默认是 <code>DEFAULT_BOUND</code>（<span class="fileref">_read.py:94</span>，恒等函数 <code>lambda x: x</code>），说明"没主逻辑、纯做读写转发"也是合法的节点。</span></div>
+                    <div class="r"><code>writers</code><span>写器列表。StateGraph 编译时会往里塞一个 <code>ChannelWrite</code>，负责把你的返回值写回 state 通道。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍①：为什么把 channels（读）和 triggers（触发）拆成两个字段？</span>
+                朴素想法：一个节点"读什么"和"被什么触发"应该是同一批通道吧？多数时候是。但拆开能表达更细的语义：<strong>比如一个节点被通道 A 触发，但运行时需要同时读 A 和 B 的当前值</strong>（B 没变也要读它的最新值参与计算）。如果只有一个字段，就没法区分"因谁而醒"和"醒了读谁"。LangGraph 把两者解耦，让"触发条件"和"输入范围"各自独立配置——这也是条件边、Send、subgraph 等高级控制流能灵活组合的基础。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>node：把"读—算—写"组装成一根链</h1></div>
+            <div class="card">
+                <p><code>node</code> 是个 <code>cached_property</code>，把 bound 和 writers 拼成一个可执行的 Runnable（<span class="fileref">_read.py:221-234</span>）：</p>
+<pre><code class="language-python"># _read.py:221
+@cached_property
+def node(self) -> Runnable[Any, Any] | None:
+    """Get a runnable that combines `bound` and `writers`."""
+    writers = self.flat_writers                 # 224 先做写器合并优化（L04）
+    if self.bound is DEFAULT_BOUND and not writers:
+        return None                             # 226 既没逻辑也没写器 → 空节点，不跑
+    elif self.bound is DEFAULT_BOUND and len(writers) == 1:
+        return writers[0]                       # 228 纯写：就一个写器，直接用
+    elif self.bound is DEFAULT_BOUND:
+        return RunnableSeq(*writers)            # 230 纯写：多个写器串起来
+    elif writers:
+        return RunnableSeq(self.bound, *writers)  # 232 常态：你的函数 + 写器们，串成链
+    else:
+        return self.bound                       # 234 只有逻辑没写器：就跑你的函数</code></pre>
+                <div class="walk">
+                    <div class="r"><code>RunnableSeq(self.bound, *writers)</code><span><b>最常见的一支</b>：把你的函数 <code>bound</code> 和写器 <code>writers</code> 用 <code>RunnableSeq</code>（顺序执行链）串起来。执行时先跑你的函数得到返回值，再把返回值喂给写器写回通道。这就是"算→写"两段。</span></div>
+                    <div class="r"><code>return None</code><span>空节点（无逻辑无写器）返回 None。Day 21 <code>prepare_single_task</code> 里 <code>if node := proc.node</code> 拿到 None 就不造可执行任务——省掉无意义的空跑。</span></div>
+                    <div class="r"><code>cached_property</code><span>这根链组装一次就缓存住，同一个节点被反复触发（循环图里 agent 跑很多次）不用每次重组。<code>copy()</code> 时会清掉这个缓存（<span class="fileref">_read.py:200</span>）保证更新后重算。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">数据结构：PregelNode 组装出的"读—算—写"链</text>
+                        <rect x="30" y="70" width="120" height="50" rx="8" fill="rgba(59,130,246,.12)" stroke="#3b82f6"/>
+                        <text x="90" y="90" fill="#93c5fd" text-anchor="middle" font-weight="700">ChannelRead</text>
+                        <text x="90" y="107" fill="#94a3b8" text-anchor="middle" font-size="9">读 channels→输入</text>
+                        <rect x="200" y="70" width="120" height="50" rx="8" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                        <text x="260" y="90" fill="#a7f3d0" text-anchor="middle" font-weight="700">bound（你）</text>
+                        <text x="260" y="107" fill="#94a3b8" text-anchor="middle" font-size="9">业务逻辑</text>
+                        <rect x="370" y="70" width="120" height="50" rx="8" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="430" y="90" fill="#f9a8d4" text-anchor="middle" font-weight="700">ChannelWrite</text>
+                        <text x="430" y="107" fill="#94a3b8" text-anchor="middle" font-size="9">写回 channels</text>
+                        <rect x="530" y="70" width="90" height="50" rx="8" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="575" y="90" fill="#fde68a" text-anchor="middle" font-size="10">channels</text>
+                        <text x="575" y="107" fill="#94a3b8" text-anchor="middle" font-size="9">状态通道</text>
+                        <path d="M150 95 L198 95" stroke="#64748b" stroke-width="1.3" marker-end="url(#d)"/>
+                        <path d="M320 95 L368 95" stroke="#64748b" stroke-width="1.3" marker-end="url(#d)"/>
+                        <path d="M490 95 L528 95" stroke="#64748b" stroke-width="1.3" marker-end="url(#d)"/>
+                        <text x="260" y="150" fill="#94a3b8" text-anchor="middle" font-size="10">RunnableSeq(bound, *writers) —— node 属性把它们串成一根链</text>
+                        <text x="90" y="55" fill="#818cf8" text-anchor="middle" font-size="10">(Day 21 造 task 时读)</text>
+                        <defs><marker id="d" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：ChannelRead 读入 → bound 计算 → ChannelWrite 写出，三段被 RunnableSeq 串成 node，供执行器调用。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>flat_writers：把相邻写器合并成一个</h1></div>
+            <div class="card">
+                <p>组装前有个小优化 <code>flat_writers</code>（<span class="fileref">_read.py:204-219</span>）：把连续的 <code>ChannelWrite</code> 合并：</p>
+<pre><code class="language-python"># _read.py:204
+@cached_property
+def flat_writers(self) -> list[Runnable]:
+    """Get writers with optimizations applied. Dedupes consecutive ChannelWrites."""
+    writers = self.writers.copy()
+    while (len(writers) > 1
+           and isinstance(writers[-1], ChannelWrite)
+           and isinstance(writers[-2], ChannelWrite)):   # 211 末尾两个都是 ChannelWrite
+        writers[-2] = ChannelWrite(                      # 215 合并成一个
+            writes=writers[-2].writes + writers[-1].writes,   # 216 写入项拼起来
+        )
+        writers.pop()                                    # 218 去掉被合并的那个
+    return writers</code></pre>
+                <div class="walk">
+                    <div class="r"><code>while 末尾两个都是 ChannelWrite</code><span>从后往前看，只要末尾连着两个写器，就把它们的 <code>writes</code>（写入项列表）拼成一个新的 <code>ChannelWrite</code>。反复合并直到不再连续。</span></div>
+                    <div class="r"><code>writers[-2].writes + writers[-1].writes</code><span>关键：合并只是把两个写器要写的<b>条目列表拼接</b>，语义完全等价——本来要执行两次写入调用，现在一次搞定。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍②：合并写器省的那点开销，值得专门写段代码吗？</span>
+                单看一次节点执行，省一次 <code>ChannelWrite.invoke</code> 调用确实微不足道。但想想循环图里的 agent 节点：一次对话可能跑几十个超步，每步都走一遍这根链。而且 LangGraph 内部为条件边、Command、Send 等会往 writers 里塞好几个 <code>ChannelWrite</code>——不合并的话每个节点每步都多好几层 Runnable 调用栈。<strong>热路径上的常数级优化，乘以运行次数就不小了</strong>。加上 <code>cached_property</code> 缓存，合并本身只算一次。这是"框架代码愿意为极致省一点点、因为它会被跑无数遍"的典型心态。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>ChannelRead：从 config 里的读函数取值</h1></div>
+            <div class="card">
+                <p>读这一段由 <code>ChannelRead</code>（<span class="fileref">_read.py:25</span>）完成。它自己不直接碰 channel，而是从 config 里取一个"读函数"（<span class="fileref">_read.py:73-91</span>）：</p>
+<pre><code class="language-python"># _read.py:73
+@staticmethod
+def do_read(config, *, select, fresh=False, mapper=None) -> Any:
+    try:
+        read: READ_TYPE = config[CONF][CONFIG_KEY_READ]   # 82 从 config 取"读函数"
+    except KeyError:
+        raise RuntimeError("Not configured with a read function ...")  # 84 不在 Pregel 上下文里
+    if mapper:
+        return mapper(read(select, fresh))                # 89 读完再转换一下
+    else:
+        return read(select, fresh)                        # 91 直接读</code></pre>
+                <div class="walk">
+                    <div class="r"><code>config[CONF][CONFIG_KEY_READ]</code><span>读通道不是硬编码的，而是<b>运行时从 config 注入</b>的一个函数。谁注入的？PregelLoop 在造任务时把"当前这套 channels 的读函数"塞进 config。这样同一个节点在不同 run / 不同 checkpoint 下读到的是各自对应的状态。</span></div>
+                    <div class="r"><code>read(select, fresh)</code><span><code>select</code> 是要读的通道名（单个或多个），<code>fresh</code> 表示是否要读"最新提交后"的值。返回值就是喂给你函数的输入。</span></div>
+                    <div class="r"><code>RuntimeError(...)</code><span>如果不在 Pregel 运行上下文里（config 没有读函数）就报错——这也是为什么你不能脱离图、单独 <code>node.invoke()</code> 期望它自己读 state。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：读/写都靠 config 注入的函数，节点本身"无状态"</span>
+                <code>ChannelRead</code>（读）和马上要看的 <code>ChannelWrite</code>（写）都不持有 channels，而是<strong>从 config 里现取</strong> <code>CONFIG_KEY_READ</code> / <code>CONFIG_KEY_SEND</code> 这两个函数。好处是节点定义本身完全无状态、可复用——真正的"读到哪套状态、写到哪套状态"由运行时 config 决定。这让同一张编译好的图能被无数个并发 thread 安全共享（各自 config 不同）。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>ChannelWrite：把返回值写回通道</h1></div>
+            <div class="card">
+                <p>对称地，<code>ChannelWrite</code>（<span class="fileref">_write.py:46</span>）负责写。它的 <code>do_write</code> 先校验再调 config 里的发送函数（<span class="fileref">_write.py:105-126</span>）：</p>
+<pre><code class="language-python"># _write.py:105
+@staticmethod
+def do_write(config, writes, allow_passthrough=True) -> None:
+    for w in writes:                                # 112 逐条校验
+        if isinstance(w, ChannelWriteEntry):
+            if w.channel == TASKS:                  # 114 禁止直接写保留通道 TASKS
+                raise InvalidUpdateError("Cannot write to the reserved channel TASKS")
+            if w.value is PASSTHROUGH and not allow_passthrough:
+                raise InvalidUpdateError("PASSTHROUGH value must be replaced")  # 119
+        ...
+    write: TYPE_SEND = config[CONF][CONFIG_KEY_SEND]   # 125 从 config 取"发送函数"
+    write(_assemble_writes(writes))                    # 126 组装成 (通道,值) 元组列表后发出</code></pre>
+                <div class="walk">
+                    <div class="r"><code>w.channel == TASKS → 报错</code><span><b>边界守卫</b>：TASKS 是给 Send 专用的保留通道，你不能直接往它写普通值。要派发动态任务只能用 <code>Send</code> 对象（L07 会看到 Send 才被允许进 TASKS）。</span></div>
+                    <div class="r"><code>PASSTHROUGH</code><span>一个哨兵值，表示"这一项要写的值就是节点的输入本身"。比如 <code>add_edge</code> 产生的"透传写"——把上游值原样传给下游通道。校验它必须在有输入可透传时才用。</span></div>
+                    <div class="r"><code>config[CONF][CONFIG_KEY_SEND]</code><span>和读对称：写也是取 config 里注入的发送函数。这个函数最终把 <code>(通道名, 值)</code> 攒进当前 task 的 <code>writes</code>——就是 Day 22 commit 时收走、Day 21 apply_writes 时合并的那批写入。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界/坑：节点返回值里写了 state 里没有的字段，会怎样？</span>
+                不会立刻报错。<code>ChannelWrite</code> 照样把它组装成 <code>(未知字段, 值)</code> 发出去，一路传到 Day 21 的 <code>apply_writes</code>——那里发现"这个通道不在 channels 里"，只 <code>logger.warning(...unknown channel...)</code> <strong>警告并丢弃</strong>，图继续跑。所以经典 bug 是：你 <code>return {"mesage": ...}</code>（拼错 messages），运行没报错但状态里那字段永远是空的。<strong>排查这类"写了没生效"的问题，第一件事是去日志里搜 unknown channel。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>Send 怎么变成 TASKS 通道里的一条写入</h1></div>
+            <div class="card">
+                <p>写入的最后一步 <code>_assemble_writes</code>（<span class="fileref">_write.py:172</span>）把各种写入项标准化成 <code>(通道, 值)</code> 元组。<code>Send</code> 在这里被特殊处理：</p>
+<pre><code class="language-python"># _write.py:172
+def _assemble_writes(writes) -> list[tuple[str, Any]]:
+    tuples: list[tuple[str, Any]] = []
+    for w in writes:
+        if isinstance(w, Send):
+            tuples.append((TASKS, w))               # 179 Send → 写进 TASKS 通道！
+        elif isinstance(w, ChannelWriteTupleEntry):
+            if ww := w.mapper(w.value):             # 181 一个映射产出多条写入
+                tuples.extend(ww)
+        elif isinstance(w, ChannelWriteEntry):
+            value = w.mapper(w.value) if w.mapper is not None else w.value
+            if value is SKIP_WRITE:                 # 185 mapper 返回 SKIP_WRITE → 跳过不写
+                continue
+            if w.skip_none and value is None:       # 187 skip_none 且值为 None → 跳过
+                continue
+            tuples.append((w.channel, value))       # 189 普通写：(通道名, 值)
+        else:
+            raise ValueError(f"Invalid write entry: {w}")
+    return tuples</code></pre>
+                <div class="walk">
+                    <div class="r"><code>isinstance(w, Send) → (TASKS, w)</code><span><b>今天的高光时刻</b>：一个 <code>Send</code> 对象被组装成 <code>(TASKS, Send对象)</code> 这条写入。它流进 TASKS 通道后，Day 21 <code>prepare_next_tasks</code> 开头那段就会把它捞出来变成 PUSH 任务。<strong>Send 的"派发"本质上就是一次向 TASKS 通道的写入</strong>——控制流被统一成了数据流！</span></div>
+                    <div class="r"><code>SKIP_WRITE / skip_none</code><span>两个"条件不写"的开关。<code>SKIP_WRITE</code> 让 mapper 能动态决定"这次不写"；<code>skip_none</code> 让"值是 None 就别覆盖"。条件边、可选写入靠它们实现"有时写有时不写"。</span></div>
+                    <div class="r"><code>ChannelWriteTupleEntry</code><span>一个写入项能通过 mapper 产出<b>多条</b>写入（一对多）。<code>add_messages</code>、Command.update 等把一个返回值拆成多个通道写入时走这条。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：LangGraph 把"控制流"也编码成"数据流"</span>
+                这是整个引擎最精巧的一处统一：你以为 <code>Send</code> 是"跳转/派发"（控制流），可它落地成了<strong>往一个特殊通道写数据</strong>（数据流）。于是执行引擎只需要会做一件事——"合并写入、按版本触发"，就同时实现了普通边、条件边、循环、map-reduce 扇出。<strong>没有单独的"调度器"处理 Send，Send 就是数据，和 messages、counter 一样流过同一套 channel 机制。</strong>这就是 Pregel 模型"一切皆消息"的威力。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 175" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">控制流：一个 Send 从"写出"到"被跑"的全程</text>
+                        <rect x="15" y="50" width="110" height="44" rx="7" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                        <text x="70" y="70" fill="#a7f3d0" text-anchor="middle" font-size="10">节点 return</text>
+                        <text x="70" y="85" fill="#94a3b8" text-anchor="middle" font-size="9">Send("b", arg)</text>
+                        <rect x="150" y="50" width="115" height="44" rx="7" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="207" y="70" fill="#f9a8d4" text-anchor="middle" font-size="10">_assemble_writes</text>
+                        <text x="207" y="85" fill="#94a3b8" text-anchor="middle" font-size="9">→ (TASKS, Send)</text>
+                        <rect x="290" y="50" width="100" height="44" rx="7" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="340" y="70" fill="#fde68a" text-anchor="middle" font-size="10">apply_writes</text>
+                        <text x="340" y="85" fill="#94a3b8" text-anchor="middle" font-size="9">进 TASKS 通道</text>
+                        <rect x="415" y="50" width="120" height="44" rx="7" fill="rgba(99,102,241,.12)" stroke="#6366f1"/>
+                        <text x="475" y="68" fill="#c7d2fe" text-anchor="middle" font-size="9">下一步</text>
+                        <text x="475" y="82" fill="#c7d2fe" text-anchor="middle" font-size="9">prepare_next_tasks</text>
+                        <rect x="558" y="50" width="70" height="44" rx="7" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                        <text x="593" y="70" fill="#a7f3d0" text-anchor="middle" font-size="10">PUSH</text>
+                        <text x="593" y="85" fill="#94a3b8" text-anchor="middle" font-size="9">任务跑</text>
+                        <path d="M125 72 L148 72" stroke="#64748b" stroke-width="1.2" marker-end="url(#i)"/>
+                        <path d="M265 72 L288 72" stroke="#64748b" stroke-width="1.2" marker-end="url(#i)"/>
+                        <path d="M390 72 L413 72" stroke="#64748b" stroke-width="1.2" marker-end="url(#i)"/>
+                        <path d="M535 72 L556 72" stroke="#64748b" stroke-width="1.2" marker-end="url(#i)"/>
+                        <text x="320" y="130" fill="#f87171" text-anchor="middle" font-size="10">注意：跨越了超步边界——Send 本步写入，下一超步才被捞出执行（BSP）</text>
+                        <text x="320" y="152" fill="#818cf8" text-anchor="middle" font-size="10">控制流(派发)被彻底编码成数据流(写通道)</text>
+                        <defs><marker id="i" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：Send 被组装成 (TASKS, Send) 写入通道，下一超步 prepare_next_tasks 捞出变 PUSH 任务执行。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手 + 明日预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么你的函数要被 PregelNode 包一层？（适配"函数世界"和"通道世界"，前后夹读器/写器）</li>
+                    <li>channels 和 triggers 有何区别？（channels=跑我时读什么；triggers=谁更新唤醒我）</li>
+                    <li>node 属性做了什么？（RunnableSeq 把 bound + writers 串成"算→写"链）</li>
+                    <li>flat_writers 优化了什么？（合并相邻 ChannelWrite，减少热路径调用层数）</li>
+                    <li>ChannelRead/ChannelWrite 自己持有 channels 吗？（不，从 config 取读/发送函数，节点无状态）</li>
+                    <li>写了 state 没有的字段会怎样？（apply_writes 只 warning 丢弃，不报错——排查搜 unknown channel）</li>
+                    <li>Send 怎么被执行的？（组装成 (TASKS, Send) 写入 → 下步 prepare 捞成 PUSH 任务，控制流即数据流）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 PregelNode 字段 + node 组装
+sed -n '97,234p' libs/langgraph/langgraph/pregel/_read.py
+
+# 2. 读 ChannelWrite.do_write（校验 + 发送）
+sed -n '105,126p' libs/langgraph/langgraph/pregel/_write.py
+
+# 3. 读 _assemble_writes（Send→TASKS 那行）
+sed -n '172,192p' libs/langgraph/langgraph/pregel/_write.py
+
+# 4. 亲手触发 unknown channel 警告（故意拼错字段）
+python -c "
+import logging; logging.basicConfig(level=logging.WARNING)
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+class S(TypedDict): count: int
+g = StateGraph(S)
+g.add_node('a', lambda s: {'cont': 1})   # 拼错 count→cont
+g.add_edge(START,'a'); g.add_edge('a',END)
+print(g.compile().invoke({'count':0}))    # 观察 warning + count 没变
+"</code></pre>
+                <div class="tip"><strong>明天预告 · Day 24</strong>：今天看的是"节点内部"的读写。明天上升一层看"整张图的边界"——你 <code>invoke({...})</code> 传进去的输入怎么变成第一批 channel 写入？图跑完又怎么从 channel 读出最终结果返回给你？进 <code>_io.py</code> 的 <code>map_input</code> / <code>map_output_values</code> / <code>map_output_updates</code>，看清输入输出的映射规则，以及 stream 的 values/updates 两种模式差在哪。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day22.html" style="color:var(--accent-cyan);">&larr; Day 22 执行器</a>
+                <a href="langgraph-day24.html" style="color:var(--accent-green);">Day 24 · 输入输出映射 _io.py &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

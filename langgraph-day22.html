@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 22 · 执行器 PregelRunner 与并行调度 — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:#818cf8}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#22d3ee;flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 6px;margin:0 2px}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">22</div>
+            <h2>Day 22</h2>
+            <p class="version">执行器 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 谁来炒菜</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · PregelRunner 是什么</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · tick 与 FuturesDict</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 单任务快路径</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 并行调度循环</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 失败即止 + commit</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · BackgroundExecutor 线程池</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day21.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 21 任务准备</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day23.html" class="nav-link" style="color:var(--accent-green);">Day 23 读写 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 22 / 共 60 天 · 阶段 4 Pregel 执行引擎（核心深水区）</span>
+            <h1 class="part-title">执行器：PregelRunner 怎么并行跑一步的任务</h1>
+            <p class="part-desc">Day 20 那句 <code>for _ in runner.tick(...)</code> 就是"炒菜"环节。tick 把 task 备好了，真正把它们<strong>并行跑起来</strong>、跑完把写入攒回去、有一个崩了就取消其他的——全靠 <code>PregelRunner</code>（<span class="fileref">_runner.py:135</span>）和它底下的线程池 <code>BackgroundExecutor</code>（<span class="fileref">_executor.py:40</span>）。今天看清一个超步内的并发是怎么被安全地组织起来的。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置</div>
+        <div class="steps">
+            <span class="st">①入门 D1-6</span><span class="sep">·</span>
+            <span class="st">②状态 D7-12</span><span class="sep">·</span>
+            <span class="st">③控制流 D13-18</span><span class="sep">·</span>
+            <span class="st on">④Pregel D19-26</span><span class="sep">·</span>
+            <span class="st">⑤通道 D27-32</span><span class="sep">·</span>
+            <span class="st">⑥持久化 D33-40</span><span class="sep">·</span>
+            <span class="st">⑦中断 D41-46</span><span class="sep">·</span>
+            <span class="st">⑧函数式 D47-52</span><span class="sep">·</span>
+            <span class="st">⑨预制件 D53-58</span><span class="sep">·</span>
+            <span class="st">⑩收官 D59-60</span>
+        </div>
+        <div class="steps" style="margin-top:8px">
+            <span class="st">D19 BSP模型</span><span class="sep">→</span>
+            <span class="st">D20 主循环</span><span class="sep">→</span>
+            <span class="st">D21 任务准备</span><span class="sep">→</span>
+            <span class="st on">D22 执行器</span><span class="sep">→</span>
+            <span class="st">D23 读写</span><span class="sep">→</span>
+            <span class="st">D24 IO映射</span><span class="sep">→</span>
+            <span class="st">D25 重试超时</span><span class="sep">→</span>
+            <span class="st">D26 调试画图</span>
+        </div></div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>谁来炒菜：执行器要解决的四个问题</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个超步里可能有好几个节点要跑，它们能并行吗？其中一个报错了，其他的怎么办？</span>
+                Day 19 说"同一超步的节点互不依赖、可以并行"。可"可以并行"是理论，落到代码：谁开线程？开几个？某个任务抛异常了，是等其他跑完还是立刻掐掉？跑完的写入先放哪，什么时候交给 apply_writes？流式输出又怎么做到"每完成一个就吐一个"？这四个问题，就是 <code>PregelRunner</code> 存在的理由。</div>
+                <p>执行器夹在 Day 20 的 tick 和 after_tick 中间，职责被官方注释说得很清楚（<span class="fileref">_runner.py:136-138</span>）：</p>
+                <ul>
+                    <li><strong>并发执行</strong>一组 Pregel 任务；</li>
+                    <li>把它们的写入 <strong>commit</strong> 回去（攒到 checkpoint 的 pending_writes）；</li>
+                    <li>有输出可吐时把控制权 <strong>yield</strong> 给外层（流式）；</li>
+                    <li>必要时 <strong>中断/取消</strong>其他任务（一个失败，全部叫停）。</li>
+                </ul>
+                <div class="essence"><span class="t">💡 本质：执行器 = "并发编排器"，节点逻辑本身它不碰</span>
+                <code>PregelRunner</code> 不关心节点里写了什么业务代码——那是节点自己的事。它只管"把这批任务丢进线程池、盯着谁先完成、把结果收好、出事就止损"。这种"编排与业务分离"让引擎能对任何节点一视同仁地做并发、超时、重试。</div>
+                <div class="baby"><span class="t">类比：后厨的传菜长</span>
+                tick 是配菜台（把每道菜的料备齐），PregelRunner 是传菜长：把这一轮的菜同时派给几个炒锅（线程）一起炒（并行），哪个锅先出菜就先端上桌（yield 流式），某个锅打翻着火了就喊停其他锅别炒了（失败即止），所有菜炒完把账单汇总交给收银台（commit → after_tick）。传菜长不亲自炒菜，只负责调度。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>PregelRunner：拿两个"弱引用"就够干活</h1></div>
+            <div class="card">
+                <p>看它的 <code>__init__</code>（<span class="fileref">_runner.py:140-169</span>）。最关键是两个参数都用 <code>weakref.ref</code> 包着：</p>
+<pre><code class="language-python"># _runner.py:135
+class PregelRunner:
+    """Responsible for executing a set of Pregel tasks concurrently, committing
+    their writes, yielding control to caller when there is output to emit, and
+    interrupting other tasks if appropriate."""
+    def __init__(self, *,
+        submit: weakref.ref[Submit],                                   # 143 拿到线程池的提交入口
+        put_writes: weakref.ref[Callable[[str, Sequence[...]], None]], # 144 把写入交回 loop
+        use_astream: bool = False,
+        node_finished: Callable[[str], None] | None = None,
+        node_error_handler_map: Mapping[str, str] | None = None,       # 147 节点→错误处理节点
+        ...
+    ) -> None:
+        self.submit = submit
+        self.put_writes = put_writes
+        self._handled_exception_ids: set[int] = set()                  # 169 已被错误处理器接管的异常</code></pre>
+                <div class="walk">
+                    <div class="r"><code>submit: weakref.ref[Submit]</code><span>提交任务到线程池的函数（来自 <code>BackgroundExecutor</code>，L07）。用时 <code>self.submit()(fn, ...)</code>——先解弱引用拿到真函数，再调用。</span></div>
+                    <div class="r"><code>put_writes: weakref.ref[...]</code><span>把某个 task 的写入交回 PregelLoop 的回调。commit 时（L06）调它，写入就进了 checkpoint 的 pending_writes，等 after_tick 的 apply_writes 来合并（Day 21）。</span></div>
+                    <div class="r"><code>node_error_handler_map</code><span>节点级容错：某节点失败时路由到指定的"错误处理节点"，而不是直接崩掉整个图（Day 52 深入）。这里先记住有这么个机制。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍①：为什么 submit / put_writes 要用 weakref 弱引用？</span>
+                <code>PregelRunner</code> 和 <code>PregelLoop</code> 是同一次运行里彼此持有的两个对象：loop 持有 runner，runner 又要回调 loop 的方法。如果 runner 用<strong>强引用</strong>抓着 loop 的方法，就形成"你抓我、我抓你"的引用环，Python 的引用计数无法回收，得等 GC 兜底——在长期运行的服务里容易攒出内存。用 <code>weakref</code> 让 runner"能用但不占有"这些回调，运行一结束 loop 就能被立即回收。<strong>代价</strong>是每次用都要 <code>self.submit()</code> 先解引用、多一层调用；换来的是干净的生命周期。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>tick 开场：FuturesDict 与"先让出控制权"</h1></div>
+            <div class="card">
+                <p><code>tick()</code>（<span class="fileref">_runner.py:176</span>）是执行器的主入口。开头先建一个特殊的 <code>FuturesDict</code>，然后 <code>yield</code> 一次：</p>
+<pre><code class="language-python"># _runner.py:176
+def tick(self, tasks, *, reraise=True, timeout=None, retry_policy=None,
+         get_waiter=None, schedule_task) -> Iterator[None]:
+    tasks = tuple(tasks)
+    futures = FuturesDict(                          # 190 {future: task} 的特殊字典
+        callback=weakref.WeakMethod(self.commit),   # 191 每个 future 完成自动回调 commit
+        event=threading.Event(),
+        should_stop=partial(_should_stop_others, ...),  # 193 判断"要不要停其他任务"
+        future_type=concurrent.futures.Future,
+    )
+    yield                                           # 199 先把控制权还给调用方
+    if len(tasks) == 0:
+        return                                      # 201 没任务，直接结束</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Iterator[None]</code><span>tick 是个<b>生成器</b>！所以 Day 20 用 <code>for _ in runner.tick(...)</code> 驱动它。每 <code>yield</code> 一次，外层就得到一次"该看看有没有新输出可以流式吐出了"的机会。</span></div>
+                    <div class="r"><code>FuturesDict(callback=WeakMethod(self.commit))</code><span>一个把 future 映射到 task 的字典，且<b>绑了完成回调</b>：任何 future 一完成，自动调 <code>commit</code> 把该 task 的写入收好。不用手动轮询"谁好了"。</span></div>
+                    <div class="r"><code>yield</code>（第一次）<span>还没开始跑就先让出控制权。这是流式的礼貌——让外层先处理上一步遗留的输出、注册好监听，再回来真正调度任务。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：tick 是"可暂停的调度器"，靠 yield 和外层协作流式</span>
+                普通函数是"进去跑完出来"；生成器 tick 是"跑一段、yield 出去让外层吐输出、外层再驱动我跑下一段"。这种"协程式"结构，正是 LangGraph 能做到"节点一完成就实时流式"而不是"整步跑完才一次性返回"的底层原因。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">数据结构：PregelRunner 的记账（弱引用 + FuturesDict）</text>
+                        <rect x="30" y="45" width="150" height="70" rx="8" fill="rgba(99,102,241,.1)" stroke="#6366f1"/>
+                        <text x="105" y="65" fill="#c7d2fe" text-anchor="middle" font-weight="700">PregelRunner</text>
+                        <text x="105" y="84" fill="#94a3b8" text-anchor="middle" font-size="9">submit（weakref）</text>
+                        <text x="105" y="99" fill="#94a3b8" text-anchor="middle" font-size="9">put_writes（weakref）</text>
+                        <rect x="245" y="45" width="170" height="70" rx="8" fill="rgba(234,179,8,.1)" stroke="#eab308"/>
+                        <text x="330" y="65" fill="#fde68a" text-anchor="middle" font-weight="700">FuturesDict</text>
+                        <text x="330" y="83" fill="#cbd5e1" text-anchor="middle" font-size="9">{future → task}</text>
+                        <text x="330" y="99" fill="#94a3b8" text-anchor="middle" font-size="9">callback=commit（完成即回调）</text>
+                        <rect x="470" y="45" width="150" height="70" rx="8" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="545" y="65" fill="#a7f3d0" text-anchor="middle" font-weight="700">BackgroundExecutor</text>
+                        <text x="545" y="83" fill="#94a3b8" text-anchor="middle" font-size="9">ThreadPoolExecutor</text>
+                        <text x="545" y="99" fill="#94a3b8" text-anchor="middle" font-size="9">真正开线程跑</text>
+                        <path d="M180 80 L243 80" stroke="#64748b" stroke-width="1.3" marker-end="url(#h)"/>
+                        <text x="212" y="72" fill="#818cf8" text-anchor="middle" font-size="8">submit()</text>
+                        <path d="M415 80 L468 80" stroke="#64748b" stroke-width="1.3" marker-end="url(#h)"/>
+                        <text x="320" y="150" fill="#94a3b8" text-anchor="middle" font-size="10">runner 用弱引用拿到线程池与回调 → 提交任务得 future → FuturesDict 记账、完成自动 commit</text>
+                        <text x="320" y="172" fill="#f9a8d4" text-anchor="middle" font-size="10">弱引用避免 loop↔runner 引用环，运行结束即可回收</text>
+                        <defs><marker id="h" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：PregelRunner 靠两个弱引用与 FuturesDict 记账，把任务提交给线程池并在完成时自动 commit。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>单任务快路径：不开线程，当场跑</h1></div>
+            <div class="card">
+                <p>如果这一步只有一个任务、没超时、没 waiter，开线程池纯属浪费。tick 有一条<strong>快路径</strong>（<span class="fileref">_runner.py:203-221</span>）：</p>
+<pre><code class="language-python"># _runner.py:203
+elif len(tasks) == 1 and timeout is None and get_waiter is None:
+    t = tasks[0]
+    try:
+        run_with_retry(                             # 207 直接在当前线程跑（含重试，Day 25）
+            t, retry_policy,
+            configurable={CONFIG_KEY_CALL: partial(_call, weakref.ref(t), ...)},  # 210
+        )
+        self.commit(t, None)                        # 221 成功：commit（无异常）
+    except Exception as exc:
+        self.commit(t, exc)                         # 223 失败：也 commit（带异常，存错误）
+        ...错误处理器路由 / reraise...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>len(tasks) == 1 and ...</code><span>命中条件：单任务 + 无超时 + 无 waiter。绝大多数线性图（A→B→C，每步就一个节点）都走这条路。</span></div>
+                    <div class="r"><code>run_with_retry(t, ...)</code><span><b>直接在当前线程同步跑</b>，不提交线程池。<code>run_with_retry</code> 是 Day 25 的主角，负责按 retry_policy 重试。</span></div>
+                    <div class="r"><code>self.commit(t, None)</code> / <code>commit(t, exc)</code><span>无论成功失败都调 commit——成功传 None，失败传异常。commit 决定"把正常写入存起来，还是把错误/中断存起来"（L06）。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍②：为什么专门为"单任务"写一条不开线程的快路径？</span>
+                线程池的 <code>submit</code> + <code>Future</code> + <code>concurrent.futures.wait</code> 有实打实的开销：上下文拷贝、线程调度、future 状态机。可现实里<strong>大量图是线性的</strong>——每一步就一个节点。为这种最常见的情况开线程池，等于"为了端一杯水叫一辆卡车"。快路径检测到"就一个任务"时当场同步跑，省掉全部并发开销；只有真需要并行（多任务）或需要超时/等待时才动用线程池（L05）。<strong>常见情况优化到极致，复杂情况才付复杂的代价。</strong></div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>并行调度循环：提交 + 等最先完成的那个</h1></div>
+            <div class="card">
+                <p>多任务时走通用路径：全部提交线程池，然后循环"等最先完成的一个、处理它、再等下一个"（<span class="fileref">_runner.py:259-289</span>）：</p>
+<pre><code class="language-python"># _runner.py:259
+for t in tasks:
+    fut = self.submit()(                            # 260 提交到线程池，拿到 future
+        run_with_retry, t, retry_policy,
+        configurable={CONFIG_KEY_CALL: partial(_call, weakref.ref(t), ...)},
+        __reraise_on_exit__=reraise,
+    )
+    futures[fut] = t                                # 276 记账：这个 future 对应哪个 task
+# 每有一个任务完成就吐一次输出
+end_time = timeout + time.monotonic() if timeout else None   # 280 墙钟截止时刻
+while len(futures) > (1 if get_waiter is not None else 0):    # 282
+    done, inflight = concurrent.futures.wait(
+        futures, return_when=concurrent.futures.FIRST_COMPLETED,   # 285 等"第一个完成"
+        timeout=(max(0, end_time - time.monotonic()) if end_time else None),
+    )
+    if not done:
+        break                                       # 289 一个都没完成=超时了，跳出</code></pre>
+                <div class="walk">
+                    <div class="r"><code>self.submit()(run_with_retry, t, ...)</code><span>把每个任务提交进线程池，立刻返回一个 <code>Future</code>（占位凭据，代表"将来会有结果"）。N 个任务=N 个 future，它们同时在不同线程跑。</span></div>
+                    <div class="r"><code>FIRST_COMPLETED</code><span>不等所有任务、只等<b>最先完成的一个</b>就醒来。这样某个任务先跑完，就能马上处理它、yield 流式输出，而不用干等最慢的那个。</span></div>
+                    <div class="r"><code>timeout=end_time - now</code><span>Day 20 传下来的 <code>step_timeout</code> 在这里生效：整个超步的墙钟上限。每轮 wait 都算"还剩多少时间"。</span></div>
+                    <div class="r"><code>if not done: break</code><span>wait 返回空 done 集，说明超时到了还没人完成——直接跳出循环，后续 <code>_panic_or_proceed</code> 会按超时处理。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 240" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">控制流：多任务并行 + FIRST_COMPLETED 逐个收割</text>
+                        <rect x="20" y="40" width="120" height="40" rx="8" fill="rgba(99,102,241,.12)" stroke="#6366f1"/>
+                        <text x="80" y="64" fill="#c7d2fe" text-anchor="middle">submit 全部任务</text>
+                        <rect x="180" y="34" width="120" height="24" rx="6" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="240" y="50" fill="#a7f3d0" text-anchor="middle" font-size="10">线程1: node A</text>
+                        <rect x="180" y="62" width="120" height="24" rx="6" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="240" y="78" fill="#a7f3d0" text-anchor="middle" font-size="10">线程2: node B</text>
+                        <rect x="180" y="90" width="120" height="24" rx="6" fill="rgba(52,211,153,.1)" stroke="#34d399"/>
+                        <text x="240" y="106" fill="#a7f3d0" text-anchor="middle" font-size="10">线程3: node C</text>
+                        <path d="M140 60 L178 46" stroke="#64748b" stroke-width="1.2" marker-end="url(#c)"/>
+                        <path d="M140 60 L178 74" stroke="#64748b" stroke-width="1.2" marker-end="url(#c)"/>
+                        <path d="M140 60 L178 100" stroke="#64748b" stroke-width="1.2" marker-end="url(#c)"/>
+                        <rect x="360" y="55" width="130" height="40" rx="8" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="425" y="72" fill="#fde68a" text-anchor="middle" font-size="10">wait(FIRST_</text>
+                        <text x="425" y="86" fill="#fde68a" text-anchor="middle" font-size="10">COMPLETED)</text>
+                        <path d="M300 74 L358 75" stroke="#64748b" stroke-width="1.2" marker-end="url(#c)"/>
+                        <rect x="520" y="55" width="100" height="40" rx="8" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="570" y="72" fill="#f9a8d4" text-anchor="middle" font-size="10">commit +</text>
+                        <text x="570" y="86" fill="#f9a8d4" text-anchor="middle" font-size="10">yield 输出</text>
+                        <path d="M490 75 L518 75" stroke="#64748b" stroke-width="1.2" marker-end="url(#c)"/>
+                        <path d="M570 95 L570 130 L425 130 L425 96" stroke="#64748b" stroke-width="1.2" fill="none" marker-end="url(#c)" stroke-dasharray="4"/>
+                        <text x="425" y="150" fill="#94a3b8" text-anchor="middle" font-size="10">循环回去等下一个完成，直到 futures 空</text>
+                        <rect x="120" y="185" width="400" height="34" rx="8" fill="rgba(239,68,68,.07)" stroke="#ef4444"/>
+                        <text x="320" y="206" fill="#fca5a5" text-anchor="middle" font-size="11">任一任务抛错 → _should_stop_others 为真 → break 停掉其余</text>
+                        <defs><marker id="c" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：多任务全部提交线程池，主循环用 FIRST_COMPLETED 逐个收割、边收边流式；出错则止损其余。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>失败即止 + commit：写入/错误/中断三条路</h1></div>
+            <div class="card">
+                <p>每轮收割后判断要不要停其他任务（<span class="fileref">_runner.py:330-335</span> + <span class="fileref">_runner.py:616</span>）：</p>
+<pre><code class="language-python"># _runner.py:330
+if _should_stop_others(done_for_stop, handled_exception_ids=self._handled_exception_ids):
+    break                                           # 333 有任务真失败 → 停掉其余
+yield                                               # 335 否则让出控制权，流式吐输出
+
+# _runner.py:616
+def _should_stop_others(done, *, handled_exception_ids=None) -> bool:
+    """Check if any task failed, if so, cancel all other tasks.
+    GraphInterrupts are not considered failures."""
+    for fut in done:
+        if fut.cancelled():
+            continue
+        elif exc := fut.exception():                # 626 这个 future 抛异常了？
+            if (id(exc) not in (handled_exception_ids or set())
+                and not isinstance(exc, GraphBubbleUp)):   # 629 中断/续跑信号不算失败
+                return True
+    return False</code></pre>
+                <p>而每个任务完成后（无论成败）由 <code>commit</code> 归档写入（<span class="fileref">_runner.py:574</span>）：</p>
+<pre><code class="language-python"># _runner.py:574
+def commit(self, task, exception) -> None:
+    if isinstance(exception, asyncio.CancelledError):
+        task.writes.append((ERROR, exception)); self.put_writes()(task.id, task.writes)
+    elif exception:
+        if isinstance(exception, GraphInterrupt):   # 585 是中断 → 存 INTERRUPT 写入
+            ... self.put_writes()(task.id, [(INTERRUPT, exception.args[0]), *resumes])
+        elif isinstance(exception, GraphBubbleUp):  # 592 冒泡信号 → 交给上层处理
+            pass
+        else:                                       # 595 真错误 → 存 ERROR 写入
+            task.writes.append((ERROR, exception)); self.put_writes()(task.id, task.writes)
+    else:                                           # 604 成功
+        if not task.writes:
+            task.writes.append((NO_WRITES, None))   # 611 没写任何东西 → 补一个占位标记
+        self.put_writes()(task.id, task.writes)     # 613 把写入交回 loop</code></pre>
+                <div class="walk">
+                    <div class="r"><code>GraphInterrupt 不算失败</code><span><code>_should_stop_others</code> 明确排除 <code>GraphBubbleUp</code>（GraphInterrupt 的父类）。人在环的中断是"计划内暂停"不是"出错"，所以不该连累其他并行任务被取消。</span></div>
+                    <div class="r"><code>commit 里三条分支</code><span>正常→存 writes；中断→存 <code>INTERRUPT</code> 写入（供恢复用，阶段 7）；真错误→存 <code>ERROR</code> 写入。<b>无论哪种，写入都进 checkpoint</b>——这样即便崩了，"崩在哪、崩之前写了啥"也都存了档，能恢复。</span></div>
+                    <div class="r"><code>NO_WRITES 占位</code><span>任务成功但啥也没写（比如纯副作用节点），也要补一个 <code>NO_WRITES</code> 标记。为什么？Day 21 apply_writes 里 <code>bump_step</code> 靠"有没有 task"判断要不要推进超步——这个占位保证"我确实跑过了"这一事实被记录。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界/坑：一个并行节点崩了，同批其他节点的写入会不会白跑？</span>
+                不会白跑，但要看时机。<code>_should_stop_others</code> 返回 True 只 <code>break</code> 掉<strong>还没完成</strong>的任务；<strong>已经完成的任务，它们的 commit 已经把写入存进 checkpoint 了</strong>。所以从崩溃点恢复时，那些已成功的节点不必重跑（Day 46 幂等恢复）。真正的坑是反过来：如果你的节点有<strong>外部副作用</strong>（比如已经发了一封邮件），而同批另一个节点崩了导致整步回滚重来，副作用会重复发生——引擎只能保证"状态写入"的幂等，管不了你的外部 IO。所以副作用节点要自己做幂等键。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>BackgroundExecutor：线程池与"退出时结账"</h1></div>
+            <div class="card">
+                <p>上面的 <code>self.submit()</code> 从哪来？来自 <code>BackgroundExecutor</code>（<span class="fileref">_executor.py:40</span>）——一个包着线程池的上下文管理器：</p>
+<pre><code class="language-python"># _executor.py:54
+def submit(self, fn, *args,
+    __cancel_on_exit__=False,     # 59 退出时若还没启动，可取消
+    __reraise_on_exit__=True,     # 60 退出时把任务里的异常重新抛出
+    __next_tick__=False, **kwargs,
+) -> concurrent.futures.Future[T]:
+    ctx = copy_context()                            # 64 拷贝上下文（ContextVar 隔离）
+    task = self.executor.submit(ctx.run, fn, *args, **kwargs)   # 71 丢进线程池
+    self.tasks[task] = (__cancel_on_exit__, __reraise_on_exit__)
+    task.add_done_callback(self.done)               # 74 完成即从 tasks 里摘除
+    return task
+
+# _executor.py:93 —— 退出上下文时（一步跑完）
+def __exit__(self, exc_type, exc_value, traceback):
+    tasks = self.tasks.copy()
+    for task, (cancel, _) in tasks.items():
+        if cancel:
+            task.cancel()                           # 104 取消标了 cancel_on_exit 的
+    if pending := {t for t in tasks if not t.done()}:
+        concurrent.futures.wait(pending)            # 107 等所有未完成的跑完
+    self.stack.__exit__(exc_type, exc_value, traceback)   # 109 关线程池
+    if exc_type is None:                            # 111 没有正在传播的异常时
+        for task, (_, reraise) in tasks.items():    # 113 才把任务内的异常重新抛出</code></pre>
+                <div class="walk">
+                    <div class="r"><code>copy_context() + ctx.run</code><span>每个任务在<b>独立拷贝的上下文</b>里跑。这样一个节点里改了 ContextVar（比如 config、tracing 上下文）不会污染并行的其他节点——线程安全的关键。</span></div>
+                    <div class="r"><code>add_done_callback(self.done)</code><span>任务一完成自动从 <code>self.tasks</code> 字典摘掉，顺手把 GraphBubbleUp（中断信号）吞掉不当错误。自动清账，不用手动管理。</span></div>
+                    <div class="r"><code>__exit__ 里 wait(pending)</code><span>退出上下文（一步结束）时<b>阻塞等所有未完成任务跑完</b>。保证不会有"半跑着的僵尸线程"泄漏到下一步——超步的边界是硬的。</span></div>
+                    <div class="r"><code>if exc_type is None: reraise</code><span>只有当前没有别的异常在传播时，才把任务里攒的异常重新抛出。避免"异常覆盖异常"丢失原始错误。</span></div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：async 图也是用这个线程池吗？</p>
+                    <p class="a">👨‍🏫 老师：不是。这是<b>同步</b>版 <code>BackgroundExecutor</code>（走线程池 <code>ThreadPoolExecutor</code>）。异步图用的是紧挨着的 <code>AsyncBackgroundExecutor</code>（<span class="fileref">_executor.py:122</span>），它不开线程，而是把每个任务变成 <code>asyncio</code> 协程任务，跑在<b>同一个事件循环</b>上，还支持 <code>max_concurrency</code> 用信号量限流。两者接口一样（都提供 <code>submit</code>），所以上层 PregelRunner 的 <code>tick/atick</code> 逻辑几乎对称。<strong>同步靠多线程并行、异步靠事件循环并发</strong>——这是 Python 并发的两条路，LangGraph 两条都铺了。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手 + 明日预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>PregelRunner 解决哪四个问题？（并发执行 / commit 写入 / yield 流式 / 失败即止）</li>
+                    <li>submit / put_writes 为什么用 weakref？（避免 loop↔runner 引用环，及时回收内存）</li>
+                    <li>单任务快路径省了什么？（不开线程池，当前线程同步跑，省并发开销）</li>
+                    <li>多任务怎么调度？（全提交线程池，FIRST_COMPLETED 逐个收割、边收边 yield）</li>
+                    <li>为什么 GraphInterrupt 不触发"停其他任务"？（中断是计划内暂停，不是失败）</li>
+                    <li>commit 的三条分支？（正常存 writes / 中断存 INTERRUPT / 错误存 ERROR，都进 checkpoint）</li>
+                    <li>同步和异步执行器分别靠什么并发？（线程池 vs 事件循环协程）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 PregelRunner.tick 主体（快路径 + 并行循环）
+sed -n '176,290p' libs/langgraph/langgraph/pregel/_runner.py
+
+# 2. 读 commit 三条分支
+sed -n '574,613p' libs/langgraph/langgraph/pregel/_runner.py
+
+# 3. 读线程池 BackgroundExecutor
+sed -n '40,120p' libs/langgraph/langgraph/pregel/_executor.py
+
+# 4. 亲眼看并行：两个节点同一步跑，观察它们的时间戳交错
+python -c "
+import time
+from langgraph.graph import StateGraph, START, END
+from typing import Annotated; import operator
+def make(name):
+    def f(s):
+        print(name,'start',time.time()); time.sleep(0.5); print(name,'end',time.time())
+        return {'log': [name]}
+    return f
+class S(dict): pass
+g = StateGraph(dict)
+g.add_node('a', make('A')); g.add_node('b', make('B'))
+g.add_edge(START,'a'); g.add_edge(START,'b'); g.add_edge('a',END); g.add_edge('b',END)
+g.compile().invoke({})   # A、B 同一超步并行，start 几乎同时
+"</code></pre>
+                <div class="tip"><strong>明天预告 · Day 23</strong>：执行器跑的其实不是"你的函数"本身，而是包了一层的 <code>PregelNode</code>——它负责"跑之前读好输入、跑之后把输出写进 channel"。明天进 <code>_read.py</code> 的 <code>PregelNode</code> 和 <code>_write.py</code> 的 <code>ChannelWrite</code>，看清一个节点的"读—算—写"三段式是怎么被组装出来的，以及 <code>Send</code> 到底怎么变成 TASKS 通道里的一条写入。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day21.html" style="color:var(--accent-cyan);">&larr; Day 21 任务准备</a>
+                <a href="langgraph-day23.html" style="color:var(--accent-green);">Day 23 · PregelNode 读写 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

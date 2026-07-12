@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 25 · 重试与超时 RetryPolicy / run_with_retry — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:#818cf8}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#22d3ee;flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 6px;margin:0 2px}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">25</div>
+            <h2>Day 25</h2>
+            <p class="version">重试与超时 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 节点会失败</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · RetryPolicy 五参数</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · run_with_retry 主循环</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 匹配策略 + 退避抖动</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · retry_on 判定</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 哪些异常不重试</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 超时与重试配合</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day24.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 24 IO映射</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day26.html" class="nav-link" style="color:var(--accent-green);">Day 26 调试画图 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 25 / 共 60 天 · 阶段 4 Pregel 执行引擎（核心深水区）</span>
+            <h1 class="part-title">重试与超时：让节点失败也能扛住</h1>
+            <p class="part-desc">Day 22 执行器无论快路径还是并行路径，跑任务都调 <code>run_with_retry</code>——今天终于展开它。Agent 节点最常见的失败就是"调 LLM 时网络抖了一下"，这种<strong>瞬时错误</strong>不该让整个图崩掉。<code>RetryPolicy</code>（<span class="fileref">types.py:416</span>）+ <code>run_with_retry</code>（<span class="fileref">_retry.py:573</span>）就是引擎的"重试保险"：指数退避、随机抖动、按异常类型决定重不重试。这是从"能跑"到"生产可用"的关键一课。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置</div>
+        <div class="steps">
+            <span class="st">①入门 D1-6</span><span class="sep">·</span>
+            <span class="st">②状态 D7-12</span><span class="sep">·</span>
+            <span class="st">③控制流 D13-18</span><span class="sep">·</span>
+            <span class="st on">④Pregel D19-26</span><span class="sep">·</span>
+            <span class="st">⑤通道 D27-32</span><span class="sep">·</span>
+            <span class="st">⑥持久化 D33-40</span><span class="sep">·</span>
+            <span class="st">⑦中断 D41-46</span><span class="sep">·</span>
+            <span class="st">⑧函数式 D47-52</span><span class="sep">·</span>
+            <span class="st">⑨预制件 D53-58</span><span class="sep">·</span>
+            <span class="st">⑩收官 D59-60</span>
+        </div>
+        <div class="steps" style="margin-top:8px">
+            <span class="st">D19 BSP模型</span><span class="sep">→</span>
+            <span class="st">D20 主循环</span><span class="sep">→</span>
+            <span class="st">D21 任务准备</span><span class="sep">→</span>
+            <span class="st">D22 执行器</span><span class="sep">→</span>
+            <span class="st">D23 读写</span><span class="sep">→</span>
+            <span class="st">D24 IO映射</span><span class="sep">→</span>
+            <span class="st on">D25 重试超时</span><span class="sep">→</span>
+            <span class="st">D26 调试画图</span>
+        </div></div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>节点会失败：瞬时错误 vs 确定性错误</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：agent 调 LLM，偶尔报个 500 或超时——难道整个对话就这么崩了？</span>
+                真实世界里节点会失败，但失败分两类：<strong>瞬时错误</strong>（网络抖动、限流 429、上游 5xx，重试一下大概率就好）和<strong>确定性错误</strong>（代码 bug、参数类型错，重试一万遍还是同样的错）。好的框架要能<strong>只对前者重试</strong>——对后者重试纯属浪费时间还掩盖 bug。今天看 LangGraph 怎么区分并处理。</div>
+                <p>重试逻辑在 Day 22 的执行链里的位置：<code>runner.tick → run_with_retry → task.proc.invoke（你的节点）</code>。也就是说重试是<strong>包在单个节点执行外面</strong>的一层循环——节点抛异常，这层决定"再来一次还是放弃"。</p>
+                <div class="essence"><span class="t">💡 本质：重试是"节点级"的，不是"整图级"的</span>
+                关键理解：重试发生在 <strong>单个节点</strong>的粒度上。某节点失败重试时，同超步的其他并行节点不受影响；重试成功后，这个超步照常继续。只有当重试也耗尽（超过 max_attempts），异常才向上冒泡到 Day 22 的 <code>_should_stop_others</code>，进而可能中止整个超步。<strong>先在最小粒度扛一扛，扛不住才升级。</strong></div>
+                <div class="baby"><span class="t">类比：打电话没打通</span>
+                给客户打电话占线（瞬时错误）——你会隔一会儿再打，而且越打不通、间隔越长（指数退避），免得一直骚扰。但如果是"号码是空号"（确定性错误），再打多少遍都没用，直接放弃换个号。<code>RetryPolicy</code> 就是这套"重拨规则"：重几次、间隔多久、遇到哪种忙音才值得重拨。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>RetryPolicy：五个参数定义"怎么重试"</h1></div>
+            <div class="card">
+                <p><code>RetryPolicy</code> 是个 NamedTuple（<span class="fileref">types.py:416</span>），带默认值：</p>
+<pre><code class="language-python"># types.py:416
+class RetryPolicy(NamedTuple):
+    """Configuration for retrying nodes."""
+    initial_interval: float = 0.5    # 第一次重试前等多久（秒）
+    backoff_factor: float = 2.0      # 每次重试间隔的放大倍数
+    max_interval: float = 128.0      # 间隔上限（再退避也不超过这个）
+    max_attempts: int = 3            # 最多尝试几次（含第一次）
+    jitter: bool = True              # 是否加随机抖动
+    retry_on: (type[Exception] | Sequence[type[Exception]]
+               | Callable[[Exception], bool]) = default_retry_on   # 哪些异常才重试</code></pre>
+                <div class="walk">
+                    <div class="r"><code>initial_interval=0.5</code><span>第一次失败后先等 0.5 秒再重试。给瞬时问题（网络抖动）一点恢复时间。</span></div>
+                    <div class="r"><code>backoff_factor=2.0</code><span><b>指数退避</b>的倍数：每失败一次，等待时间翻倍。0.5 → 1 → 2 → 4……越failed 越克制，避免雪崩式重试打垮已经不稳的上游。</span></div>
+                    <div class="r"><code>max_interval=128</code><span>退避的天花板。就算翻倍翻到很大，单次等待也不超过 128 秒——防止退避到"几小时后才重试"的荒唐值。</span></div>
+                    <div class="r"><code>max_attempts=3</code><span>总共最多试 3 次（1 次正常 + 2 次重试）。用光还失败就真放弃、向上抛。</span></div>
+                    <div class="r"><code>jitter=True</code><span><b>随机抖动</b>：在间隔上加一个 0~1 秒的随机量。为什么要随机？见 L04 的取舍——防"重试风暴同步化"。</span></div>
+                    <div class="r"><code>retry_on=default_retry_on</code><span>决定"哪些异常值得重试"的判据。默认是个智能函数（L05/L06），也能传异常类或自定义函数。</span></div>
+                </div>
+                <div class="anno"><b>注意</b>：节点默认<b>不带</b> RetryPolicy（除非你在 <code>add_node(..., retry_policy=RetryPolicy())</code> 显式配）。所以默认情况下节点失败就是直接失败——重试是你主动开启的能力，不是隐式行为。</div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 210" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">数据结构：RetryPolicy 的字段各管一件事</text>
+                        <rect x="60" y="40" width="520" height="70" rx="8" fill="rgba(99,102,241,.08)" stroke="#6366f1"/>
+                        <text x="320" y="58" fill="#c7d2fe" text-anchor="middle" font-weight="700">RetryPolicy(NamedTuple)</text>
+                        <text x="90" y="80" fill="#a7f3d0" font-size="10">initial_interval=0.5</text>
+                        <text x="300" y="80" fill="#a7f3d0" font-size="10">backoff_factor=2.0</text>
+                        <text x="470" y="80" fill="#a7f3d0" font-size="10">max_interval=128</text>
+                        <text x="90" y="99" fill="#fde68a" font-size="10">max_attempts=3</text>
+                        <text x="300" y="99" fill="#fde68a" font-size="10">jitter=True</text>
+                        <text x="470" y="99" fill="#f9a8d4" font-size="10">retry_on=判据</text>
+                        <text x="150" y="140" fill="#94a3b8" text-anchor="middle" font-size="10">← 三个管"等多久"（退避曲线）</text>
+                        <text x="360" y="140" fill="#94a3b8" text-anchor="middle" font-size="10">管"重几次"</text>
+                        <text x="470" y="140" fill="#94a3b8" text-anchor="middle" font-size="10">管"哪些异常才重"</text>
+                        <rect x="120" y="160" width="400" height="36" rx="8" fill="rgba(52,211,153,.06)" stroke="#34d399"/>
+                        <text x="320" y="182" fill="#86efac" text-anchor="middle" font-size="10">sleep = min(max_interval, initial × factor^(n-1)) + [jitter 0~1s]</text>
+                        <defs></defs>
+                    </svg>
+                    <div class="cap">图注：三个字段决定退避间隔曲线，max_attempts 决定次数，retry_on 决定异常筛选——各司其职。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>run_with_retry：一个 while True 包住节点</h1></div>
+            <div class="card">
+                <p><code>run_with_retry</code>（<span class="fileref">_retry.py:573</span>）主体就是个 <code>while True</code>，每轮尝试跑一次节点：</p>
+<pre><code class="language-python"># _retry.py:573
+def run_with_retry(task, retry_policy, configurable=None) -> None:
+    retry_policy = task.retry_policy or retry_policy   # 579 节点自带优先，否则用图级默认
+    attempts = 0
+    config = ...
+    while True:                                        # 600 重试循环
+        try:
+            task.writes.clear()                        # 615 关键！清掉上次失败残留的写入
+            return task.proc.invoke(task.input, config)  # 617 跑你的节点，成功就 return 退出
+        except ParentCommand as exc:                   # 618 跨图 Command，特殊处理（不重试）
+            ...
+        except GraphBubbleUp:                          # 632 中断/续跑信号 → 直接抛，不重试
+            raise
+        except asyncio.CancelledError as exc:
+            raise NodeCancelledError(task.name) from exc  # 640 同步节点被取消 → 转成错误
+        except Exception as exc:                       # 641 普通异常 → 进重试判定（L04）
+            ...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>task.retry_policy or retry_policy</code><span>优先用<b>节点自己</b>的策略（<code>add_node(retry_policy=...)</code>），没有才用<b>图级</b>默认。细粒度覆盖粗粒度——不同节点可有不同重试脾气（LLM 节点重试、纯计算节点不重试）。</span></div>
+                    <div class="r"><code>task.writes.clear()</code><span><b>每次重试前清空写入</b>。为什么重要？上一次失败前节点可能已经写了半截东西进 <code>task.writes</code>，不清就会和这次的写入叠加、产生脏数据。清空保证"每次尝试都是干净的从头来"。这是重试幂等的一个前提。</span></div>
+                    <div class="r"><code>return task.proc.invoke(...)</code><span>真正跑节点（Day 23 那根 read→bound→write 链）。<b>成功就 return 直接跳出 while</b>——只有抛异常才会走到下面的 except 继续循环。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 边界/坑：重试会重跑整个节点函数——副作用要自己保证幂等</span>
+                <code>task.writes.clear()</code> 只能清掉"对图状态的写入"，清不掉你节点里的<strong>外部副作用</strong>。如果你的节点在失败前已经"给用户扣了一次款"或"发了一条 MQ 消息"，重试会<strong>再执行一遍</strong>——扣两次款。引擎无法回滚你的外部操作。所以带副作用的节点必须自己做幂等（用幂等键、先查后写）。<strong>"引擎重试安全"仅限于状态写入，不含你的 IO。</strong></div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>匹配策略 + 退避抖动：等多久再重试</h1></div>
+            <div class="card">
+                <p>捕获普通异常后，决定重不重试、等多久（<span class="fileref">_retry.py:641-674</span>）：</p>
+<pre><code class="language-python"># _retry.py:641
+except Exception as exc:
+    if not retry_policy:
+        raise                                          # 645 压根没配策略 → 不重试，直接抛
+    matching_policy = None
+    for policy in retry_policy:                        # 649 可能有多个策略，逐个看谁匹配
+        if _should_retry_on(policy, exc):              # 650 这个异常该按这个策略重试吗（L05）
+            matching_policy = policy
+            break
+    if not matching_policy:
+        raise                                          # 655 没有策略认领这个异常 → 抛
+    attempts += 1                                      # 658 失败次数 +1
+    if attempts >= matching_policy.max_attempts:
+        raise                                          # 660 用光重试次数 → 放弃
+    interval = matching_policy.initial_interval        # 663
+    interval = min(matching_policy.max_interval,       # 665 退避：初始 × 倍数^(失败次数-1)，封顶
+                   interval * (matching_policy.backoff_factor ** (attempts - 1)))
+    sleep_time = (interval + random.uniform(0, 1)      # 671 抖动：加 0~1 秒随机
+                  if matching_policy.jitter else interval)
+    time.sleep(sleep_time)                             # 674 睡一会儿，然后 while 回去重试</code></pre>
+                <div class="walk">
+                    <div class="r"><code>interval * backoff_factor ** (attempts-1)</code><span>指数退避公式。第 1 次重试 <code>0.5 × 2^0 = 0.5s</code>，第 2 次 <code>0.5 × 2^1 = 1s</code>，第 3 次 <code>2s</code>……用 <code>min(max_interval, ...)</code> 封顶。</span></div>
+                    <div class="r"><code>+ random.uniform(0, 1)</code><span>抖动：在算好的间隔上再加一个 0~1 秒的随机数，打散重试时刻。</span></div>
+                    <div class="r"><code>time.sleep(sleep_time)</code><span>同步版用 <code>time.sleep</code> 阻塞当前线程等待（异步版用 <code>await asyncio.sleep</code>，<span class="fileref">_retry.py:830</span>）。睡醒后 <code>while True</code> 回到顶端再试一次。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 190" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">控制流：指数退避重试（initial=0.5, factor=2, attempts=3）</text>
+                        <rect x="20" y="60" width="90" height="36" rx="7" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                        <text x="65" y="82" fill="#a7f3d0" text-anchor="middle" font-size="10">试① 跑节点</text>
+                        <rect x="180" y="60" width="90" height="36" rx="7" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="225" y="82" fill="#fde68a" text-anchor="middle" font-size="10">试② 跑节点</text>
+                        <rect x="340" y="60" width="90" height="36" rx="7" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="385" y="82" fill="#fde68a" text-anchor="middle" font-size="10">试③ 跑节点</text>
+                        <rect x="500" y="60" width="120" height="36" rx="7" fill="rgba(239,68,68,.1)" stroke="#ef4444"/>
+                        <text x="560" y="82" fill="#fca5a5" text-anchor="middle" font-size="10">仍失败→抛出</text>
+                        <path d="M110 78 L178 78" stroke="#64748b" stroke-width="1.3" marker-end="url(#f)"/>
+                        <text x="144" y="52" fill="#94a3b8" text-anchor="middle" font-size="9">睡 ~0.5s</text>
+                        <path d="M270 78 L338 78" stroke="#64748b" stroke-width="1.3" marker-end="url(#f)"/>
+                        <text x="304" y="52" fill="#94a3b8" text-anchor="middle" font-size="9">睡 ~1.0s</text>
+                        <path d="M430 78 L498 78" stroke="#64748b" stroke-width="1.3" marker-end="url(#f)"/>
+                        <text x="464" y="52" fill="#94a3b8" text-anchor="middle" font-size="9">用光次数</text>
+                        <text x="320" y="135" fill="#86efac" text-anchor="middle" font-size="11">任一次成功 → return，立即跳出循环</text>
+                        <text x="320" y="158" fill="#f9a8d4" text-anchor="middle" font-size="10">每次实际睡眠 = 退避间隔 + 0~1s 随机抖动</text>
+                        <defs><marker id="f" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：最多 3 次尝试，间隔按 0.5→1→2 指数增长并加抖动；任一次成功即退出。</div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍①：为什么要加随机抖动 jitter？没它不是更可预测吗？</span>
+                想象一个上游服务挂了 1 秒，此刻有 1000 个节点同时失败。如果没抖动，它们会在<strong>完全相同</strong>的时刻（都等 0.5s）一起重试——1000 个请求同一瞬间砸向刚缓过来的上游，直接把它再打挂，形成"重试风暴/惊群"。抖动让每个重试时刻散开在 0.5~1.5s 之间，把冲击摊平。<strong>可预测性在这里是缺点，随机性才是解药</strong>——这是分布式系统里公认的最佳实践，LangGraph 默认开启。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>retry_on：这个异常该不该重试</h1></div>
+            <div class="card">
+                <p>"该不该重试"由 <code>_should_retry_on</code>（<span class="fileref">_retry.py:841</span>）判定，支持三种写法：</p>
+<pre><code class="language-python"># _retry.py:841
+def _should_retry_on(retry_policy, exc) -> bool:
+    if isinstance(retry_policy.retry_on, Sequence):       # 843 ① 传了异常类的列表/元组
+        return isinstance(exc, tuple(retry_policy.retry_on))
+    elif isinstance(retry_policy.retry_on, type) and issubclass(
+        retry_policy.retry_on, Exception):                 # 845 ② 传了单个异常类
+        return isinstance(exc, retry_policy.retry_on)
+    elif callable(retry_policy.retry_on):                  # 849 ③ 传了自定义函数
+        return retry_policy.retry_on(exc)
+    else:
+        raise TypeError("retry_on must be an Exception class, a list/tuple ..., or a callable")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>Sequence → isinstance(exc, tuple(...))</code><span>写法①：<code>retry_on=[ConnectionError, TimeoutError]</code>，异常是其中任一类型就重试。最常用。</span></div>
+                    <div class="r"><code>单个 type → isinstance</code><span>写法②：<code>retry_on=ConnectionError</code>，只重这一类。</span></div>
+                    <div class="r"><code>callable → retry_on(exc)</code><span>写法③：传个函数，你自己判断（比如"HTTP 状态码是 5xx 才重"）。默认的 <code>default_retry_on</code> 就是这种——下一讲细看。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值走一遍</span>
+                <code>RetryPolicy(retry_on=(ConnectionError, TimeoutError))</code>：节点抛 <code>ConnectionError</code> → <code>isinstance(exc, (ConnectionError, TimeoutError))</code> 为 True → 重试；抛 <code>ValueError</code> → 不在元组里 → False → 立即放弃向上抛。<strong>你能精确控制"只对哪些异常宽容"。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>default_retry_on：默认哪些不该重试</h1></div>
+            <div class="card">
+                <p>默认判据 <code>default_retry_on</code>（<span class="fileref">_internal/_retry.py:1</span>）体现了"哪些错重试有意义"的经验：</p>
+<pre><code class="language-python"># _internal/_retry.py:1
+def default_retry_on(exc: Exception) -> bool:
+    import httpx, requests
+    if isinstance(exc, ConnectionError):
+        return True                                    # 连接错误 → 重（瞬时）
+    if isinstance(exc, httpx.HTTPStatusError):
+        return 500 <= exc.response.status_code < 600   # 5xx 才重（服务端问题）
+    if isinstance(exc, requests.HTTPError):
+        return 500 <= exc.response.status_code < 600 if exc.response else True
+    if isinstance(exc, (                               # ↓ 这些一律不重（确定性错误）
+        ValueError, TypeError, ArithmeticError, ImportError, LookupError,
+        NameError, SyntaxError, RuntimeError, ReferenceError,
+        StopIteration, StopAsyncIteration, OSError,
+    )):
+        return False
+    return True                                        # 其余未知异常 → 默认重试</code></pre>
+                <div class="walk">
+                    <div class="r"><code>ConnectionError → True</code><span>网络连不上，典型瞬时错误，重。</span></div>
+                    <div class="r"><code>5xx → True，4xx → False</code><span><b>只重服务端错误（5xx）</b>。4xx（如 400 参数错、401 没权限）是你请求本身的问题，重试也是同样的错——不重。这个区分极其关键。</span></div>
+                    <div class="r"><code>ValueError/TypeError/... → False</code><span>一长串<b>代码级错误</b>明确不重：类型错、名字错、语法错、查找错……这些是 bug，重试只会掩盖问题、浪费时间。</span></div>
+                    <div class="r"><code>return True</code>（兜底）<span>不认识的异常<b>默认重试</b>——保守假设"可能是瞬时的"。这是"宁可多重一次也别漏掉可恢复错误"的取向。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍②：为什么明确把 ValueError/TypeError 列进"不重试"黑名单？</span>
+                本可以简单点：默认全重试，让用户自己配 retry_on 排除。但那样新手一开重试，代码里的 <code>TypeError</code>（真 bug）会被<strong>悄悄重试 3 次然后才报错</strong>——不但拖慢反馈、还让人误以为是"偶发问题"而非"必现 bug"。LangGraph 的选择是<strong>把"几乎不可能靠重试解决"的异常类型硬编码进黑名单</strong>，让 bug 立即暴露、让重试只作用于真正的瞬时错误。代价是这个名单是"经验性"的、可能不完美（比如某些 OSError 其实是瞬时的），但对绝大多数场景，"让 bug 快速失败"比"对 bug 也宽容"更有价值。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>超时与重试怎么配合</h1></div>
+            <div class="card">
+                <p>超时有两个层次，别混淆：</p>
+                <p><strong>① 超步级墙钟超时</strong>（Day 20/22）：<code>step_timeout</code> 通过 <code>runner.tick(timeout=...)</code> 给<strong>整个超步</strong>设上限，在 <code>concurrent.futures.wait</code> 那层生效（<span class="fileref">_runner.py:286</span>）。到点还没跑完就停等。</p>
+                <p><strong>② 节点级超时</strong>（TimeoutPolicy）：给<strong>单次节点调用</strong>设超时。同步节点<strong>不支持</strong>——<code>run_with_retry</code> 开头就守卫（<span class="fileref">_retry.py:580-583</span>）：</p>
+<pre><code class="language-python"># _retry.py:580
+if task.timeout is not None:
+    # 同步节点无 asyncio 上下文，编译期已拦截，这里是运行期兜底
+    raise sync_timeout_unsupported(task.name)</code></pre>
+                <p>异步节点才有节点级超时，用一个"看门狗"协程实现（<span class="fileref">_retry.py:417</span>）：</p>
+<pre><code class="language-python"># _retry.py:417
+async def _run_timeout_watchdog(run_timeout_s: float) -> None:
+    await asyncio.sleep(run_timeout_s)     # 睡够超时时长
+    raise asyncio.TimeoutError             # 到点就抛超时——和节点协程赛跑，谁先完成算谁</code></pre>
+                <div class="walk">
+                    <div class="r"><code>看门狗协程</code><span>思路：起一个"睡 N 秒就抛 TimeoutError"的协程，和你的节点协程一起跑。节点先完成就正常返回；看门狗先醒就把节点判超时。这就是异步超时的经典实现。</span></div>
+                    <div class="r"><code>超时后交给重试</code><span>节点级超时抛出的 <code>NodeTimeoutError</code>，会被 <code>run_with_retry</code> 的 except 捕获，再走一遍 retry_on 判定——<b>超时也能被重试策略接管</b>。所以"超时 + 重试"能组合：单次太慢就掐掉重来。</span></div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白：同步节点为什么不支持超时？我 <code>time.sleep(100)</code> 卡住了咋办？</p>
+                    <p class="a">👨‍🏫 老师：因为同步代码跑在线程里，Python <b>没法安全地从外部打断一个正在跑的线程</b>（没有可靠的线程 kill）。异步能超时是因为 asyncio 可以在 <code>await</code> 点让出、被取消。所以卡死的同步节点，超步级 <code>step_timeout</code> 能让主循环"不再等它"（<code>wait</code> 超时返回），但那个线程本身还在后台空转——这也是为什么<b>生产环境重 IO 的节点建议写成 async</b>：才能真正掐断。同步节点要防卡死，只能靠你自己在节点里给底层库设超时（比如 <code>requests.get(timeout=5)</code>）。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>今日小结 + 动手 + 明日预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>重试是什么粒度的？（单个节点级，同超步其他节点不受影响；耗尽才向上冒泡）</li>
+                    <li>RetryPolicy 五个参数？（initial_interval / backoff_factor / max_interval / max_attempts / jitter + retry_on）</li>
+                    <li>每次重试前为什么 <code>task.writes.clear()</code>？（清掉上次失败残留写入，保证干净重来）</li>
+                    <li>为什么要加 jitter 抖动？（打散重试时刻，防"重试风暴/惊群"打垮上游）</li>
+                    <li>default_retry_on 的原则？（5xx/连接错重试；4xx 和 ValueError/TypeError 等 bug 不重）</li>
+                    <li>为什么要把代码错列进不重试黑名单？（让 bug 快速失败、不被悄悄掩盖）</li>
+                    <li>节点级超时的限制？（仅异步节点支持；同步节点靠 step_timeout 不再等它，但线程仍在后台）</li>
+                    <li>重试能保证幂等吗？（只保证状态写入幂等，外部副作用要你自己做幂等）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 run_with_retry 主循环
+sed -n '573,682p' libs/langgraph/langgraph/pregel/_retry.py
+
+# 2. 读 retry_on 判定 + 默认判据
+sed -n '841,854p' libs/langgraph/langgraph/pregel/_retry.py
+cat libs/langgraph/langgraph/_internal/_retry.py
+
+# 3. 亲眼看重试：前两次抛错、第三次成功
+python -c "
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import RetryPolicy
+from typing import TypedDict
+class S(TypedDict): n: int
+calls = {'c': 0}
+def flaky(s):
+    calls['c'] += 1
+    print('attempt', calls['c'])
+    if calls['c'] < 3: raise ConnectionError('boom')  # 前两次假装网络错
+    return {'n': 42}
+g = StateGraph(S)
+g.add_node('flaky', flaky, retry_policy=RetryPolicy(initial_interval=0.1, max_attempts=5))
+g.add_edge(START,'flaky'); g.add_edge('flaky',END)
+print(g.compile().invoke({'n':0}))   # 观察 attempt 1/2/3，最终 n=42
+"</code></pre>
+                <div class="tip"><strong>明天预告 · Day 26</strong>：阶段 4 收官。前面所有机制都跑起来了，可怎么<strong>看清</strong>它在跑什么？明天进 <code>debug.py</code>（<code>stream_mode="debug"</code> 每步吐 task/checkpoint 事件）和 <code>_draw.py</code>（把图画成 Mermaid——而且它是靠"空跑一遍 Pregel 循环"来发现边的！）。学会给引擎装上"仪表盘"，也为阶段 6 的时间旅行埋下伏笔。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day24.html" style="color:var(--accent-cyan);">&larr; Day 24 输入输出映射</a>
+                <a href="langgraph-day26.html" style="color:var(--accent-green);">Day 26 · 调试与画图 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

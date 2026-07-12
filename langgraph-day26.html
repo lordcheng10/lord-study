@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 26 · 调试与画图 debug.py / _draw.py — LangGraph 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left}
+        .ttable th{background:var(--bg-secondary);color:#818cf8}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#22d3ee;flex-shrink:0;min-width:160px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .fileref{display:inline-block;font-size:11px;font-family:ui-monospace,monospace;background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 6px;margin:0 2px}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">26</div>
+            <h2>Day 26</h2>
+            <p class="version">调试与画图 · 8 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 8 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 给引擎装仪表盘</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · map_debug_tasks</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · map_debug_checkpoint</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · debug 模式怎么发出</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 写入聚合 $writes</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · draw_graph 空跑发现边</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 为何空跑而非读结构</a></li>
+            <li><a href="#l08" class="nav-link" data-section="l08">L08 · 阶段小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langgraph-day25.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 25 重试超时</a></li>
+            <li><a href="langgraph-tutorial.html" class="nav-link">60 天总目录</a></li>
+            <li><a href="langgraph-day27.html" class="nav-link" style="color:var(--accent-green);">Day 27 通道抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 26 / 共 60 天 · 阶段 4 Pregel 执行引擎（核心深水区·收官）</span>
+            <h1 class="part-title">调试与画图：给 Pregel 引擎装上仪表盘</h1>
+            <p class="part-desc">阶段 4 收官。前 7 天把引擎里外拆了个遍，可跑起来时怎么<strong>看清</strong>它在干什么？今天两件事：<code>stream_mode="debug"</code> 每步吐出 task / checkpoint 事件（<span class="fileref">debug.py</span>），让你像看回放一样审视每个超步；<code>get_graph()</code> 把图画成 Mermaid（<span class="fileref">_draw.py</span>）——而它发现边的方式极妙：<strong>拿一张空图、空跑一遍 Pregel 主循环，看每步谁触发了谁</strong>。学会观测，也顺带为阶段 6 的时间旅行铺路。</p>
+        </div>
+
+        <div class="journey"><div class="jt">📍 你在 60 天里的位置</div>
+        <div class="steps">
+            <span class="st">①入门 D1-6</span><span class="sep">·</span>
+            <span class="st">②状态 D7-12</span><span class="sep">·</span>
+            <span class="st">③控制流 D13-18</span><span class="sep">·</span>
+            <span class="st on">④Pregel D19-26</span><span class="sep">·</span>
+            <span class="st">⑤通道 D27-32</span><span class="sep">·</span>
+            <span class="st">⑥持久化 D33-40</span><span class="sep">·</span>
+            <span class="st">⑦中断 D41-46</span><span class="sep">·</span>
+            <span class="st">⑧函数式 D47-52</span><span class="sep">·</span>
+            <span class="st">⑨预制件 D53-58</span><span class="sep">·</span>
+            <span class="st">⑩收官 D59-60</span>
+        </div>
+        <div class="steps" style="margin-top:8px">
+            <span class="st">D19 BSP模型</span><span class="sep">→</span>
+            <span class="st">D20 主循环</span><span class="sep">→</span>
+            <span class="st">D21 任务准备</span><span class="sep">→</span>
+            <span class="st">D22 执行器</span><span class="sep">→</span>
+            <span class="st">D23 读写</span><span class="sep">→</span>
+            <span class="st">D24 IO映射</span><span class="sep">→</span>
+            <span class="st">D25 重试超时</span><span class="sep">→</span>
+            <span class="st on">D26 调试画图</span>
+        </div></div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>给引擎装仪表盘：两种"看清"的手段</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：图跑出来结果不对，可它一共跑了几步、每步激活了谁、状态怎么演变——我完全看不到。</span>
+                Day 24 的 <code>values</code>/<code>updates</code> 只给你"状态/更新"，不告诉你引擎的<strong>内部节奏</strong>：这一步计划了哪些 task？它们的触发通道是什么？存了哪个 checkpoint？下一步 <code>next</code> 是谁？调试复杂图（尤其有环、有 Send 扇出）时，这些"引擎视角"的信息才是关键。<code>stream_mode="debug"</code> 就是把引擎内部状态<strong>逐步暴露</strong>出来。</div>
+                <p>两种手段互补：</p>
+                <ul>
+                    <li><strong>debug 流</strong>（<span class="fileref">debug.py</span>）：运行时观测。每步产出两类事件——<code>task</code>（这步要跑谁）和 <code>task_result</code>/<code>checkpoint</code>（这步跑完的结果和存档）。</li>
+                    <li><strong>画图</strong>（<span class="fileref">_draw.py</span>）：静态观测。<code>graph.get_graph().draw_mermaid()</code> 把节点和边画出来，一眼看清结构。</li>
+                </ul>
+                <div class="essence"><span class="t">💡 本质：debug 流复用的就是前面所有 map_* 函数</span>
+                今天你会发现一个惊喜——debug 模式并没有另起炉灶，它就是把 Day 24 的 <code>map_output_*</code> 换成 <code>map_debug_tasks</code> / <code>map_debug_checkpoint</code>，塞进 Day 20 那个 <code>_emit</code> 机制。<strong>观测能力是"复用流式管道 + 换个映射函数"实现的</strong>，不是额外挂的一套东西。理解了前面的 _emit 和 map_output，debug 就是水到渠成。</div>
+                <div class="baby"><span class="t">类比：行车记录仪 + 车辆结构图</span>
+                debug 流像<strong>行车记录仪</strong>：逐帧记录"这一秒踩了油门、那一秒打了方向"，出事了能回放查因；画图像<strong>车辆结构图</strong>：静态地告诉你发动机连着变速箱、变速箱连着车轮。一个看"动态怎么跑"，一个看"静态怎么连"。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>map_debug_tasks：这一步要跑谁</h1></div>
+            <div class="card">
+                <p>debug 的第一类事件由 <code>map_debug_tasks</code>（<span class="fileref">debug.py:41</span>）产出——在任务执行<strong>之前</strong>发（Day 20 tick 里 <code>_emit("tasks", ...)</code>）：</p>
+<pre><code class="language-python"># debug.py:41
+def map_debug_tasks(tasks) -> Iterator[TaskPayload]:
+    """Produce "task" events for stream_mode=debug."""
+    for task in tasks:
+        if task.config is not None and TAG_HIDDEN in task.config.get("tags", []):
+            continue                                   # 44 隐藏任务不吐
+        payload: TaskPayload = {
+            "id": task.id,                             # 48 任务唯一 id
+            "name": task.name,                         # 49 节点名
+            "input": task.input,                       # 50 喂给它的输入（读通道读出来的）
+            "triggers": task.triggers,                 # 51 是被哪些通道触发的
+        }
+        if task.config is not None:                    # 60 附上用户级 metadata（过滤内部键）
+            md = {k: v for k, v in (task.config.get("metadata") or {}).items()
+                  if k not in EXCLUDED_METADATA_KEYS}
+            ...
+            if md:
+                payload["metadata"] = md
+        yield payload</code></pre>
+                <div class="walk">
+                    <div class="r"><code>"triggers": task.triggers</code><span><b>调试利器</b>：直接告诉你"这个任务是被哪个通道触发的"。图为什么在这步激活了 agent？看 triggers 就知道——是 messages 通道更新了。省去猜。</span></div>
+                    <div class="r"><code>"input": task.input</code><span>任务的实际输入（Day 23 ChannelRead 读出来的那份）。能看到"喂给节点的到底是什么"，排查"节点行为怪异"时先看它吃进去的是不是对的。</span></div>
+                    <div class="r"><code>EXCLUDED_METADATA_KEYS 过滤</code><span>只保留用户关心的 metadata，丢掉 langgraph 内部键（step/node/checkpoint_ns 等，这些和 task 自身字段重复）。让输出干净。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值走一遍</span>
+                <code>stream(mode="debug")</code> 在某步吐出：<code>{"type":"task", "payload":{"id":"...","name":"agent","input":{"messages":[...]},"triggers":["messages"]}}</code>。读它你立刻知道："第 N 步，agent 因 messages 通道更新被触发，输入是当前消息列表。"这就是引擎视角的实况。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>map_debug_checkpoint：这一步存了什么档</h1></div>
+            <div class="card">
+                <p>第二类事件由 <code>map_debug_checkpoint</code>（<span class="fileref">debug.py:144</span>）产出——在 after_tick 存档时发，携带这步的完整快照：</p>
+<pre><code class="language-python"># debug.py:144
+def map_debug_checkpoint(config, channels, stream_channels, metadata, tasks,
+                         pending_writes, parent_config, output_keys) -> Iterator[CheckpointPayload]:
+    ...
+    yield {
+        "config": rm_pregel_keys(patch_checkpoint_map(config, metadata)),   # 177 本步 checkpoint 定位
+        "parent_config": ...,                          # 178 上一个 checkpoint（用于时间旅行链）
+        "values": read_channels(channels, stream_channels),   # 179 存档时的完整状态
+        "metadata": metadata,                          # 180 step/source 等元信息
+        "next": [t.name for t in tasks],               # 181 下一步会跑谁
+        "tasks": [                                     # 182 每个任务的结果/错误/中断
+            {"id": t.id, "name": t.name, "error": t.error, "state": t.state}
+            if t.error else
+            {"id": t.id, "name": t.name, "result": t.result,
+             "interrupts": tuple(asdict(i) for i in t.interrupts), "state": t.state}
+            if t.result else
+            {"id": t.id, "name": t.name, "interrupts": ..., "state": t.state}
+            for t in tasks_w_writes(tasks, pending_writes, task_states, output_keys)
+        ],
+    }</code></pre>
+                <div class="walk">
+                    <div class="r"><code>"values": read_channels(...)</code><span>存档瞬间的完整状态（复用 Day 24 的 <code>read_channels</code>！）。每个 checkpoint 都带一份全量——这正是<b>时间旅行</b>能回到任意步的数据基础（阶段 6）。</span></div>
+                    <div class="r"><code>"next": [t.name for t in tasks]</code><span>下一步待跑的节点名。中断后你 <code>get_state()</code> 看到的 <code>next</code> 就来自这里——它告诉你"恢复后会从哪继续"。</span></div>
+                    <div class="r"><code>"parent_config"</code><span>指向上一个 checkpoint。一串 checkpoint 靠 parent 链成一条历史，<code>get_state_history()</code> 就是顺着这条链回溯（Day 44）。</span></div>
+                    <div class="r"><code>error / result / interrupts 三态</code><span>任务结果按三种情况分别打包：出错了带 error；正常带 result；被中断带 interrupts。调试时一眼看出"这个任务是成了、崩了、还是停在人在环那了"。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">数据结构：debug 流的两类事件长什么样</text>
+                        <rect x="30" y="42" width="270" height="140" rx="8" fill="rgba(59,130,246,.08)" stroke="#3b82f6"/>
+                        <text x="165" y="62" fill="#93c5fd" text-anchor="middle" font-weight="700">task 事件（执行前）</text>
+                        <text x="50" y="86" fill="#cbd5e1" font-size="10">id: 任务唯一 id</text>
+                        <text x="50" y="106" fill="#cbd5e1" font-size="10">name: 节点名</text>
+                        <text x="50" y="126" fill="#a7f3d0" font-size="10">triggers: 被哪些通道触发 ★</text>
+                        <text x="50" y="146" fill="#a7f3d0" font-size="10">input: 喂进去的输入 ★</text>
+                        <text x="50" y="166" fill="#cbd5e1" font-size="10">metadata: 用户级元信息</text>
+                        <rect x="340" y="42" width="270" height="140" rx="8" fill="rgba(234,179,8,.08)" stroke="#eab308"/>
+                        <text x="475" y="62" fill="#fde68a" text-anchor="middle" font-weight="700">checkpoint 事件（存档时）</text>
+                        <text x="360" y="86" fill="#a7f3d0" font-size="10">values: 存档时完整状态 ★</text>
+                        <text x="360" y="106" fill="#a7f3d0" font-size="10">next: 下一步会跑谁 ★</text>
+                        <text x="360" y="126" fill="#cbd5e1" font-size="10">config / parent_config: 时间旅行链</text>
+                        <text x="360" y="146" fill="#cbd5e1" font-size="10">metadata: step / source</text>
+                        <text x="360" y="166" fill="#cbd5e1" font-size="10">tasks: 每任务 result/error/interrupt</text>
+                        <defs></defs>
+                    </svg>
+                    <div class="cap">图注：task 事件回答"这步跑谁、被谁触发、吃什么"；checkpoint 事件回答"现在状态、下一步谁、结果如何"。★ 为 values/updates 拿不到的引擎视角信息。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>debug 模式怎么发出：checkpoints/tasks 的重映射</h1></div>
+            <div class="card">
+                <p>debug 流不是独立通道，而是 <code>_emit</code>（Day 20，<span class="fileref">_loop.py:1380</span>）把 <code>checkpoints</code>/<code>tasks</code> 事件<strong>重新包装</strong>成 debug：</p>
+<pre><code class="language-python"># _loop.py:1380
+def _emit(self, mode, values, *args, **kwargs) -> None:
+    if self.stream is None:
+        return
+    debug_remap = mode in ("checkpoints", "tasks") and "debug" in self.stream.modes  # 1389
+    if mode not in self.stream.modes and not debug_remap:
+        return                                         # 1390 既不是订阅的模式、也不需重映射 → 不发
+    for v in values(*args, **kwargs):                  # 1392 调 map_debug_* 生成事件
+        if mode in self.stream.modes:
+            self.stream((self.checkpoint_ns, mode, v))  # 1394 原模式直接发
+        if debug_remap:                                # 1396 若订阅了 debug，再包一层发一份
+            self.stream((self.checkpoint_ns, "debug", {
+                "step": self.step - 1 if mode == "checkpoints" else self.step,  # 1402
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "type": "checkpoint" if mode == "checkpoints" else "task_result" ...
+            }))</code></pre>
+                <div class="walk">
+                    <div class="r"><code>debug_remap</code><span>核心开关：当你订阅了 <code>"debug"</code>，引擎把内部的 <code>checkpoints</code> 和 <code>tasks</code> 事件<b>额外</b>包装成带 <code>step/timestamp/type</code> 的 debug 事件发一份。debug = "checkpoints + tasks 的加壳版"。</span></div>
+                    <div class="r"><code>"step" / "timestamp" / "type"</code><span>debug 事件比原始事件多了这三样"元信息包装"——步号、时间戳、类型。有了它们你才能把一串事件按时间/步号排成清晰的回放。</span></div>
+                    <div class="r"><code>同时发原模式 + debug</code><span>如果你同时订阅了 <code>tasks</code> 和 <code>debug</code>，一个任务事件会发两份（各自格式）。互不干扰。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">🎯 设计取舍①：debug 为什么是"重映射已有事件"而不是独立埋点？</span>
+                本可以在引擎各处单独插 debug 埋点。但那意味着两套并行的观测代码，容易<strong>信息漂移</strong>——debug 显示的和实际发生的不一致（埋点忘了更新）。LangGraph 的做法是让 debug <strong>寄生</strong>在既有的 checkpoints/tasks 事件上，只加一层 <code>step/timestamp/type</code> 外壳。这样 debug 看到的<strong>就是引擎真正发出的事件</strong>，天然同步、零漂移。代价是 debug 事件的结构受限于底层事件（不能任意定制），但换来"所见即真实"的可靠性——对调试工具而言这是对的取舍。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>写入聚合：同通道多次写怎么呈现</h1></div>
+            <div class="card">
+                <p>一个小而精的细节：debug 展示任务写入时，同一通道被写多次要特殊呈现（<code>map_task_result_writes</code>，<span class="fileref">debug.py:83</span>）：</p>
+<pre><code class="language-python"># debug.py:83
+def map_task_result_writes(writes) -> dict[str, Any]:
+    """单次写记为 {channel: write}；多次写记为 {channel: {'$writes': [w1, w2, ...]}}"""
+    result: dict[str, Any] = {}
+    for channel, value in writes:
+        existing = result.get(channel)
+        if existing is not None:                       # 93 这个通道之前已经写过
+            channel_writes = (existing["$writes"]      # 94 已是聚合形式就取列表
+                              if is_multiple_channel_write(existing) else [existing])
+            channel_writes.append(value)               # 99 追加本次写入
+            result[channel] = {"$writes": channel_writes}   # 100 聚合成 $writes 列表
+        else:
+            result[channel] = value                    # 102 首次写：直接记值</code></pre>
+                <div class="walk">
+                    <div class="r"><code>单次 vs 多次</code><span>通道只被写一次 → 直接 <code>{通道: 值}</code>；被写多次（比如 Send 扇出多个都写同字段）→ <code>{通道: {"$writes": [值1, 值2, ...]}}</code>。用 <code>$writes</code> 包裹区分"这是多条写入"。</span></div>
+                    <div class="r"><code>为什么要区分？</code><span>因为 debug 要展示"reducer 合并<b>之前</b>的原始写入"。如果只展示合并后的值，你就看不到"其实有 3 个节点都往这写了"这个事实——而这恰恰是排查"并行写冲突"的关键信息。</span></div>
+                </div>
+                <p>而任务跑完后的 <code>task_result</code> 事件（<span class="fileref">debug.py:106</span>）就用它来打包结果里的写入：</p>
+<pre><code class="language-python"># debug.py:106
+def map_debug_task_results(task_tup, stream_keys) -> Iterator[TaskResultPayload]:
+    """Produce "task_result" events for stream_mode=debug."""
+    task, writes = task_tup
+    yield {
+        "id": task.id, "name": task.name,
+        "error": next((w[1] for w in writes if w[0] == ERROR), None),   # 118 有错取错
+        "result": map_task_result_writes(                                # 119 用 L05 那个聚合
+            [w for w in writes if w[0] in stream_channels_list or w[0] == RETURN]),
+        "interrupts": [asdict(v) for w in writes if w[0] == INTERRUPT    # 122 中断信息
+                       for v in (w[1] if isinstance(w[1], Sequence) else [w[1]])],
+    }</code></pre>
+                <div class="anno"><b>看</b>：<code>task_result</code> 事件里 <code>result</code> 字段调的正是 L05 的 <code>map_task_result_writes</code>——所以你在 debug 里看到的任务结果，写入部分就是上面那套"单写记值、多写记 <code>$writes</code>"的规则。</div>
+                <div class="pitfall"><span class="t">⚠️ 边界/坑：debug 里看到的 <code>$writes</code> 列表 ≠ 最终状态值</span>
+                新手看到 debug 输出里某字段是 <code>{"$writes": [1, 2, 3]}</code> 会困惑"我的 count 怎么变成列表了？"。其实这是<strong>合并前的原始写入清单</strong>——3 个并行任务各写了 1、2、3。最终 count 是什么，取决于该通道的 reducer：LastValue 取最后（3），BinaryOp 累加（6）。<strong>debug 展示的是"过程"，最终值要看 values 模式或 reducer 语义。</strong>别把 <code>$writes</code> 当成实际状态。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>draw_graph：靠"空跑一遍"发现所有边</h1></div>
+            <div class="card">
+                <p>换到画图。<code>draw_graph</code>（<span class="fileref">_draw.py:42</span>）最惊艳的地方：它不去读图的静态结构，而是<strong>拿空 checkpoint 真的跑一遍 Pregel 循环</strong>，看每步谁触发谁，反推出边（<span class="fileref">_draw.py:88-118</span>）：</p>
+<pre><code class="language-python"># _draw.py:88
+input_writes = list(map_input(input_channels, {}))    # 89 造一批"空输入"写入（复用 Day 24！）
+updated_channels = apply_writes(                       # 90 空跑 apply_writes（复用 Day 21！）
+    checkpoint, channels,
+    [PregelTaskWrites((), INPUT, input_writes, [])],
+    get_next_version, trigger_to_nodes,
+)
+tasks = prepare_next_tasks(                            # 100 空跑 prepare_next_tasks（复用 Day 21！）
+    checkpoint, [], nodes, channels, managed, config,
+    step, -1, for_execution=True, ...,
+    updated_channels=updated_channels,
+)
+start_tasks = tasks
+for step in range(step, limit):                        # 118 真的循环模拟超步
+    if not tasks:
+        break                                          # 119 没任务了=图跑完=画完了
+    ...记录这步 tasks 是被哪些通道触发的 → 连边...</code></pre>
+                <div class="walk">
+                    <div class="r"><code>map_input(input_channels, {})</code><span>用<b>空字典</b>造输入写入——不关心真实数据，只想触发第一批节点。复用的正是 Day 24 的 map_input。</span></div>
+                    <div class="r"><code>apply_writes / prepare_next_tasks</code><span><b>直接调 Day 21 的两个核心函数</b>！画图不是另写一套遍历逻辑，而是真的驱动引擎跑。每步 <code>prepare_next_tasks</code> 算出哪些节点被触发，就等于发现了"上一步的节点 → 这一步的节点"这条边。</span></div>
+                    <div class="r"><code>for step in range(...): if not tasks: break</code><span>和 Day 20 主循环一模一样的停止条件！"没任务了就停"，此时所有能到达的边都已走过、记录完毕。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 200" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="18" fill="#e5e5e5" text-anchor="middle" font-weight="700">控制流：draw_graph 靠"空跑 Pregel 循环"逐步发现边</text>
+                        <rect x="20" y="55" width="110" height="40" rx="8" fill="rgba(99,102,241,.12)" stroke="#6366f1"/>
+                        <text x="75" y="72" fill="#c7d2fe" text-anchor="middle" font-size="10">空输入 map_input</text>
+                        <text x="75" y="87" fill="#94a3b8" text-anchor="middle" font-size="9">触发入口</text>
+                        <rect x="175" y="55" width="130" height="40" rx="8" fill="rgba(52,211,153,.12)" stroke="#34d399"/>
+                        <text x="240" y="72" fill="#a7f3d0" text-anchor="middle" font-size="10">prepare_next_tasks</text>
+                        <text x="240" y="87" fill="#94a3b8" text-anchor="middle" font-size="9">这步谁被触发</text>
+                        <rect x="350" y="55" width="130" height="40" rx="8" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="415" y="72" fill="#f9a8d4" text-anchor="middle" font-size="10">记录触发关系→连边</text>
+                        <rect x="525" y="55" width="95" height="40" rx="8" fill="rgba(234,179,8,.12)" stroke="#eab308"/>
+                        <text x="572" y="72" fill="#fde68a" text-anchor="middle" font-size="10">apply_writes</text>
+                        <text x="572" y="87" fill="#94a3b8" text-anchor="middle" font-size="9">推进一步</text>
+                        <path d="M130 75 L173 75" stroke="#64748b" stroke-width="1.3" marker-end="url(#g)"/>
+                        <path d="M305 75 L348 75" stroke="#64748b" stroke-width="1.3" marker-end="url(#g)"/>
+                        <path d="M480 75 L523 75" stroke="#64748b" stroke-width="1.3" marker-end="url(#g)"/>
+                        <path d="M572 95 L572 130 L240 130 L240 97" stroke="#64748b" stroke-width="1.3" fill="none" marker-end="url(#g)" stroke-dasharray="4"/>
+                        <text x="320" y="152" fill="#94a3b8" text-anchor="middle" font-size="10">循环直到 prepare_next_tasks 返回空 → 所有边发现完毕</text>
+                        <text x="320" y="175" fill="#818cf8" text-anchor="middle" font-size="10">全程复用 Day 21/24 的真实引擎函数，不另写遍历</text>
+                        <defs><marker id="g" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0,0 L6,2.5 L0,5 z" fill="#64748b"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：画图=空跑一遍 Pregel 主循环，每步的触发关系就是一条边，直到没任务可跑。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>为什么"空跑"而不是"读静态结构"</h1></div>
+            <div class="card">
+                <div class="tradeoff"><span class="t">🎯 设计取舍②：画图为什么不直接读 <code>add_edge</code> 记录的边表，非要模拟运行？</span>
+                因为 LangGraph 的"边"<strong>不全是静态声明的</strong>。普通 <code>add_edge</code> 确实能直接读；但<strong>条件边</strong>（走哪条取决于运行时函数返回）、<strong>Send 扇出</strong>（运行时动态派发）、<strong>Command.goto</strong>（节点内决定跳哪）——这些"边"在静态结构里根本不完整。要画出真实的可达关系，唯一可靠的办法是<strong>让引擎按真实触发逻辑跑一遍</strong>：<code>prepare_next_tasks</code> 用的是和真运行<strong>一模一样</strong>的 <code>_triggers</code> 版本比较（Day 21），所以它"发现"的边就是真实会发生的边。用静态边表会漏掉动态控制流；用空跑则和实际执行天然一致。<strong>这就是为什么画图代码里赫然出现 apply_writes / prepare_next_tasks——它借用了引擎本身作为"事实来源"。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：空跑会不会真的执行我的节点函数、产生副作用？</p>
+                    <p class="a">👨‍🏫 老师：不会。空跑只调 <code>prepare_next_tasks</code>（算"谁该被触发"）和 <code>apply_writes</code>（推进版本号），<b>并不调 runner 去真正 invoke 你的节点</b>——注意 L06 代码里没有 <code>runner.tick</code>。它关心的只是"触发关系"（谁连谁），不关心节点算出什么值，所以喂的是空输入、也不跑业务逻辑。你的函数一次都不会被调用，放心画图。</p>
+                </div>
+                <div class="essence"><span class="t">💡 本质：整个阶段 4 的函数在这里"闭环复用"了一次</span>
+                今天画图这段是对阶段 4 最好的复习：它把 <strong>Day 24 的 map_input</strong>（造输入）、<strong>Day 21 的 apply_writes</strong>（推进）、<strong>Day 21 的 prepare_next_tasks + _triggers</strong>（发现触发）、<strong>Day 20 的循环骨架</strong>（while not tasks break）全串了一遍——只是把"执行器 runner"这一环抽掉了。看懂这段，说明你真的理解了 Pregel 引擎：它的每个零件都能被单独拿来复用。</div>
+            </div>
+        </section>
+
+        <section id="l08" class="section">
+            <div class="section-header"><span class="section-number">L08</span><h1>阶段 4 小结 + 动手 + 明日预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>debug 流给你哪些 values/updates 没有的信息？（task 的 triggers/input、checkpoint 的 next、每任务结果三态）</li>
+                    <li>debug 模式是怎么实现的？（_emit 把 checkpoints/tasks 事件加 step/timestamp/type 外壳重映射）</li>
+                    <li>为什么 debug 用重映射而非独立埋点？（寄生既有事件，天然同步、零信息漂移）</li>
+                    <li>debug 里 <code>$writes</code> 列表是什么？（合并前的原始多写入，不是最终状态值）</li>
+                    <li>draw_graph 怎么发现边？（空跑一遍 Pregel 主循环，每步触发关系即一条边）</li>
+                    <li>为什么画图要模拟运行而非读静态边表？（条件边/Send/Command 是动态的，只有真跑才准）</li>
+                    <li>空跑会执行我的节点吗？（不会，只调 prepare/apply，不调 runner，无副作用）</li>
+                </ul>
+                <h3 style="margin-top:14px">🏔️ 阶段 4 全景回顾（D19-26）</h3>
+                <p style="font-size:13px;color:var(--text-secondary)">D19 BSP 模型 → D20 主循环 tick/after_tick → D21 Plan(prepare)/Update(apply_writes) → D22 执行器并行 → D23 节点读写三段式 → D24 图边界 IO → D25 重试超时 → D26 观测。<strong>一句话串起来：引擎一波波跑超步（D19/20），每步先算任务（D21）、并行执行（D22），任务本身是"读通道→跑函数→写通道"（D23），图的进出靠 IO 映射（D24），失败有重试兜底（D25），全程可观测可画图（D26）。</strong>Pregel 深水区到此结束，你已经拿到了这台引擎的完整心智模型。</p>
+            </div>
+            <div class="card">
+                <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash"># 1. 读 debug 事件映射
+sed -n '41,71p' libs/langgraph/langgraph/pregel/debug.py
+sed -n '144,206p' libs/langgraph/langgraph/pregel/debug.py
+
+# 2. 读画图"空跑发现边"那段
+sed -n '88,120p' libs/langgraph/langgraph/pregel/_draw.py
+
+# 3. 看 debug 流的真实事件 + 画 Mermaid
+python -c "
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict
+class S(TypedDict): n: int
+g = StateGraph(S)
+g.add_node('a', lambda s:{'n':s['n']+1}); g.add_node('b', lambda s:{'n':s['n']*2})
+g.add_edge(START,'a'); g.add_edge('a','b'); g.add_edge('b',END)
+app = g.compile()
+for ev in app.stream({'n':1}, stream_mode='debug'):
+    print(ev['type'], '| step', ev.get('step'), '|', ev['payload'].get('name') or ev['payload'].get('next'))
+print(app.get_graph().draw_mermaid())   # 打印 Mermaid 源码
+"</code></pre>
+                <div class="tip"><strong>明天预告 · Day 27（进入阶段 5）</strong>：这 8 天我们一直在说"通道 channel"——它有版本、能 update、能 get、能存进 checkpoint，但它内部到底长啥样？下一阶段专攻 Channels。Day 27 先看抽象基类 <code>BaseChannel</code>（<span class="fileref">channels/base.py</span>）的四个核心方法 update/get/checkpoint/from_checkpoint，看清所有通道的共同契约——然后逐个拆 LastValue、BinaryOp、Topic、屏障通道。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="langgraph-day25.html" style="color:var(--accent-cyan);">&larr; Day 25 重试与超时</a>
+                <a href="langgraph-day27.html" style="color:var(--accent-green);">Day 27 · 通道抽象 BaseChannel &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
