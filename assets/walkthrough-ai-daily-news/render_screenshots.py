@@ -75,7 +75,8 @@ def render_terminal(
 
 
 STEPS = [
-    ("step-install-skill.png", "安装 Skill · cc-marketplace", "step-install-skill.log"),
+    ("step-install-03-list.png", "步骤 A3 · install + list 验证", "step-install-03-list.log"),
+    ("step-install-skill.png", "安装 Skill · cc-marketplace（旧·Session 过期示例）", "step-install-skill.log"),
     ("step00-env.png", "Skill 步骤 0 · 环境检查", "step00-env.log"),
     ("step01-init.png", "Skill 步骤 1 · 起仓 + 改名", "step01-init.log"),
     ("step03-uv-sync.png", "Skill 步骤 3 · uv sync", "step03-uv-sync.log"),
