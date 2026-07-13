@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 12 · Retriever 与 RAG 链 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">12</div>
+            <h2>Day 12</h2>
+            <p class="version">Retriever 与 RAG 链 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：检索怎么进链</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseRetriever：模板方法</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · as_retriever：一行升级</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 三种检索策略的分发</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 组装一条 RAG 问答链</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day11.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 11 Embeddings/向量库</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day13.html" class="nav-link" style="color:var(--accent-green);">Day 13 Tool 抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 12 / 共 20 天 · 阶段3 数据与 RAG</span>
+            <h1 class="part-title">Retriever 与 RAG 链：把"翻书"变成一个 Runnable，然后用 | 拼出问答机器人</h1>
+            <p class="part-desc">Day11 我们能按语义搜到相关文档了，但它还是个"孤立的库"。今天做两件事：<strong>①读懂 <code>BaseRetriever</code>——它把"检索"抽象成一个标准 Runnable（能 invoke、能进 LCEL 链、自动带回调追踪）；②把 Day11 的向量库经 <code>as_retriever()</code> 一行升级，再和 Prompt、ChatModel 用 <code>|</code> 组装成一条完整的 RAG 问答链</strong>。这是阶段3 的收官——数据侧的所有零件今天正式合体。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段3：数据与 RAG · D09-12）</div>
+            <div class="steps">
+                <span class="st">S1 LCEL</span><span class="sep">→</span>
+                <span class="st">S2 模型·消息·提示</span><span class="sep">→</span>
+                <span class="st">D09 Document</span><span class="sep">→</span>
+                <span class="st">D10 文本切分</span><span class="sep">→</span>
+                <span class="st">D11 Embeddings/向量库</span><span class="sep">→</span>
+                <span class="st on">D12 Retriever/RAG</span><span class="sep">→</span>
+                <span class="st">S4 工具/Agent</span><span class="sep">→</span>
+                <span class="st">S5 进阶收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        类比一：<strong>Retriever 是图书馆的"管理员"，VectorStore 是"书库"</strong>。Day11 的向量库像书库本身——能存能查，但你得懂它的内部规矩（similarity_search？with_score？k 传几？）。Retriever 是站在服务台的管理员：<strong>你只说一句话（query 字符串），他还你一摞相关的书页（list[Document]）</strong>，至于他去书库用什么姿势找，是他的事。类比二：<strong>RAG 链 = 开卷考试</strong>。闭卷（直接问模型）容易瞎编；开卷是先让管理员把相关页翻出来夹在考卷里（塞进 prompt 的 context），模型照着材料答题。今天的链就是把"翻书→夹页→答题"三步用 <code>|</code> 串成流水线。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：检索这一步怎么"进链"？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>有了向量库，最朴素的 RAG 写法是手工三段式：<code>docs = store.similarity_search(q)</code> → 手工把 docs 拼成字符串塞进 prompt → 调模型。能跑，但问题一堆：换个检索源（向量库→ES→数据库）上层代码全改；想在 D03 学的 LCEL 链里用 <code>|</code> 接检索这一步，接不进去（它不是 Runnable）；想在 LangSmith 里看到"这次检索用了什么词、返回了哪几条"，没有埋点。<strong>检索需要一个和模型、Prompt 平级的"标准件"身份。</strong></div>
+                <div class="essence"><span class="t">💡 本质：给"检索"发一张 Runnable 身份证</span>LangChain 的答案是 <code>BaseRetriever</code>：固定输入输出为 <strong><code>str → list[Document]</code></strong>，并继承 <code>RunnableSerializable</code>——于是任何检索器天生就有 <code>invoke/batch/stream</code>、能进 LCEL 链、自动挂回调。而"向量库检索"只是检索器的一种实现（<code>VectorStoreRetriever</code>），关键词检索、混合检索、多路召回……都能实现同一接口。<strong>上层链只认"管理员"这个岗位，不认某个具体的人。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseRetriever：invoke 是壳，_get_relevant_documents 是芯</h1></div>
+            <div class="card">
+                <p>看 <span class="fileref">libs/core/langchain_core/retrievers.py:55</span>——类签名一行就交代了输入输出契约：</p>
+<pre><code class="language-python"># libs/core/langchain_core/retrievers.py:55
+class BaseRetriever(RunnableSerializable[RetrieverInput, RetrieverOutput], ABC):
+    # RetrieverInput = str（查询词）, RetrieverOutput = list[Document]（相关文档）
+    ...</code></pre>
+                <p>公开入口 <code>invoke</code>（<span class="fileref">retrievers.py:179</span>）是一个标准的"模板方法"——包一圈回调，把真活委托给子类：</p>
+<pre><code class="language-python"># libs/core/langchain_core/retrievers.py:179（裁剪）
+def invoke(self, input: str, config=None, **kwargs) -> list[Document]:
+    config = ensure_config(config)
+    callback_manager = CallbackManager.configure(                # ① 装配回调（LangSmith 追踪靠它）
+        config.get("callbacks"), None, ...,
+        inheritable_tags=config.get("tags"), local_tags=self.tags, ...)
+    run_manager = callback_manager.on_retriever_start(           # ② 记录"检索开始"事件
+        None, input, name=config.get("run_name") or self.get_name(), ...)
+    try:
+        result = self._get_relevant_documents(                   # ③ ★真正的检索：交给子类
+            input, run_manager=run_manager)
+    except Exception as e:
+        run_manager.on_retriever_error(e)                        # ④ 失败也上报
+        raise
+    else:
+        run_manager.on_retriever_end(result)                     # ⑤ 记录"检索结束+结果"
+        return result</code></pre>
+                <p>子类唯一必须实现的抽象方法（<span class="fileref">retrievers.py:298</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/retrievers.py:298
+@abstractmethod
+def _get_relevant_documents(
+    self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+) -> list[Document]:
+    """Get documents relevant to a query."""</code></pre>
+                <div class="walk">
+                    <div class="r"><code>模板方法模式</code><span>★<code>invoke</code>（壳）负责回调、异常上报这些"人人都要的杂务"，只写一次；<code>_get_relevant_documents</code>（芯）才是各家自由发挥的检索逻辑。你自己写检索器时，<b>只需实现芯，杂务白送</b>。这和 Day05 ChatModel 的 <code>invoke → _generate</code>、后面 Day13 Tool 的 <code>run → _run</code> 是同一个模式，LangChain 全家都这么长。</span></div>
+                    <div class="r"><code>on_retriever_start/end</code><span>检索有自己专属的回调事件——所以在 LangSmith 里能看到独立的 Retriever 节点：查询词是什么、返回了哪几条、耗时多少。RAG 效果不好时，第一件事就是看这个节点：<b>是没搜到，还是搜到了模型没用好</b>。</span></div>
+                    <div class="r"><code>RunnableSerializable</code><span>继承它 = 领到 Runnable 全家桶：<code>invoke/ainvoke/batch/stream</code>、<code>|</code> 组合、<code>with_config</code>……检索器从此和 Prompt、模型是"同一种积木"。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>as_retriever：向量库一行升级成检索器</h1></div>
+            <div class="card">
+                <p>Day11 结尾埋的钩子今天揭开。<code>VectorStore.as_retriever</code>（<span class="fileref">libs/core/langchain_core/vectorstores/base.py:905</span>）去掉长长的 docstring 后只有两行（<span class="fileref">base.py:960-961</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/vectorstores/base.py:960
+tags = kwargs.pop("tags", None) or [*self._get_retriever_tags()]
+return VectorStoreRetriever(vectorstore=self, tags=tags, **kwargs)</code></pre>
+                <p>产出的 <code>VectorStoreRetriever</code>（<span class="fileref">base.py:964</span>）本质是"向量库 + 检索策略配置"的组合体：</p>
+<pre><code class="language-python"># libs/core/langchain_core/vectorstores/base.py:964
+class VectorStoreRetriever(BaseRetriever):
+    """Base Retriever class for VectorStore."""
+
+    vectorstore: VectorStore                       # 背后的书库（Day11 的对象）
+    search_type: str = "similarity"                # 用哪种找法，默认相似度
+    search_kwargs: dict[str, Any] = Field(default_factory=dict)   # k、filter、阈值…
+
+    allowed_search_types: ClassVar[Collection[str]] = (
+        "similarity",                              # 纯相似度 top-k
+        "similarity_score_threshold",              # 带分数下限
+        "mmr",                                     # 最大边际相关：相关性+多样性
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>vectorstore=self</code><span>检索器<b>持有</b>向量库，不复制数据——它只是给书库配了个管理员，书还是那些书。库里后续 add_documents 的新内容，检索器立刻能搜到。</span></div>
+                    <div class="r"><code>search_type / search_kwargs</code><span>把"怎么搜"做成了<b>数据（配置）而非代码</b>：<code>as_retriever(search_type="mmr", search_kwargs={"k": 6, "lambda_mult": 0.25})</code>。docstring（base.py:932 起）给了一整页真实示例：卡阈值 0.8、只取 1 条、按 metadata 过滤……</span></div>
+                    <div class="r"><code>校验器兜底</code><span><code>validate_search_type</code>（<span class="fileref">base.py:987</span>）在构造时就检查：search_type 拼错直接报错；选了 <code>similarity_score_threshold</code> 却没给 float 阈值也报错——<b>把错误拦在构造期，别等运行期</b>。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>一句 <code>retriever = store.as_retriever(search_kwargs={"k": 3})</code>，读作：<strong>"给这个书库配个管理员，以后每次问他，他都取最相关的 3 页回来。"</strong>从此你手里的东西就是个标准 Runnable，能 <code>retriever.invoke("请假规定")</code>，也能直接 <code>|</code> 进链。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>三种检索策略的分发：一个 if 链就讲完</h1></div>
+            <div class="card">
+                <p><code>VectorStoreRetriever</code> 实现的"芯"（<span class="fileref">base.py:1040</span>）就是把 search_type 翻译成 Day11 学过的那几个方法：</p>
+<pre><code class="language-python"># libs/core/langchain_core/vectorstores/base.py:1040
+def _get_relevant_documents(self, query, *, run_manager, **kwargs) -> list[Document]:
+    kwargs_ = self.search_kwargs | kwargs                       # 配置合并：调用时可临时覆盖
+    if self.search_type == "similarity":
+        docs = self.vectorstore.similarity_search(query, **kwargs_)      # ① 纯 top-k
+    elif self.search_type == "similarity_score_threshold":
+        docs_and_similarities = (
+            self.vectorstore.similarity_search_with_relevance_scores(    # ② 先拿分数
+                query, **kwargs_))
+        docs = [doc for doc, _ in docs_and_similarities]                 #    低于阈值的已被过滤
+    elif self.search_type == "mmr":
+        docs = self.vectorstore.max_marginal_relevance_search(query, **kwargs_)  # ③ 去同质化
+    else:
+        raise ValueError(f"search_type of {self.search_type} not allowed.")
+    return docs</code></pre>
+                <table class="ttable">
+                    <thead><tr><th>search_type</th><th>行为</th><th>什么时候用</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>similarity</code></td><td>无脑取最相似的 k 条</td><td>默认；库内容干净、不怕沾边噪音</td></tr>
+                        <tr><td><code>similarity_score_threshold</code></td><td>相似度不到阈值的宁可不要</td><td>怕"硬凑 k 条"引入无关内容误导模型</td></tr>
+                        <tr><td><code>mmr</code></td><td>相关性和多样性折中，避免 k 条都是近似重复</td><td>文档间高度雷同（多版本文档、模板化内容）</td></tr>
+                    </tbody>
+                </table>
+                <div class="tradeoff"><span class="t">💡 设计取舍：为什么策略挂在 Retriever 而不是 VectorStore？</span>向量库只提供<strong>能力</strong>（三个 search 方法都有），检索器负责<strong>决策</strong>（这个场景用哪个、参数是多少）。同一个库可以配出多个不同性格的管理员：<code>store.as_retriever(search_kwargs={"k": 8})</code> 给召回率优先的场景，<code>store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.8, "k": 3})</code> 给精度优先的场景——<strong>数据一份，策略多套</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>组装一条 RAG 问答链：检索 + 提示 + 模型 合体</h1></div>
+            <div class="card">
+                <p>零件齐了：Retriever 是 Runnable（今天），Prompt 是 Runnable（D07），ChatModel 是 Runnable（D05），解析器是 Runnable（D08）。用 D03 的 <code>|</code> 拼起来：</p>
+<pre><code class="language-python">from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
+retriever = store.as_retriever(search_kwargs={"k": 3})       # Day11 的库 + 今天的管理员
+
+def format_docs(docs):                                       # list[Document] → 一段文本
+    return "\n\n".join(doc.page_content for doc in docs)
+
+prompt = ChatPromptTemplate.from_template(
+    "只根据以下材料回答问题，材料里没有就说不知道。\n材料：\n{context}\n\n问题：{question}")
+
+rag_chain = (
+    {"context": retriever | format_docs,                     # ① 并行分支A：问题→翻书→拼材料
+     "question": RunnablePassthrough()}                      # ② 并行分支B：问题原样透传
+    | prompt                                                 # ③ 填模板 → 消息列表
+    | chat_model                                             # ④ 开卷答题
+    | StrOutputParser()                                      # ⑤ AIMessage → 纯字符串
+)
+answer = rag_chain.invoke("请假要提前几天申请？")</code></pre>
+                <div class="walk">
+                    <div class="r"><code>{"context": ..., "question": ...}</code><span>dict 字面量在 LCEL 里自动变成 <code>RunnableParallel</code>（D03 学过）：同一个输入（问题字符串）兵分两路——一路去检索并拼成材料，一路原样透传当问题。两路结果合成 <code>{"context": "...", "question": "..."}</code> 喂给 prompt。</span></div>
+                    <div class="r"><code>retriever | format_docs</code><span>检索器输出 <code>list[Document]</code>，模板要的是字符串——中间垫一个普通函数（LCEL 自动把它包成 <code>RunnableLambda</code>）。<b>Retriever 能出现在 <code>|</code> 左边，正是 L02 继承 Runnable 换来的待遇。</b></span></div>
+                    <div class="r"><code>"没有就说不知道"</code><span>RAG 提示词的经典护栏：明确要求模型只依据材料作答，显著降低幻觉。开卷考试要在考卷上印"答案必须出自材料"。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 230" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">RAG 链的数据流：一个问题兵分两路，再合流答题</text>
+                        <rect x="20" y="95" width="110" height="34" rx="7" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="75" y="116" fill="#fbbf24" text-anchor="middle">"请假提前几天?"</text>
+                        <path d="M130 105 L185 62" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar12)"/>
+                        <path d="M130 122 L185 165" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar12)"/>
+                        <rect x="188" y="40" width="150" height="40" rx="7" fill="rgba(47,111,235,.12)" stroke="#2f6feb"/>
+                        <text x="263" y="57" fill="#93c5fd" text-anchor="middle">retriever（翻书 k=3）</text>
+                        <text x="263" y="72" fill="#94a3b8" text-anchor="middle">| format_docs 拼材料</text>
+                        <rect x="188" y="150" width="150" height="34" rx="7" fill="rgba(100,116,139,.15)" stroke="#64748b"/>
+                        <text x="263" y="171" fill="#cbd5e1" text-anchor="middle">RunnablePassthrough</text>
+                        <path d="M338 60 L395 100" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar12)"/>
+                        <path d="M338 167 L395 127" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar12)"/>
+                        <rect x="398" y="95" width="100" height="34" rx="7" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="448" y="116" fill="#c084fc" text-anchor="middle">prompt 填模板</text>
+                        <path d="M498 112 L528 112" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar12)"/>
+                        <rect x="531" y="95" width="90" height="34" rx="7" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="576" y="116" fill="#86efac" text-anchor="middle">model | parser</text>
+                        <text x="263" y="205" fill="#94a3b8" text-anchor="middle">{"context": 材料, "question": 原问题}</text>
+                        <defs><marker id="ar12" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：dict 即 RunnableParallel——上路开卷找材料，下路带着原题，合流后填进模板让模型照材料作答。</div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 坑：检索质量决定 RAG 上限</span>链跑通 ≠ 答得好。如果 Day10 切分切碎了关键段落、k 给小了没召回、或者该用 threshold 挡噪音没挡——模型再强也只能"照着错误材料一本正经地答"。调 RAG 优先调检索侧（看 LangSmith 里 Retriever 节点返回的文档对不对），而不是先改提示词。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：rag_chain.invoke 一步步发生了什么</span>
+                <code>rag_chain.invoke("请假要提前几天申请？")</code> → RunnableParallel 两路并发：分支A <code>retriever.invoke("请假要提前几天申请？")</code> → 走 L02 的模板方法 → <code>_get_relevant_documents</code> 按 <code>search_type="similarity"</code> 调 <code>similarity_search(k=3)</code> → 返回 3 个 Document（第 1 条就是"员工休假需至少提前三个工作日提交 OA 流程"）→ <code>format_docs</code> 拼成一段材料；分支B 原样输出问题字符串 → 合成 dict → prompt 填出完整消息 → 模型读材料回答：<code>"根据材料，请假（休假）需要至少提前三个工作日提交 OA 流程。"</code> → StrOutputParser 剥出纯文本。<strong>整条链每一节都是 Day03-11 学过的标准件。</strong></div>
+                <div class="qa">
+                    <p class="q">👶 小白：Retriever 和 VectorStore 感觉功能重叠——都能"查"，为什么要两个东西？</p>
+                    <p class="a">👨‍🏫 老师：分工不同。<strong>VectorStore 是"存储层"</strong>：接口宽（增删查、多种 search、带分数、按向量搜……），面向"管理数据的人"。<strong>Retriever 是"服务层"</strong>：接口极窄（str 进、list[Document] 出），面向"用数据的链"。窄接口才好组合、好替换——明天你把向量检索换成 ES 关键词检索、甚至"多路召回再融合"，只要还是 str→list[Document]，RAG 链一个字不用改。<strong>宽接口管数据，窄接口进流水线</strong>，这是分层设计的经典味道。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li><code>BaseRetriever</code> 的输入输出契约是什么？（str → list[Document]，且是 Runnable）</li>
+                        <li>invoke 和 _get_relevant_documents 什么关系？（模板方法：壳管回调/异常，芯管检索逻辑，自定义只写芯）</li>
+                        <li><code>as_retriever()</code> 做了什么？（两行：构造 VectorStoreRetriever，持有向量库 + search_type/search_kwargs 配置）</li>
+                        <li>三种 search_type 各解决什么？（similarity 保量 / threshold 保质 / mmr 保多样）</li>
+                        <li>RAG 链里 dict 字面量的作用？（RunnableParallel：context 走检索、question 透传，合流喂 prompt）</li>
+                        <li>RAG 答错了先查哪？（先看检索节点召回的文档对不对，再调提示词）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain
+
+# 1. BaseRetriever：契约 + 模板方法 + 抽象芯
+sed -n '55,70p'   libs/core/langchain_core/retrievers.py
+sed -n '179,236p' libs/core/langchain_core/retrievers.py
+sed -n '297,310p' libs/core/langchain_core/retrievers.py
+
+# 2. as_retriever 与 VectorStoreRetriever
+sed -n '905,965p'  libs/core/langchain_core/vectorstores/base.py   # docstring 里全是真实用法
+sed -n '964,985p'  libs/core/langchain_core/vectorstores/base.py   # 三个字段
+sed -n '1040,1058p' libs/core/langchain_core/vectorstores/base.py  # 三种策略分发</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 13</strong>：阶段3 完结，进入阶段4"工具与 Agent"。RAG 是"给模型喂材料"，工具是"给模型发扳手"——明天读 <code>core/tools/</code>：一个 <code>@tool</code> 装饰器怎么把普通 Python 函数变成模型能看懂的工具（名字/说明书/参数 schema 从哪来），以及 <code>BaseTool</code>/<code>StructuredTool</code> 的家族关系。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day11.html" style="color:var(--accent-cyan);">&larr; Day 11 Embeddings 与 VectorStore</a>
+                    <a href="langchain-day13.html" style="color:var(--accent-green);">Day 13 · Tool 抽象 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

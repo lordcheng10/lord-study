@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · 工具调用闭环 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">工具调用闭环 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：模型只会说不会做</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · bind_tools：把说明书发给模型</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · AIMessage.tool_calls：开工单</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · ToolMessage：带工单号的回执</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 自动闭环：invoke(ToolCall)</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day13.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 13 Tool 抽象</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day15.html" class="nav-link" style="color:var(--accent-green);">Day 15 Agent &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 阶段4 工具与 Agent</span>
+            <h1 class="part-title">工具调用闭环：模型开工单（tool_calls）、你干活、回执（ToolMessage）贴回去</h1>
+            <p class="part-desc">Day13 把工具造好了，今天让模型真正用起来。关键认知：<strong>模型自己不执行任何代码</strong>——它只会在回复里"下单"。完整闭环四步：<strong>①<code>bind_tools</code> 把工具说明书随请求发给模型；②模型回一条带 <code>tool_calls</code> 的 <code>AIMessage</code>（工单：调哪个、参数是什么、工单号 id）；③你在本地执行工具；④把结果装进 <code>ToolMessage</code>（带上同一个工单号）追加回消息列表，再问一次模型</strong>。今天逐环读源码，Day15 的 Agent 就是把这个循环自动化。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段4：工具与 Agent · D13-16）</div>
+            <div class="steps">
+                <span class="st">S1 LCEL</span><span class="sep">→</span>
+                <span class="st">S2 模型·消息·提示</span><span class="sep">→</span>
+                <span class="st">S3 数据与 RAG</span><span class="sep">→</span>
+                <span class="st">D13 Tool 抽象</span><span class="sep">→</span>
+                <span class="st on">D14 工具调用</span><span class="sep">→</span>
+                <span class="st">D15 Agent</span><span class="sep">→</span>
+                <span class="st">D16 记忆</span><span class="sep">→</span>
+                <span class="st">S5 进阶收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        类比一：<strong>模型是"只动嘴的项目经理"</strong>。他看过所有工具的说明书（bind_tools 发过去的），但他的手够不到键盘——他能做的只是在回复里写一张<strong>工单</strong>："请用 get_weather，参数 {city: '上海'}，工单号 call_ab12"。<strong>真正拧螺丝的是你的代码。</strong>类比二：<strong>tool_call_id 像快递面单号</strong>。经理可能一口气开三张工单（并行 tool_calls），你干完把三份结果寄回去——如果包裹上不贴面单号，经理就不知道哪个结果对应哪张工单。<code>ToolMessage.tool_call_id</code> 必须和 <code>ToolCall.id</code> 严格对上，这是闭环的"对账"机制。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：说明书怎么发？结果怎么还？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>Day13 结束时你手里有一个 <code>StructuredTool</code>。但三个问题没答案：<strong>①</strong>模型是通过 HTTP API 调的，怎么让它"看见"我这件工具？（不能把 Python 对象塞进请求体）<strong>②</strong>模型决定要用工具时，它的"意图"以什么格式回来？各家 API 格式还不一样（OpenAI 的 function.arguments 是 JSON 字符串，Anthropic 是嵌套 dict）。<strong>③</strong>我执行完了，结果以什么身份塞回对话，模型才知道"这是刚才那个调用的结果"而不是用户新说的话？</div>
+                <div class="essence"><span class="t">💡 本质：一套标准信封，屏蔽三套邮政系统</span>LangChain 的答案是<strong>标准化三个节点</strong>：发件用 <code>bind_tools</code>（把任意形态的工具统一转成该厂商的 JSON 格式挂到请求上）；收件用 <code>AIMessage.tool_calls</code>（把各家五花八门的返回统一解析成标准 <code>ToolCall</code>：name/args/id）；回件用 <code>ToolMessage</code>（带 tool_call_id 的标准回执）。<strong>你的代码只面对这三个标准件，换模型厂商，闭环代码一行不改。</strong></div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>bind_tools：把说明书翻译成厂商格式，挂在请求上</h1></div>
+            <div class="card">
+                <p>基类只定了接口（<span class="fileref">libs/core/langchain_core/language_models/chat_models.py:2338</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/language_models/chat_models.py:2338
+def bind_tools(
+    self,
+    tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],  # 四种形态都收
+    *,
+    tool_choice: str | None = None,
+    **kwargs: Any,
+) -> Runnable[LanguageModelInput, AIMessage]:
+    """Bind tools to the model."""
+    raise NotImplementedError        # 具体翻译格式，各厂商包自己实现</code></pre>
+                <p>看真实现——OpenAI 版（<span class="fileref">libs/partners/openai/langchain_openai/chat_models/base.py:2157</span>）：</p>
+<pre><code class="language-python"># libs/partners/openai/langchain_openai/chat_models/base.py:2157（裁剪）
+def bind_tools(self, tools, *, tool_choice=None, strict=None, **kwargs):
+    formatted_tools = [
+        convert_to_openai_tool(tool, strict=strict) for tool in tools   # :2203 ★统一翻译
+    ]
+    ...
+    if tool_choice:                                  # "auto"/"any"/指定工具名/none
+        ...
+    return super().bind(tools=formatted_tools, **kwargs)   # :2263 ★挂参数，返回新 Runnable</code></pre>
+                <div class="walk">
+                    <div class="r"><code>tools 四种形态</code><span>BaseTool、普通函数、Pydantic 类、现成的 dict schema——都行。<code>convert_to_openai_tool</code>（<span class="fileref">core/utils/function_calling.py:517</span>）统一翻译成 OpenAI 的 <code>{"type": "function", "function": {"name", "description", "parameters"}}</code> 格式。Day13 的说明书（name/description/args_schema）在这里被序列化成 JSON Schema。</span></div>
+                    <div class="r"><code>super().bind(...)</code><span>★注意它<b>不发请求、不改模型</b>！<code>bind</code> 是 Day03 学过的 Runnable 机制：返回一个"预先绑定了默认参数"的新 Runnable。以后每次 <code>invoke</code>，这份 tools JSON 都自动附在 API 请求里。<b>模型每一次都是现场读说明书，没有任何"记住工具"这回事。</b></span></div>
+                    <div class="r"><code>tool_choice</code><span>调度选项："auto"（模型自己决定用不用）、"any"/"required"（必须用一个）、指定名字（必须用这个）。Day15 的结构化输出会用 "any" 强制模型调工具。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span><code>model_with_tools = model.bind_tools([get_weather])</code> 读作：<strong>"复印一份模型的使用配置，在里面夹上工具说明书。"</strong>原来的 <code>model</code> 没被改动，<code>model_with_tools</code> 是个新积木——它仍然是标准 Runnable，能进任何链。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>AIMessage.tool_calls：模型开出的标准工单</h1></div>
+            <div class="card">
+                <p>模型决定用工具时，回复的 <code>AIMessage</code>（<span class="fileref">libs/core/langchain_core/messages/ai.py:160</span>）里 <code>tool_calls</code> 字段非空：</p>
+<pre><code class="language-python"># libs/core/langchain_core/messages/ai.py:160
+class AIMessage(BaseMessage):
+    """Message from an AI. ..."""
+
+    tool_calls: list[ToolCall] = Field(default_factory=list)          # :170 ★工单列表
+    invalid_tool_calls: list[InvalidToolCall] = Field(default_factory=list)  # :173 解析失败的工单
+    usage_metadata: UsageMetadata | None = None                       # :176 token 用量
+    type: Literal["ai"] = "ai"</code></pre>
+                <p>每张工单是个 TypedDict——<code>ToolCall</code>（<span class="fileref">libs/core/langchain_core/messages/tool.py:206</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/messages/tool.py:206
+class ToolCall(TypedDict):
+    """Represents an AI's request to call a tool.
+
+    Example:
+        {"name": "foo", "args": {"a": 1}, "id": "123"}
+    """
+    name: str               # 调哪件工具（Day13 的品名）
+    args: dict[str, Any]    # ★参数：已解析成标准 dict（不管厂商原始格式是啥）
+    id: str | None          # ★工单号：回执对账全靠它
+    type: NotRequired[Literal["tool_call"]]</code></pre>
+                <div class="walk">
+                    <div class="r"><code>args 是 dict 不是字符串</code><span>OpenAI 原始返回里 arguments 是一个 <b>JSON 字符串</b>，LangChain 在解析阶段（<span class="fileref">messages/tool.py:350</span> 附近的解析函数）就帮你 <code>json.loads</code> 好了。你拿到的永远是能直接用的 dict——跨厂商统一。</span></div>
+                    <div class="r"><code>id 的注释原话</code><span>:232 附近写得很直白：多个并发工具调用时，需要 id 来把"调用请求"和"调用结果"对上号。这就是快递面单号。</span></div>
+                    <div class="r"><code>invalid_tool_calls</code><span>模型偶尔会生成残缺 JSON（截断、格式错）。解析失败的不会静默丢弃，而是进 <code>invalid_tool_calls</code> 留着——你可以选择报错、重试或让模型自己修。<b>诚实暴露脏数据，而不是假装没发生。</b></span></div>
+                    <div class="r"><code>tool_calls 非空时 content 常为空</code><span>模型这轮回复可能一句话不说、光开工单——<code>content=""</code> 且 <code>tool_calls=[...]</code>。判断"模型是否想用工具"永远看 <code>tool_calls</code>，别看 content。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>ToolMessage：带工单号的标准回执</h1></div>
+            <div class="card">
+                <p>你执行完工具，用第四种消息还给模型——<code>ToolMessage</code>（<span class="fileref">libs/core/langchain_core/messages/tool.py:26</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/messages/tool.py:26（裁剪）
+class ToolMessage(BaseMessage, ToolOutputMixin):
+    """Message for passing the result of executing a tool back to a model.
+
+    Example:
+        ToolMessage(content="42", tool_call_id="call_Jja7J89XsjrOLA5r...")
+    """
+    tool_call_id: str                                  # :67 ★必填！对应 ToolCall.id
+    artifact: Any = None                               # :73 原始产物（不发给模型）
+    status: Literal["success", "error"] = "success"   # :81 执行成败标记
+    type: Literal["tool"] = "tool"</code></pre>
+                <div class="walk">
+                    <div class="r"><code>tool_call_id 必填</code><span>★整个类唯一的必填新字段。模型收到消息列表时，靠它把回执贴回对应工单。<span class="fileref">tool.py:130</span> 附近还有个校验器：uuid/int/float 类型的 id 自动转成 str——对粗心用户的宽容。</span></div>
+                    <div class="r"><code>content vs artifact</code><span>类 docstring（:47-62）给了真实例子：图片生成工具把"生成成功"的短文本放 content（发给模型），把 base64 原图放 artifact（<b>不进对话历史</b>，程序自己取用）。和 Day13 的 <code>response_format="content_and_artifact"</code> 首尾呼应。</span></div>
+                    <div class="r"><code>status="error"</code><span>工具执行失败也要回执！标记 status="error"、content 里写错误信息，模型看到后能换参数重试或改用别的工具——<b>失败信息也是模型的决策输入</b>。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍：为什么结果不直接拼成文本塞回去？</span>老式做法是把结果拼进一条"user"消息："工具返回了：26度"。缺点：模型分不清这是<strong>系统事实</strong>还是<strong>用户嘴里的话</strong>（用户可以撒谎"工具说了明天涨停"）；多工单时对不上号；各家 API 现在都要求工具结果走专用角色否则报错。独立的 ToolMessage 角色 + 强制 tool_call_id，把"程序的回执"和"人的发言"在类型层面隔离——<strong>消息角色就是信任边界</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>自动闭环：tool.invoke(ToolCall) 直接产出 ToolMessage</h1></div>
+            <div class="card">
+                <p>手工闭环要自己取 id、造 ToolMessage？不用。Day13 埋的伏笔兑现：<strong>把整个 ToolCall 直接丢给工具的 invoke</strong>。看 <span class="fileref">libs/core/langchain_core/tools/base.py:731</span> → <code>_prep_run_args</code>（<span class="fileref">base.py:1320</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/tools/base.py:1320（裁剪）
+def _prep_run_args(value, config, **kwargs):
+    if _is_tool_call(value):                              # ① 认出这是一张工单
+        tool_call_id: str | None = value["id"]            # ② ★抽出工单号
+        tool_input = value["args"].copy()                 # ③ 参数就是 args dict
+    else:
+        tool_call_id = None                               #    普通调用：没有工单号
+        tool_input = value
+    return (tool_input, dict(..., tool_call_id=tool_call_id, **kwargs))</code></pre>
+                <p>执行完，出口处 <code>_format_output</code>（<span class="fileref">base.py:1358</span>）决定返回什么：</p>
+<pre><code class="language-python"># libs/core/langchain_core/tools/base.py:1358（裁剪）
+def _format_output(content, artifact, tool_call_id, name, status):
+    if isinstance(content, ToolOutputMixin) or tool_call_id is None:
+        return content                                    # 普通调用 → 原样返回结果
+    ...
+    return ToolMessage(content,                           # ★带工单号调用 → 自动包成回执
+                       artifact=artifact,
+                       tool_call_id=tool_call_id,
+                       name=name,
+                       status=status)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>同一个 invoke 两种人格</code><span><code>tool.invoke({"city":"上海"})</code>（无工单号）返回裸结果字符串——本地调试用；<code>tool.invoke(ai_msg.tool_calls[0])</code>（有工单号）返回<b>现成的 ToolMessage</b>，id 已自动贴好——闭环用。判断依据就是输入是不是 ToolCall 形状。</span></div>
+                    <div class="r"><code>闭环代码就三行</code><span><code>for tc in ai_msg.tool_calls: messages.append(tool_map[tc["name"]].invoke(tc))</code>——取工单、执行、回执入列，一气呵成。Day15 的 Agent 里那个 tools 节点，核心干的就是这个。</span></div>
+                    <div class="r"><code>status 也自动填</code><span>执行抛异常且配置了 <code>handle_tool_error</code> 时，回执自动 status="error"——错误也走标准回执通道。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 250" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">工具调用闭环：工单出去，回执回来，工单号对账</text>
+                        <rect x="30" y="36" width="180" height="44" rx="8" fill="rgba(47,111,235,.12)" stroke="#2f6feb"/>
+                        <text x="120" y="54" fill="#93c5fd" text-anchor="middle">① bind_tools + invoke</text>
+                        <text x="120" y="70" fill="#94a3b8" text-anchor="middle">说明书随请求发给模型</text>
+                        <path d="M210 58 L268 58" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar14)"/>
+                        <rect x="271" y="36" width="180" height="44" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="361" y="54" fill="#fbbf24" text-anchor="middle">② AIMessage.tool_calls</text>
+                        <text x="361" y="70" fill="#94a3b8" text-anchor="middle">{name, args, id:"call_ab12"}</text>
+                        <path d="M451 58 L509 58" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#ar14)"/>
+                        <rect x="512" y="36" width="110" height="44" rx="8" fill="rgba(34,197,94,.12)" stroke="#22c55e"/>
+                        <text x="567" y="54" fill="#86efac" text-anchor="middle">③ tool.invoke(tc)</text>
+                        <text x="567" y="70" fill="#94a3b8" text-anchor="middle">本地真执行</text>
+                        <path d="M567 80 L567 130 L451 152" stroke="#94a3b8" stroke-width="1.2" fill="none" marker-end="url(#ar14)"/>
+                        <rect x="271" y="134" width="180" height="44" rx="8" fill="rgba(168,85,247,.12)" stroke="#a855f7"/>
+                        <text x="361" y="152" fill="#c084fc" text-anchor="middle">④ ToolMessage</text>
+                        <text x="361" y="168" fill="#94a3b8" text-anchor="middle">tool_call_id:"call_ab12" ✓对账</text>
+                        <path d="M271 156 L120 156 L120 90" stroke="#94a3b8" stroke-width="1.2" fill="none" marker-end="url(#ar14)"/>
+                        <text x="150" y="120" fill="#94a3b8" text-anchor="start">⑤ 追加回 messages 再问一次</text>
+                        <rect x="30" y="196" width="592" height="38" rx="8" fill="rgba(47,111,235,.06)" stroke="#2f6feb" stroke-dasharray="4 3"/>
+                        <text x="326" y="219" fill="#93c5fd" text-anchor="middle">最终 messages = [Human, AI(tool_calls), Tool(回执), AI("上海现在 26 度，晴")]</text>
+                        <defs><marker id="ar14" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：模型两次出场——第一次开工单，第二次看回执说人话。中间的执行永远发生在你的进程里。</div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 坑：工单必须"每单必回"</span>带 tool_calls 的 AIMessage 进了历史，就必须给<strong>每一张</strong>工单配一条 tool_call_id 对应的 ToolMessage 再发起下一轮——漏一张，OpenAI/Anthropic 的 API 直接 400 报错（"tool_calls 未被响应"）。不想执行某张工单？也要回一条 status="error" 或"用户拒绝"的回执。<strong>工单没有"已读不回"这个选项。</strong></div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：一次完整闭环的消息流水</span>
+                <code>model_with_tools = model.bind_tools([get_weather])</code>；第一轮 <code>ai_msg = model_with_tools.invoke([HumanMessage("上海现在多少度？")])</code> → 返回 <code>AIMessage(content="", tool_calls=[{"name": "get_weather", "args": {"city": "上海"}, "id": "call_ab12", "type": "tool_call"}])</code>。执行：<code>tool_msg = get_weather.invoke(ai_msg.tool_calls[0])</code> → <code>_prep_run_args</code> 抽出 <code>id="call_ab12"</code>，跑 Day13 的 <code>run</code>，出口 <code>_format_output</code> 包成 <code>ToolMessage(content="上海 26 度，晴", tool_call_id="call_ab12", status="success")</code>。第二轮 <code>model_with_tools.invoke([human, ai_msg, tool_msg])</code> → <code>AIMessage(content="上海现在 26 度，天气晴朗。", tool_calls=[])</code>——工单空了，闭环结束。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：bind_tools 之后，模型是不是就"拥有"这些工具了？它会不会自己偷偷调用？</p>
+                    <p class="a">👨‍🏫 老师：完全不会，这是今天最重要的安全认知。<strong>模型从头到尾只输出文本</strong>——bind_tools 只是每次请求时附一份 JSON 说明书；所谓 tool_calls 也只是"结构化地表达了想调用的意愿"。<strong>执行发生在你的 Python 进程里、由你的代码触发</strong>，你完全可以在执行前审查、过滤、要求人工确认（Day15 的 middleware 里真有 human_in_the_loop 这一层）。模型是下单的客户，你才是掌勺的厨房。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>bind_tools 干了什么、没干什么？（把工具翻译成厂商 JSON 挂到请求参数上；不发请求、不执行、不改原模型）</li>
+                        <li>ToolCall 三要素？（name 调谁 / args 标准 dict 参数 / id 工单号）</li>
+                        <li>ToolMessage 为什么必须带 tool_call_id？（多工单并发时对账，API 层面强制"每单必回"）</li>
+                        <li>tool.invoke 传 ToolCall 和传 dict 有什么区别？（前者自动抽 id、返回现成 ToolMessage；后者返回裸结果）</li>
+                        <li>工具执行失败怎么办？（回 status="error" 的回执，让模型自己决定重试还是换路）</li>
+                        <li>整个闭环里代码真正执行在哪？（永远在你本地进程，模型只出文本）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain
+
+# 1. 接口与实现
+sed -n '2338,2356p' libs/core/langchain_core/language_models/chat_models.py   # 基类接口
+grep -n "convert_to_openai_tool\|return super().bind" \
+  libs/partners/openai/langchain_openai/chat_models/base.py | head -5         # OpenAI 翻译+bind
+
+# 2. 工单与回执
+sed -n '160,180p' libs/core/langchain_core/messages/ai.py      # AIMessage.tool_calls
+sed -n '206,240p' libs/core/langchain_core/messages/tool.py    # ToolCall
+sed -n '26,82p'   libs/core/langchain_core/messages/tool.py    # ToolMessage
+
+# 3. 自动闭环两端
+sed -n '1320,1356p' libs/core/langchain_core/tools/base.py     # _prep_run_args 抽工单号
+sed -n '1358,1395p' libs/core/langchain_core/tools/base.py     # _format_output 产回执</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 15</strong>：今天的闭环还得你手写 while 循环："有工单就执行、回填、再问，直到没工单"。明天读 <code>libs/langchain_v1/langchain/agents/factory.py</code> 的 <code>create_agent</code>——它把这个循环编译成一张 LangGraph 状态图（model 节点 ⇄ tools 节点），这就是 ReAct Agent 的真身，也顺便讲清 LangChain 和 LangGraph 的关系。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day13.html" style="color:var(--accent-cyan);">&larr; Day 13 Tool 抽象</a>
+                    <a href="langchain-day15.html" style="color:var(--accent-green);">Day 15 · Agent 与 create_agent &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
