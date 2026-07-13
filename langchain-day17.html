@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 17 · 回调与流式 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">17</div>
+            <h2>Day 17</h2>
+            <p class="version">回调与流式 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：黑箱里发生了什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · BaseCallbackHandler：听众</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · CallbackManager：广播台</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · configure：听众怎么被装配</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · stream：打字机哪来的</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · astream_events：事件流</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day16.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 16 记忆/历史</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day18.html" class="nav-link" style="color:var(--accent-green);">Day 18 LCEL 高级组合 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 17 / 共 20 天 · 阶段5 进阶与收官</span>
+            <h1 class="part-title">回调与流式：LangChain 的"神经系统"和打字机效果的真相</h1>
+            <p class="part-desc">Day16 结尾埋了个钩子：<code>with_listeners</code> 凭什么能在链跑完时拿到完整记录？答案是贯穿一切的<strong>回调系统（callbacks/）</strong>——链开始、模型吐字、工具结束……每个环节都会向一批"听众"广播事件。今天拆三层：<strong>①听众长什么样（<code>BaseCallbackHandler</code>）；②谁负责广播（<code>CallbackManager</code> + <code>handle_event</code>）；③流式输出 <code>stream</code>/<code>astream_events</code> 是怎么在回调之上"长"出来的</strong>。学完它，Day19 的追踪系统就只剩临门一脚。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段5：进阶与收官 · D17-20）</div>
+            <div class="steps">
+                <span class="st">S1 全景/LCEL</span><span class="sep">→</span>
+                <span class="st">S2 模型/消息</span><span class="sep">→</span>
+                <span class="st">S3 数据/RAG</span><span class="sep">→</span>
+                <span class="st">S4 工具/Agent</span><span class="sep">→</span>
+                <span class="st on">D17 回调/流式</span><span class="sep">→</span>
+                <span class="st">D18 LCEL 高级</span><span class="sep">→</span>
+                <span class="st">D19 追踪</span><span class="sep">→</span>
+                <span class="st">D20 收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        类比一：回调系统像<strong>体育比赛的现场直播体系</strong>。比赛（你的链）照常进行，场边架着一排机位（handlers）：解说员（<code>StdOutCallbackHandler</code>，把过程念给你听）、记录员（<code>LangChainTracer</code>，Day19 见）、字幕机（流式 handler）。<strong>导播台（<code>CallbackManager</code>）</strong>负责在每个节点喊"进球了！"（<code>on_llm_start</code>/<code>on_llm_new_token</code>…），所有机位各自反应；某台机器坏了也不影响比赛本身。类比二：<code>astream_events</code> 像给直播加了<strong>逐条弹幕的赛事数据流</strong>——不只给你最终比分（invoke 的返回值），而是把"谁在第几分钟做了什么"一条条推给你，前端想做多花哨的进度 UI 都有料。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：链是个黑箱，流式又从哪来</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>一条 RAG 链跑了 8 秒才吐答案，慢在检索还是模型？中间 prompt 到底拼成了什么样？想在网页上做"逐字打出"的效果，可 <code>invoke</code> 要等全部生成完才返回。如果靠在业务代码里到处插 <code>print</code> 和计时器，链一改就全废。观测、日志、计费统计、流式 UI……这些需求都要求"看见链的内部过程"，但又都<strong>不该侵入链本身的代码</strong>。</div>
+                <div class="essence"><span class="t">💡 本质：观察者模式 + 事件总线</span>LangChain 的答案是把执行过程<strong>事件化</strong>：每个组件在关键时刻（开始/出 token/结束/出错）调用 <code>CallbackManager</code> 广播事件，任何实现了 <code>BaseCallbackHandler</code> 的对象都可以订阅。链的代码只管"广播"，不关心"谁在听、听了干什么"。日志、追踪、流式、甚至 Day16 的写历史，全是不同的听众——<strong>一套总线，喂饱所有横切需求</strong>。</div>
+                <table class="ttable">
+                    <thead><tr><th>事件家族</th><th>典型钩子</th><th>谁触发</th></tr></thead>
+                    <tbody>
+                        <tr><td>模型</td><td><code>on_chat_model_start / on_llm_new_token / on_llm_end / on_llm_error</code></td><td>BaseChatModel（Day05）</td></tr>
+                        <tr><td>链</td><td><code>on_chain_start / on_chain_end / on_chain_error</code></td><td>各种 Runnable（Day03-04）</td></tr>
+                        <tr><td>工具</td><td><code>on_tool_start / on_tool_end / on_tool_error</code></td><td>BaseTool（Day13）</td></tr>
+                        <tr><td>检索器</td><td><code>on_retriever_start / on_retriever_end</code></td><td>BaseRetriever（Day12）</td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">大白话</span>看这张表就明白：前 16 天学的每个组件，其实一直在偷偷"直播"自己——只是你没接机位而已。今天就是学怎么接。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>BaseCallbackHandler：一个"听众"长什么样</h1></div>
+            <div class="card">
+                <p>听众基类 <code>BaseCallbackHandler</code>（<span class="fileref">libs/core/langchain_core/callbacks/base.py:496</span>）——注意它是靠一堆 Mixin 拼出来的：</p>
+<pre><code class="language-python"># libs/core/langchain_core/callbacks/base.py:496
+class BaseCallbackHandler(
+    LLMManagerMixin,        # 提供 on_llm_new_token / on_llm_end / on_llm_error
+    ChainManagerMixin,      # 提供 on_chain_end / on_chain_error / on_agent_action...
+    ToolManagerMixin,       # 提供 on_tool_end / on_tool_error
+    RetrieverManagerMixin,  # 提供 on_retriever_end / on_retriever_error
+    CallbackManagerMixin,   # 提供各种 on_*_start
+    RunManagerMixin,        # 提供 on_text / on_retry / on_custom_event
+):
+    """Base callback handler."""
+
+    raise_error: bool = False   # 听众自己抛异常时，要不要拖垮主流程？默认不要
+    run_inline: bool = False    # 是否在主线程同步执行（追踪器需要顺序保证时置 True）
+
+    @property
+    def ignore_llm(self) -> bool:
+        """Whether to ignore LLM callbacks."""
+        return False            # 子类可声明"我不关心 LLM 事件"，广播时会跳过它</code></pre>
+                <div class="walk">
+                    <div class="r"><code>一堆 Mixin</code><span>每个 Mixin 对应一个事件家族（L01 的表）。所有钩子默认都是"空实现可覆写"——你写自定义 handler 时<strong>只覆写关心的那几个</strong>，比如做计费统计只写 <code>on_llm_end</code> 读 token 用量。</span></div>
+                    <div class="r"><code>raise_error=False</code><span>★关键设计：听众坏了不能砸场子。广播函数会捕获 handler 的异常只打日志（L03 见），保证"直播机位故障不中断比赛"。</span></div>
+                    <div class="r"><code>ignore_llm 等开关</code><span>性能优化：handler 声明不关心某类事件，<code>handle_event</code> 广播时直接跳过，连方法都不调。</span></div>
+                    <div class="r"><code>AsyncCallbackHandler</code><span>同文件下面还有异步版（<span class="fileref">callbacks/base.py:548</span>），所有钩子是 <code>async def</code>——L06 的事件流 handler 就继承它。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值：一个最小计时听众</span>
+                <code>class Timer(BaseCallbackHandler):</code> 里只覆写两个钩子：<code>on_chain_start</code> 记 <code>self.t0 = time.time()</code>，<code>on_chain_end</code> 打印 <code>f"耗时 {time.time()-self.t0:.2f}s"</code>。使用：<code>chain.invoke({"q": "hi"}, config={"callbacks": [Timer()]})</code> → 控制台输出 <code>耗时 3.41s</code>。链的代码一个字都没改——这就是"无侵入观测"。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>CallbackManager：导播台怎么广播</h1></div>
+            <div class="card">
+                <p>广播方 <code>CallbackManager</code>（<span class="fileref">libs/core/langchain_core/callbacks/manager.py:1377</span>）。看最常走的 <code>on_chat_model_start</code>（<span class="fileref">manager.py:1431</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/callbacks/manager.py:1431
+def on_chat_model_start(self, serialized, messages, run_id=None, **kwargs
+) -> list[CallbackManagerForLLMRun]:
+    managers = []
+    for message_list in messages:                 # 每批消息一个独立的 run
+        run_id_ = run_id or uuid7()               # ① 发一个 run_id（追踪树的节点编号）
+        handle_event(                             # ② ★向所有 handler 广播"模型开始了"
+            self.handlers, "on_chat_model_start", "ignore_chat_model",
+            serialized, [message_list],
+            run_id=run_id_, parent_run_id=self.parent_run_id,
+            tags=self.tags, metadata=self.metadata, **kwargs,
+        )
+        managers.append(CallbackManagerForLLMRun( # ③ 返回"本次运行专属"的子管理器
+            run_id=run_id_, handlers=self.handlers,
+            inheritable_handlers=self.inheritable_handlers,
+            parent_run_id=self.parent_run_id, ...))
+    return managers</code></pre>
+                <p>广播的底层是个通用函数 <code>handle_event</code>（<span class="fileref">manager.py:285</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/callbacks/manager.py:285
+def handle_event(handlers, event_name, ignore_condition_name, *args, **kwargs):
+    for handler in handlers:
+        try:
+            if ignore_condition_name is None or not getattr(
+                handler, ignore_condition_name          # ① 尊重 ignore_chat_model 等开关
+            ):
+                event = getattr(handler, event_name)(*args, **kwargs)  # ② 反射调钩子
+                if asyncio.iscoroutine(event):
+                    coros.append(event)                 #    异步钩子攒起来统一跑
+        except NotImplementedError as e:
+            if event_name == "on_chat_model_start":     # ③ ★老 handler 不认识 chat 事件？
+                handle_event([handler], "on_llm_start", # 降级成 on_llm_start 再喂一次
+                             "ignore_llm", args[0], message_strings, ...)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>run_id / parent_run_id</code><span>★每次"开始"都发一个 uuid，并带上父 run 的 id——所有事件因此能拼成一棵<strong>运行树</strong>。Day19 的追踪就是把这棵树画出来。</span></div>
+                    <div class="r"><code>返回子管理器</code><span><code>CallbackManagerForLLMRun</code> 是"绑定了本次 run_id 的遥控器"——模型后续吐 token 时调它的 <code>on_llm_new_token</code>，事件自动归属到正确的 run 上。这就是"父发号、子汇报"的结构。</span></div>
+                    <div class="r"><code>getattr(handler, event_name)</code><span>广播就是遍历听众、按名字反射调钩子。外层 try 捕获异常（<code>raise_error=False</code> 时只 log 警告）——印证 L02"机位坏了不砸比赛"。</span></div>
+                    <div class="r"><code>NotImplementedError 降级</code><span>贴心的兼容：老 handler 只实现过 <code>on_llm_start</code>（收字符串），遇到 chat 事件就把消息 <code>get_buffer_string</code> 拍平成字符串重新广播。生态包袱在源码里的样子。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：manager 是"树上的信使"</span><code>CallbackManager</code> 自己不处理事件，它做两件事：<strong>广播</strong>（handle_event 遍历听众）和<strong>续树</strong>（造出携带 run_id 血缘的子 manager 传给下一层）。Day04 看到的 <code>run_manager.get_child()</code>、今天的 <code>CallbackManagerForLLMRun</code>，都是同一棵树在不同层的化身。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>configure：听众是怎么被装配上车的</h1></div>
+            <div class="card">
+                <p>你可能好奇：我只在 <code>config</code> 里塞了个 handler，谁把它装进 manager 的？每个组件执行前都会调 <code>CallbackManager.configure</code>（<span class="fileref">libs/core/langchain_core/callbacks/manager.py:1683</span>），它委托给模块级的 <code>_configure</code>（<span class="fileref">manager.py:2390</span>）。核心逻辑三步：</p>
+                <div class="walk">
+                    <div class="r"><code>① 合并两路听众</code><span><code>inheritable_callbacks</code>（可继承：会随 <code>get_child()</code> 传给子 run，你在 config 里传的就是这类）+ <code>local_callbacks</code>（本层专属：只听这一个组件）。区分继承性，才能做到"给根链装一个 handler，全树事件都听得到"。</span></div>
+                    <div class="r"><code>② 按环境变量加"官方机位"</code><span><code>verbose=True</code> → 自动挂 <code>StdOutCallbackHandler</code>（解说员）；debug 模式 → <code>ConsoleCallbackHandler</code>；<strong>开了 LangSmith 追踪 → 自动挂 <code>LangChainTracer</code></strong>（<span class="fileref">manager.py:2524-2532</span>，Day19 主角，明天后天见）。</span></div>
+                    <div class="r"><code>③ 挂上下文钩子</code><span><code>register_configure_hook</code> 注册的 ContextVar handler（如 usage 统计）也在这里被拾取。所以"with 一个上下文管理器就能全局监听"不是魔法。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>一句话：<strong>每次组件开跑前，都会现场组一个"导播台"</strong>——你手动塞的、环境变量声明的、上下文里挂的听众全被拢到一起。这就是为什么设个 <code>LANGSMITH_TRACING=true</code> 环境变量，什么代码都不改就有了全链路追踪。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：handler 传错位置，子组件听不到</span><code>chain.invoke(x, config={"callbacks": [h]})</code> 传的是<strong>可继承</strong>听众，全树可见；而 <code>chain.with_config(callbacks=[h])</code> 绑在特定 Runnable 上的行为不同层级会有差异。发现"我的 handler 只收到一半事件"时，先检查它是从哪条路上车的。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>stream：打字机效果从哪来</h1></div>
+            <div class="card">
+                <p>先看一个反直觉的事实——<code>Runnable.stream</code> 的默认实现（<span class="fileref">libs/core/langchain_core/runnables/base.py:1182</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/runnables/base.py:1182
+def stream(self, input, config=None, **kwargs) -> Iterator[Output]:
+    """Default implementation of stream, which calls invoke.
+    Subclasses must override this method if they support streaming output."""
+    yield self.invoke(input, config, **kwargs)   # ★默认：憋完一整个结果，一次 yield</code></pre>
+                <div class="walk">
+                    <div class="r"><code>默认 = 假流式</code><span>基类的 <code>stream</code> 只是把 <code>invoke</code> 的完整结果包成"只有一块的流"。<strong>真流式必须由子类覆写</strong>：ChatModel 覆写成逐 token 吐（Day05 见过 <code>_stream</code>），<code>RunnableSequence</code> 覆写成 <code>transform</code> 管道——上一步吐一块、下一步立刻加工一块，块在管道里"流"过去。</span></div>
+                    <div class="r"><code>token 与回调的关系</code><span>模型每收到一个 token，做两件事：yield 给调用方（打字机）、同时调 <code>run_manager.on_llm_new_token(...)</code> 广播给听众。<strong>同一个 token，流式管道和回调总线各发一份</strong>——前者给你，后者给观测系统。</span></div>
+                    <div class="r"><code>断流点</code><span>链中间夹了一个"不会 transform 的步骤"（比如吃整个输入才能算的自定义函数），流到它就断了——它上游的块会被攒齐再往下传。排查"为什么我的链不逐字出"时先找这种堵点。</span></div>
+                </div>
+                <div class="example"><span class="t">📝 真实值：stream 一条链</span>
+                <code>chain = prompt | model | StrOutputParser()</code>，执行 <code>for chunk in chain.stream({"topic": "冰淇淋"})</code> → 依次打印 <code>"为"</code>、<code>"什"</code>、<code>"么"</code>、<code>"冰淇淋"</code>…… 每个 chunk 是 <code>str</code>（因为最后一环 parser 的 transform 把 <code>AIMessageChunk</code> 转成了字符串片段）。同一时刻，如果挂了 handler，它的 <code>on_llm_new_token</code> 也在被逐个调用。</div>
+                <div class="tradeoff"><span class="t">💡 取舍：为什么默认实现是"假流式"而不是报错？</span>好处是<strong>接口统一</strong>：任何 Runnable 都可以被 <code>stream</code> 调用，组合链时不用关心每个成员支不支持流式——不支持的成员自动退化为"一大块"。代价是退化是<strong>静默的</strong>：你以为在流式，其实在等全量。LangChain 选择了可组合性优先，把识别堵点的责任留给使用者。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>astream_events：把回调变成一条事件流</h1></div>
+            <div class="card">
+                <p><code>stream</code> 只能拿到<strong>最终输出</strong>的碎片；想要"检索完成了、模型开始了"这类中间事件，用 <code>astream_events</code>（<span class="fileref">libs/core/langchain_core/runnables/base.py:1356</span>）。它的 v2 实现在 <span class="fileref">tracers/event_stream.py:1008</span>——原理妙极了，就是"自己给自己装个听众"：</p>
+<pre><code class="language-python"># libs/core/langchain_core/tracers/event_stream.py:1008
+async def _astream_events_implementation_v2(runnable, value, config=None, ...):
+    event_streamer = _AstreamEventsCallbackHandler(   # ① ★造一个特殊听众（tracers/event_stream.py:101）
+        include_names=include_names, include_types=include_types, ...)
+
+    config = ensure_config(config)
+    callbacks = config.get("callbacks")
+    if callbacks is None:
+        config["callbacks"] = [event_streamer]        # ② 把这个听众塞进 config
+    elif isinstance(callbacks, list):
+        config["callbacks"] = [*callbacks, event_streamer]
+
+    async def consume_astream() -> None:
+        try:      # ③ 后台任务：正常跑 astream，输出也 tap 进事件流
+            async with aclosing(runnable.astream(value, config, **kwargs)) as stream:
+                async for _ in event_streamer.tap_output_aiter(run_id, stream):
+                    pass                              # 内容都被听众截走了
+        finally:
+            await event_streamer.send_stream.aclose()
+
+    task = asyncio.create_task(consume_astream())     # ④ 链在后台跑
+    async for event in event_streamer:                # ⑤ ★前台：从队列里逐条吐事件
+        ...
+        yield event</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_AstreamEventsCallbackHandler</code><span>一个"翻译官"听众：收到 <code>on_chat_model_start</code> 回调 → 翻译成 <code>{"event": "on_chat_model_start", "name": ..., "run_id": ..., "data": ...}</code> 字典，塞进内存队列（<code>_MemoryStream</code>，<span class="fileref">event_stream.py:147-149</span>）。</span></div>
+                    <div class="r"><code>后台跑 + 前台读</code><span>★生产者-消费者：链作为 asyncio task 在后台执行、事件不断入队；<code>astream_events</code> 的调用方在前台 <code>async for</code> 逐条消费。这就是"边跑边报"的实现。</span></div>
+                    <div class="r"><code>include/exclude 过滤</code><span>事件可能非常多，支持按 name/type/tags 过滤（<code>_RootEventFilter</code>）——比如只订阅 <code>on_chat_model_stream</code> 做打字机、忽略其余。</span></div>
+                    <div class="r"><code>事件命名规律</code><span><code>on_[组件类型]_(start|stream|end)</code>：<code>on_chain_start</code>、<code>on_chat_model_stream</code>（<code>data.chunk</code> 是 <code>AIMessageChunk</code>）、<code>on_retriever_end</code>（<code>data.output</code> 是文档列表）……docstring 里有完整对照表（<span class="fileref">runnables/base.py:1399-1420</span>）。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 240" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">回调总线：一次广播，多个听众；事件流 = 把回调装进队列</text>
+                        <rect x="20" y="34" width="200" height="66" rx="8" fill="rgba(47,111,235,.10)" stroke="#2f6feb"/>
+                        <text x="120" y="52" fill="#93c5fd" text-anchor="middle" font-weight="700">你的链在执行</text>
+                        <text x="120" y="68" fill="#cbd5e1" text-anchor="middle">retriever → prompt → model</text>
+                        <text x="120" y="84" fill="#cbd5e1" text-anchor="middle">每个节点触发 on_*_start/end/token</text>
+                        <path d="M220 67 L268 67" stroke="#94a3b8" stroke-width="1.2"/>
+                        <rect x="270" y="44" width="140" height="46" rx="8" fill="rgba(245,158,11,.12)" stroke="#f59e0b"/>
+                        <text x="340" y="62" fill="#fcd34d" text-anchor="middle" font-weight="700">CallbackManager</text>
+                        <text x="340" y="78" fill="#cbd5e1" text-anchor="middle">handle_event 广播</text>
+                        <path d="M410 55 L468 42" stroke="#94a3b8" stroke-width="1.2"/>
+                        <path d="M410 67 L468 92" stroke="#94a3b8" stroke-width="1.2"/>
+                        <path d="M410 79 L468 142" stroke="#94a3b8" stroke-width="1.2"/>
+                        <rect x="470" y="28" width="150" height="32" rx="7" fill="rgba(34,197,94,.10)" stroke="#22c55e"/>
+                        <text x="545" y="41" fill="#86efac" text-anchor="middle">StdOutCallbackHandler</text>
+                        <text x="545" y="54" fill="#cbd5e1" text-anchor="middle">解说员：打印过程</text>
+                        <rect x="470" y="78" width="150" height="32" rx="7" fill="rgba(168,85,247,.10)" stroke="#a855f7"/>
+                        <text x="545" y="91" fill="#d8b4fe" text-anchor="middle">LangChainTracer</text>
+                        <text x="545" y="104" fill="#cbd5e1" text-anchor="middle">记录员：Day19 见</text>
+                        <rect x="470" y="128" width="150" height="32" rx="7" fill="rgba(236,72,153,.10)" stroke="#ec4899"/>
+                        <text x="545" y="141" fill="#f9a8d4" text-anchor="middle">_AstreamEventsHandler</text>
+                        <text x="545" y="154" fill="#cbd5e1" text-anchor="middle">翻译官：事件入队</text>
+                        <path d="M545 160 L545 184" stroke="#94a3b8" stroke-width="1.2"/>
+                        <rect x="380" y="186" width="240" height="34" rx="8" fill="rgba(52,211,153,.08)" stroke="#34d399"/>
+                        <text x="500" y="200" fill="#6ee7b7" text-anchor="middle" font-weight="700">内存队列 → async for event in ...</text>
+                        <text x="500" y="213" fill="#cbd5e1" text-anchor="middle">astream_events 的调用方逐条消费</text>
+                        <text x="180" y="200" fill="#94a3b8" text-anchor="middle">听众互不干扰：加一个机位</text>
+                        <text x="180" y="214" fill="#94a3b8" text-anchor="middle">不用改比赛（链）的任何代码</text>
+                    </svg>
+                    <div class="cap">图注：广播是"推"，事件流是在推的末端接了个队列变成"拉"。同一套回调总线，喂出了日志、追踪、事件流三种能力。</div>
+                </div>
+                <div class="example"><span class="t">📝 真实值：astream_events 吐出的前几条事件</span>
+                <code>async for ev in chain.astream_events({"topic": "冰淇淋"}, version="v2")</code>，依次收到：<br>
+                ① <code>{"event": "on_chain_start", "name": "RunnableSequence", "run_id": "0198...", "data": {"input": {"topic": "冰淇淋"}}}</code><br>
+                ② <code>{"event": "on_prompt_start", "name": "ChatPromptTemplate", ...}</code> → ③ <code>on_prompt_end</code>（output 是拼好的 <code>ChatPromptValue</code>）<br>
+                ④ <code>{"event": "on_chat_model_start", ...}</code> → ⑤⑥⑦… <code>{"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="为")}}</code> 一大串<br>
+                ⑧ <code>on_chat_model_end</code> → ⑨ <code>on_chain_end</code>（data.output 是完整答案）。前端拿 ⑤ 做打字机、拿 ② ④ 做"正在思考/正在生成"状态灯。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：stream 和 astream_events 我该用哪个？</p>
+                    <p class="a">👨‍🏫 老师：只要<strong>最终答案逐字出</strong>——用 <code>stream</code>/<code>astream</code>，简单直接。要<strong>中间过程</strong>（Agent 正在调哪个工具、检索到了什么、每一步进度）——用 <code>astream_events</code>，按事件名过滤你关心的。经验法则：聊天气泡用前者，Agent 执行面板用后者。另外注意 <code>astream_events</code> 只有异步版——因为它靠 asyncio task 实现"后台跑前台读"。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="essence"><span class="t">💡 回望 Day16，闭环了</span>昨天的 <code>with_listeners(on_end=_exit_history)</code> 现在完全透明了：它就是往回调总线上挂了一个"只听 <code>on_chain_end</code> 的听众"（底层是 tracers 里的 <code>RootListenersTracer</code>），链跑完收到带完整输入输出的 Run → 写历史。<strong>记忆、日志、流式、追踪，四件看似无关的事，全是同一条总线上的不同听众。</strong></div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>回调系统解决什么问题？（无侵入地观察执行过程：观察者模式 + 事件总线）</li>
+                        <li>handler 抛异常会砸掉主流程吗？（默认不会，<code>raise_error=False</code>，<code>handle_event</code> 捕获后只记日志）</li>
+                        <li><code>run_id/parent_run_id</code> 是干嘛的？（给每次运行发编号并记血缘，事件才能拼成运行树——Day19 的地基）</li>
+                        <li>为什么设个环境变量就有 LangSmith 追踪？（<code>_configure</code> 组装 manager 时按环境自动挂 <code>LangChainTracer</code>）</li>
+                        <li><code>stream</code> 的默认实现是什么？（调 invoke 一次性 yield——假流式；真流式靠子类覆写 transform/_stream）</li>
+                        <li><code>astream_events</code> 的原理？（自己给自己挂一个把回调翻译成事件、塞进队列的听众；链后台跑、前台逐条消费）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain/libs/core/langchain_core
+
+# 1. 听众：Mixin 拼出来的钩子全家福
+sed -n '496,546p' callbacks/base.py          # BaseCallbackHandler + ignore_* 开关
+grep -n "def on_" callbacks/base.py | head -25
+
+# 2. 导播台：广播与续树
+sed -n '285,335p'  callbacks/manager.py      # handle_event（含降级兼容）
+sed -n '1431,1483p' callbacks/manager.py     # on_chat_model_start
+sed -n '2510,2545p' callbacks/manager.py     # _configure 自动挂 tracer
+
+# 3. 流式：假流式默认值 + 事件流实现
+sed -n '1182,1202p' runnables/base.py        # stream 默认=invoke
+sed -n '1008,1075p' tracers/event_stream.py  # astream_events v2：自装听众+队列</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 18</strong>：回调让链"可观测"，但链本身还能更聪明——输入不齐怎么补默认值？按条件走不同分支？主模型挂了怎么自动换备胎？失败了怎么优雅重试？明天把 <code>runnables/</code> 目录里剩下的六件高级积木（passthrough/branch/fallbacks/retry/configurable/router）一次配齐。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day16.html" style="color:var(--accent-cyan);">&larr; Day 16 记忆与对话历史</a>
+                    <a href="langchain-day18.html" style="color:var(--accent-green);">Day 18 · LCEL 高级组合 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

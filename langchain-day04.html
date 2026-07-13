@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · 一次 invoke 的完整旅程 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">invoke 完整旅程 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：黑箱里到底跑了什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 主循环：Sequence.invoke 全文</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · config 随身包：ensure/patch</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 每一节内部：_call_with_config</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 回调树：seq:step:N</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03 Runnable/LCEL</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 ChatModel 抽象 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 阶段1 全景与 LCEL</span>
+            <h1 class="part-title">一次 invoke 的完整旅程：水流过每节管子时都发生了什么</h1>
+            <p class="part-desc">Day03 我们看清了管道的"静态结构"（first/middle/last），今天看"动态执行"：<code>chain.invoke({"topic": "猫"})</code> 按下之后，<strong>①<code>RunnableSequence.invoke</code> 的 for 循环怎么逐节放水；②那个从头传到尾的 <code>config</code> 随身包怎么被 <code>ensure_config / patch_config</code> 一路加工；③每一节内部的 <code>_call_with_config</code> 做了哪些"进出手续"；④LangSmith 里那棵 <code>seq:step:1/2/3</code> 回调树是怎么长出来的。</strong>读完今天，你对任何 LCEL 链的执行都有 X 光视角。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段1：全景与 LCEL · D01-04）</div>
+            <div class="steps">
+                <span class="st">D01 项目全景</span><span class="sep">→</span>
+                <span class="st">D02 第一个链</span><span class="sep">→</span>
+                <span class="st">D03 Runnable/LCEL</span><span class="sep">→</span>
+                <span class="st on">D04 invoke 旅程</span><span class="sep">→</span>
+                <span class="st">S2 模型/消息/Prompt</span><span class="sep">→</span>
+                <span class="st">S3 数据与 RAG</span><span class="sep">→</span>
+                <span class="st">S4 工具/Agent</span><span class="sep">→</span>
+                <span class="st">S5 进阶收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        还是水管世界观。类比一：<strong>config = 跟着水流走的"工单夹"</strong>——水厂放水前，师傅先把工单夹补齐（<code>ensure_config</code>：缺页的补空白页），水每流进一节管子，师傅就在工单上盖一个这节的章（<code>patch_config</code>：换上这一节专属的记录员），这样最后翻工单就知道水走过哪、每段谁负责。类比二：<strong>回调树 = 施工监理的层级汇报</strong>——总监理（root run）盯整条链，每节管子各派一个子监理（child run，编号 seq:step:1/2/3），子监理干活前喊"开工"（on_chain_start）、干完喊"完工"（on_chain_end）、出事喊"事故"（on_chain_error）——LangSmith 网页上那棵漂亮的执行树，就是这些汇报拼出来的。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：invoke 一按，中间发生了什么全靠猜？</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>链跑出来的结果不对，你想知道：是 prompt 拼错了，还是模型抽风了，还是解析器抠错了？如果执行过程是黑箱，你只能在链里到处插 print。更麻烦的是横切需求：想给这次调用打个标签方便检索、想限制并发、想把整个过程送到 LangSmith 可视化——这些"和业务无关但每一节都要配合"的事，难道要每个组件各改一遍？</div>
+                <div class="essence"><span class="t">💡 本质：执行循环只有 20 行，横切需求全塞进 config</span>LangChain 的答案：执行主循环写得极其朴素（真的就是个 for 循环），而所有横切需求（追踪、标签、并发、递归深度）统一装进一个字典 <code>RunnableConfig</code>，<strong>由框架保证它随水流传遍每一节</strong>。组件不需要知道"谁在监听我"，它只要在开工/完工时朝 config 里的回调管理器喊一嗓子。关注点分离的教科书：业务走数据流，观测走 config 流。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>主循环：RunnableSequence.invoke 全文（真源码第 1 段）</h1></div>
+            <div class="card">
+                <p>今天的主菜，一行不删（<span class="fileref">runnables/base.py:3418-3451</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/runnables/base.py:3418（完整正文）
+def invoke(self, input, config=None, **kwargs):
+    # setup callbacks and context
+    config = ensure_config(config)                                # ① 补齐工单
+    callback_manager = get_callback_manager_for_config(config)    # ② 组装监理团
+    # start the root run
+    run_manager = callback_manager.on_chain_start(                # ③ 总监理喊开工
+        None, input,
+        name=config.get("run_name") or self.get_name(),
+        run_id=config.pop("run_id", None),
+    )
+    input_ = input
+
+    # invoke all steps in sequence
+    try:
+        for i, step in enumerate(self.steps):                     # ④ ★逐节放水
+            # mark each step as a child run
+            config = patch_config(                                # ⑤ 给这节盖章
+                config, callbacks=run_manager.get_child(f"seq:step:{i + 1}")
+            )
+            with set_config_context(config) as context:           # ⑥ 存进 contextvar
+                if i == 0:
+                    input_ = context.run(step.invoke, input_, config, **kwargs)
+                else:
+                    input_ = context.run(step.invoke, input_, config)  # ⑦ 出水=下节进水
+    # finish the root run
+    except BaseException as e:
+        run_manager.on_chain_error(e)                             # ⑧ 出事上报
+        raise
+    else:
+        run_manager.on_chain_end(input_)                          # ⑨ 完工上报
+        return cast("Output", input_)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>④ for i, step in ...</code><span>★整个 LCEL 的执行核心就这一个循环。<code>self.steps</code> 是 D03 看过的 <code>[first, *middle, last]</code> 平铺列表——D03 的"拆平"设计在这里兑现：一层循环走到底，没有递归下钻。</span></div>
+                    <div class="r"><code>⑦ input_ = step.invoke(input_)</code><span>用同一个变量 <code>input_</code> 滚动：这一节的出水直接当下一节的进水。prompt 吐的 PromptValue 进 model，model 吐的 AIMessage 进 parser——数据"接力棒"就是这行。</span></div>
+                    <div class="r"><code>i==0 才传 **kwargs</code><span>细节：调用方传的额外参数只给第一节。因为 kwargs 是"对这次输入的补充说明"，从第二节起输入已经是上一节的产物，原始 kwargs 语义不再成立。</span></div>
+                    <div class="r"><code>⑥ set_config_context</code><span>把 config 存进 Python 的 <code>contextvars</code>（线程/协程本地变量）再执行。妙处：万一某节内部又调了别的 Runnable 却忘了传 config，<code>ensure_config</code> 能从 contextvar 里捞回来（L03 就能看到这个兜底）——工单不会断传。</span></div>
+                    <div class="r"><code>⑧⑨ try/except/else</code><span>成功走 <code>on_chain_end(最终结果)</code>，失败走 <code>on_chain_error(异常)</code> 再原样 raise。<strong>监理只记录、不吞异常</strong>——所以你的 try/except 照常能接到错误。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>剥掉监理相关的 6 行，这个函数其实就是：<code>for step in steps: x = step.invoke(x)</code>。LangChain 最核心的执行逻辑就这么朴素——复杂度全在"随行的工单"和"层层的监理"上，这正是接下来两讲的内容。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>config 随身包：ensure_config 与 patch_config（真源码第 2 段）</h1></div>
+            <div class="card">
+                <p>两位工单管理员都住在 <span class="fileref">runnables/config.py</span>。先看补齐员（<span class="fileref">config.py:255-292</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/runnables/config.py:255（裁剪）
+def ensure_config(config: RunnableConfig | None = None) -> RunnableConfig:
+    """Ensure that a config is a dict with all keys present."""
+    empty = RunnableConfig(
+        tags=[], metadata={}, callbacks=None,
+        recursion_limit=DEFAULT_RECURSION_LIMIT, configurable={},
+    )                                                   # ① 先造一份空白工单
+    if var_config := var_child_runnable_config.get():   # ② ★从 contextvar 捞"祖传工单"
+        empty.update({k: v.copy() if k in COPIABLE_KEYS else v
+                      for k, v in var_config.items() if v is not None})
+    if config is not None:                              # ③ 调用方亲手传的，优先级最高
+        empty.update({k: ... for k, v in config.items()
+                      if v is not None and k in CONFIG_KEYS})
+    ...
+    return empty</code></pre>
+                <p>再看盖章员（<span class="fileref">config.py:357-397</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/runnables/config.py:357（裁剪）
+def patch_config(config, *, callbacks=None, recursion_limit=None,
+                 max_concurrency=None, run_name=None, configurable=None):
+    config = ensure_config(config)
+    if callbacks is not None:
+        # If we're replacing callbacks, we need to unset run_name
+        # As that should apply only to the same run as the original callbacks
+        config["callbacks"] = callbacks        # ① 换上"这一节专属监理"
+        if "run_name" in config: del config["run_name"]   # ② 名字不跟着下传
+        if "run_id" in config:   del config["run_id"]     #    id 也不跟
+    if recursion_limit is not None: config["recursion_limit"] = recursion_limit
+    ...
+    if configurable is not None:
+        config["configurable"] = {**config.get("configurable", {}), **configurable}
+    return config</code></pre>
+                <div class="walk">
+                    <div class="r"><code>三层优先级</code><span>ensure_config 的合并顺序：空白默认 &lt; contextvar 里的祖传工单 &lt; 你亲手传的 config。所以外层链设置的 tags，内层组件自动继承；但你现场指定的永远赢。</span></div>
+                    <div class="r"><code>v.copy() if COPIABLE</code><span>tags/metadata 这类可变容器要复制一份再合并——否则内层组件往 tags 里 append，会把外层的列表也改了（可变默认值的经典坑，框架替你防了）。</span></div>
+                    <div class="r"><code>patch 时删 run_name/run_id</code><span>★L02 的 ⑤ 每节都 patch callbacks，同时删掉 run_name/run_id——因为"这次运行叫什么/编号多少"只属于<strong>根运行</strong>；如果跟着下传，LangSmith 树上每一节都会顶着同一个名字，没法看了。源码注释原话就在解释这个。</span></div>
+                    <div class="r"><code>configurable 合并不覆盖</code><span>configurable 字典是 merge（<code>{**旧, **新}</code>）而非替换——运行时配置一路只增不丢，D18 的可配置模型全靠它。</span></div>
+                </div>
+                <div class="tradeoff"><span class="t">💡 设计取舍：config 为什么是"松散字典"而不是强类型对象？</span><code>RunnableConfig</code> 是 TypedDict（带类型提示的普通 dict）。好处：可以随手 <code>{"tags": ["实验A"]}</code> 就传、跨版本兼容宽松、序列化零成本；代价：key 拼错（<code>"tag"</code> 少个 s）不报错只静默丢弃——所以 ensure_config 里有 <code>k in CONFIG_KEYS</code> 的白名单过滤。用灵活性换严格性，并靠白名单守住底线。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>每一节内部：以 prompt 为例看 _call_with_config（真源码第 3 段）</h1></div>
+            <div class="card">
+                <p>主循环调 <code>step.invoke(...)</code> 后，每一节自己还要办"进出手续"。看第一节 prompt 的 invoke（<span class="fileref">prompts/base.py:210-236</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/prompts/base.py:210（完整正文）
+def invoke(self, input, config=None, **kwargs) -> PromptValue:
+    config = ensure_config(config)                       # 又 ensure 一次（幂等，白捡兜底）
+    if self.metadata:
+        config["metadata"] = {**config["metadata"], **self.metadata}
+    if self.tags:
+        config["tags"] += self.tags                      # 组件自带的标签也上工单
+    return self._call_with_config(                       # ★交给基类的"标准过场"
+        self._format_prompt_with_error_handling,         #   真正的业务：填模板
+        input, config,
+        run_type="prompt",                               #   在追踪里标记为 prompt 类型
+        serialized=self._serialized,
+    )</code></pre>
+                <div class="walk">
+                    <div class="r"><code>_call_with_config</code><span>定义在 <span class="fileref">runnables/base.py:2256</span>，是所有"单步组件"共用的标准过场：开子运行（on_chain_start）→ 执行传进来的业务函数 → 成功报 end / 失败报 error → 返回。<strong>组件作者只写业务函数，进出手续基类全包</strong>——和 L02 主循环的 try/else 结构一模一样，只是粒度小一层。</span></div>
+                    <div class="r"><code>run_type="prompt"</code><span>告诉追踪系统"我这一步是填提示词的"。LangSmith 里不同 run_type 显示不同图标/颜色：prompt/llm/parser/tool/retriever……D19 会看到 tracer 怎么消费它。</span></div>
+                    <div class="r"><code>再 ensure 一次不浪费吗？</code><span>ensure_config 是幂等的（补齐过的工单再补一次不变）。多这一道是防御：prompt 也可能被<strong>单独</strong> invoke（不在链里），这时没人替它 ensure。每个组件自守门户，才能既独立可用又可组合。</span></div>
+                    <div class="r"><code>第二节 model 呢？</code><span><code>BaseChatModel.invoke</code>（<span class="fileref">language_models/chat_models.py:463</span>）不走 _call_with_config，而是把 config 拆开（callbacks/tags/metadata/run_name 各自取出）传给 <code>generate_prompt</code>——因为模型的"过场"复杂得多（缓存、限流、流式判断），明天 D05 专门拆它。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>回调树：seq:step:N 是怎么长成 LangSmith 那棵树的</h1></div>
+            <div class="card">
+                <p>把 L02-L04 拼起来，一次 <code>chain.invoke({"topic": "猫"})</code> 的完整时序：</p>
+                <div class="svgbox">
+                    <svg viewBox="0 0 660 320" width="100%" style="max-width:660px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="330" y="18" fill="#e2e8f0" text-anchor="middle" font-weight="700">一次 invoke 的 X 光片：左边数据流，右边回调树</text>
+                        <rect x="30" y="40" width="290" height="256" rx="10" fill="rgba(47,111,235,.05)" stroke="#2f6feb" stroke-dasharray="4 3"/>
+                        <text x="175" y="60" fill="#93c5fd" text-anchor="middle" font-weight="700">数据流（input_ 接力棒）</text>
+                        <rect x="60" y="74" width="230" height="28" rx="6" fill="rgba(148,163,184,.10)" stroke="#94a3b8"/>
+                        <text x="175" y="92" fill="#cbd5e1" text-anchor="middle">{"topic": "猫"}</text>
+                        <path d="M175 102 L175 116" stroke="#2f6feb" stroke-width="1.6" marker-end="url(#a4)"/>
+                        <rect x="60" y="118" width="230" height="30" rx="6" fill="rgba(47,111,235,.12)" stroke="#2f6feb"/>
+                        <text x="175" y="137" fill="#93c5fd" text-anchor="middle">step1 prompt.invoke → PromptValue</text>
+                        <path d="M175 148 L175 162" stroke="#2f6feb" stroke-width="1.6" marker-end="url(#a4)"/>
+                        <rect x="60" y="164" width="230" height="30" rx="6" fill="rgba(14,165,233,.12)" stroke="#0ea5e9"/>
+                        <text x="175" y="183" fill="#7dd3fc" text-anchor="middle">step2 model.invoke → AIMessage</text>
+                        <path d="M175 194 L175 208" stroke="#2f6feb" stroke-width="1.6" marker-end="url(#a4)"/>
+                        <rect x="60" y="210" width="230" height="30" rx="6" fill="rgba(16,185,129,.12)" stroke="#10b981"/>
+                        <text x="175" y="229" fill="#6ee7b7" text-anchor="middle">step3 parser.invoke → str</text>
+                        <path d="M175 240 L175 254" stroke="#2f6feb" stroke-width="1.6" marker-end="url(#a4)"/>
+                        <rect x="60" y="256" width="230" height="28" rx="6" fill="rgba(148,163,184,.10)" stroke="#94a3b8"/>
+                        <text x="175" y="274" fill="#cbd5e1" text-anchor="middle">'我家猫把我当...实习生。'</text>
+                        <rect x="350" y="40" width="290" height="256" rx="10" fill="rgba(236,72,153,.04)" stroke="#ec4899" stroke-dasharray="4 3"/>
+                        <text x="495" y="60" fill="#f9a8d4" text-anchor="middle" font-weight="700">回调树（run 层级）</text>
+                        <rect x="374" y="74" width="242" height="30" rx="6" fill="rgba(236,72,153,.12)" stroke="#ec4899"/>
+                        <text x="495" y="93" fill="#f9a8d4" text-anchor="middle">RunnableSequence（root run）</text>
+                        <path d="M400 104 L400 126" stroke="#ec4899" stroke-width="1.3" fill="none"/>
+                        <rect x="410" y="116" width="206" height="26" rx="6" fill="rgba(47,111,235,.10)" stroke="#2f6feb"/>
+                        <text x="513" y="133" fill="#93c5fd" text-anchor="middle">seq:step:1 · prompt（run_type=prompt）</text>
+                        <path d="M400 104 L400 172" stroke="#ec4899" stroke-width="1.3" fill="none"/>
+                        <rect x="410" y="162" width="206" height="26" rx="6" fill="rgba(14,165,233,.10)" stroke="#0ea5e9"/>
+                        <text x="513" y="179" fill="#7dd3fc" text-anchor="middle">seq:step:2 · model（run_type=llm）</text>
+                        <path d="M400 104 L400 218" stroke="#ec4899" stroke-width="1.3" fill="none"/>
+                        <rect x="410" y="208" width="206" height="26" rx="6" fill="rgba(16,185,129,.10)" stroke="#10b981"/>
+                        <text x="513" y="225" fill="#6ee7b7" text-anchor="middle">seq:step:3 · parser（run_type=parser）</text>
+                        <text x="495" y="262" fill="#94a3b8" text-anchor="middle">run_manager.get_child("seq:step:N")</text>
+                        <text x="495" y="278" fill="#94a3b8" text-anchor="middle">= 给这节生成子监理（patch_config 装进工单）</text>
+                        <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2f6feb"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：左列是 L02 的 for 循环，右列是每次 <code>patch_config(callbacks=run_manager.get_child("seq:step:N"))</code> 长出的子运行。LangSmith 的树 = 右列的可视化。</div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：树不是"事后分析"出来的，是执行时天然长出来的</span>很多系统的调用树靠事后解析日志拼接，容易断线。LCEL 的树是<strong>结构性的</strong>：父 run_manager 调 <code>get_child()</code> 生成子监理、子监理随 config 传给子组件、子组件的所有汇报天然挂在父节点下。嵌套链（链里套链）也一样成立——每层都重复这个"生子下传"动作，树就自动多一层。这套机制同时服务 D17 的流式事件和 D19 的 LangSmith 追踪。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：自定义组件"跳出"了树</span>如果你在 RunnableLambda 里手写 <code>some_chain.invoke(x)</code>（不传 config），得益于 L02 ⑥ 的 contextvar 兜底，多数情况树还连着；但如果你自己开线程/进程去调，contextvar 传不过去，那一支就会从树上断开，LangSmith 里变成孤儿 run。跨线程调用时记得手动把 config 传进去。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：带着 config 跑一次，看工单怎么变</span>
+                <code>chain.invoke({"topic": "猫"}, config={"tags": ["实验A"], "run_name": "笑话链"})</code> 的工单演变：<br>
+                ① 进 Sequence.invoke，<code>ensure_config</code> 补齐 → <code>{"tags": ["实验A"], "metadata": {}, "callbacks": None, "recursion_limit": 25, "configurable": {}, "run_name": "笑话链"}</code>；<br>
+                ② <code>on_chain_start</code> 用 <code>run_name="笑话链"</code> 建 root run；<br>
+                ③ 进 step1 前 <code>patch_config</code>：callbacks 换成 root 的子监理 <code>seq:step:1</code>，同时<strong>删掉 run_name</strong>（只属于根）；tags 里的 "实验A" 保留下传；<br>
+                ④ prompt.invoke 内部再把自己的 tags/metadata 并进工单，以 <code>run_type="prompt"</code> 记录子运行；<br>
+                ⑤ step2、step3 重复 ③④，编号变成 seq:step:2、seq:step:3；<br>
+                ⑥ 全部成功，root 的 <code>on_chain_end('我家猫把我当...')</code> 收尾。LangSmith 里你会看到名为"笑话链"的树、三个子节点、全树都带 "实验A" 标签。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：为什么我在链中间的组件上单独设的 run_name 没显示？还有 recursion_limit 是防什么的？</p>
+                    <p class="a">👨‍🏫 老师：第一问正是 L03 的细节——<code>patch_config</code> 在给每节换监理时会删掉 config 里的 run_name（它只属于当前这层 run），组件想固定名字应该用 <code>.with_config(run_name="...")</code> 把名字绑在组件自己身上。第二问：recursion_limit（默认 25）防的是"Runnable 调 Runnable"无限套娃——比如 Agent 循环里链自己调自己，每下一层计数 +1，超限抛错，防止栈溢出或无限烧钱。这个值也在工单里，所以可以每次调用单独放宽。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>Sequence.invoke 的核心是什么结构？（一个 for 循环，<code>input_ = step.invoke(input_)</code> 滚动接力）</li>
+                        <li>ensure_config 的三层优先级？（默认空白 &lt; contextvar 祖传 &lt; 亲手传入）</li>
+                        <li>patch_config 换 callbacks 时为什么删 run_name/run_id？（它们只属于当前层的 run，下传会让每节重名）</li>
+                        <li>seq:step:N 从哪来？（主循环里 <code>run_manager.get_child(f"seq:step:{i+1}")</code>，每节一个子监理）</li>
+                        <li>组件单独 invoke 也能被追踪吗？（能，每个组件自己也 ensure_config + _call_with_config 走标准过场）</li>
+                        <li>kwargs 为什么只传给第一节？（它是对原始输入的补充，第二节起输入已是上节产物）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain
+
+# 1. 主循环（今天的主菜，值得逐行再读一遍）
+sed -n '3418,3452p' libs/core/langchain_core/runnables/base.py
+
+# 2. 工单双雄
+sed -n '255,295p' libs/core/langchain_core/runnables/config.py   # ensure_config
+sed -n '357,398p' libs/core/langchain_core/runnables/config.py   # patch_config
+
+# 3. 单节的标准过场
+sed -n '210,240p' libs/core/langchain_core/prompts/base.py       # prompt.invoke
+grep -n "def _call_with_config" libs/core/langchain_core/runnables/base.py  # :2256
+
+# 4. 无 key 观察回调树：挂一个打印所有事件的 handler
+python3 -c "
+from langchain_core.runnables import RunnableLambda
+from langchain_core.callbacks import BaseCallbackHandler
+class Spy(BaseCallbackHandler):
+    def on_chain_start(self, s, inputs, *, run_id, parent_run_id=None, **kw):
+        print('start', kw.get('name'), 'parent=', parent_run_id is not None)
+seq = RunnableLambda(lambda x: x+1) | RunnableLambda(lambda x: x*2)
+seq.invoke(1, config={'callbacks': [Spy()], 'run_name': '试验链'})"</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 05</strong>：主循环里的 step2（model.invoke）今天被我们一笔带过，其实它是最厚的一节——进入阶段 2，打开 <code>language_models/chat_models.py</code>：BaseChatModel 的 invoke → generate → _generate_with_cache 主线，缓存怎么查怎么存、"要不要流式"怎么判断、厂商子类到底只需要写哪两个方法。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day03.html" style="color:var(--accent-cyan);">&larr; Day 03 Runnable 与 LCEL 管道</a>
+                    <a href="langchain-day05.html" style="color:var(--accent-green);">Day 05 · ChatModel 抽象 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
