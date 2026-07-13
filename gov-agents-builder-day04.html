@@ -9,11 +9,18 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
     <style>
-        .dir-tree{font-family:'SF Mono',monospace;font-size:12px;line-height:1.65;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:14px 16px;margin:12px 0;color:var(--text-secondary)}
+        .dir-tree{font-family:'SF Mono',monospace;font-size:11.5px;line-height:1.75;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:14px 16px;margin:12px 0;color:var(--text-secondary)}
         .dir-tree .hot{color:var(--accent-purple);font-weight:600}
+        .dir-tree .node{color:var(--accent-green);font-weight:600}
+        .dir-tree .warn{color:#f87171;font-weight:600}
         .essence{border-left:3px solid #3b82f6;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
         .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
-        .fileref{display:inline-block;font-family:monospace;font-size:11px;color:var(--accent-purple);background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.25);border-radius:5px;padding:1px 7px}
+        .fmap{width:100%;border-collapse:collapse;font-size:12px;margin:12px 0}
+        .fmap th,.fmap td{border:1px solid var(--border-color);padding:7px 10px;text-align:left;vertical-align:top}
+        .fmap th{background:var(--bg-secondary);color:var(--text-primary)}
+        .fmap code{font-size:11px;color:var(--accent-cyan)}
+        .paths2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+        @media(max-width:768px){.paths2{grid-template-columns:1fr}}
     </style>
 </head>
 <body>
@@ -21,19 +28,18 @@
         <div class="sidebar-header">
             <div class="logo" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">04</div>
             <h2>Day 04</h2>
-            <p class="version">业务图开发 · 核心代码</p>
+            <p class="version">每个业务文件在哪 · 改什么</p>
         </div>
         <ul class="nav-list">
             <li class="nav-group-title">本篇</li>
-            <li><a href="#dir" class="nav-link active">标准目录</a></li>
-            <li><a href="#state" class="nav-link">state + builder</a></li>
-            <li><a href="#sp" class="nav-link">specialists</a></li>
-            <li><a href="#tools" class="nav-link">tools / prompts</a></li>
-            <li><a href="#critic" class="nav-link">Critic · LLM 铁律</a></li>
+            <li><a href="#rule" class="nav-link active">builder 不在 nodes/</a></li>
+            <li><a href="#standalone" class="nav-link">独立仓目录 + 对照表</a></li>
+            <li><a href="#mono" class="nav-link">Monorepo 目录 + 对照表</a></li>
+            <li><a href="#state" class="nav-link">state / builder / nodes 示例</a></li>
+            <li><a href="#extra" class="nav-link">specialists / tools / prompts</a></li>
             <li class="nav-group-title">教程</li>
-            <li><a href="gov-agents-builder-day03.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 03</a></li>
-            <li><a href="gov-agents-builder-tutorial.html" class="nav-link">5 天总目录</a></li>
-            <li><a href="gov-agents-day05.html" class="nav-link">源码 Day 05 解剖</a></li>
+            <li><a href="gov-agents-builder-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02 9 步</a></li>
+            <li><a href="gov-agents-builder-day03.html" class="nav-link">Day 03 Monorepo</a></li>
             <li><a href="gov-agents-builder-day05.html" class="nav-link" style="color:var(--accent-green);">Day 05 评测上线 &rarr;</a></li>
         </ul>
     </nav>
@@ -41,92 +47,133 @@
 
     <main class="content" id="content">
         <div class="part-header">
-            <span class="part-label">Day 04 / 5 · 双路径汇合</span>
-            <h1 class="part-title">业务图开发 · 你只写这些文件</h1>
-            <p class="part-desc">独立仓与 Monorepo 目录结构一致。平台包好 Critic/Failsafe/API，业务 90% 精力在以下文件。</p>
+            <span class="part-label">Day 04 / 5 · 文件地图</span>
+            <h1 class="part-title">业务图开发 · 每个文件在哪、改什么</h1>
+            <p class="part-desc">独立仓与 Monorepo 业务分层相同；差异在 server 形态和仓外注册文件。下文用 <code>my-agent</code> / <code>my_agent</code> 作示例名。</p>
         </div>
 
-        <section id="dir" class="section">
-            <div class="section-header"><span class="section-number">01</span><h1>标准目录 · 施工档案袋</h1></div>
+        <section id="rule" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>铁律：builder.py 与 nodes/ 平级</h1></div>
             <div class="card">
-                <div class="dir-tree">my_agent/
-  <span class="hot">state.py</span>        ← 公告板：全图共享字段
-  <span class="hot">builder.py</span>      ← ★ 施工蓝图：先读这个
-  nodes/            ← 各道工序（一职责一文件）
-  specialists/      ← LLM 多视角专家（复杂才用）
-  tools/            ← 下游只读 client（GitLab/Quickwit/DB）
-  prompts/          ← Prompt 模板（不 inline 进 .py）
-  server.py         ← Monorepo：build_v1_router
-  core.py           ← 独立仓：跑图 + telemetry</div>
-                <div class="essence"><span class="t">💡 读陌生 agent 的顺序</span><code>builder.py</code>（图怎么连）→ <code>state.py</code>（传什么）→ 各 <code>nodes/</code> / <code>specialists/</code>。全平台格式统一——看懂一户就看懂所有户。</div>
+                <div class="essence"><span class="t">✅ 正确</span><code>&lt;pkg&gt;/builder.py</code> 组装图 · <code>&lt;pkg&gt;/nodes/*.py</code> 放节点函数 · <code>&lt;pkg&gt;/state.py</code> 放共享字段。<br><span class="warn" style="color:#f87171">❌ 错误</span>：在 <code>nodes/builder.py</code> 找装配逻辑——模板里不存在这个文件。</div>
+                <p>调用链：</p>
+                <div class="dir-tree">cli.py / core.py / server.py
+    └── 调 build_graph()          ← &lt;pkg&gt;/builder.py
+            └── import run_node     ← &lt;pkg&gt;/nodes/run.py</div>
+            </div>
+        </section>
+
+        <section id="standalone" class="section">
+            <div class="section-header"><span class="section-number">A</span><h1>路径 A · 独立仓完整目录</h1></div>
+            <div class="card">
+                <div class="dir-tree">/path/to/my-agent/                 ← git 仓库根
+├── pyproject.toml
+├── .env
+├── tests/test_smoke.py
+└── my_agent/
+    ├── <span class="hot">builder.py</span>              ← 组装 LangGraph（与 nodes/ 平级）
+    ├── state.py
+    ├── core.py                   ← run_agent + telemetry
+    ├── cli.py
+    ├── server.py
+    ├── nodes/
+    │   ├── __init__.py
+    │   └── <span class="node">run.py</span>              ← 节点业务逻辑（无 builder.py）
+    ├── prompts/__init__.py
+    ├── specialists/              ← 可选
+    └── tools/                      ← 可选</div>
+                <table class="fmap">
+                    <tr><th>你要做</th><th>改这个文件（独立仓完整路径）</th></tr>
+                    <tr><td>节点业务逻辑</td><td><code>my-agent/my_agent/nodes/run.py</code>（或多文件 <code>nodes/scan.py</code> …）</td></tr>
+                    <tr><td>导出新节点</td><td><code>my-agent/my_agent/nodes/__init__.py</code></td></tr>
+                    <tr><td>串成图 add_node/edge</td><td><code>my-agent/my_agent/builder.py</code></td></tr>
+                    <tr><td>节点间传什么字段</td><td><code>my-agent/my_agent/state.py</code></td></tr>
+                    <tr><td>System prompt</td><td><code>my-agent/my_agent/prompts/__init__.py</code></td></tr>
+                    <tr><td>Portal KPI 指标</td><td><code>my-agent/my_agent/core.py</code>（record_effect）</td></tr>
+                    <tr><td>HTTP pod 入口</td><td><code>my-agent/my_agent/server.py</code> + 根 <code>pyproject.toml</code> 加 fastapi</td></tr>
+                    <tr><td>冒烟测试</td><td><code>my-agent/tests/test_smoke.py</code></td></tr>
+                    <tr><td>包名 / CLI 命令名</td><td><code>my-agent/pyproject.toml</code></td></tr>
+                </table>
+            </div>
+        </section>
+
+        <section id="mono" class="section">
+            <div class="section-header"><span class="section-number">B</span><h1>路径 B · Monorepo 完整目录</h1></div>
+            <div class="card">
+                <div class="dir-tree">gov-agents-platform/              ← monorepo 根
+├── pyproject.toml                  ← workspace members 加 apps/my-agent
+├── packages/gov-agents-server/src/gov_agents_server/main.py
+│                                   ← AGENT_REGISTRY + AGENT_META
+└── apps/my-agent/
+    ├── pyproject.toml              ← BOM extras
+    ├── evals/golden.jsonl          ← 评测样本（Monorepo 常有）
+    ├── tests/test_smoke.py
+    └── my_agent/
+        ├── <span class="hot">builder.py</span>
+        ├── state.py
+        ├── server.py               ← build_v1_router（不是 legacy POST）
+        ├── specialists.py 或 specialists/  ← 按 scaffold 而定
+        └── nodes/ …                  ← 同独立仓</div>
+                <table class="fmap">
+                    <tr><th>你要做</th><th>改这个文件（Monorepo 完整路径）</th></tr>
+                    <tr><td>注册 agent 到平台</td><td><code>gov-agents-platform/pyproject.toml</code>（members）<br><code>packages/gov-agents-server/src/gov_agents_server/main.py</code></td></tr>
+                    <tr><td>业务图 / 节点 / state</td><td><code>apps/my-agent/my_agent/builder.py</code><br><code>apps/my-agent/my_agent/nodes/*.py</code><br><code>apps/my-agent/my_agent/state.py</code></td></tr>
+                    <tr><td>标准 HTTP API</td><td><code>apps/my-agent/my_agent/server.py</code></td></tr>
+                    <tr><td>Specialist + prompt</td><td><code>apps/my-agent/my_agent/specialists.py</code> 或 <code>specialists/*.py</code><br><code>apps/my-agent/my_agent/prompts/*.md</code></td></tr>
+                    <tr><td>评测样本</td><td><code>apps/my-agent/evals/golden.jsonl</code> 或 <code>data/eval_samples.jsonl</code></td></tr>
+                    <tr><td>依赖 / BOM</td><td><code>apps/my-agent/pyproject.toml</code></td></tr>
+                    <tr><td>IDE MCP 暴露（可选）</td><td><code>packages/gov-agents-mcp/src/gov_agents_mcp/schemas.py</code></td></tr>
+                </table>
             </div>
         </section>
 
         <section id="state" class="section">
-            <div class="section-header"><span class="section-number">02</span><h1>state.py + builder.py</h1></div>
+            <div class="section-header"><span class="section-number">01</span><h1>state · builder · nodes 代码示例</h1></div>
             <div class="card">
-<pre><code class="language-python"># state.py
-from typing import Annotated, TypedDict
+                <p><strong>①</strong> <code>my_agent/state.py</code></p>
+<pre><code class="language-python">from typing import Annotated, TypedDict
 from operator import add
 
 class AgentState(TypedDict, total=False):
     input: str
     output: str
-    retry_count: Annotated[int, add]  # Critic retry
-    triage_result: dict   # 各 SP 各占独立字段，避免并行 Reducer 冲突</code></pre>
-<pre><code class="language-python"># builder.py · LangGraph 装配
-from langgraph.graph import END, StateGraph
+    retry_count: Annotated[int, add]</code></pre>
+                <p><strong>②</strong> <code>my_agent/nodes/run.py</code> — 只写节点函数</p>
+<pre><code class="language-python">from ai_trust_toolkit.llm import get_llm
+from ..state import AgentState
+
+def run_node(state: AgentState) -> AgentState:
+    # 你的业务 ...
+    return {"output": "..."}</code></pre>
+                <p><strong>③</strong> <code>my_agent/nodes/__init__.py</code></p>
+<pre><code class="language-python">from .run import run_node
+__all__ = ["run_node"]</code></pre>
+                <p><strong>④</strong> <code>my_agent/builder.py</code> — 与 nodes/ 平级，负责串图</p>
+<pre><code class="language-python">from langgraph.graph import END, StateGraph
+from .nodes import run_node
+from .state import AgentState
 
 def build_graph():
     g = StateGraph(AgentState)
-    g.add_node("scan", scan_node)
-    g.add_node("process", process_node)
-    g.set_entry_point("scan")
-    g.add_edge("scan", "process")
-    g.add_edge("process", END)
+    g.add_node("run", run_node)
+    g.set_entry_point("run")
+    g.add_edge("run", END)
     return g.compile()</code></pre>
-                <p>多 SP 并行扇出/扇入 → 参考 <span class="fileref">sre-rca-agent/builder.py</span> 的 recall → 4 specialists → rag → synthesizer → critic 链路。</p>
             </div>
         </section>
 
-        <section id="sp" class="section">
-            <div class="section-header"><span class="section-number">03</span><h1>Specialist 节点（Monorepo / 复杂场景）</h1></div>
+        <section id="extra" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>按需扩展的文件</h1></div>
             <div class="card">
-<pre><code class="language-python">from ai_trust_toolkit.specialists import sp_node
-from ai_trust_toolkit.llm import get_llm
-
-@sp_node(name="triage", prompt_file="prompts/triage.md")
-async def triage(state: AgentState) -> dict:
-    llm = get_llm(tier="auto")  # cost-aware · 别 hardcode "sonnet"
-    result = await llm.ainvoke(state["input"])
-    return {"category": parse_category(result.content)}</code></pre>
-                <p><code>@sp_node</code> 自动接 OTel span / cost tracker / critic L1。</p>
-            </div>
-        </section>
-
-        <section id="tools" class="section">
-            <div class="section-header"><span class="section-number">04</span><h1>tools / prompts / 自有库</h1></div>
-            <div class="card">
-                <ul style="line-height:1.85;color:var(--text-secondary);">
-                    <li><strong>tools/</strong>：只读 client · 白名单 + 强制时间窗 + 超时 · 失败不阻断主流程 · 入 LLM 前脱敏</li>
-                    <li><strong>prompts/*.md</strong>：Prompt 走文件 PR review · 顶部第一行写关键词（FakeLLM 匹配用）</li>
-                    <li><strong>自有 store</strong>：telemetry ≠ 业务库 · 台账/基线用 Memory(测) / MySQL(prod) · 范例 <code>governance_store.py</code></li>
-                </ul>
-                <p>活样例：biz-link-gov <span class="fileref">tools/quickwit_client.py</span> + <span class="fileref">specialists/log_sp.py</span></p>
-            </div>
-        </section>
-
-        <section id="critic" class="section">
-            <div class="section-header"><span class="section-number">05</span><h1>Critic · get_llm 铁律</h1></div>
-            <div class="card">
-<pre><code class="language-python">from ai_trust_toolkit.critic import build_business_critic_l1, Verdict
-
-def my_l1_rules(state):
-    if not state.get("category"):
-        return Verdict(verdict="reject", reason="category 缺失")
-    return Verdict(verdict="pass", reason=None)</code></pre>
-                <div class="note"><strong>铁律</strong>：✅ <code>from ai_trust_toolkit.llm import get_llm</code> · ❌ 直连 <code>anthropic.Anthropic()</code>（丢成本/观测）。prod 不要 <code>critic_mode="off"</code>。</div>
-                <div class="tip">多 Agent 编排：进程内 supervisor → specialists/；跨 agent 链 → HandoffSignal + supervisor-router-agent。详见平台 <code>multi-agent-cookbook.md</code>。</div>
+                <table class="fmap">
+                    <tr><th>场景</th><th>文件位置</th><th>改什么</th></tr>
+                    <tr><td>调 GitLab / Quickwit / DB</td><td><code>&lt;pkg&gt;/tools/xxx_client.py</code></td><td>只读 client + 脱敏</td></tr>
+                    <tr><td>多 LLM 视角并行</td><td><code>&lt;pkg&gt;/specialists/xxx_sp.py</code></td><td>@sp_node 或工厂节点</td></tr>
+                    <tr><td>长 prompt</td><td><code>&lt;pkg&gt;/prompts/*.md</code> 或 <code>prompts/__init__.py</code></td><td>不要 inline 进 .py</td></tr>
+                    <tr><td>Critic L1 规则</td><td><code>&lt;pkg&gt;/nodes/critic_l1.py</code> 或 builder 注入</td><td>Monorepo 常见</td></tr>
+                    <tr><td>自有业务库</td><td><code>&lt;pkg&gt;/governance_store.py</code>（新建）</td><td>≠ telemetry 的 core.py</td></tr>
+                </table>
+                <div class="note"><strong>LLM 铁律</strong>：所有 <code>&lt;pkg&gt;/**/*.py</code> 里调模型走 <code>from ai_trust_toolkit.llm import get_llm</code>。</div>
             </div>
         </section>
     </main>
