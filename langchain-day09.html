@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Document 与加载 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">LC</div>
+            <h2>Day 09</h2>
+            <p class="version">Document 与加载 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：知识在文件里不在模型里</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Document：一张图书馆卡片</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · metadata 与 __str__ 的小心思</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · BaseLoader：搬运工协议</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · lazy_load：传送带 vs 一车全卸</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · load_and_split 与 Blob</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day08.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 08 输出解析</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day10.html" class="nav-link" style="color:var(--accent-green);">Day 10 文本切分 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 阶段3 数据与 RAG</span>
+            <h1 class="part-title">Document 与加载：page_content / metadata / BaseLoader / lazy_load</h1>
+            <p class="part-desc">阶段2 我们打通了 <code>prompt | model | parser</code>，但模型只知道训练时见过的东西。想让它回答"你自己文档里的问题"，得走 RAG——第一步就是把 PDF、网页、数据库里的内容<strong>搬进一个统一容器</strong>。今天看 <code>libs/core/langchain_core/documents/</code> 与 <code>document_loaders/</code>：<strong>①<code>Document</code> 为什么只有 page_content + metadata 两个主角；②<code>BaseLoader</code> 的搬运工协议；③为什么源码强调"实现 <code>lazy_load</code> 而不是 <code>load</code>"。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段3：数据与 RAG · D09-12）</div>
+            <div class="steps">
+                <span class="st">S2 模型/消息/提示</span><span class="sep">→</span>
+                <span class="st on">D09 Document/加载</span><span class="sep">→</span>
+                <span class="st">D10 文本切分</span><span class="sep">→</span>
+                <span class="st">D11 Embedding/向量库</span><span class="sep">→</span>
+                <span class="st">D12 Retriever/RAG链</span><span class="sep">→</span>
+                <span class="st">S4 工具/Agent</span><span class="sep">→</span>
+                <span class="st">S5 进阶收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        今天的世界观是<strong>图书馆</strong>。类比一：<code>Document</code> 是一张<strong>带卡片的书页</strong>——正面是内容本身（<code>page_content</code>），背面钉着一张<strong>索引卡片</strong>（<code>metadata</code>：来自哪本书、第几页、哪年出版）。检索系统翻的是卡片，读者读的是正文。类比二：<code>BaseLoader</code> 是图书馆的<strong>进书通道</strong>：<code>load()</code> 像"一卡车书一次全卸进大厅"（内存全占），<code>lazy_load()</code> 像"传送带一本一本送进来、上架一本再来一本"（恒定内存）——馆藏百万册时，只有传送带走得通。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：知识在文件里，不在模型里</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>你问模型"我们公司报销上限是多少"，它只能瞎编——这条知识在你内网的《差旅制度.pdf》里。RAG 的思路是"先查资料再回答"，但资料五花八门：PDF、Word、网页、Notion、数据库……每种来源的读取方式都不同。如果检索、切分、向量化的代码要针对每种格式各写一套，整个 RAG 生态就没法搭。</div>
+                <div class="essence"><span class="t">💡 本质：先统一容器，再统一搬运</span>LangChain 拆成两步：<strong>①统一容器</strong>——不管来源是什么，进了系统一律装进 <code>Document</code>（正文 + 索引卡片）；<strong>②统一搬运协议</strong>——每种来源写一个 Loader，只要实现"产出 Document 迭代器"这一个接口。于是下游（切分器 D10、向量库 D11、检索器 D12）都只面向 <code>Document</code> 编程，来源无限扩展、下游一行不改。<strong>这和 D06 的消息体系是同一个招式：格式统一了，生态才能拼积木。</strong></div>
+                <table class="ttable">
+                    <thead><tr><th>类</th><th>位置</th><th>角色</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>BaseMedia</code></td><td><span class="fileref">documents/base.py:34</span></td><td>公共底座：id + metadata</td></tr>
+                        <tr><td><code>Document</code></td><td><span class="fileref">documents/base.py:288</span></td><td>统一容器：page_content + metadata</td></tr>
+                        <tr><td><code>Blob</code></td><td><span class="fileref">documents/base.py:59</span></td><td>原始二进制（还没解析成文本的"生书"）</td></tr>
+                        <tr><td><code>BaseLoader</code></td><td><span class="fileref">document_loaders/base.py:26</span></td><td>搬运工协议：load / lazy_load / load_and_split</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Document：一张图书馆卡片</h1></div>
+            <div class="card">
+                <p>主角出场：<code>Document</code>（<span class="fileref">libs/core/langchain_core/documents/base.py:288</span>），简单到让人意外：</p>
+<pre><code class="language-python"># libs/core/langchain_core/documents/base.py:288
+class Document(BaseMedia):
+    """Class for storing a piece of text and associated metadata.
+
+    !!! note
+        `Document` is for **retrieval workflows**, not chat I/O. For sending
+        text to an LLM in a conversation, use message types from
+        `langchain.messages`.
+
+    Example:
+        document = Document(
+            page_content="Hello, world!", metadata={"source": "https://example.com"}
+        )
+    """
+
+    page_content: str                        # ★正文：就是一段字符串
+    type: Literal["Document"] = "Document"
+
+    def __init__(self, page_content: str, **kwargs: Any) -> None:
+        """Pass page_content in as positional or named arg."""
+        super().__init__(page_content=page_content, **kwargs)   # 支持位置参数写法</code></pre>
+                <div class="walk">
+                    <div class="r"><code>page_content: str</code><span>正文只是一个字符串——刻意简单。图片/音频等二进制不走这里（那是 Blob 的事），<b>RAG 主线处理的就是文本</b>。</span></div>
+                    <div class="r"><code>继承 BaseMedia</code><span>（<span class="fileref">documents/base.py:34</span>）从底座继承两个字段：<code>id</code>（可选唯一标识，向量库增量更新靠它）和 <code>metadata: dict</code>（索引卡片本体）。</span></div>
+                    <div class="r"><code>docstring 的提醒</code><span>★源码特意警告：Document 是给<b>检索流程</b>用的，别拿它当聊天输入——对话该用 D06 的消息体系。两套容器各管各的场景。</span></div>
+                    <div class="r"><code>__init__ 重写</code><span>只为让 <code>Document("你好")</code> 这种位置参数写法成立（Pydantic 默认必须关键字传参）。对高频类型，一点点书写体验也值得花心思。</span></div>
+                </div>
+                <div class="baby"><span class="t">大白话</span>整个 RAG 世界的"通货"就这么点东西：<strong>一段文字 + 一张说明它来历的卡片</strong>。切分（D10）是把大额通货换零钱，向量化（D11）是给通货编索引，检索（D12）是按索引找通货——通货本身始终是 Document。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>metadata 与 __str__ 的小心思</h1></div>
+            <div class="card">
+                <p><code>metadata</code> 卡片上通常写什么？没有强制 schema，约定俗成的常客：</p>
+                <table class="ttable">
+                    <thead><tr><th>键</th><th>示例值</th><th>谁用它</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>source</code></td><td><code>"差旅制度.pdf"</code> / URL</td><td>回答时标注引用来源</td></tr>
+                        <tr><td><code>page</code></td><td><code>3</code></td><td>PDF 加载器写入，定位原文</td></tr>
+                        <tr><td><code>start_index</code></td><td><code>1024</code></td><td>切分器（D10）写入：块在原文的起点</td></tr>
+                        <tr><td>业务自定义</td><td><code>{"dept": "财务部", "year": 2025}</code></td><td>检索时按条件过滤（只搜财务部的文档）</td></tr>
+                    </tbody>
+                </table>
+                <p>再看一个隐藏细节——<code>Document.__str__</code>（<span class="fileref">libs/core/langchain_core/documents/base.py:331</span>）被特意重写了：</p>
+<pre><code class="language-python"># libs/core/langchain_core/documents/base.py:331
+def __str__(self) -> str:
+    """Override `__str__` to restrict it to page_content and metadata."""
+    # The purpose of this change is to make sure that user code that feeds
+    # Document objects directly into prompts remains unchanged due to the
+    # addition of the id field (or any other fields in the future).
+    if self.metadata:
+        return f"page_content='{self.page_content}' metadata={self.metadata}"
+    return f"page_content='{self.page_content}'"</code></pre>
+                <div class="walk">
+                    <div class="r"><code>为什么重写 __str__</code><span>很多人偷懒把 Document <b>直接塞进提示词</b>（f-string 一格式化就调 __str__）。注释说得明白：如果用 Pydantic 默认的 __str__，将来给类加个新字段（比如 id），<b>所有人的提示词内容都会悄悄变化</b>，模型效果莫名抖动。锁死 __str__ 输出 = 保护下游提示词的稳定性。</span></div>
+                    <div class="r"><code>教训</code><span>框架作者连"用户会怎么偷懒"都考虑到了。你自己设计数据类型时也记住：<b>会被渲染进提示词的对象，它的字符串形式就是公共 API</b>，别随意变。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>BaseLoader：搬运工协议</h1></div>
+            <div class="card">
+                <p>搬运工协议 <code>BaseLoader</code>（<span class="fileref">libs/core/langchain_core/document_loaders/base.py:26</span>）：</p>
+<pre><code class="language-python"># libs/core/langchain_core/document_loaders/base.py:26
+class BaseLoader(ABC):
+    """Interface for document loader.
+
+    Implementations should implement the lazy-loading method using generators
+    to avoid loading all documents into memory at once.
+
+    `load` is provided just for user convenience and should not be overridden."""
+
+    # Sub-classes should not implement this method directly. Instead, they
+    # should implement the lazy load method.
+    def load(self) -> list[Document]:                 # base.py:37
+        """Load data into `Document` objects."""
+        return list(self.lazy_load())                 # ★一行：把传送带上的书全收进列表
+
+    async def aload(self) -> list[Document]:
+        return [document async for document in self.alazy_load()]</code></pre>
+                <div class="walk">
+                    <div class="r"><code>ABC 但 load 有默认实现</code><span>协议的分工很清楚：<b>子类只写 <code>lazy_load</code>（怎么一本本产出），<code>load</code> 白送</b>（= <code>list(lazy_load())</code>）。写一个自定义 Loader 只需实现一个生成器函数。</span></div>
+                    <div class="r"><code>"should not be overridden"</code><span>docstring 两次强调别重写 load。为什么？如果你只实现了 load，别人调你的 lazy_load 时（见 L05）只能退化成"先全加载再假装流式"，懒加载的好处全没了。</span></div>
+                    <div class="r"><code>aload</code><span>异步版一样是"收集 alazy_load"。LangChain 全家的接口都是 同步/异步、全量/流式 四件套成对出现——D05 的 ChatModel 也是这个套路。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>lazy_load：传送带 vs 一车全卸</h1></div>
+            <div class="card">
+                <p><code>lazy_load</code> 的默认实现（<span class="fileref">libs/core/langchain_core/document_loaders/base.py:91</span>）藏着一个聪明的互相兜底：</p>
+<pre><code class="language-python"># libs/core/langchain_core/document_loaders/base.py:91
+def lazy_load(self) -> Iterator[Document]:
+    """A lazy loader for `Document`."""
+    if type(self).load != BaseLoader.load:        # ★子类重写了 load（老式写法）？
+        return iter(self.load())                  #    → 用它的 load 凑一个迭代器
+    msg = f"{self.__class__.__name__} does not implement lazy_load()"
+    raise NotImplementedError(msg)                # 两个都没实现 → 明确报错</code></pre>
+                <div class="walk">
+                    <div class="r"><code>type(self).load != BaseLoader.load</code><span>★反射检查："你重写过 load 吗？"重写过（很多老 Loader 只实现了 load），就退化成 <code>iter(self.load())</code>——先全加载再逐个吐，<b>接口兼容但失去省内存的实惠</b>。</span></div>
+                    <div class="r"><code>双向兜底</code><span>合起来看：实现了 lazy_load → load 白送（L04）；只实现了 load → lazy_load 也能凑合用（这里）。<b>新老两种写法都能同时提供两个接口</b>，生态平滑演进。</span></div>
+                    <div class="r"><code>为什么执念于懒加载</code><span>想象加载 10GB 的日志目录：load 要把全部 Document 同时放进内存；lazy_load 一次只在内存里放一本，边加载边切分边入库（下游 D10/D11 都吃迭代器），<b>内存恒定</b>。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 230" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">进书通道：load（一车全卸） vs lazy_load（传送带）</text>
+                        <rect x="30" y="34" width="130" height="60" rx="8" fill="rgba(148,163,184,.08)" stroke="#94a3b8"/>
+                        <text x="95" y="56" fill="#cbd5e1" text-anchor="middle" font-weight="700">数据源</text>
+                        <text x="95" y="74" fill="#94a3b8" text-anchor="middle">PDF / 网页 / DB</text>
+                        <path d="M160 52 L215 52" stroke="#f87171" stroke-width="1.4" marker-end="url(#a9)"/>
+                        <text x="188" y="43" fill="#f87171" text-anchor="middle">load()</text>
+                        <rect x="217" y="30" width="200" height="44" rx="8" fill="rgba(239,68,68,.08)" stroke="#ef4444"/>
+                        <text x="317" y="48" fill="#fca5a5" text-anchor="middle">list[Document] 10 万条同时在内存</text>
+                        <text x="317" y="64" fill="#94a3b8" text-anchor="middle">馆藏太大 → OOM</text>
+                        <path d="M160 84 L215 84" stroke="#22c55e" stroke-width="1.4" marker-end="url(#a9)"/>
+                        <text x="188" y="100" fill="#86efac" text-anchor="middle">lazy_load()</text>
+                        <rect x="217" y="84" width="200" height="44" rx="8" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="317" y="102" fill="#86efac" text-anchor="middle">Iterator[Document] 一次一本</text>
+                        <text x="317" y="118" fill="#94a3b8" text-anchor="middle">yield → 处理 → 再 yield 下一本</text>
+                        <path d="M417 106 L472 106" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#a9)"/>
+                        <rect x="474" y="84" width="140" height="44" rx="8" fill="rgba(47,111,235,.1)" stroke="#2f6feb"/>
+                        <text x="544" y="102" fill="#93c5fd" text-anchor="middle">下游流水线</text>
+                        <text x="544" y="118" fill="#94a3b8" text-anchor="middle">切分(D10)→入库(D11)</text>
+                        <rect x="30" y="152" width="584" height="58" rx="8" fill="rgba(245,158,11,.06)" stroke="#f59e0b"/>
+                        <text x="322" y="172" fill="#fcd34d" text-anchor="middle" font-weight="700">协议的互相兜底（document_loaders/base.py）</text>
+                        <text x="322" y="190" fill="#cbd5e1" text-anchor="middle">子类实现 lazy_load → load = list(lazy_load()) 白送（:37）；子类只写了 load → lazy_load = iter(load()) 凑合（:91）</text>
+                        <defs><marker id="a9" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/></marker></defs>
+                    </svg>
+                    <div class="cap">图注：新写 Loader 永远实现 lazy_load（生成器 yield），既省内存又白得一个 load。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>load_and_split 与 Blob：两个配角</h1></div>
+            <div class="card">
+                <p>配角一：<code>load_and_split</code>（<span class="fileref">libs/core/langchain_core/document_loaders/base.py:53</span>）——加载完顺手切块，预告了明天的主角：</p>
+<pre><code class="language-python"># libs/core/langchain_core/document_loaders/base.py:53
+def load_and_split(self, text_splitter: TextSplitter | None = None) -> list[Document]:
+    """Load `Document` and split into chunks. Chunks are returned as `Document`.
+
+    !!! danger
+        Do not override this method. It should be considered to be deprecated!"""
+    if text_splitter is None:
+        ...
+        text_splitter_: TextSplitter = RecursiveCharacterTextSplitter()   # ★默认切分器
+    else:
+        text_splitter_ = text_splitter
+    docs = self.load()
+    return text_splitter_.split_documents(docs)      # 切完还是 list[Document]</code></pre>
+                <div class="walk">
+                    <div class="r"><code>默认 RecursiveCharacterTextSplitter</code><span>不传切分器就用"递归字符切分"——正是 Day10 的主角。注意它来自独立包 <code>langchain-text-splitters</code>，没装会报 ImportError 并提示安装。</span></div>
+                    <div class="r"><code>切完还是 Document</code><span>split_documents 输入输出都是 Document 列表——"通货"形态不变，只是面额变小、卡片继承（D10 细看）。</span></div>
+                    <div class="r"><code>danger: 别重写，视同弃用</code><span>官方更推荐显式两步：<code>loader.lazy_load()</code> 再自己调切分器——加载和切分解耦，还能保持流式。这个便捷方法用了 <code>self.load()</code>，大数据集会吃满内存。</span></div>
+                </div>
+                <p>配角二：<code>Blob</code>（<span class="fileref">libs/core/langchain_core/documents/base.py:59</span>）——"还没拆封的生书"：原始二进制 + MIME 类型 + 路径，支持 <code>from_path</code>（<span class="fileref">base.py:214</span>）延迟读盘、<code>as_string</code>（<span class="fileref">base.py:158</span>）按编码解码。它把"从哪拿字节"和"怎么解析成 Document"分开，PDF 解析器这类"拆封工"（BlobParser）就能独立复用。</p>
+                <div class="essence"><span class="t">💡 本质：进书三段式</span>完整的进书流水线其实是：<strong>Blob（生书，字节）→ Parser（拆封解析）→ Document（上架成品）</strong>。简单场景里 Loader 一个人把三段全干了；复杂场景（比如同一批 PDF 想换不同解析器）就按三段拆开各自复用——图书馆收书也是"卸货、编目、上架"三道工序分工。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：写一个自定义 Loader 只要几行</span>
+                按协议只需实现 lazy_load 生成器：<br>
+                <code>class TxtDirLoader(BaseLoader):</code><br>
+                <code>&nbsp;&nbsp;def __init__(self, dir): self.dir = dir</code><br>
+                <code>&nbsp;&nbsp;def lazy_load(self):</code><br>
+                <code>&nbsp;&nbsp;&nbsp;&nbsp;for p in Path(self.dir).glob("*.txt"):</code><br>
+                <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;yield Document(page_content=p.read_text(), metadata={"source": str(p)})</code><br>
+                用起来：<code>docs = TxtDirLoader("./notes").load()</code> → 比如得到 3 条，第一条 <code>Document(page_content="差旅报销上限为每晚 500 元…", metadata={"source": "notes/差旅制度.txt"})</code>。load 是白送的（base.py:37），大目录时改用 <code>for doc in loader.lazy_load():</code> 逐本处理，内存恒定。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：Document 和 D06 的 HumanMessage 都是"文本 + 附加信息"，为什么要两套容器？</p>
+                    <p class="a">👨‍🏫 老师：因为<strong>它们在两条不同的流水线上流动</strong>。消息流向模型 API（有角色、要序列化成厂商聊天格式、带 tool_calls）；Document 流向检索系统（要切分、向量化、按 metadata 过滤）。源码在 Document 的 docstring 里专门写了这条 note（documents/base.py:291）：检索用 Document，聊天用 messages。两者的交汇点在 D12：检索出来的 Document 会被<strong>渲染成文本塞进提示词</strong>，变成一条 HumanMessage/SystemMessage 的一部分——那一刻通货完成"换轨"。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>Document 的两个主角字段？（page_content 正文 + metadata 索引卡片，documents/base.py:288/306）</li>
+                        <li>metadata 通常写什么？（source/page/start_index/业务过滤字段）</li>
+                        <li>为什么重写 __str__？（Document 常被直接塞提示词，锁死字符串形式保护下游稳定，base.py:331）</li>
+                        <li>写自定义 Loader 要实现哪个方法？（lazy_load 生成器；load 白送，document_loaders/base.py:26/37）</li>
+                        <li>lazy_load 的默认实现怎么兜底？（反射检查子类是否重写了 load，退化成 iter(load())，base.py:91）</li>
+                        <li>load_and_split 默认用什么切分？（RecursiveCharacterTextSplitter，且官方不建议依赖此便捷方法，base.py:53）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain/libs/core/langchain_core
+
+# 1. 统一容器
+sed -n '288,320p' documents/base.py        # Document：page_content + metadata
+sed -n '331,347p' documents/base.py        # __str__ 为什么锁死
+sed -n '34,58p'   documents/base.py        # BaseMedia：id + metadata 底座
+
+# 2. 搬运工协议
+sed -n '26,52p'  document_loaders/base.py  # BaseLoader + load = list(lazy_load())
+sed -n '91,100p' document_loaders/base.py  # lazy_load 的反射兜底
+sed -n '53,88p'  document_loaders/base.py  # load_and_split（danger 注释）
+
+# 3. 生书 Blob
+grep -n "class Blob\|def from_path\|def as_string" documents/base.py</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 10</strong>：书搬进来了，但一整本《差旅制度》几万字，检索时不可能整本塞给模型。明天去独立包 <code>libs/text-splitters</code> 看切分的艺术：<code>TextSplitter</code> 的 chunk_size/chunk_overlap 怎么定义、<code>_merge_splits</code> 滑动窗口怎么工作、<code>RecursiveCharacterTextSplitter</code> 为什么按"段→行→词→字"递归降级。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day08.html" style="color:var(--accent-cyan);">&larr; Day 08 输出解析与结构化输出</a>
+                    <a href="langchain-day10.html" style="color:var(--accent-green);">Day 10 · 文本切分 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

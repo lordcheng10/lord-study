@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 10 · 文本切分 — LangChain 20 天源码深度</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #2f6feb;background:rgba(47,111,235,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#60a5fa;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .example{border:1px dashed var(--border-color);background:rgba(52,211,153,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#34d399;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0} .qa .q{color:#c084fc;font-weight:600} .qa .a{color:var(--text-secondary)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#1c3c3c,#2f6feb);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(47,111,235,.12);color:#a5b4fc;border:1px solid rgba(47,111,235,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:170px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .tradeoff{border-left:3px solid #ec4899;background:rgba(236,72,153,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .tradeoff .t{font-weight:700;color:#f472b6;display:block;margin-bottom:4px}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .ttable{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+        .ttable th,.ttable td{border:1px solid var(--border-color);padding:6px 9px;text-align:left;vertical-align:top}
+        .ttable th{background:var(--bg-secondary);color:var(--accent-cyan)}
+        .ttable code{color:var(--accent-cyan)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#1c3c3c,#2f6feb);">LC</div>
+            <h2>Day 10</h2>
+            <p class="version">文本切分 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 痛点：整本书塞不进上下文</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · TextSplitter：两个旋钮的约法</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · _merge_splits：滑动窗口装箱</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · CharacterTextSplitter：一刀流</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Recursive：段→行→词→字递归降级</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · create/split_documents：卡片继承</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 串起来 + 小结</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="langchain-day09.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 09 Document 与加载</a></li>
+            <li><a href="langchain-tutorial.html" class="nav-link">20 天总目录</a></li>
+            <li><a href="langchain-day11.html" class="nav-link" style="color:var(--accent-green);">Day 11 Embedding 与向量库 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 10 / 共 20 天 · 阶段3 数据与 RAG</span>
+            <h1 class="part-title">文本切分：chunk_size / chunk_overlap 与 RecursiveCharacterTextSplitter</h1>
+            <p class="part-desc">Day09 把书搬进了图书馆，但一整本《差旅制度》几万字，检索时不可能整本塞给模型。今天离开 core 包，去独立包 <code>libs/text-splitters/langchain_text_splitters/</code> 看切分的艺术。弄清三件事：<strong>①<code>chunk_size</code>/<code>chunk_overlap</code> 两个旋钮在基类怎么约定和校验；②所有切分器共享的装箱算法 <code>_merge_splits</code> 怎么实现"重叠滑动窗口"；③<code>RecursiveCharacterTextSplitter</code> 为什么按"段→行→词→字"递归降级、又为什么是官方默认。</strong></p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在 20 天里的位置（阶段3：数据与 RAG · D09-12）</div>
+            <div class="steps">
+                <span class="st">S2 模型/消息/提示</span><span class="sep">→</span>
+                <span class="st">D09 Document/加载</span><span class="sep">→</span>
+                <span class="st on">D10 文本切分</span><span class="sep">→</span>
+                <span class="st">D11 Embedding/向量库</span><span class="sep">→</span>
+                <span class="st">D12 Retriever/RAG链</span><span class="sep">→</span>
+                <span class="st">S4 工具/Agent</span><span class="sep">→</span>
+                <span class="st">S5 进阶收官</span>
+            </div>
+        </div>
+
+        <div class="essence" style="margin:0 0 4px"><span class="t">💡 先用两个类比兜住今天</span>
+        继续图书馆世界观。类比一：切分像把一整本书拆成<strong>活页装订的小册子</strong>——每册不超过 500 字（<code>chunk_size</code>），并且<strong>每册开头重印上一册的最后 50 字</strong>（<code>chunk_overlap</code>），这样读者随手抽出一册也能接得上上文，不会一句话被拦腰斩断在两册之间读不懂。类比二：<code>RecursiveCharacterTextSplitter</code> 像一位讲究的装订师傅：<strong>能整章拆就整章拆；章太厚就按段拆；段还太长就按句、按词拆；实在不行才逐字硬切</strong>——刀口永远优先落在最自然的缝隙上。</div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>痛点：整本书塞不进上下文，切碎又怕断句</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点</span>为什么非切不可？三个硬约束：①<strong>上下文有限</strong>——几万字的文档塞不进（塞进也贵）；②<strong>向量检索的粒度</strong>——一整本书压成一个向量，"报销上限"这种细节问题根本查不准，块越聚焦命中越准；③<strong>模型注意力</strong>——塞一堆无关内容进提示词反而拉低回答质量。但切也有切的风险：一刀下去正好把"上限为每晚 500 元"斩成两半，两个块都答不上问题。<strong>怎么切得又小又不断意思？</strong></div>
+                <div class="essence"><span class="t">💡 本质：块大小是检索精度与上下文完整性的滑杆</span>块小 → 向量更聚焦、检索更准，但单块信息可能不完整；块大 → 上下文完整，但向量"什么都有一点"、检索变糊。LangChain 的工程答案是三件套：<strong>chunk_size 限制册厚 + chunk_overlap 册间重印几行 + 优先在自然缝隙（段落/句子）下刀</strong>。这套逻辑独立成包 <code>langchain-text-splitters</code>，因为它不依赖任何模型——纯文本算法。</div>
+                <table class="ttable">
+                    <thead><tr><th>类</th><th>位置</th><th>切法</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>TextSplitter</code></td><td><span class="fileref">text_splitters/base.py:59</span></td><td>抽象基类：旋钮 + 装箱算法 _merge_splits</td></tr>
+                        <tr><td><code>CharacterTextSplitter</code></td><td><span class="fileref">text_splitters/character.py:13</span></td><td>一刀流：按单一分隔符（默认 "\n\n"）</td></tr>
+                        <tr><td><code>RecursiveCharacterTextSplitter</code></td><td><span class="fileref">text_splitters/character.py:91</span></td><td>递归降级：["\n\n", "\n", " ", ""]，官方默认</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>TextSplitter 基类：两个旋钮的约法三章</h1></div>
+            <div class="card">
+                <p>基类 <code>TextSplitter</code>（<span class="fileref">libs/text-splitters/langchain_text_splitters/base.py:59</span>）的构造函数把规矩立在最前面：</p>
+<pre><code class="language-python"># libs/text-splitters/langchain_text_splitters/base.py:59
+class TextSplitter(BaseDocumentTransformer, ABC):
+    """Interface for splitting text into chunks."""
+
+    def __init__(
+        self,
+        chunk_size: int = 4000,          # ① 每册最多多少"长度单位"
+        chunk_overlap: int = 200,        # ② 册间重印多少
+        length_function: Callable[[str], int] = len,   # ③ ★"长度"怎么量：默认数字符
+        keep_separator: bool | Literal["start", "end"] = False,
+        add_start_index: bool = False,   # 是否在 metadata 里记录块的起点
+        strip_whitespace: bool = True,
+    ) -> None:
+        if chunk_size <= 0:
+            raise ValueError(msg)                       # 约法一：册厚必须为正
+        if chunk_overlap < 0:
+            raise ValueError(msg)                       # 约法二：重叠不能为负
+        if chunk_overlap > chunk_size:
+            msg = (f"Got a larger chunk overlap ({chunk_overlap}) than chunk size "
+                   f"({chunk_size}), should be smaller.")
+            raise ValueError(msg)                       # 约法三：重叠必须小于册厚
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
+        self._length_function = length_function
+        ...
+
+    @abstractmethod
+    def split_text(self, text: str) -> list[str]: ...   # base.py:108 子类唯一必须实现的</code></pre>
+                <div class="walk">
+                    <div class="r"><code>chunk_size=4000</code><span>默认每块最多 4000 个"长度单位"。注意单位由 <code>length_function</code> 说了算。</span></div>
+                    <div class="r"><code>chunk_overlap=200</code><span>相邻两册重印 200 单位。若 overlap ≥ size，每一册几乎全是上一册的重印——逻辑上荒谬，所以构造时直接拒绝（约法三）。</span></div>
+                    <div class="r"><code>length_function=len</code><span>★"厚度怎么量"是可注入的策略：默认数字符；换成 tokenizer 计数就变成<b>按 token 切</b>（基类还内置了 <code>from_huggingface_tokenizer</code>（<span class="fileref">base.py:212</span>）和 <code>from_tiktoken_encoder</code> 两个工厂）。模型的账本按 token 记，生产上常用 token 口径。</span></div>
+                    <div class="r"><code>split_text 抽象</code><span>基类不规定"在哪下刀"（那是子类的个性），只规定旋钮和装箱算法（下一节的 _merge_splits，所有子类共享）。<b>模板方法模式</b>。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>_merge_splits：滑动窗口装箱算法</h1></div>
+            <div class="card">
+                <p>子类先把文本按分隔符剁成小片（splits），然后统一交给基类的 <code>_merge_splits</code>（<span class="fileref">libs/text-splitters/langchain_text_splitters/base.py:167</span>）装箱成册——这是全包最核心的 40 行：</p>
+<pre><code class="language-python"># libs/text-splitters/langchain_text_splitters/base.py:167
+def _merge_splits(self, splits: Iterable[str], separator: str) -> list[str]:
+    separator_len = self._length_function(separator)
+    docs = []
+    current_doc: list[str] = []          # 当前正在装的这一册
+    total = 0                            # 当前册的累计厚度
+    for d in splits:
+        len_ = self._length_function(d)
+        if (total + len_ + (separator_len if len(current_doc) > 0 else 0)
+                > self._chunk_size):     # ① 再装这片就超厚了？
+            if total > self._chunk_size:
+                logger.warning("Created a chunk of size %d, which is longer "
+                               "than the specified %d", total, self._chunk_size)
+            if len(current_doc) > 0:
+                doc = self._join_docs(current_doc, separator)   # ② 当前册装订出货
+                if doc is not None:
+                    docs.append(doc)
+                while total > self._chunk_overlap or (          # ③ ★从册头弹出旧片，
+                    total + len_ + ... > self._chunk_size and total > 0   #   只留 overlap 的量
+                ):
+                    total -= self._length_function(current_doc[0]) + ...
+                    current_doc = current_doc[1:]               #   ← 弹出最旧的一片
+        current_doc.append(d)            # ④ 新片入册
+        total += len_ + (separator_len if len(current_doc) > 1 else 0)
+    doc = self._join_docs(current_doc, separator)               # ⑤ 收尾：最后一册出货
+    if doc is not None:
+        docs.append(doc)
+    return docs</code></pre>
+                <div class="walk">
+                    <div class="r"><code>① 超厚判断</code><span>厚度 = 已装片 + 新片 + 片间分隔符，凑一起超过 chunk_size 就先出货。分隔符长度也算钱——细到这个程度。</span></div>
+                    <div class="r"><code>③ while 弹出到只剩 overlap</code><span>★重叠的实现精髓：出货后<b>不清空</b> current_doc，而是从头部弹出旧片，直到剩余厚度 ≤ chunk_overlap。<b>留下的这个"尾巴"就是下一册开头的重印内容</b>——滑动窗口就是这么滑的。</span></div>
+                    <div class="r"><code>logger.warning</code><span>如果某一片单片就超过 chunk_size（比如一个 800 字符的段落、chunk_size=500），装不下也得装，打个警告继续——<b>宁可超尺寸也不静默丢内容</b>。这也是 Recursive 版要递归再切的动机（L05）。</span></div>
+                </div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 236" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="11">
+                        <text x="320" y="16" fill="#e2e8f0" text-anchor="middle" font-weight="700">_merge_splits：滑动窗口装箱（chunk_size=10，overlap=3 示意）</text>
+                        <text x="60" y="46" fill="#94a3b8">小片流入：</text>
+                        <rect x="130" y="32" width="60" height="22" rx="5" fill="rgba(148,163,184,.12)" stroke="#94a3b8"/><text x="160" y="47" fill="#cbd5e1" text-anchor="middle">A(4)</text>
+                        <rect x="196" y="32" width="60" height="22" rx="5" fill="rgba(148,163,184,.12)" stroke="#94a3b8"/><text x="226" y="47" fill="#cbd5e1" text-anchor="middle">B(3)</text>
+                        <rect x="262" y="32" width="60" height="22" rx="5" fill="rgba(148,163,184,.12)" stroke="#94a3b8"/><text x="292" y="47" fill="#cbd5e1" text-anchor="middle">C(3)</text>
+                        <rect x="328" y="32" width="60" height="22" rx="5" fill="rgba(148,163,184,.12)" stroke="#94a3b8"/><text x="358" y="47" fill="#cbd5e1" text-anchor="middle">D(4)</text>
+                        <rect x="394" y="32" width="60" height="22" rx="5" fill="rgba(148,163,184,.12)" stroke="#94a3b8"/><text x="424" y="47" fill="#cbd5e1" text-anchor="middle">E(5)</text>
+                        <rect x="40" y="84" width="270" height="52" rx="8" fill="rgba(47,111,235,.1)" stroke="#2f6feb"/>
+                        <text x="175" y="103" fill="#93c5fd" text-anchor="middle" font-weight="700">册1 出货：A+B+C（厚度10，D 装不下）</text>
+                        <text x="175" y="122" fill="#cbd5e1" text-anchor="middle">出货后弹出 A、B，留 C(3) ≤ overlap(3)</text>
+                        <rect x="340" y="84" width="270" height="52" rx="8" fill="rgba(34,197,94,.08)" stroke="#22c55e"/>
+                        <text x="475" y="103" fill="#86efac" text-anchor="middle" font-weight="700">册2 接着装：C+D（C 是重印的尾巴）</text>
+                        <text x="475" y="122" fill="#cbd5e1" text-anchor="middle">再来 E 超厚 → 册2 出货 → 留 D … 依此滑动</text>
+                        <rect x="40" y="160" width="570" height="56" rx="8" fill="rgba(245,158,11,.06)" stroke="#f59e0b"/>
+                        <text x="325" y="180" fill="#fcd34d" text-anchor="middle" font-weight="700">重叠 = 出货后"不清空、只弹到剩 overlap"（base.py:195 的 while 循环）</text>
+                        <text x="325" y="198" fill="#cbd5e1" text-anchor="middle">相邻两册共享尾巴 C，被拦腰的语义在下一册还能读全 —— 活页册开头重印上一册末行</text>
+                    </svg>
+                    <div class="cap">图注：窗口向前滑、尾巴留下来。overlap 不是"额外复制一段"，而是装箱时自然留在箱底的旧片。</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>CharacterTextSplitter：一刀流</h1></div>
+            <div class="card">
+                <p>最简单的子类 <code>CharacterTextSplitter</code>（<span class="fileref">libs/text-splitters/langchain_text_splitters/character.py:13</span>）——只认一个分隔符：</p>
+<pre><code class="language-python"># libs/text-splitters/langchain_text_splitters/character.py:13
+class CharacterTextSplitter(TextSplitter):
+    """Splitting text that looks at characters."""
+
+    def __init__(self, separator: str = "\n\n", is_separator_regex: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self._separator = separator          # 默认按"空行"（段落边界）下刀
+
+    @override
+    def split_text(self, text: str) -> list[str]:    # character.py:28
+        sep_pattern = (self._separator if self._is_separator_regex
+                       else re.escape(self._separator))
+        splits = _split_text_with_regex(text, sep_pattern,          # ① 按分隔符剁成片
+                                        keep_separator=self._keep_separator)
+        ...
+        merge_sep = ""
+        if not (self._keep_separator or is_lookaround):
+            merge_sep = self._separator
+        return self._merge_splits(splits, merge_sep)                 # ② 交给基类装箱</code></pre>
+                <div class="walk">
+                    <div class="r"><code>separator="\n\n"</code><span>默认在<b>空行（段落边界）</b>下刀——最自然的缝隙。也可以换成正则（<code>is_separator_regex=True</code>）。</span></div>
+                    <div class="r"><code>两步走</code><span>子类的全部个性就是"①怎么剁片"；"②怎么装箱"完全复用基类 <code>_merge_splits</code>。后面的 markdown.py、python.py 等所有切分器都是这个结构。</span></div>
+                    <div class="r"><code>致命短板</code><span>只有一把刀：如果某个段落本身超过 chunk_size，它<b>不会再想别的办法</b>，只能打警告塞出一个超大块（L03 见过）。这就轮到 Recursive 出场了。</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>RecursiveCharacterTextSplitter：段→行→词→字递归降级</h1></div>
+            <div class="card">
+                <p>官方默认切分器（D09 的 load_and_split 就用它）：<code>RecursiveCharacterTextSplitter</code>（<span class="fileref">libs/text-splitters/langchain_text_splitters/character.py:91</span>）：</p>
+<pre><code class="language-python"># libs/text-splitters/langchain_text_splitters/character.py:91
+class RecursiveCharacterTextSplitter(TextSplitter):
+    """Splitting text by recursively look at characters.
+    Recursively tries to split by different characters to find one that works."""
+
+    def __init__(self, separators=None, keep_separator=True, ...):
+        super().__init__(keep_separator=keep_separator, **kwargs)
+        self._separators = separators or ["\n\n", "\n", " ", ""]   # ★刀谱：段→行→词→字
+
+    def _split_text(self, text: str, separators: list[str]) -> list[str]:  # character.py:110
+        final_chunks = []
+        separator = separators[-1]
+        new_separators = []
+        for i, s_ in enumerate(separators):
+            if re.search(separator_, text):        # ① 选出当前文本里能用的最粗的刀
+                separator = s_
+                new_separators = separators[i + 1 :]   #    剩下的细刀留给递归
+                break
+        splits = _split_text_with_regex(text, separator_, ...)   # ② 用选中的刀剁片
+        good_splits = []
+        for s in splits:
+            if self._length_function(s) < self._chunk_size:
+                good_splits.append(s)              # ③ 片够小 → 攒着待装箱
+            else:
+                if good_splits:
+                    final_chunks.extend(self._merge_splits(good_splits, separator_))
+                    good_splits = []
+                if not new_separators:
+                    final_chunks.append(s)         # ④ 刀用完了，认了
+                else:
+                    final_chunks.extend(self._split_text(s, new_separators))  # ⑤ ★换细刀递归
+        if good_splits:
+            final_chunks.extend(self._merge_splits(good_splits, separator_))
+        return final_chunks</code></pre>
+                <div class="walk">
+                    <div class="r"><code>刀谱 ["\n\n","\n"," ",""]</code><span>从粗到细四把刀：空行（段）→ 换行（行）→ 空格（词）→ 空字符串（逐字符）。最后一把 <code>""</code> 保证<b>任何文本最终都能切开</b>——哪怕是没有空格的中文长句。</span></div>
+                    <div class="r"><code>① 选刀</code><span>不是死板从第一把开始：挑<b>当前文本里实际存在</b>的最粗一把（全文没有空行就直接从换行开始），并记下更细的刀（new_separators）备用。</span></div>
+                    <div class="r"><code>⑤ 递归降级</code><span>★灵魂所在：某片用粗刀切完还是超厚 → <b>对这一片单独换细刀重切</b>（递归调用），细刀还不够就再细。对比一刀流的"认命打警告"，Recursive 只有刀谱全用完（④）才认命。</span></div>
+                    <div class="r"><code>③ good_splits 分批装箱</code><span>够小的片攒着，遇到超厚片时先把攒的装箱出货、再处理超厚片——保证<b>输出顺序与原文一致</b>。</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 本质：语义边界的优先级搜索</span>为什么"段→行→词→字"？因为<strong>语义完整性递减</strong>：整段是完整论述，整行是完整句子，整词至少不切碎单词，逐字是最后的无奈。装订师傅的原则——刀口尽量落在最自然的缝隙，实在不行才硬切。这也解释了为什么它是官方默认：对任意未知文本，它给出"尽可能不破坏语义"的最稳妥切法。代码场景还有专门刀谱：<code>from_language</code>（<span class="fileref">character.py:165</span>）按编程语言给出如 <code>class/def</code> 边界优先的分隔符组。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>create_documents / split_documents：卡片跟着走</h1></div>
+            <div class="card">
+                <p>切分器怎么和 D09 的 Document 世界接轨？看 <code>create_documents</code>（<span class="fileref">libs/text-splitters/langchain_text_splitters/base.py:118</span>）和 <code>split_documents</code>（<span class="fileref">base.py:146</span>）：</p>
+<pre><code class="language-python"># libs/text-splitters/langchain_text_splitters/base.py:118
+def create_documents(self, texts, metadatas=None) -> list[Document]:
+    metadatas_ = metadatas or [{}] * len(texts)
+    documents = []
+    for i, text in enumerate(texts):
+        index = 0
+        previous_chunk_len = 0
+        for chunk in self.split_text(text):
+            metadata = copy.deepcopy(metadatas_[i])       # ① ★母卡片深拷贝给每个子块
+            if self._add_start_index:
+                offset = index + previous_chunk_len - self._chunk_overlap
+                index = text.find(chunk, max(0, offset))  # ② 定位块在原文的起点
+                metadata["start_index"] = index
+                previous_chunk_len = len(chunk)
+            documents.append(Document(page_content=chunk, metadata=metadata))
+    return documents
+
+# base.py:146
+def split_documents(self, documents: Iterable[Document]) -> list[Document]:
+    texts, metadatas = [], []
+    for doc in documents:
+        texts.append(doc.page_content)
+        metadatas.append(doc.metadata)                    # ③ 拆出正文和卡片
+    return self.create_documents(texts, metadatas=metadatas)</code></pre>
+                <div class="walk">
+                    <div class="r"><code>copy.deepcopy(metadata)</code><span>★每个子块拿到母文档卡片的<b>深拷贝</b>——source、page 等信息全继承。为什么深拷贝？如果 100 个块共享同一个 dict，改一个块的卡片会污染其他 99 个。</span></div>
+                    <div class="r"><code>start_index 的寻找起点</code><span>开了 <code>add_start_index</code> 后用 <code>text.find(chunk, offset)</code> 定位，起点扣掉了 overlap——因为重叠意味着<b>同样的文字出现两次</b>，直接从头 find 可能定位到上一块的重印区。答案引用要标"原文第几个字符起"就靠它。</span></div>
+                    <div class="r"><code>split_documents</code><span>Document 进 → 拆成(正文, 卡片) → 切正文、继承卡片 → Document 出。D09 说的"通货换零钱、卡片跟着走"就是这三行。</span></div>
+                </div>
+                <div class="pitfall"><span class="t">⚠️ 坑：中文文本 + 默认刀谱</span>默认刀谱里的"词刀"是<strong>空格</strong>——中文没有空格！于是中文常从"行刀"直接跌到"字刀"，切在词中间（如"报销上|限"）。中文实践通常自定义刀谱：<code>separators=["\n\n", "\n", "。", "，", ""]</code>，把句号、逗号加进优先级。另一个常见坑：<code>chunk_size</code> 数的是"length_function 的单位"，默认按<strong>字符</strong>数——中文 1 字符 ≈ 1 token 甚至更多，按英文经验设 4000 可能超预算，按 token 计数更稳（L02 的 tokenizer 工厂）。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>串起来 + 今日小结</h1></div>
+            <div class="card">
+                <div class="example"><span class="t">📝 真实值：切一段制度文档</span>
+                输入（假设 <code>chunk_size=60, chunk_overlap=12</code>，字符计）：<br>
+                <code>text = "第一条 差旅住宿标准。\n\n一线城市每晚上限 500 元，二线城市每晚上限 350 元。\n\n第二条 报销流程。\n\n出差结束后 7 日内提交行程单与发票。"</code><br>
+                <code>RecursiveCharacterTextSplitter(chunk_size=60, chunk_overlap=12).split_text(text)</code> 的行为：先用"段刀"（\n\n）剁成 4 片（12/27/10/19 字符），再由 <code>_merge_splits</code> 装箱：片1+片2 = 41 字符，再加片3 要超 60？41+2+10=53 还装得下；再加片4 超了 → 册1出货（"第一条…\n\n一线城市…\n\n第二条 报销流程。"），弹旧片留尾巴 ≤12（"第二条 报销流程。"10 字符留下）→ 册2 = "第二条 报销流程。\n\n出差结束后 7 日内…"。<strong>两册，重叠的正是"第二条 报销流程。"这句标题——两边都能接上下文。</strong>再 <code>create_documents([text], metadatas=[{"source":"差旅制度.txt"}])</code>，两册各自带上同一张 source 卡片。</div>
+                <div class="qa">
+                    <p class="q">👶 小白：chunk_overlap 白白多存了重复内容，不浪费吗？到底设多大？</p>
+                    <p class="a">👨‍🏫 老师：是的，overlap 就是<strong>用存储换语义完整</strong>——多存 5%-15% 的重复文字，换"关键句子不被拦腰斩断在两块之间"的保险。设多大没有铁律，常见经验是 chunk_size 的 10%-20%（比如 1000/150）。设 0 的后果：正好切在"上限为每晚 | 500 元"处时，问"上限多少"两块都检索不出完整答案。设太大（基类约法三禁止 ≥ chunk_size）则块间大量雷同，向量库里全是重复内容，检索结果一片近亲。<strong>从 10% 起步，用你自己的问答对实测调优</strong>，比背数字有用。</p>
+                </div>
+                <div class="card highlight-card">
+                    <h3>🧠 今天你应该能回答</h3>
+                    <ul>
+                        <li>基类的约法三章？（size&gt;0、overlap≥0、overlap&lt;size，base.py:88-99）</li>
+                        <li>"长度"一定是字符数吗？（不，length_function 可注入，可换 token 计数，base.py:67）</li>
+                        <li>overlap 是怎么实现的？（_merge_splits 出货后不清空、从头弹片到剩 ≤overlap，留作下册开头，base.py:167/195）</li>
+                        <li>单片超过 chunk_size 时一刀流和递归流各怎么办？（一刀流打警告硬塞；Recursive 换细刀递归重切，character.py:145）</li>
+                        <li>默认刀谱及其含义？（["\n\n","\n"," ",""] 段→行→词→字，语义完整性递减，character.py:107）</li>
+                        <li>切出来的块为什么还带 source？（create_documents 深拷贝母卡片给每个子块，base.py:135）</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>✋ 10 分钟动手</h3>
+<pre><code class="language-bash">cd /Users/bitmart/work/codes/github/AI_WORK/langchain/libs/text-splitters/langchain_text_splitters
+
+# 1. 基类：旋钮 + 装箱
+sed -n '59,107p'  base.py    # 构造函数：约法三章 + length_function
+sed -n '167,210p' base.py    # _merge_splits：滑动窗口装箱
+
+# 2. 两个切分器
+sed -n '13,62p'   character.py   # 一刀流
+sed -n '91,152p'  character.py   # Recursive：选刀 + 递归降级
+
+# 3. 与 Document 接轨
+sed -n '118,160p' base.py    # create_documents / split_documents（卡片深拷贝）
+grep -n "def from_language\|def get_separators_for_language" character.py</code></pre>
+                    <div class="tip"><strong>明日预告 · Day 11</strong>：书拆成小册子了，接下来给每册编"语义索引"——明天看 <code>embeddings/</code> 与 <code>vectorstores/</code>：Embeddings 抽象怎么定义、InMemoryVectorStore 怎么存向量、余弦相似度检索怎么跑起来。RAG 流水线再进一站。</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                    <a href="langchain-day09.html" style="color:var(--accent-cyan);">&larr; Day 09 Document 与加载</a>
+                    <a href="langchain-day11.html" style="color:var(--accent-green);">Day 11 · Embedding 与向量库 &rarr;</a>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
