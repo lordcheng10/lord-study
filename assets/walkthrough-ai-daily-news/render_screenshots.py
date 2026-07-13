@@ -75,13 +75,14 @@ def render_terminal(
 
 
 STEPS = [
-    ("step00-env.png", "Step 0 · 环境检查", "step00-env.log"),
-    ("step01-init.png", "Step 1 · 起仓 + 改名", "step01-init.log"),
-    ("step03-uv-sync.png", "Step 3 · uv sync", "step03-uv-sync.log"),
-    ("step03-first-run.png", "Step 3 · 首次跑通", "step03-first-run.log"),
-    ("step04-daily-run.png", "Step 4 · 每日播报输出", "step04-daily-run.log"),
-    ("step04-files.png", "Step 4 · 业务文件结构", "step04-files.log"),
-    ("step07-pytest.png", "Step 7 · pytest", "step07-pytest.log"),
+    ("step-install-skill.png", "安装 Skill · cc-marketplace", "step-install-skill.log"),
+    ("step00-env.png", "Skill 步骤 0 · 环境检查", "step00-env.log"),
+    ("step01-init.png", "Skill 步骤 1 · 起仓 + 改名", "step01-init.log"),
+    ("step03-uv-sync.png", "Skill 步骤 3 · uv sync", "step03-uv-sync.log"),
+    ("step03-first-run.png", "Skill 步骤 3 · 首次跑通", "step03-first-run.log"),
+    ("step04-daily-run.png", "Skill 步骤 4 · 每日播报输出", "step04-daily-run.log"),
+    ("step04-files.png", "Skill 步骤 4 · 业务文件结构", "step04-files.log"),
+    ("step07-pytest.png", "Skill 步骤 7 · pytest", "step07-pytest.log"),
 ]
 
 
