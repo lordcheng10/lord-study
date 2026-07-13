@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · Monorepo 接入 — 业务方构建 Agent</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/toml.min.js"></script>
+    <style>
+        .must3{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:14px;margin:12px 0}
+        .must3 h4{color:#f59e0b;margin:0 0 8px}
+        .anti{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:10px 14px;margin:8px 0;font-size:12.5px}
+        .anti b{color:#f87171}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">路径 B · Monorepo 接入</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本篇</li>
+            <li><a href="#env" class="nav-link active">环境</a></li>
+            <li><a href="#scaffold" class="nav-link">起手脚手架</a></li>
+            <li><a href="#must3" class="nav-link">全仓 3 处必改</a></li>
+            <li><a href="#server" class="nav-link">build_v1_router</a></li>
+            <li><a href="#e2e" class="nav-link">e2e 跑通</a></li>
+            <li class="nav-group-title">教程</li>
+            <li><a href="gov-agents-builder-day02.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 02</a></li>
+            <li><a href="gov-agents-builder-tutorial.html" class="nav-link">5 天总目录</a></li>
+            <li><a href="gov-agents-day19.html" class="nav-link">源码 Day 19 深讲</a></li>
+            <li><a href="gov-agents-builder-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 业务开发 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 5 · 路径 B</span>
+            <h1 class="part-title">Monorepo 内接入新 Agent</h1>
+            <p class="part-desc">有平台仓权限时：15 分钟 scaffold + <code>build_v1_router</code> 挂标准 API，零手写 run 路由。</p>
+        </div>
+
+        <section id="env" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>环境</h1></div>
+            <div class="card">
+<pre><code class="language-bash">git clone git@gitlab.bitmartpro.com:exchange/code/architecture/gov-agents-platform.git
+cd gov-agents-platform
+uv sync --all-packages
+export ANTHROPIC_API_KEY=...
+uv run agentctl --help</code></pre>
+            </div>
+        </section>
+
+        <section id="scaffold" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>起手 · 三选一</h1></div>
+            <div class="card">
+                <p><strong>推荐 · agentctl new</strong></p>
+<pre><code class="language-bash">uv run agentctl new agent release-notes-bot \
+  --pattern supervisor \
+  --specialists "diff_sp,changelog_sp" \
+  --critic both</code></pre>
+                <p>6 个 pattern：<code>supervisor</code>（默认）· <code>rag</code> · <code>monitor</code> · <code>doc</code> · <code>business-data</code> · <code>minimal</code></p>
+                <p><strong>或 agent-creator</strong>（AI 生成 · dry-run 先看预览）：</p>
+<pre><code class="language-bash">uv run agentctl invoke agent-creator \
+  --data '{"description":"做一个 ...","dry_run":true}'</code></pre>
+                <p><strong>或 cp 最接近的老 agent</strong>：</p>
+<pre><code class="language-bash">cp -r apps/sre-rca-agent apps/my-agent && mv sre_rca my_agent</code></pre>
+                <div class="anti"><b>包名铁律</b>：顶层 Python 包必须 snake_case 且独特（<code>my_agent</code> ✓ · <code>agent</code> / <code>app</code> ✗）。</div>
+            </div>
+        </section>
+
+        <section id="must3" class="section">
+            <div class="section-header"><span class="section-number">03</span><h1>全仓 3 处必改</h1></div>
+            <div class="card">
+                <div class="must3"><h4>忘了就跑不起来</h4></div>
+<pre><code class="language-toml"># 1. 根 pyproject.toml [tool.uv.workspace] members
+"apps/my-agent",</code></pre>
+<pre><code class="language-python"># 2. gov_agents_server/main.py AGENT_REGISTRY
+"my-agent": ("my_agent.server", "build_router"),
+
+# 3. 同文件 AGENT_META（Portal 卡片元数据）
+"my-agent": {"title": "...", "subtitle": "...", "prefix": "/agents/my-agent"}</code></pre>
+                <p>然后 <code>uv sync --all-packages</code>。</p>
+            </div>
+        </section>
+
+        <section id="server" class="section">
+            <div class="section-header"><span class="section-number">04</span><h1>server.py · build_v1_router</h1></div>
+            <div class="card">
+                <div class="anti"><b>反模式</b>：❌ <code>@router.post("/agents/my-agent/run")</code> 手写 · ❌ 自己拼 envelope · ❌ 手动改 ANTHROPIC_API_KEY env</div>
+                <p>✅ 用工厂挂 6 个 endpoint（invoke / stream / cases / feedback + legacy alias）：</p>
+<pre><code class="language-python">from ai_trust_toolkit.api import (
+    AgentOutcome, CallContext, CostTracker, build_v1_router,
+    anthropic_key_override, make_case_store_from_env,
+)
+
+async def _invoke(body, ctx: CallContext, tracker: CostTracker) -> AgentOutcome:
+    req = MyAgentRequest.model_validate(body)
+    with anthropic_key_override(ctx.anthropic_api_key):
+        final = await graph.ainvoke(_initial_state(req))
+    return AgentOutcome(
+        status="success" if final.get("critique_passed", True) else "critic_end",
+        result=_final_to_result(final),
+        retry_count=int(final.get("retry_count", 0)),
+    )
+
+def build_router(case_store=None):
+    router = APIRouter(tags=["my-agent"])
+    router.include_router(build_v1_router(
+        agent_name="my-agent", invoke_fn=_invoke,
+        case_store=case_store or make_case_store_from_env(),
+    ))
+    return router</code></pre>
+                <p>BOM 依赖：<code>ai-trust-toolkit-bom[core,supervisor]==0.6.0</code> + workspace source。不要直 pin toolkit 子模块。</p>
+            </div>
+        </section>
+
+        <section id="e2e" class="section">
+            <div class="section-header"><span class="section-number">05</span><h1>e2e 跑通</h1></div>
+            <div class="card">
+<pre><code class="language-bash">uv run uvicorn gov_agents_server.main:app --host 127.0.0.1 --port 8080
+
+export PLATFORM_BASE_URL=http://127.0.0.1:8080
+export AGENTCTL_USER_ID=dev
+uv run agentctl invoke my-agent --data='{"target":"hello"}'
+uv run agentctl cases my-agent --table</code></pre>
+                <div class="tip">📎 完整 cookbook + echo-agent 最小示例 → 平台仓 <code>docs/new-agent-cookbook.md</code> · 源码课 <a href="gov-agents-day19.html">Day 19</a>。</div>
+            </div>
+        </section>
+    </main>
+    <script>hljs.highlightAll();document.getElementById('sidebarToggle')?.addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));</script>
+</body>
+</html>

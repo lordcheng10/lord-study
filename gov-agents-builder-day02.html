@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 02 · 独立仓接入 — 业务方构建 Agent</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <style>
+        .steps9{position:relative;padding-left:30px;margin:10px 0}
+        .steps9::before{content:'';position:absolute;left:10px;top:6px;bottom:6px;width:2px;background:linear-gradient(var(--accent-green),var(--accent-purple))}
+        .s9{position:relative;margin-bottom:12px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:11px 14px}
+        .s9::before{content:'';position:absolute;left:-25px;top:15px;width:13px;height:13px;border-radius:50%;background:var(--accent-green);box-shadow:0 0 0 3px var(--bg-primary)}
+        .s9 .n{font-size:11px;font-weight:800;color:var(--accent-green);font-family:monospace}
+        .s9 h4{font-size:13.5px;margin:2px 0 3px}.s9 p{font-size:12px;color:var(--text-secondary);margin:0}
+        .gotcha{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:11px 14px;margin:8px 0;font-size:12.5px}
+        .gotcha b{color:var(--accent-red)}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#06b6d4);">02</div>
+            <h2>Day 02</h2>
+            <p class="version">路径 A · 独立仓接入</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本篇</li>
+            <li><a href="#s0" class="nav-link active">步骤 0 环境</a></li>
+            <li><a href="#s1" class="nav-link">步骤 1-2 起仓·Nexus</a></li>
+            <li><a href="#s3" class="nav-link">步骤 3 跑通</a></li>
+            <li><a href="#s4" class="nav-link">步骤 4-7 业务·telemetry</a></li>
+            <li><a href="#s8" class="nav-link">步骤 8-9 安全·上线</a></li>
+            <li class="nav-group-title">教程</li>
+            <li><a href="gov-agents-builder-day01.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 01</a></li>
+            <li><a href="gov-agents-builder-tutorial.html" class="nav-link">5 天总目录</a></li>
+            <li><a href="gov-agents-day21.html" class="nav-link">独立仓 9 步深讲</a></li>
+            <li><a href="gov-agents-builder-day04.html" class="nav-link" style="color:var(--accent-green);">Day 04 业务开发 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 02 / 5 · 路径 A</span>
+            <h1 class="part-title">独立仓 Agent 接入 · 9 步跑通</h1>
+            <p class="part-desc">没有 monorepo 权限的业务团队标准路径：小区外自建小屋，通过 Nexus 订同款 toolkit 建材包。活范例 <code>bmc-agent</code>。</p>
+        </div>
+
+        <section id="s0" class="section">
+            <div class="section-header"><span class="section-number">0</span><h1>环境检查</h1></div>
+            <div class="card">
+<pre><code class="language-bash">python3 --version   # ≥ 3.10
+uv --version        # curl -LsSf https://astral.sh/uv/install.sh | sh
+git --version</code></pre>
+            </div>
+        </section>
+
+        <section id="s1" class="section">
+            <div class="section-header"><span class="section-number">1-2</span><h1>起仓 + Nexus 凭据</h1></div>
+            <div class="card">
+                <p><strong>步骤 1 · 下模板并改名</strong>（免登录直链）：</p>
+<pre><code class="language-bash">curl -fL http://gov-agents-ui.bmaicsaws-prod.com/portal/v1/agent-template/download.zip \
+  -o /tmp/tpl.zip
+unzip /tmp/tpl.zip && mv standalone-agent-template my-agent && cd my-agent
+mv your_agent my_agent
+grep -rl 'your[-_]agent' . | xargs sed -i '' 's/your-agent/my-agent/g; s/your_agent/my_agent/g'
+git init && git add -A && git commit -m "init my-agent"</code></pre>
+                <p><strong>步骤 2 · Nexus 只读凭据</strong>（<code>uv sync</code> 401 多半是这步错了）：</p>
+<pre><code class="language-bash">printf 'machine nexus.bitmartpro.com\nlogin pypi_pull\npassword 08gk5p2Q\n' >> ~/.netrc
+chmod 600 ~/.netrc</code></pre>
+                <div class="gotcha"><b>⚠️</b> login/password <strong>不要加引号</strong>；用 <code>printf</code> 写 netrc，别用 heredoc（易卡在 <code>heredoc&gt;</code>）。</div>
+                <div class="baby"><span class="t">pyproject.toml 关键段</span>依赖 <code>ai-trust-toolkit-bom[core]==0.6.0</code> + Nexus index + <code>index-strategy = "unsafe-best-match"</code>。模板已带好，确认即可。</div>
+            </div>
+        </section>
+
+        <section id="s3" class="section">
+            <div class="section-header"><span class="section-number">3</span><h1>安装 + LLM + 跑通</h1></div>
+            <div class="card">
+<pre><code class="language-bash">uv sync
+cp .env.example .env   # ANTHROPIC_API_KEY=sk-ant-...（业务方自己的 key）
+uv run my-agent run "你好"</code></pre>
+                <p>✅ 期望：<code>success=True</code> + LLM 回复。没 key 走 echo 兜底也算跑通。</p>
+            </div>
+        </section>
+
+        <section id="s4" class="section">
+            <div class="section-header"><span class="section-number">4-7</span><h1>业务图 · telemetry · 形态 · 测试</h1></div>
+            <div class="card">
+                <div class="steps9">
+                    <div class="s9"><span class="n">步骤 4</span><h4>写业务图（核心）</h4><p>改 <code>nodes/</code> + <code>builder.py</code>；LLM 一律 <code>from ai_trust_toolkit.llm import get_llm</code>。详见 <a href="gov-agents-builder-day04.html">Day 04</a>。</p></div>
+                    <div class="s9"><span class="n">步骤 5</span><h4>接 telemetry</h4><p><code>core.py</code> 里 <code>record_effect("你的指标", 1)</code> + <code>push_invoke_metrics</code>。本地调试加 <code>--no-telemetry</code>。</p></div>
+                    <div class="s9"><span class="n">步骤 6</span><h4>选入口形态</h4><p>CLI（默认）· MCP（参考 bmc-agent-mcp）· Pod（FastAPI + uvicorn）。</p></div>
+                    <div class="s9"><span class="n">步骤 7</span><h4>测试</h4><p><code>uv run --extra test pytest</code>（必须带 <code>--extra test</code>）。</p></div>
+                </div>
+<pre><code class="language-python"># core.py · telemetry 示例
+with bind_effect():
+    record_effect("done", 1)  # 换成 upgraded / scanned / reviewed ...
+    push_invoke_metrics(result, form="cli")</code></pre>
+            </div>
+        </section>
+
+        <section id="s8" class="section">
+            <div class="section-header"><span class="section-number">8-9</span><h1>安全自检 · 上线</h1></div>
+            <div class="card">
+                <p>步骤 8：用服务凭据调下游 → 必过 <a href="gov-agents-builder-day05.html">Day 05 安全 7 问</a>。</p>
+                <p>步骤 9：先测试环境 obelisk → 验 Portal 出 invocation → 再生产灰度。</p>
+<pre><code class="language-bash">uv build
+uv publish --publish-url http://nexus.bitmartpro.com/repository/bm-pypi/ \
+  --username '&lt;USER&gt;' --password '&lt;TOKEN&gt;' dist/*</code></pre>
+                <div class="tip">📎 本篇是浓缩版。动画时间线 + 模板真代码 walkthrough → <a href="gov-agents-day21.html">番外 · 独立仓 9 步深讲</a>。</div>
+            </div>
+        </section>
+    </main>
+    <script>hljs.highlightAll();document.getElementById('sidebarToggle')?.addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));</script>
+</body>
+</html>

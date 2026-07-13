@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · 评测·安全·上线 — 业务方构建 Agent</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <style>
+        .sec-q{display:flex;flex-direction:column;gap:6px}
+        .sq{display:flex;gap:10px;align-items:flex-start;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;border-left:3px solid var(--accent-orange)}
+        .sq .qn{flex-shrink:0;font-weight:700;color:var(--accent-orange);font-family:monospace}
+        .sq p{margin:0;font-size:12.5px;color:var(--text-secondary)}
+        .checklist li{margin:6px 0;line-height:1.6}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">评测 · 安全 · 上线 · KPI</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本篇</li>
+            <li><a href="#eval" class="nav-link active">评测样本</a></li>
+            <li><a href="#test" class="nav-link">FakeLLM 测试</a></li>
+            <li><a href="#sec" class="nav-link">安全 7 问</a></li>
+            <li><a href="#deploy" class="nav-link">上线 · canary</a></li>
+            <li><a href="#kpi" class="nav-link">Portal KPI</a></li>
+            <li><a href="#done" class="nav-link">毕业清单</a></li>
+            <li class="nav-group-title">教程</li>
+            <li><a href="gov-agents-builder-day04.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Day 04</a></li>
+            <li><a href="gov-agents-builder-tutorial.html" class="nav-link">5 天总目录</a></li>
+            <li><a href="gov-agents-tutorial.html" class="nav-link">框架源码 21 天</a></li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 5 · 收官</span>
+            <h1 class="part-title">评测 · 安全 · 上线 · Portal 看见你的效果</h1>
+            <p class="part-desc">能跑不够——要有样本、0 外网测试、涉权过评审、灰度上线、KPI 闭环。</p>
+        </div>
+
+        <section id="eval" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>评测样本 · ≥20 条</h1></div>
+            <div class="card">
+                <p>Monorepo：<code>data/eval_samples.jsonl</code> 或 <code>evals/samples/*.yaml</code></p>
+<pre><code class="language-json">{"sample_id":"t-001","input":{"text":"hello"},"ground_truth":{"category":"greeting"},"tags":["smoke"]}</code></pre>
+                <p>覆盖：核心场景 × 边界 × 失败 case。少于 20 条 FiveDimScorer 方差大，跨周对比假阳性多。</p>
+<pre><code class="language-bash">uv run agentctl invoke my-agent --eval
+uv run agentctl invoke my-agent --eval --sample t-001 -v</code></pre>
+            </div>
+        </section>
+
+        <section id="test" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>FakeLLM · 0 外网 · 5 秒跑完</h1></div>
+            <div class="card">
+<pre><code class="language-python">from ai_trust_toolkit.testing import FakeLLM, build_agent_for_test
+
+async def test_triage():
+    fake = FakeLLM({"triage": ["category: greeting"]})
+    app = build_agent_for_test(builder=build_router, llm=fake)
+    result = await app.invoke({"input": "你好"})
+    assert result["category"] == "greeting"</code></pre>
+<pre><code class="language-bash">uv run pytest apps/my-agent/tests/ -q          # Monorepo
+uv run --extra test pytest                       # 独立仓</code></pre>
+                <p>最小合并标准：≥3 个 FakeLLM 测试 · ≥1 个 L1 critic 规则 · ≥5 条评测样本。</p>
+            </div>
+        </section>
+
+        <section id="sec" class="section">
+            <div class="section-header"><span class="section-number">03</span><h1>安全自检 · 7 问（涉权必做）</h1></div>
+            <div class="card">
+                <p>用<strong>服务凭据</strong>调下游时：没权限的人经 agent 拿到那个权限 = 越权放大。命中写/删下游、跨团队、涉密 → 独立安全评审。</p>
+                <div class="sec-q">
+                    <div class="sq"><span class="qn">1</span><p>会放大权限吗？</p></div>
+                    <div class="sq"><span class="qn">2</span><p>下游带谁的身份？服务凭据怎么校验调用者有权？</p></div>
+                    <div class="sq"><span class="qn">3</span><p>服务凭据是最小权限吗？</p></div>
+                    <div class="sq"><span class="qn">4</span><p>高危操作有 dry-run / 人审 / 二次授权吗？</p></div>
+                    <div class="sq"><span class="qn">5</span><p>每次操作可追溯到真实用户吗？</p></div>
+                    <div class="sq"><span class="qn">6</span><p>越权/失败默认拒绝吗？</p></div>
+                    <div class="sq"><span class="qn">7</span><p>敏感数据出域 / 过 LLM 吗？</p></div>
+                </div>
+                <div class="note"><strong>原则</strong>：经 agent 的有效权限 ≤ 调用者本人。</div>
+            </div>
+        </section>
+
+        <section id="deploy" class="section">
+            <div class="section-header"><span class="section-number">04</span><h1>上线 · 先测试后生产</h1></div>
+            <div class="card">
+                <p><strong>Pod</strong>：obelisk 测试环境 → 健康检查 + Portal 出 invocation → 生产 canary 0→10→50→100%</p>
+<pre><code class="language-bash">canary phase advance --agent my-agent
+canary rollback --agent my-agent   # 异常 p99 &lt; 30s 回滚</code></pre>
+                <p><strong>CLI/MCP</strong>：<code>uv publish</code> → Nexus → 小范围 pipx → 稳定版广播。</p>
+                <p>BOM 升级：看 release notes → 改一行版本 → <code>uv sync</code> + 跑测 → 不跳 MINOR。</p>
+            </div>
+        </section>
+
+        <section id="kpi" class="section">
+            <div class="section-header"><span class="section-number">05</span><h1>Portal KPI 闭环</h1></div>
+            <div class="card">
+                <p>上线后在 <code>/agents/&lt;your-agent&gt;</code> 可见：调用次数 · 成功率 · P95 · 单次成本 · <code>record_effect</code> 领域指标 · case + feedback。</p>
+<pre><code class="language-python">with bind_effect():
+    record_effect("upgraded", 1)   # 换成你的业务 key
+    push_invoke_metrics(result, form="cli")</code></pre>
+                <div class="info-box">Skill 默认不上报 KPI；要做效果度量闭环必须走 Agent + telemetry。</div>
+            </div>
+        </section>
+
+        <section id="done" class="section">
+            <div class="section-header"><span class="section-number">✓</span><h1>5 天毕业清单</h1></div>
+            <div class="card">
+                <ul class="checklist">
+                    <li>☐ Day 01 选型完成（Skill/Agent · 独立仓/Monorepo）</li>
+                    <li>☐ 环境 + Nexus + LLM · <code>run</code> / <code>invoke</code> 跑通</li>
+                    <li>☐ 业务图 · <code>get_llm()</code> · 至少 1 个 L1 critic</li>
+                    <li>☐ ≥20 评测样本 + FakeLLM pytest 全绿</li>
+                    <li>☐ 涉权 → 安全 7 问 / 评审</li>
+                    <li>☐ 测试环境验 Portal → 生产灰度</li>
+                </ul>
+                <div class="card highlight-card" style="margin-top:16px;text-align:center;">
+                    <p style="margin:0;">🎉 恭喜完成业务接入 5 天。想深入 toolkit 原理 → <a href="gov-agents-tutorial.html">框架源码 21 天</a> · 独立仓动画深讲 → <a href="gov-agents-day21.html">番外 9 步</a></p>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script>hljs.highlightAll();document.getElementById('sidebarToggle')?.addEventListener('click',()=>document.getElementById('sidebar').classList.toggle('open'));</script>
+</body>
+</html>
