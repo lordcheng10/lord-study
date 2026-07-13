@@ -31,6 +31,12 @@
         .lbl-before{font-size:11px;font-weight:700;color:#f59e0b;margin:8px 0 4px}
         .lbl-after{font-size:11px;font-weight:700;color:var(--accent-green);margin:12px 0 4px}
         .nav-sub{font-size:12px;padding-left:28px!important}
+        .deep-read{margin-top:14px;padding:12px 14px;border:1px dashed var(--border-color);border-radius:8px;font-size:13px;line-height:1.75;color:var(--text-secondary)}
+        .deep-read h4{margin:0 0 8px;font-size:14px;color:var(--text-primary)}
+        .deep-read table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
+        .deep-read th,.deep-read td{border:1px solid var(--border-color);padding:6px 8px;text-align:left;vertical-align:top}
+        .deep-read th{background:var(--bg-card)}
+        .deep-read code{font-size:11px}
     </style>
 </head>
 <body>
@@ -199,6 +205,22 @@ npx https://plugin-marketplace.bmaws-infra.com/api/cli list</code></pre>
     output: str
     raw_items: list        # fetch 写入
     headlines_text: str    # fetch → broadcast</code></pre>
+                <div class="deep-read">
+                    <h4>深读 · 每个字段的作用</h4>
+                    <p><code>AgentState</code> 是 LangGraph 全图共享的数据契约；各节点 return 的字段会<strong>合并</strong>进同一份 state（不是整份替换）。<code>total=False</code> 表示字段均可选，随节点逐步补齐。</p>
+                    <table>
+                        <tr><th>字段</th><th>谁写入</th><th>谁读取</th><th>作用</th></tr>
+                        <tr><td><code>input</code></td><td>CLI / 调用方</td><td>broadcast</td><td>可选「日期提示」，如 <code>"2026-07-13"</code>，用于播报标题里的日期；<strong>不是</strong>资讯正文（资讯来自 RSS）</td></tr>
+                        <tr><td><code>output</code></td><td>broadcast</td><td>CLI、core</td><td>最终交付物：📢 每日播报正文；CLI 打印 <code>final_state["output"]</code></td></tr>
+                        <tr><td><code>raw_items</code></td><td>fetch</td><td>（预留）</td><td>结构化列表 <code>[{"title","link"}, ...]</code>，便于调试、存历史、扩展；当前 broadcast 不直接读</td></tr>
+                        <tr><td><code>headlines_text</code></td><td>fetch</td><td>broadcast、core、测试</td><td>标题列表的 multiline 文本，喂给 LLM；core 用它判 fetch 是否跑过</td></tr>
+                    </table>
+                    <pre class="dir-tree">数据流:
+CLI {"input":"2026-07-13"}
+  → fetch 写 raw_items + headlines_text
+  → broadcast 读 input + headlines_text → 写 output
+  → core 读 output + headlines_text 判 success</pre>
+                </div>
             </div>
 
             <!-- 4-3 fetch -->
@@ -237,6 +259,17 @@ npx https://plugin-marketplace.bmaws-infra.com/api/cli list</code></pre>
 <pre><code class="language-python">from .broadcast import broadcast_node
 from .fetch import fetch_node
 __all__ = ["fetch_node", "broadcast_node"]</code></pre>
+                <div class="deep-read">
+                    <h4>深读 · __init__.py 与 run.py</h4>
+                    <p><code>nodes/__init__.py</code> 是包的<strong>对外出口</strong>：让 <code>builder.py</code> 写 <code>from .nodes import fetch_node, broadcast_node</code>，而不必 <code>from .nodes.fetch import ...</code>。</p>
+                    <table>
+                        <tr><th></th><th>改前（模板）</th><th>改后</th></tr>
+                        <tr><td>导出</td><td><code>run_node</code></td><td><code>fetch_node</code> + <code>broadcast_node</code></td></tr>
+                        <tr><td>builder</td><td><code>run → END</code></td><td><code>fetch → broadcast → END</code></td></tr>
+                    </table>
+                    <p><strong>还需要 run.py 吗？</strong> 运行时<strong>不需要</strong>。改完后 <code>builder.py</code> 不再 import <code>run_node</code>，<code>run.py</code> 是模板遗留；且仍引用已删的 <code>RUN_SYSTEM</code>，手动 import 会报错。建议<strong>删除 run.py</strong> 或保留但不放入 <code>__all__</code>。</p>
+                    <p>以后加第三节点：新建 <code>nodes/xxx.py</code> → 在 <code>__init__.py</code> export → 在 <code>builder.py</code> <code>add_node</code> / <code>add_edge</code>。</p>
+                </div>
             </div>
 
             <!-- 4-6 builder -->
@@ -246,11 +279,33 @@ __all__ = ["fetch_node", "broadcast_node"]</code></pre>
                 <div class="why"><b>修改原因</b>：单节点 <code>run→END</code> 改为两节点流水线。</div>
                 <div class="why"><b>作用</b>：LangGraph 入口 fetch · 边 fetch→broadcast→END。</div>
                 <img class="shot" src="assets/walkthrough-ai-daily-news/screenshots/edits/step04-edit-06-builder.png" alt="改 builder">
-<pre><code class="language-python">g.add_node("fetch", fetch_node)
-g.add_node("broadcast", broadcast_node)
-g.set_entry_point("fetch")
-g.add_edge("fetch", "broadcast")
-g.add_edge("broadcast", END)</code></pre>
+<pre><code class="language-python">def build_graph() -> Any:
+    from langgraph.graph import END, StateGraph
+
+    g = StateGraph(AgentState)
+    g.add_node("fetch", fetch_node)
+    g.add_node("broadcast", broadcast_node)
+    g.set_entry_point("fetch")
+    g.add_edge("fetch", "broadcast")
+    g.add_edge("broadcast", END)
+    return g.compile()</code></pre>
+                <div class="deep-read">
+                    <h4>深读 · build_graph() 逐行</h4>
+                    <table>
+                        <tr><th>代码</th><th>含义</th></tr>
+                        <tr><td><code>def build_graph() -> Any</code></td><td>工厂函数；返回编译后可 <code>.invoke()</code> 的 graph</td></tr>
+                        <tr><td><code>from langgraph.graph import END, StateGraph</code></td><td>延迟 import；<code>StateGraph</code> 建图，<code>END</code> 是结束哨兵</td></tr>
+                        <tr><td><code>g = StateGraph(AgentState)</code></td><td>指定 state 类型；各节点读写同一份 state 并 merge 字段</td></tr>
+                        <tr><td><code>g.add_node("fetch", fetch_node)</code></td><td>注册节点：图内名 <code>"fetch"</code> → 函数 <code>fetch_node</code></td></tr>
+                        <tr><td><code>g.add_node("broadcast", broadcast_node)</code></td><td>同上，第二个业务节点</td></tr>
+                        <tr><td><code>g.set_entry_point("fetch")</code></td><td>入口：invoke 后第一个跑 fetch（不是 broadcast）</td></tr>
+                        <tr><td><code>g.add_edge("fetch", "broadcast")</code></td><td>fetch 完成后自动进入 broadcast；headlines_text 在此传递</td></tr>
+                        <tr><td><code>g.add_edge("broadcast", END)</code></td><td>broadcast 完成后图结束，返回 final state</td></tr>
+                        <tr><td><code>return g.compile()</code></td><td>编译蓝图为可执行 graph；<code>core.py</code> / 测试调 <code>.invoke()</code></td></tr>
+                    </table>
+                    <pre class="dir-tree">执行顺序:
+invoke({"input":"..."}) → fetch → broadcast → END → 返回含 output 的 state</pre>
+                </div>
             </div>
 
             <!-- 5 core -->
@@ -262,6 +317,23 @@ g.add_edge("broadcast", END)</code></pre>
                 <img class="shot" src="assets/walkthrough-ai-daily-news/screenshots/edits/step04-edit-07-core.png" alt="改 core">
 <pre><code class="language-python">success = bool(final.get("output")) and bool(final.get("headlines_text"))
 record_effect("briefing_sent", 1)</code></pre>
+                <div class="deep-read">
+                    <h4>深读 · core.py 结构与逐段说明</h4>
+                    <p><code>core.py</code> 是 CLI / Pod 共用的<strong>跑图 + 包装结果 + 上报 Portal</strong> 入口，不直接写业务逻辑。</p>
+                    <p><strong>RunResult</strong>（dataclass）：<code>success</code> 是否业务成功 · <code>status</code> ok/failsafe · <code>duration_ms</code> 耗时 · <code>final_state</code> 图跑完后的完整 state（CLI 从这里取 output）。</p>
+                    <p><strong>run_agent(...)</strong> 主流程：</p>
+                    <table>
+                        <tr><th>步骤</th><th>代码</th><th>说明</th></tr>
+                        <tr><td>1</td><td><code>graph = build_graph()</code></td><td>拿到 fetch→broadcast 编译图</td></tr>
+                        <tr><td>2</td><td><code>final = graph.invoke(initial_state, ...)</code></td><td>真正跑图；<code>recursion_limit: 50</code> 防死循环</td></tr>
+                        <tr><td>3</td><td><code>success = output and headlines_text</code></td><td><strong>本 Demo 改动</strong>：成功 = 有播报 + fetch 跑过（模板只判 output）</td></tr>
+                        <tr><td>4</td><td>组装 <code>RunResult</code></td><td>含耗时、final_state</td></tr>
+                        <tr><td>5</td><td><code>if telemetry: _report(...)</code></td><td>默认上报；<code>--no-telemetry</code> 或测试可关</td></tr>
+                    </table>
+                    <p><strong>_report(...)</strong>：<code>bind_effect()</code> 上下文 · 成功时 <code>record_effect("briefing_sent", 1)</code>（模板是 <code>"done"</code>）· <code>push_invoke_metrics</code> 推调用 KPI · 整个 try 包上报，<strong>失败静默</strong>不阻断业务。</p>
+                    <pre class="dir-tree">调用链:
+cli run "..." → run_agent({"input":...}) → build_graph().invoke() → 打印 final_state["output"]</pre>
+                </div>
             </div>
 
             <!-- 7 tests -->
