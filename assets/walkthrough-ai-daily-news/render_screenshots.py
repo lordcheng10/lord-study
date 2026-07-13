@@ -14,9 +14,11 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 # macOS monospace fonts (fallback chain)
 FONT_CANDIDATES = [
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
     "/System/Library/Fonts/SFNSMono.ttf",
     "/System/Library/Fonts/Menlo.ttc",
-    "/Library/Fonts/Courier New.ttf",
 ]
 
 
@@ -41,7 +43,7 @@ def render_terminal(
     pad: int = 20,
 ) -> None:
     font = _font(font_size)
-    title_font = _font(font_size + 2)
+    title_font = _font(font_size + 1)
     lines = body.rstrip("\n").split("\n")
     line_h = font_size + 6
     title_h = 36
