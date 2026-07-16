@@ -9,51 +9,64 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets" / "coze-practice"
 
-# (rel_path, boxes) where box = (x1,y1,x2,y2, label) in 1440x900 coords (scaled if needed)
+# boxes listed in click/edit ORDER → rendered as 1, 2, 3...
+# each: (x1,y1,x2,y2, label) in 1440x900 design coords
 ANNOTATIONS: dict[str, list[tuple[int, int, int, int, str]]] = {
     # P00
-    "00-setup/01-login.png": [(520, 280, 920, 520, "在此输入邮箱与密码 → 登录")],
+    "00-setup/01-login.png": [
+        (520, 280, 920, 400, "输入邮箱"),
+        (520, 400, 920, 470, "输入密码"),
+        (560, 480, 880, 540, "点「登录」"),
+    ],
     "00-setup/02-develop.png": [
-        (55, 95, 250, 145, "侧栏：项目开发"),
+        (55, 95, 250, 145, "确认侧栏在「项目开发」"),
         (1280, 70, 1410, 115, "点「+ 创建」"),
     ],
     "00-setup/10-develop-home.png": [
-        (55, 95, 250, 145, "侧栏：项目开发（当前页）"),
-        (1280, 70, 1410, 115, "点这里：+ 创建"),
-        (55, 145, 250, 195, "侧栏：资源库"),
+        (55, 95, 250, 145, "确认侧栏在「项目开发」"),
+        (1280, 70, 1410, 115, "点「+ 创建」"),
     ],
     "00-setup/11-create-modal.png": [
-        (380, 260, 700, 620, "第2课选这里：创建智能体"),
-        (740, 260, 1060, 620, "第5课选这里：创建应用"),
-        (1280, 70, 1410, 115, "从「+ 创建」打开"),
+        (380, 260, 700, 620, "第2课：选「创建智能体」"),
+        (740, 260, 1060, 620, "第5课：选「创建应用」"),
     ],
-    "00-setup/03-model-admin.png": [(200, 80, 1400, 820, "模型管理列表 · 确认「启用」")],
-    "00-setup/12-admin-home.png": [(40, 80, 280, 400, "左侧进入「模型管理」")],
-    "00-setup/13-model-list.png": [(280, 80, 1400, 820, "至少一条状态为「启用」")],
-    "00-setup/05-add-claude-form.png": [(400, 120, 1040, 780, "在此填写显示名 / Model / API Key")],
-    "00-setup/04-model-detail-or-add.png": [(400, 100, 1100, 800, "添加/编辑模型表单")],
+    "00-setup/03-model-admin.png": [(200, 80, 1400, 820, "在列表确认模型为「启用」")],
+    "00-setup/12-admin-home.png": [(40, 80, 280, 400, "左侧点「模型管理」")],
+    "00-setup/13-model-list.png": [(280, 80, 1400, 820, "确认至少一条「启用」")],
+    "00-setup/05-add-claude-form.png": [
+        (400, 120, 1040, 280, "填显示名称 / Model"),
+        (400, 280, 1040, 480, "填 API Key"),
+        (400, 700, 1040, 780, "点保存"),
+    ],
+    "00-setup/04-model-detail-or-add.png": [(400, 100, 1100, 800, "填写并保存模型")],
     # P02
     "02-agent/01-create-modal.png": [(380, 260, 700, 620, "选「创建智能体」")],
     "02-agent/13-create-agent-form.png": [(480, 300, 960, 520, "填写智能体名称")],
-    "02-agent/14-create-agent-filled.png": [(480, 300, 960, 560, "名称填好后点确认")],
+    "02-agent/14-create-agent-filled.png": [
+        (480, 300, 960, 450, "确认名称无误"),
+        (700, 480, 900, 560, "点确认"),
+    ],
     "02-agent/15-new-agent-ide.png": [
-        (40, 120, 480, 860, "左：人设与回复逻辑"),
-        (480, 120, 900, 860, "中：技能 / 对话体验"),
-        (900, 120, 1420, 860, "右：预览与调试"),
+        (40, 120, 480, 860, "左栏：人设（下一步粘贴）"),
+        (480, 120, 900, 860, "中栏：技能 / 对话体验"),
+        (900, 120, 1420, 860, "右栏：预览与调试"),
     ],
     "02-agent/20-ide-full.png": [
-        (40, 120, 480, 860, "① 粘贴人设到这里"),
-        (480, 120, 900, 400, "② 技能区（插件/工作流/知识）"),
-        (900, 120, 1420, 860, "③ 在此预览调试"),
         (700, 55, 900, 100, "选已启用模型"),
-        (1300, 50, 1410, 100, "发布"),
+        (40, 120, 480, 860, "粘贴人设到这里"),
+        (480, 120, 900, 400, "认识技能区（后课再用）"),
+        (900, 120, 1420, 860, "在此预览调试"),
+        (1300, 50, 1410, 100, "发布（本课可后做）"),
     ],
-    "02-agent/21-persona.png": [(40, 120, 520, 860, "人设编辑区 · 全选后粘贴")],
+    "02-agent/21-persona.png": [(40, 120, 520, 860, "人设区：全选后粘贴")],
     "02-agent/11-persona-area.png": [(40, 120, 520, 860, "人设与回复逻辑")],
-    "02-agent/22-preview.png": [(900, 120, 1420, 860, "预览与调试 · 在此发测试句")],
+    "02-agent/22-preview.png": [
+        (900, 120, 1420, 750, "查看回复区"),
+        (920, 780, 1400, 870, "输入测试句并发送"),
+    ],
     "02-agent/12-preview-panel.png": [(900, 120, 1420, 860, "预览与调试面板")],
-    "02-agent/16-preview-input.png": [(920, 780, 1400, 870, "输入框 · 发送测试句")],
-    "02-agent/17-preview-reply.png": [(920, 150, 1400, 700, "观察模型回复是否符合人设")],
+    "02-agent/16-preview-input.png": [(920, 780, 1400, 870, "输入框发送测试句")],
+    "02-agent/17-preview-reply.png": [(920, 150, 1400, 700, "检查回复是否符合人设")],
     "02-agent/10-ide-overview.png": [
         (40, 120, 480, 860, "左：人设"),
         (480, 120, 900, 860, "中：技能"),
@@ -61,66 +74,113 @@ ANNOTATIONS: dict[str, list[tuple[int, int, int, int, str]]] = {
     ],
     "02-agent/04-agent-skills-area.png": [(480, 120, 900, 500, "技能区：插件 / 工作流 / 知识")],
     # P03
-    "03-skills/10-skills-area.png": [(480, 120, 900, 520, "技能区 · 在此添加插件/工作流/知识")],
-    "03-skills/11-plugin-panel.png": [(500, 150, 1100, 750, "插件添加面板 · 勾选后确认")],
+    "03-skills/10-skills-area.png": [
+        (480, 140, 900, 260, "插件入口"),
+        (480, 260, 900, 380, "工作流入口（推荐挂）"),
+        (480, 380, 900, 500, "知识库入口"),
+    ],
+    "03-skills/11-plugin-panel.png": [
+        (500, 150, 1100, 650, "勾选要添加的插件"),
+        (900, 680, 1080, 750, "确认添加"),
+    ],
     # P04
-    "04-knowledge/01-library.png": [(55, 145, 250, 195, "侧栏：资源库"), (1280, 70, 1410, 115, "+ 创建")],
-    "04-knowledge/10-library.png": [(55, 145, 250, 195, "侧栏：资源库"), (1280, 70, 1410, 115, "点「+ 创建」")],
-    "04-knowledge/02-create-menu.png": [(1100, 100, 1380, 420, "菜单里选「知识库」")],
-    "04-knowledge/11-create-menu.png": [(1100, 100, 1380, 420, "菜单里选「知识库」")],
-    "04-knowledge/03-create-knowledge-dialog.png": [(420, 180, 1020, 700, "填名称 · 选文本 · 本地文档")],
+    "04-knowledge/01-library.png": [
+        (55, 145, 250, 195, "侧栏点「资源库」"),
+        (1280, 70, 1410, 115, "点「+ 创建」"),
+    ],
+    "04-knowledge/10-library.png": [
+        (55, 145, 250, 195, "侧栏点「资源库」"),
+        (1280, 70, 1410, 115, "点「+ 创建」"),
+    ],
+    "04-knowledge/02-create-menu.png": [(1100, 100, 1380, 420, "菜单选「知识库」")],
+    "04-knowledge/11-create-menu.png": [(1100, 100, 1380, 420, "菜单选「知识库」")],
+    "04-knowledge/03-create-knowledge-dialog.png": [
+        (420, 180, 1020, 420, "填名称 / 选文本与本地文档"),
+        (700, 620, 980, 700, "点「创建并导入」"),
+    ],
     "04-knowledge/03b-pick-type.png": [(420, 200, 1020, 650, "选择知识库类型")],
-    "04-knowledge/04-knowledge-form-filled.png": [(420, 180, 1020, 700, "填好后点「创建并导入」")],
-    "04-knowledge/05-after-create.png": [(200, 100, 1240, 800, "创建后进入上传向导")],
+    "04-knowledge/04-knowledge-form-filled.png": [
+        (420, 180, 1020, 520, "核对已填字段"),
+        (700, 620, 980, 700, "点「创建并导入」"),
+    ],
+    "04-knowledge/05-after-create.png": [(200, 100, 1240, 800, "进入上传向导")],
     "04-knowledge/05-knowledge-page.png": [(200, 100, 1240, 800, "知识库详情/上传页")],
-    "04-knowledge/06-upload-file.png": [(300, 200, 1140, 700, "上传区 · 选择本地 MD")],
-    "04-knowledge/07-upload-processing.png": [(300, 200, 1140, 700, "等待文档处理完成")],
-    "03-library/01-library.png": [(55, 145, 250, 195, "资源库"), (1280, 70, 1410, 115, "+ 创建")],
-    "03-library/02-create-resource.png": [(1100, 100, 1380, 450, "创建资源菜单")],
+    "04-knowledge/06-upload-file.png": [(300, 200, 1140, 700, "上传本地 MD 文件")],
+    "04-knowledge/07-upload-processing.png": [(300, 200, 1140, 700, "等待处理完成")],
+    "03-library/01-library.png": [
+        (55, 145, 250, 195, "侧栏「资源库」"),
+        (1280, 70, 1410, 115, "点「+ 创建」"),
+    ],
+    "03-library/02-create-resource.png": [(1100, 100, 1380, 450, "在菜单中选择资源类型")],
     # P05
-    "05-plugin/01-explore-plugin.png": [(200, 80, 1400, 850, "插件列表 · 点卡片查看/添加")],
-    "05-plugin/10-explore.png": [(40, 80, 200, 200, "侧栏：探索"), (200, 80, 1400, 850, "探索内容区")],
-    "05-plugin/11-plugin-list.png": [(200, 80, 1400, 850, "插件列表 · 点卡片安装")],
+    "05-plugin/01-explore-plugin.png": [(200, 80, 1400, 850, "点插件卡片查看/添加")],
+    "05-plugin/10-explore.png": [
+        (40, 80, 200, 200, "侧栏点「探索」"),
+        (200, 80, 1400, 850, "进入插件等内容区"),
+    ],
+    "05-plugin/11-plugin-list.png": [(200, 80, 1400, 850, "点卡片安装插件")],
     "09-explore/01-explore.png": [(40, 80, 200, 200, "探索入口")],
     # P06
-    "06-database/10-library.png": [(55, 145, 250, 195, "资源库"), (1280, 70, 1410, 115, "+ 创建")],
+    "06-database/10-library.png": [
+        (55, 145, 250, 195, "侧栏「资源库」"),
+        (1280, 70, 1410, 115, "点「+ 创建」"),
+    ],
     "06-database/11-create-menu.png": [(1100, 100, 1380, 480, "菜单选「数据库」")],
     # P07
     "07-project/01-project-ide.png": [
-        (40, 80, 320, 860, "左侧资源树"),
-        (320, 80, 1420, 860, "中间编辑区"),
-        (1280, 40, 1410, 95, "发布"),
+        (40, 80, 320, 860, "左侧资源树找工作流"),
+        (320, 80, 1420, 860, "中间编辑当前资源"),
+        (1280, 40, 1410, 95, "需要时点「发布」"),
     ],
     "07-project/10-ide.png": [
-        (40, 80, 320, 860, "① 资源树（工作流入口）"),
-        (320, 80, 1420, 860, "② 当前资源编辑区"),
+        (40, 80, 320, 860, "资源树：新建/打开工作流"),
+        (320, 80, 1420, 860, "编辑区"),
     ],
-    "07-project/02-workflow.png": [(200, 80, 1400, 850, "应用内工作流画布")],
+    "07-project/02-workflow.png": [(200, 80, 1400, 850, "在画布上编排节点")],
     # P01
-    "01-competitor-daily/01-login.png": [(520, 280, 920, 520, "登录后才能进开发页")],
-    "01-competitor-daily/02-develop.png": [(1280, 70, 1410, 115, "创建/打开应用"), (280, 160, 560, 360, "打开「竞品日报实战」")],
-    "01-competitor-daily/05-workflow-canvas.png": [(80, 80, 1360, 820, "五节点画布：开始→LLM→Code→HTTP→结束")],
-    "01-competitor-daily/10-canvas.png": [(80, 80, 1360, 820, "工作流画布 · 按节点依次配置")],
-    "01-competitor-daily/11-from-project.png": [(40, 80, 320, 400, "从左侧点开工作流")],
-    "01-competitor-daily/06-testrun.png": [(1000, 80, 1420, 860, "试运行侧栏 · 填 report_date / lark_hint")],
+    "01-competitor-daily/01-login.png": [(520, 280, 920, 520, "先登录")],
+    "01-competitor-daily/02-develop.png": [
+        (280, 160, 560, 360, "打开应用「竞品日报实战」"),
+        (1280, 70, 1410, 115, "或点「+ 创建」新建应用"),
+    ],
+    "01-competitor-daily/05-workflow-canvas.png": [(80, 80, 1360, 820, "按 开始→LLM→Code→HTTP→结束 配置")],
+    "01-competitor-daily/10-canvas.png": [(80, 80, 1360, 820, "按节点顺序依次配置")],
+    "01-competitor-daily/11-from-project.png": [(40, 80, 320, 400, "左侧点开工作流")],
+    "01-competitor-daily/06-testrun.png": [
+        (1000, 120, 1420, 400, "填写 report_date"),
+        (1000, 400, 1420, 600, "填写 lark_hint"),
+        (1100, 780, 1380, 860, "点试运行/开始"),
+    ],
     # P08
-    "08-publish/10-agent-publish.png": [(400, 100, 1100, 800, "发布页 · 勾选 API / Chat SDK")],
-    "08-publish/11-app-publish.png": [(400, 100, 1100, 800, "应用发布 · 勾选渠道后点发布")],
-    "08-publish/20-publish-panel.png": [(400, 80, 1100, 820, "发布面板 · 勾选 API + Chat SDK")],
-    "08-publish/12-avatar-menu.png": [(1100, 40, 1420, 320, "头像菜单 · 进设置")],
-    "08-publish/21-avatar-menu.png": [(1100, 40, 1420, 320, "头像菜单 · 进设置")],
-    "08-publish/16-account-settings.png": [(40, 80, 320, 500, "左侧：API 授权")],
-    "08-publish/17-api-auth-tab.png": [(320, 80, 1400, 820, "添加新令牌 · 复制 PAT")],
-    "08-publish/14-workflow-url-id.png": [(200, 20, 1400, 80, "地址栏末段数字 = workflow_id")],
-    "08-publish/15-api-configure.png": [(320, 80, 1400, 820, "API / 令牌相关配置")],
-    "08-publish/24-settings-page.png": [(40, 80, 1400, 820, "账号设置页 · 找 API 授权")],
-    "08-publish/25-top-menu.png": [(1100, 40, 1420, 320, "右上角菜单入口")],
-    "08-publish/03-agent-publish.png": [(400, 100, 1100, 800, "智能体发布")],
-    "08-publish/04-app-publish.png": [(400, 100, 1100, 800, "应用发布")],
-    "08-publish/01-account-menu.png": [(1100, 40, 1420, 320, "账号菜单")],
-    "08-publish/13-settings-fallback.png": [(40, 80, 1400, 820, "设置入口")],
+    "08-publish/10-agent-publish.png": [
+        (400, 100, 1100, 550, "勾选 API / Chat SDK"),
+        (700, 700, 1000, 800, "点「发布」"),
+    ],
+    "08-publish/11-app-publish.png": [
+        (400, 100, 1100, 550, "勾选发布渠道"),
+        (700, 700, 1000, 800, "点「发布」"),
+    ],
+    "08-publish/20-publish-panel.png": [
+        (400, 80, 1100, 550, "勾选 API + Chat SDK"),
+        (700, 700, 1000, 800, "确认发布"),
+    ],
+    "08-publish/12-avatar-menu.png": [(1100, 40, 1420, 320, "点头像 → 进设置")],
+    "08-publish/21-avatar-menu.png": [(1100, 40, 1420, 320, "点头像 → 进设置")],
+    "08-publish/16-account-settings.png": [(40, 80, 320, 500, "左侧点「API 授权」")],
+    "08-publish/17-api-auth-tab.png": [
+        (320, 80, 1400, 400, "点「添加新令牌」"),
+        (320, 400, 1400, 820, "复制 PAT（只显示一次）"),
+    ],
+    "08-publish/14-workflow-url-id.png": [(200, 20, 1400, 80, "抄地址栏末段 = workflow_id")],
+    "08-publish/15-api-configure.png": [(320, 80, 1400, 820, "完成 API / 令牌配置")],
+    "08-publish/24-settings-page.png": [(40, 80, 1400, 820, "在设置里找「API 授权」")],
+    "08-publish/25-top-menu.png": [(1100, 40, 1420, 320, "打开右上角菜单")],
+    "08-publish/03-agent-publish.png": [(400, 100, 1100, 800, "发布智能体")],
+    "08-publish/04-app-publish.png": [(400, 100, 1100, 800, "发布应用")],
+    "08-publish/01-account-menu.png": [(1100, 40, 1420, 320, "打开账号菜单")],
+    "08-publish/13-settings-fallback.png": [(40, 80, 1400, 820, "进入设置")],
     # P09
-    "09-chatflow/10-explore.png": [(40, 80, 200, 200, "探索 / 开放能力相关入口")],
+    "09-chatflow/10-explore.png": [(40, 80, 200, 200, "探索 / 开放能力入口")],
 }
 
 def font(size: int):
@@ -144,29 +204,59 @@ def annotate(src: Path, boxes: list[tuple[int, int, int, int, str]], dst: Path) 
     sx, sy = w / 1440.0, h / 900.0
     overlay = Image.new("RGBA", im.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    f = font(max(18, int(22 * min(sx, sy))))
-    f_small = font(max(14, int(16 * min(sx, sy))))
+    scale = min(sx, sy)
+    f = font(max(16, int(18 * scale)))
+    f_num = font(max(20, int(26 * scale)))
+    f_small = font(max(14, int(16 * scale)))
+    badge_r = max(16, int(22 * scale))
+    stroke = max(3, int(4 * scale))
 
-    for x1, y1, x2, y2, label in boxes:
+    for i, (x1, y1, x2, y2, label) in enumerate(boxes, start=1):
         a = (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
-        # semi-transparent fill
-        draw.rectangle(a, outline=(239, 68, 68, 255), width=max(3, int(4 * min(sx, sy))), fill=(239, 68, 68, 35))
-        # label background above box or inside top
-        tw = draw.textlength(label, font=f) if hasattr(draw, "textlength") else len(label) * 12
+        # red box
+        draw.rectangle(a, outline=(239, 68, 68, 255), width=stroke, fill=(239, 68, 68, 28))
+
+        # numbered badge at top-left of box
+        cx = a[0] + badge_r + 2
+        cy = a[1] + badge_r + 2
+        if cy - badge_r < 2:
+            cy = badge_r + 4
+        if cx - badge_r < 2:
+            cx = badge_r + 4
+        draw.ellipse(
+            (cx - badge_r, cy - badge_r, cx + badge_r, cy + badge_r),
+            fill=(239, 68, 68, 255),
+            outline=(255, 255, 255, 255),
+            width=max(2, stroke - 1),
+        )
+        num = str(i)
+        # center number in circle
+        bbox = draw.textbbox((0, 0), num, font=f_num)
+        nw, nh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text((cx - nw / 2, cy - nh / 2 - 2), num, fill=(255, 255, 255, 255), font=f_num)
+
+        # caption: "1 · 文案"
+        caption = f"{i} · {label}"
+        tw = draw.textlength(caption, font=f) if hasattr(draw, "textlength") else len(caption) * 11
         pad = 8
-        ly1 = max(4, a[1] - 36)
-        if ly1 < 4:
-            ly1 = a[1] + 6
-        lx1 = a[0]
+        ly1 = max(4, a[1] - int(34 * scale))
+        if ly1 < cy + badge_r + 4 and a[1] > 50:
+            ly1 = min(h - 40, a[1] + 6)
+        lx1 = min(a[0] + badge_r * 2 + 6, w - int(tw) - 20)
         lx2 = min(w - 4, int(lx1 + tw + pad * 2))
-        ly2 = ly1 + 32
-        draw.rectangle((lx1, ly1, lx2, ly2), fill=(239, 68, 68, 230))
-        draw.text((lx1 + pad, ly1 + 5), label, fill=(255, 255, 255, 255), font=f)
+        ly2 = ly1 + int(30 * scale)
+        draw.rectangle((lx1, ly1, lx2, ly2), fill=(239, 68, 68, 235))
+        draw.text((lx1 + pad, ly1 + 5), caption, fill=(255, 255, 255, 255), font=f)
 
     # bottom banner
-    banner_h = max(36, int(42 * sy))
-    draw.rectangle((0, h - banner_h, w, h), fill=(15, 23, 42, 210))
-    draw.text((14, h - banner_h + 10), "红框 = 本步重点操作/修改位置 · 请对照文案点击", fill=(248, 250, 252, 255), font=f_small)
+    banner_h = max(38, int(44 * sy))
+    draw.rectangle((0, h - banner_h, w, h), fill=(15, 23, 42, 220))
+    draw.text(
+        (14, h - banner_h + 12),
+        "数字 1 → 2 → 3 … = 操作顺序 · 请按编号依次点击/填写",
+        fill=(248, 250, 252, 255),
+        font=f_small,
+    )
 
     out = Image.alpha_composite(im, overlay).convert("RGB")
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -175,17 +265,18 @@ def annotate(src: Path, boxes: list[tuple[int, int, int, int, str]], dst: Path) 
 
 
 def mark_all() -> dict[str, str]:
-    """Returns map original_rel -> marked_rel (posix)."""
+    """Returns map original_rel -> marked_rel (posix). Only regenerate images."""
     mapping = {}
     for rel, boxes in ANNOTATIONS.items():
         src = ASSETS / rel
         if not src.exists():
             print("skip missing", rel)
             continue
-        # write as foo.marked.png next to original
         dst = src.with_name(src.stem + ".marked" + src.suffix)
         annotate(src, boxes, dst)
-        mapping[f"assets/coze-practice/{rel}"] = f"assets/coze-practice/{Path(rel).with_name(Path(rel).stem + '.marked' + Path(rel).suffix).as_posix()}"
+        mapping[f"assets/coze-practice/{rel}"] = (
+            f"assets/coze-practice/{Path(rel).with_name(Path(rel).stem + '.marked' + Path(rel).suffix).as_posix()}"
+        )
     return mapping
 
 
@@ -357,28 +448,56 @@ def process_html(mapping: dict[str, str]) -> None:
         print("html", fname)
 
 
+def refresh_shot_notes() -> None:
+    """Update caption under marked screenshots to mention numbered order."""
+    old = "红框标注 = 本步要点击 / 填写 / 观察的位置"
+    new = "数字 1→2→3 = 操作顺序 · 请按编号依次点击 / 填写"
+    for path in ROOT.glob("coze-studio-practice-0*.html"):
+        t = path.read_text(encoding="utf-8")
+        if old in t:
+            path.write_text(t.replace(old, new), encoding="utf-8")
+            print("notes", path.name)
+    hub = ROOT / "coze-studio-practice-tutorial.html"
+    if hub.exists():
+        t = hub.read_text(encoding="utf-8")
+        t2 = t.replace(
+            "截图上的<strong>红框</strong>标出要点击或修改的位置，请对照红框操作。",
+            "截图上用<strong>数字 1、2、3…</strong>标出操作顺序，请按编号依次点击或填写。",
+        )
+        if t2 != t:
+            hub.write_text(t2, encoding="utf-8")
+            print("hub tip updated")
+
+
 def main():
+    import sys
+
     mapping = mark_all()
+    if "--images-only" in sys.argv:
+        refresh_shot_notes()
+        print("done", len(mapping), "marked images (images-only)")
+        return
     process_html(mapping)
-    # also update hub tip
+    refresh_shot_notes()
     hub = ROOT / "coze-studio-practice-tutorial.html"
     if hub.exists():
         t = hub.read_text(encoding="utf-8")
         tip = (
             '<div class="warn-box" style="margin-top:12px">'
             "<strong>阅读约定</strong>：每课开头有「本课目标」；每一步有「本步目的/作用」；"
-            "截图上的<strong>红框</strong>标出要点击或修改的位置，请对照红框操作。"
+            "截图上用<strong>数字 1、2、3…</strong>标出操作顺序，请按编号依次点击或填写。"
             "</div>"
         )
         if "阅读约定" not in t:
             t = t.replace(
                 '<section id="path" class="section">',
-                tip + '\n  <section id="path" class="section">',
+                tip + "\n  <section id=\"path\" class=\"section\">",
                 1,
             )
-            # ensure warn-box style exists via style.css already
             hub.write_text(t, encoding="utf-8")
             print("hub tip")
+        else:
+            refresh_shot_notes()
     print("done", len(mapping), "marked images")
 
 
