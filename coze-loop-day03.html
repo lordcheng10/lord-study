@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 03 · 进程怎么启动 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#a5b4fc;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .glossary{border-left:3px solid var(--accent-cyan);background:rgba(6,182,212,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .glossary b{color:var(--accent-cyan)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}
+        .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .loopd{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:9px 11px;font-size:11.5px;text-align:center}
+        .loopd .n b{display:block;color:#818cf8;font-size:12px}
+        .loopd .a{color:#06b6d4;font-weight:800;font-size:15px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">03</div>
+            <h2>Day 03</h2>
+            <p class="version">进程怎么启动 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · main.go 鸟瞰</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · newComponent 组装基础设施</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · infrastructure.yaml 怎么读</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · api.Init 组装六模块</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · consumer 与优雅退出</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 今日小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="coze-loop-day02.html" class="nav-link">&larr; 上一天</a></li>
+            <li><a href="coze-loop-day04.html" class="nav-link" style="color:var(--accent-green);">下一天 · HTTP 网关与路由 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 03 / 共 20 天 · 第 1 周 环境与骨架</span>
+            <h1 class="part-title">进程怎么启动</h1>
+            <p class="part-desc">昨天看到了容器跑起来。今天钻进 <code>backend/cmd/main.go</code>，逐行看一个 Go 进程从零到能接请求，中间到底按什么顺序把 MySQL/Redis/ClickHouse 连上、把六大模块组装好。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 1 周 环境与骨架（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D1 项目全景</span><span class="sep">→</span>
+                <span class="st">D2 Docker 跑起来</span><span class="sep">→</span>
+                <span class="st on">D3 进程启动</span><span class="sep">→</span>
+                <span class="st">D4 HTTP 网关</span><span class="sep">→</span>
+                <span class="st">D5 Handler 桥接</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>main.go 鸟瞰</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：main 函数动不动几十行，第一次看容易发懵</span>
+                <span class="fileref">backend/cmd/main.go</span> 的 <code>main()</code> 函数其实只做四件事，一件事一行就能说清楚——发懵往往是因为没先看"骨架"就直接抠细节。</div>
+                <div class="essence"><span class="t">💡 本质：main 只是"编排"，四步走</span>
+<pre><code class="language-go">func main() {
+	ctx := context.Background()
+	c, err := newComponent(ctx)              // ① 组装所有基础设施客户端
+	handler, err := api.Init(ctx, c.idgen, c.db, ...) // ② 组装六大模块 handler
+	initTracer(handler)                       // ③ 初始化链路追踪
+	r := registry.NewConsumerRegistryWithShutdown(...)
+	r.StartAll(ctx)                          // ④ 启动消息队列消费者
+	go api.Start(handler)                    // ⑤ 启动 HTTP 服务（协程里跑，不阻塞退出监听）
+	<-signalCtx.Done()                       // 阻塞等 SIGTERM/SIGINT
+	r.StopAll(stopCtx)                       // 优雅停止消费者
+}</code></pre>
+                <span class="fileref">backend/cmd/main.go:50-80</span> 就是这五步的真实代码——注意它<strong>只做编排</strong>，没有一行业务逻辑，完全符合 <span class="fileref">ARCHITECTURE.md</span> 里 <code>cmd/</code> 的架构不变量。</div>
+                <div class="baby"><span class="t">🍼 类比：开餐厅前的四道准备工序</span>
+                ① 先把水电煤气接通（基础设施）；② 把各个厨房岗位的师傅招齐（六大模块 handler）；③ 装好监控摄像头（tracer）；④ 打开外卖接单软件的后台任务（consumer）；最后才⑤挂牌营业（HTTP Start）。顺序不能乱——没水电就开炉子是要出事的。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>newComponent：组装基础设施客户端</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/cmd/main.go:167-280</span> 的 <code>newComponent</code> 是"水电工"，把所有基础设施的客户端连好、包成一个 <code>component</code> 结构体：</p>
+<pre><code class="language-go">type component struct {
+	idgen               idgen.IIDGenerator      // 分布式 ID 生成器（基于 Redis）
+	db                  db.Provider             // MySQL 连接池
+	redis               redis.Cmdable           // Redis 客户端
+	cfgFactory          conf.IConfigLoaderFactory // 配置加载器工厂
+	mqFactory           mq.IFactory              // RocketMQ 工厂
+	objectStorage       fileserver.ObjectStorage // MinIO/S3 客户端
+	ckDb                ck.Provider              // ClickHouse 连接
+	benefitSvc          benefit.IBenefitService  // 权益服务（开源版是 Noop 空实现）
+	auditClient         audit.IAuditService      // 审核服务（开源版是 Noop 空实现）
+	// ...
+}</code></pre>
+                <div class="glossary"><b>细节：Redis 连接建立后立刻用来生成 ID</b> <span class="fileref">main.go:250</span> 处 <code>redis_gen.NewIDGenerator(redisCli, ...)</code>——Coze Loop 用 Redis 实现分布式自增 ID（类似雪花算法的一种变体），而不是用数据库自增主键，这样多个应用实例并发建 Prompt 也不会 ID 冲突。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：benefitSvc / auditClient 是空实现（Noop）</span>
+                <span class="fileref">main.go:272-273</span>：<code>benefitSvc: benefit.NewNoopBenefitService()</code>、<code>auditClient: audit.NewNoopAuditService()</code>。这是开源版和商业版的一个典型分野——"权益校验"（比如额度限制）和"内容审核"在商业版接了真实服务，开源版给的是"什么都不做，直接放行"的空实现。读代码时看到调用了 <code>auditRPCProvider.AuditPrompt(...)</code> 却发现什么都没发生，不要慌，去看它注入的是不是 Noop。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>infrastructure.yaml 怎么被读进来</h1></div>
+            <div class="card">
+                <p>数据库、Redis、ClickHouse 的连接参数不是硬编码在代码里，而是从 <span class="fileref">backend/conf/infrastructure.yaml</span> 读的（注意：这份和 Day 02 的 <code>docker-compose/conf/model_config.yaml</code> 是两个不同的配置文件，各管各的）：</p>
+<pre><code class="language-yaml"># backend/conf/infrastructure.yaml（容器内路径 /coze-loop/conf/infrastructure.yaml）
+infra:
+  redis:
+    host: "cozeloop-redis"
+    port: 6379
+  rds:
+    host: "cozeloop-mysql"
+    port: 3306
+  ck_config:
+    host: "cozeloop-clickhouse:9008"
+  idgen:
+    server_ids: [1]      # 分布式 ID 生成器的机器号
+  log_level: "info"</code></pre>
+                <p><span class="fileref">main.go:117-129</span> 的 <code>getComponentConfig</code> 就是加载这份配置：</p>
+<pre><code class="language-go">func getComponentConfig(configFactory conf.IConfigLoaderFactory) (*ComponentConfig, error) {
+	componentConfigLoader, err := configFactory.NewConfigLoader("infrastructure.yaml")
+	componentConfig := &ComponentConfig{}
+	err = componentConfigLoader.UnmarshalKey(ctx, "infra", componentConfig)
+	return componentConfig, nil
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：真正的连接地址其实来自环境变量，YAML 只兜底非敏感项</span>
+                仔细看 <code>newComponent</code>，Redis/MySQL/ClickHouse/MinIO 的 host、密码全部通过 <code>os.Getenv("COZE_LOOP_REDIS_DOMAIN")</code> 这类函数读取（<span class="fileref">main.go:282-367</span> 一整串 <code>getXxx()</code> 辅助函数）。而这些环境变量正是 Day 02 <code>docker-compose.yml</code> 里 <code>app</code> 服务的 <code>environment:</code> 段注入的。<code>infrastructure.yaml</code> 只负责 <code>idgen.server_ids</code>、<code>log_level</code> 这类"不敏感、不随部署环境变化"的参数。这是"敏感配置走环境变量、结构化配置走 YAML"的常见工程实践。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>api.Init：组装六大模块 handler</h1></div>
+            <div class="card">
+                <p>基础设施连好之后，<span class="fileref">backend/api/api.go</span> 的 <code>Init</code> 函数把六大模块的 handler 逐个组装出来。这里能直接看到模块之间的<strong>依赖顺序</strong>：</p>
+<pre><code class="language-go">func Init(ctx context.Context, idgen ..., db ..., ...) (*apis.APIHandler, error) {
+	foundationHandler, _ := apis.InitFoundationHandler(...)   // ① 最先：用户/空间/鉴权
+	llmHandler, _ := apis.InitLLMHandler(..., loauth.NewLocalAuthService(foundationHandler.AuthService))
+	promptHandler, _ := apis.InitPromptHandler(...,
+		loruntime.NewLocalLLMRuntimeService(llmHandler.LLMRuntimeService), // 依赖 llm
+		loauth.NewLocalAuthService(foundationHandler.AuthService),        // 依赖 foundation
+		lofile.NewLocalFileService(foundationHandler.FileService),
+	)
+	dataHandler, _ := apis.InitDataHandler(...)
+	evaluationHandler, _ := apis.InitEvaluationHandler(...,             // 依赖 data + prompt + llm + foundation
+		lodataset.NewLocalDatasetService(dataHandler.IDatasetApplication),
+		lomanage.NewLocalPromptManageService(promptHandler.PromptManageService),
+	)
+	observabilityHandler, _ := apis.InitObservabilityHandler(...)       // 依赖几乎所有前面模块
+	return &apis.APIHandler{ PromptHandler: promptHandler, ... }, nil
+}</code></pre>
+                <div class="glossary"><b>依赖顺序揭示了模块的"地基"关系</b>：<code>foundation</code> 最先初始化（几乎所有模块都要靠它鉴权/查用户），<code>llm</code> 第二（<code>prompt</code> 要调模型），<code>observability</code> 最后（它要观测前面所有模块产生的调用）。这条顺序和 Day 01 讲的"六大模块"角色完全吻合——今天你终于在真实代码里看到了这种依赖关系是怎么落地的。</div>
+                <div class="anno">📌 注意到没有：这里传进去的不是 <code>foundationHandler.AuthService</code> 本身，而是包了一层 <code>loauth.NewLocalAuthService(...)</code>——这就是 Day 01 埋下的"模块间不直接互调"的钩子，Day 05/06 会专门揭秘这层包装是干什么的。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>consumer 与优雅退出</h1></div>
+            <div class="card">
+                <p>HTTP 之外，Coze Loop 还有一批基于 RocketMQ 的异步消费者（比如异步处理 Trace 摄入、评测任务）。<span class="fileref">backend/cmd/main.go:69-79</span>：</p>
+<pre><code class="language-go">signalCtx, signalCancel := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
+r := registry.NewConsumerRegistryWithShutdown(signalCtx, c.mqFactory).
+	Register(MustInitConsumerWorkers(c.cfgFactory, c.mqFactory, handler, handler, handler, handler))
+r.StartAll(ctx)
+
+go api.Start(handler)   // HTTP 服务放进协程，不阻塞主流程
+<-signalCtx.Done()      // 主 goroutine 在这里"睡着"，直到收到退出信号
+
+stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+r.StopAll(stopCtx)      // 给消费者 30 秒把手头的消息处理完再退出</code></pre>
+                <div class="loopd">
+                    <span class="n"><b>进程启动</b>组装依赖</span><span class="a">→</span>
+                    <span class="n"><b>consumer</b>StartAll</span><span class="a">→</span>
+                    <span class="n"><b>HTTP</b>协程里 Start</span><span class="a">→</span>
+                    <span class="n"><b>阻塞等待</b>SIGTERM</span><span class="a">→</span>
+                    <span class="n"><b>StopAll</b>30s 内收尾</span>
+                </div>
+                <div class="baby"><span class="t">🍼 类比：下班关店流程</span>
+                <code>signal.NotifyContext</code> 就像"店长盯着门口，一旦看到打烊信号（Ctrl+C 或容器要被杀）"；<code>StopAll</code> 给 30 秒是"允许后厨把手上还在炒的最后几个菜炒完，而不是直接拔电闸"——这叫<strong>优雅停机（Graceful Shutdown）</strong>，避免正在处理的消息/请求被硬生生打断导致数据不一致。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>main 函数的五个步骤分别是什么？（组装基础设施 → 组装模块 handler → 初始化 tracer → 启动消费者 → 启动 HTTP + 阻塞等退出信号）</li>
+                    <li>数据库连接参数从哪来？（大部分敏感项走环境变量，<code>infrastructure.yaml</code> 只管非敏感结构化配置）</li>
+                    <li>六大模块初始化顺序说明了什么？（foundation 最先，observability 最后，体现依赖关系）</li>
+                    <li>什么是优雅停机？（收到退出信号后给消费者一段时间处理完手头任务再退出）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟</h3>
+<pre><code class="language-bash"># 1. 通读 main 函数骨架（先看骨架，别急着抠细节）
+sed -n '50,80p' backend/cmd/main.go
+
+# 2. 看 newComponent 组装了哪些基础设施
+grep -n "type component struct" -A 15 backend/cmd/main.go
+
+# 3. 看 api.Init 的六模块初始化顺序
+grep -n "Init.*Handler" backend/api/api.go
+
+# 4. 看本地容器里的 infrastructure.yaml 长什么样
+cat release/deployment/docker-compose/conf/infrastructure.yaml 2>/dev/null || \
+cat backend/conf/infrastructure.yaml</code></pre>
+                <div class="tip"><strong>明天预告 · Day 04</strong>：<code>api.Start(handler)</code> 只是启动了 Hertz 服务，具体一个 HTTP 请求怎么被路由到对应 handler，中间经过哪些中间件（Session/Locale）？我们会跟着一条真实路由 <code>POST /api/prompt/v1/prompts</code> 走一遍。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day02.html" style="color:var(--accent-cyan);">&larr; 上一天 · Docker 跑起来</a>
+                <a href="coze-loop-day04.html" style="color:var(--accent-green);">下一天 · HTTP 网关与路由 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

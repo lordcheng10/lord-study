@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 06 · DDD 分层与 Wire — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#a5b4fc;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .glossary{border-left:3px solid var(--accent-cyan);background:rgba(6,182,212,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .glossary b{color:var(--accent-cyan)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}
+        .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">06</div>
+            <h2>Day 06</h2>
+            <p class="version">DDD 分层与 Wire · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · modules/&lt;domain&gt; 四层目录</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 依赖方向铁律</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · wire.go 手写依赖声明</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · wire_gen.go 自动生成</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 组装全过程实例</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 模块间不直接互调</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 今日小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="coze-loop-day05.html" class="nav-link">&larr; 上一天</a></li>
+            <li><a href="coze-loop-day07.html" class="nav-link" style="color:var(--accent-green);">下一天 · IDL 契约入门 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 06 / 共 20 天 · 第 2 周 分层与契约</span>
+            <h1 class="part-title">DDD 分层与 Wire</h1>
+            <p class="part-desc">第一周走完了"一次请求怎么进来"的骨架。今天开始第二周，钻进 <code>modules/prompt</code> 内部，看真实的 DDD 四层是怎么划分的，以及这些层与层之间的依赖，是怎么被 Wire 这个工具自动组装出来的。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 2 周 分层与契约（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st on">D6 DDD 与 Wire</span><span class="sep">→</span>
+                <span class="st">D7 IDL 契约</span><span class="sep">→</span>
+                <span class="st">D8 Foundation</span><span class="sep">→</span>
+                <span class="st">D9 Prompt 读路径</span><span class="sep">→</span>
+                <span class="st">D10 调试与 LLM</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>modules/&lt;domain&gt; 四层目录</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：Day 01 已经画过四层示意图了，今天有什么不一样？</span>
+                Day 01 是"看图"，今天是"进真实目录"。打开 <span class="fileref">backend/modules/prompt/</span> 数一数文件，你会发现四层不是空谈：</div>
+<pre><code class="language-bash">backend/modules/prompt/
+├── application/     # manage.go debug.go execute.go openapi.go tool_manage.go + wire.go/wire_gen.go
+├── domain/
+│   ├── entity/       # prompt.go prompt_detail.go label.go debug_context.go ...
+│   ├── service/       # manage.go execute.go formatter.go snippet_parser.go ...
+│   └── repo/          # manage.go label.go debug_log.go debug_context.go tool.go（全是接口）
+├── infra/
+│   ├── repo/mysql/    # DAO 实现
+│   ├── repo/redis/    # 缓存 DAO 实现
+│   ├── rpc/           # 调 foundation/llm 等其他模块（本地客户端）
+│   └── conf/ collector/ metrics/
+└── pkg/               # errno consts template（模块内部小工具）</code></pre>
+                <div class="essence"><span class="t">💡 本质：application 是"编排"，domain 是"规则"，infra 是"脏活"</span>
+                <code>application/manage.go</code> 的 <code>CreatePrompt</code> 负责"取用户 → 查权限 → 拼 DTO → 审核 → 调用 domain service"；<code>domain/service/manage.go</code> 的 <code>CreatePrompt</code> 负责"校验业务规则 → 调 repo 接口存"；<code>infra/repo/manage.go</code> 才是真正拼 SQL、开事务写 MySQL 的地方。三层各管一段，Day 09 会把这条链路完整走一遍。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>依赖方向铁律：api→application→domain←infra</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/modules/prompt/domain/repo/manage.go</span> 的 <code>IManageRepo</code> 接口是这条铁律最好的证据——它定义在 <strong>domain</strong> 层，却描述的是"存储"这件"infra 的事"：</p>
+<pre><code class="language-go">// domain/repo/manage.go —— 接口定义在 domain 层
+type IManageRepo interface {
+	CreatePrompt(ctx context.Context, promptDO *entity.Prompt) (promptID int64, err error)
+	GetPrompt(ctx context.Context, param GetPromptParam) (promptDO *entity.Prompt, err error)
+	// ...
+}</code></pre>
+<pre><code class="language-go">// infra/repo/manage.go —— 实现放在 infra 层，反向依赖 domain
+type ManageRepoImpl struct { db db.Provider; idgen idgen.IIDGenerator; ... }
+func (d *ManageRepoImpl) CreatePrompt(ctx context.Context, promptDO *entity.Prompt) (promptID int64, err error) { ... }</code></pre>
+                <div class="glossary"><b>这叫"依赖倒置原则"（DIP）</b>：domain 层不 import infra 包，反而是 infra 层 import domain 包（引用 <code>entity.Prompt</code> 和实现 <code>repo.IManageRepo</code> 接口）。好处是：domain 里的业务规则测试可以完全脱离真实数据库，用 mock 实现 <code>IManageRepo</code> 就能跑单测（<span class="fileref">domain/repo/mocks/manage_repo.go</span> 就是自动生成的 mock）。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：新手常把校验逻辑写反位置</span>
+                比如"promptKey 不能为空"这种业务规则应该写在 <code>domain/service</code>（<span class="fileref">domain/service/manage.go:344-349</span> 就是这么做的），而不是写在 <code>infra/repo</code>（那里应该只管怎么存）或者散落在 <code>application</code>（那里应该只管编排，不该重复业务判断）。层次一乱，规则就会散落各处难以维护。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>wire.go：手写"要装配哪些零件"</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一个 application 对象往往依赖十几个东西，手动 new 太痛苦</span>
+                看 <span class="fileref">modules/prompt/application/wire.go</span> 就知道 <code>PromptManageApplicationImpl</code> 到底依赖多少东西——光是 domain 层的依赖集合 <code>promptDomainSet</code> 就有 20 多项：</div>
+<pre><code class="language-go">//go:build wireinject
+package application
+
+var (
+	promptDomainSet = wire.NewSet(
+		service.NewPromptFormatter, service.NewToolConfigProvider, service.NewPromptService,
+		repo.NewManageRepo, repo.NewLabelRepo, repo.NewDebugLogRepo,
+		mysql.NewPromptBasicDAO, mysql.NewPromptCommitDAO, mysql.NewPromptUserDraftDAO,
+		rediscache.NewPromptBasicDAO, rediscache.NewPromptDAO,
+		rpc.NewLLMRPCProvider, rpc.NewAuthRPCProvider, rpc.NewFileRPCProvider,
+		// ... 共 20 余项
+	)
+	manageSet = wire.NewSet(NewPromptManageApplication, promptDomainSet)
+)
+
+func InitPromptManageApplication(idgen idgen.IIDGenerator, db db.Provider, redisCli redis.Cmdable, ...) (manage.PromptManageService, error) {
+	wire.Build(manageSet)   // 只声明"用这些零件"，具体怎么拼装交给 wire 工具生成
+	return nil, nil
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：wire.go 只是"零件清单"，不是"组装说明书"</span>
+                注意函数体只有一行 <code>wire.Build(manageSet)</code> 加一行占位 <code>return nil, nil</code>——这份文件<strong>永远不会被真正编译执行</strong>（顶部 <code>//go:build wireinject</code> 就是排除它参与正常编译的 build tag）。它存在的唯一目的，是给 <code>wire</code> 命令行工具读，告诉它"要造出一个 <code>manage.PromptManageService</code>，需要用到这些构造函数"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>wire_gen.go：真正跑起来的那份</h1></div>
+            <div class="card">
+                <p>执行 <code>wire</code> 命令后，真正参与编译的是同目录下的 <span class="fileref">wire_gen.go</span>——它会分析每个构造函数需要什么参数、自动按正确顺序把它们一个个 new 出来：</p>
+<pre><code class="language-go">// wire_gen.go（自动生成，勿手改）
+func InitPromptManageApplication(idgen idgen2.IIDGenerator, db2 db.Provider, redisCli redis2.Cmdable, ...) (manage.PromptManageService, error) {
+	promptBasicDAO := mysql.NewPromptBasicDAO(db2)
+	promptCommitDAO := mysql.NewPromptCommitDAO(db2)
+	manageRepo := repo.NewManageRepo(idgen, promptBasicDAO, promptCommitDAO, ...)
+	authRPCProvider := rpc.NewAuthRPCProvider(authClient)
+	promptService := service.NewPromptService(manageRepo, ...)
+	promptManageApplicationImpl := NewPromptManageApplication(promptService, authRPCProvider, ...)
+	return promptManageApplicationImpl, nil
+}</code></pre>
+                <div class="glossary"><b>为什么不直接手写这一大串 new？</b> 因为依赖关系一旦有十几层，手写装配代码极易漏参数、顺序错乱，而且每加一个新依赖就要改遍全部调用点。Wire 的思路是"你只管声明零件清单，装配顺序让工具去算"——本质上和 Day 07 的 IDL 生成代码是同一种工程哲学：<strong>把容易出错的重复劳动交给代码生成，人只维护"意图"</strong>。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：改了 wire.go 忘记重新生成</span>
+                如果你在 <code>promptDomainSet</code> 里新增了一个构造函数，必须在 <code>modules/prompt/application/</code> 目录下执行 <code>wire</code> 命令重新生成 <code>wire_gen.go</code>，否则新依赖不会真正被装配进去——这一步和 IDL 改完要重新跑生成脚本（Day 07）是完全一样的心智模型。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>组装全过程实例：从 api.go 到最底层 DAO</h1></div>
+            <div class="card">
+                <p>把 Day 03 的 <code>api.Init</code>、Day 05 的 <code>bindLocalCallClient</code>、今天的 Wire 串起来，一次"新建 Prompt handler"的完整装配链路是：</p>
+                <table>
+                    <thead><tr><th>层级</th><th>谁调用谁</th></tr></thead>
+                    <tbody>
+                        <tr><td>1</td><td><code>api.go Init</code> 调 <code>apis.InitPromptHandler(...)</code></td></tr>
+                        <tr><td>2</td><td><code>InitPromptHandler</code> 内部调 <code>application.InitPromptManageApplication(...)</code>（Wire 生成的函数）</td></tr>
+                        <tr><td>3</td><td>Wire 生成代码按依赖顺序 new 出 <code>mysql.NewPromptBasicDAO → repo.NewManageRepo → service.NewPromptService → NewPromptManageApplication</code></td></tr>
+                        <tr><td>4</td><td>拿到 <code>manage.PromptManageService</code> 接口后，<code>NewPromptHandler</code> 用 <code>bindLocalCallClient</code> 再包一层"本地 Kitex 客户端"（Day 05）</td></tr>
+                        <tr><td>5</td><td>最终塞进 <code>APIHandler</code>，被路由分发到的 <code>apis.CreatePrompt</code> 调用</td></tr>
+                    </tbody>
+                </table>
+                <div class="baby"><span class="t">🍼 类比：宜家家具的组装顺序</span>
+                Wire 就像宜家说明书——它不生产螺丝和木板（那些是 <code>mysql.NewXxxDAO</code> 这类"零件构造函数"），只保证"先装底座、再装侧板、最后装抽屉"这个顺序不会错。你只需要把说明书（<code>wire.go</code> 的依赖清单）写对，宜家（wire 工具）就能自动生成正确的组装步骤。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>模块间不直接互调，在这里长什么样</h1></div>
+            <div class="card">
+                <p>回头看 Day 03 埋下的钩子：<span class="fileref">api.go:77-83</span> 里 <code>InitPromptHandler</code> 接收的参数是包装过的接口：</p>
+<pre><code class="language-go">promptHandler, err := apis.InitPromptHandler(ctx, ...,
+	loruntime.NewLocalLLMRuntimeService(llmHandler.LLMRuntimeService),   // 不是直接传 llm 模块的 application 对象
+	loauth.NewLocalAuthService(foundationHandler.AuthService),           // 而是先包一层 "本地 Kitex 客户端"
+	lofile.NewLocalFileService(foundationHandler.FileService),
+	louser.NewLocalUserService(foundationHandler.UserService),
+	auditClient,
+)</code></pre>
+                <p>这些包装函数最终会流入 <span class="fileref">modules/prompt/infra/rpc/</span> 下的 <code>NewAuthRPCProvider</code> 等 Provider——<code>prompt</code> 模块拿到手的，永远只是 <code>authservice.Client</code> 这样一个 Kitex 生成的<strong>接口类型</strong>，完全看不到 <code>foundation</code> 模块内部 <code>AuthApplicationImpl</code> 的任何实现细节。</p>
+                <div class="essence"><span class="t">💡 本质：每个模块只对外暴露 Thrift 定义的接口，模块内部对彼此是黑盒</span>
+                这意味着 <code>foundation</code> 模块的维护者可以随意重写 <code>AuthApplicationImpl</code> 内部实现（比如换一种鉴权算法），只要 <code>auth.AuthService</code> 这个 Thrift 接口签名不变，<code>prompt</code> 模块完全不需要动。这正是 Day 01 说的"模块间不直接互调"在代码里的完整实现路径：<strong>IDL 定义接口 → Kitex 生成接口类型 → loop_gen 包一层本地客户端 → 各模块只依赖接口类型</strong>。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>modules/&lt;domain&gt; 四层分别叫什么、各自放什么？（application 编排、domain/entity+service+repo 规则、infra 实现）</li>
+                    <li>依赖倒置怎么体现？（repo 接口定义在 domain，实现在 infra，infra 反向依赖 domain）</li>
+                    <li>wire.go 和 wire_gen.go 的关系？（前者是手写的零件清单，后者是自动生成的真实装配代码）</li>
+                    <li>模块间调用为什么要包一层"本地客户端"？（让模块只依赖 Thrift 接口类型，彼此实现互为黑盒）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟</h3>
+<pre><code class="language-bash"># 1. 数一数 prompt 模块四层各有多少文件
+for d in application domain/entity domain/service domain/repo infra; do
+  echo "$(find backend/modules/prompt/$d -maxdepth 1 -name '*.go' 2>/dev/null | grep -v _test | wc -l) $d"
+done
+
+# 2. 看 wire.go 的零件清单
+grep -n "wire.NewSet\|wire.Build" backend/modules/prompt/application/wire.go
+
+# 3. 对比 wire_gen.go 是怎么真正装配的
+grep -n "func InitPromptManageApplication" -A 15 backend/modules/prompt/application/wire_gen.go
+
+# 4. 找到 IManageRepo 接口定义与实现分别在哪
+grep -rn "type IManageRepo interface" backend/modules/prompt/domain/repo/
+grep -rn "type ManageRepoImpl struct" backend/modules/prompt/infra/repo/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 07</strong>：今天反复出现的"Thrift 接口"到底是从哪个 <code>.thrift</code> 文件生成的？<code>kitex_gen</code> 和 <code>loop_gen</code> 又分别是什么？我们会打开 <code>idl/thrift/coze/loop/prompt/</code> 看契约的原始定义。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day05.html" style="color:var(--accent-cyan);">&larr; 上一天 · Handler 桥接模式</a>
+                <a href="coze-loop-day07.html" style="color:var(--accent-green);">下一天 · IDL 契约入门 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

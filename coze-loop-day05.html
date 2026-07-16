@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 05 · Handler 桥接模式 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#a5b4fc;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .glossary{border-left:3px solid var(--accent-cyan);background:rgba(6,182,212,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .glossary b{color:var(--accent-cyan)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}
+        .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">05</div>
+            <h2>Day 05</h2>
+            <p class="version">Handler 桥接模式 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · APIHandler 是六模块拼盘</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · bindLocalCallClient 是干嘛的</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · invokeAndRender 统一范式</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 走一遍 CreatePrompt handler</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 进程内调用 ≠ 跨机 RPC</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 今日小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="coze-loop-day04.html" class="nav-link">&larr; 上一天</a></li>
+            <li><a href="coze-loop-day06.html" class="nav-link" style="color:var(--accent-green);">下一天 · DDD 分层与 Wire &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 05 / 共 20 天 · 第 1 周 环境与骨架</span>
+            <h1 class="part-title">Handler 桥接模式</h1>
+            <p class="part-desc">昨天看到路由把请求分发到了 <code>apis.CreatePrompt</code>。今天拆开 <span class="fileref">backend/api/handler/coze/loop/apis/handler.go</span>——这是全仓库最值得精读的一个文件，藏着 Coze Loop 一个很特别的设计：用 Kitex 客户端做"进程内本地调用"。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 1 周 环境与骨架（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D1 项目全景</span><span class="sep">→</span>
+                <span class="st">D2 Docker 跑起来</span><span class="sep">→</span>
+                <span class="st">D3 进程启动</span><span class="sep">→</span>
+                <span class="st">D4 HTTP 网关</span><span class="sep">→</span>
+                <span class="st on">D5 Handler 桥接</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>APIHandler：六大模块的拼盘</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：全局到处传的 handler 参数到底是个什么大对象？</span>
+                Day 03/04 反复出现的 <code>*apis.APIHandler</code>，第一次看这个类型定义的人常常一头雾水——它长这样：</div>
+<pre><code class="language-go">// backend/api/handler/coze/loop/apis/handler.go
+type APIHandler struct {
+	*PromptHandler
+	*LLMHandler
+	*EvaluationHandler
+	*DataHandler
+	*ObservabilityHandler
+	*FoundationHandler
+	Translater i18n.ITranslater
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：用 Go 的匿名嵌入把六大模块的所有接口"摊平"到一个对象上</span>
+                每个 <code>XxxHandler</code>（比如 <code>PromptHandler</code>）本身又是嵌入了一堆 Kitex 生成的 Service 接口：</p>
+<pre><code class="language-go">type PromptHandler struct {
+	manage.PromptManageService     // 增删改查 Prompt
+	toolmanage.ToolManageService   // 工具管理
+	debug.PromptDebugService       // 调试
+	execute.PromptExecuteService   // 执行
+	openapi.PromptOpenAPIService   // 开放 API
+}</code></pre>
+                得益于 Go 的匿名字段嵌入机制，<code>handler.CreatePrompt(...)</code> 这样的方法调用可以直接"透传"到最内层的 <code>PromptManageService.CreatePrompt</code>——<code>APIHandler</code> 因此变成了一个能调用<strong>所有</strong>业务方法的巨型对象，被四处传递。</div>
+                <div class="baby"><span class="t">🍼 类比：一张万能门卡</span>
+                <code>APIHandler</code> 就像一张贴了六个部门授权的万能门卡——不管是去 Prompt 部门、评测部门还是基础部门办事，拿着这一张卡（一个参数）就够了，不用给每个部门单独发一张卡。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>bindLocalCallClient：把 application 包装成 Kitex Client</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：为什么不直接把 application 对象存起来，非要包一层 "Client"？</span>
+                这是本仓库最反直觉但也最精妙的设计之一。看 <span class="fileref">handler.go:171-190</span> 的 <code>NewPromptHandler</code>：</div>
+<pre><code class="language-go">func NewPromptHandler(manageApp manage.PromptManageService, ...) *PromptHandler {
+	h := &PromptHandler{PromptManageService: manageApp, ...}
+	bindLocalCallClient(manage.PromptManageService(h), &promptManageSvc, lomanage.NewLocalPromptManageService)
+	// ...
+	return h
+}</code></pre>
+                <p><code>bindLocalCallClient</code> 本身很短，<span class="fileref">handler.go:238-245</span>：</p>
+<pre><code class="language-go">func bindLocalCallClient[T, K any](svc T, cli any, provider func(t T, mds ...endpoint.Middleware) K) {
+	v := reflect.ValueOf(cli)
+	c := provider(svc, defaultKiteXMiddlewares()...)
+	v.Elem().Set(reflect.ValueOf(c))   // 用反射把生成出来的 "客户端" 塞进包级全局变量
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：把"直接调用 application"包一层"Kitex 客户端"，为的是白嫖 Kitex 中间件体系</span>
+                <code>lomanage.NewLocalPromptManageService</code> 是 Day 07 会讲到的 <code>loop_gen</code> 生成代码——它把 <code>PromptManageService</code> 接口包装成一个"看起来像远程调用、实际是进程内直接函数调用"的 Kitex Client。这样做的好处是：<strong>所有原本只能挂在真实 RPC 上的 Kitex 中间件（日志、鉴权、参数校验、上下文缓存）都能原样套用</strong>，而不需要为"进程内调用"这种场景重新发明一套中间件机制。</div>
+                <div class="glossary"><b>包级全局变量 <code>promptManageSvc</code> 是干什么的？</b> 它在 <span class="fileref">prompt_manage_service.go:15</span> 声明为 <code>var promptManageSvc promptmanageservice.Client</code>——正是被 <code>bindLocalCallClient</code> 反射赋值的那个"本地 Kitex 客户端"。所有 <code>apis.CreatePrompt</code> 这样的 handler 函数，实际调用的都是这个包级变量，而不是直接调 application 对象。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>invokeAndRender：一个函数统一所有 handler 的写法</h1></div>
+            <div class="card">
+                <p>正因为有了上一讲的"本地 Kitex 客户端"，所有 handler 函数才能写得极度统一。<span class="fileref">handler.go:256-284</span>：</p>
+<pre><code class="language-go">func invokeAndRender[T, K any](
+	ctx context.Context, c *app.RequestContext,
+	callable func(ctx context.Context, req T, callOptions ...callopt.Option) (K, error),
+) {
+	render := func(c *app.RequestContext, fn func() (any, error)) {
+		resp, err := fn()
+		if err == nil { c.JSON(http.StatusOK, resp); return }
+		_ = c.Error(err)
+	}
+	render(c, func() (r any, err error) {
+		defer goroutine.Recover(ctx, &err)   // panic 兜底恢复
+		var req T
+		ins := reflect.New(reflect.TypeOf(req).Elem()).Interface().(T)
+		if err := c.BindAndValidate(ins); err != nil {   // ① HTTP 请求体绑定 + 校验
+			return nil, kerrors.NewBizStatusError(errno.CommonBadRequestCode, ...)
+		}
+		return callable(ctx, ins)   // ② 调用真正的业务逻辑
+	})
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：用 Go 泛型把"绑参数 → 调用 → 渲染响应"三步固定成一个模板函数</span>
+                因为 <code>invokeAndRender</code> 是泛型函数，<code>T</code>（请求类型）和 <code>K</code>（响应类型）由传入的 <code>callable</code> 自动推导——这就是为什么几乎每个业务 handler 都只有一行代码。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>走一遍 CreatePrompt handler</h1></div>
+            <div class="card">
+                <p>现在回头看 <span class="fileref">backend/api/handler/coze/loop/apis/prompt_manage_service.go:17-21</span>，这一行就完全说得通了：</p>
+<pre><code class="language-go">var promptManageSvc promptmanageservice.Client
+
+// CreatePrompt .
+// @router /api/prompt/v1/prompts [POST]
+func CreatePrompt(ctx context.Context, c *app.RequestContext) {
+	invokeAndRender(ctx, c, promptManageSvc.CreatePrompt)
+}</code></pre>
+                <p>拆开这一行，实际发生的事情是：</p>
+                <table>
+                    <thead><tr><th>步骤</th><th>发生了什么</th></tr></thead>
+                    <tbody>
+                        <tr><td>1</td><td>Hertz 把请求体交给 <code>invokeAndRender</code>，反射构造出一个空的 <code>CreatePromptRequest</code></td></tr>
+                        <tr><td>2</td><td><code>c.BindAndValidate</code> 把 JSON 请求体解析并做参数校验（IDL 里 <code>vt.not_nil</code> 之类的校验规则在这里生效）</td></tr>
+                        <tr><td>3</td><td>调用 <code>promptManageSvc.CreatePrompt(ctx, req)</code>——这一步会先穿过 <code>defaultKiteXMiddlewares</code>（日志/校验/Session/上下文缓存），再落到真正的 <code>PromptManageApplicationImpl.CreatePrompt</code>（Day 09 详细拆开）</td></tr>
+                        <tr><td>4</td><td>拿到返回值后 <code>c.JSON(200, resp)</code> 写回 HTTP 响应；如果出错则 <code>c.Error(err)</code> 交给统一错误处理</td></tr>
+                    </tbody>
+                </table>
+                <div class="pitfall"><span class="t">⚠️ 坑：<code>defaultKiteXMiddlewares</code> 和 Day 04 的 Hertz 中间件是两套不同的东西</span>
+                <span class="fileref">handler.go:247-254</span>：<code>[]endpoint.Middleware{logmw.LogTrafficMW, validator.KiteXValidatorMW, session.NewRequestSessionMW(), cachemw.CtxCacheMW}</code>。这是 Kitex 的 <code>endpoint.Middleware</code>，套在"本地调用"这一层；Day 04 的 <code>SessionMW</code>/<code>LocaleMW</code> 是 Hertz 的 <code>app.HandlerFunc</code>，套在 HTTP 这一层。两套中间件体系并存、各管各的阶段，初学者很容易把两者搞混。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>为什么是"进程内"而不是真正的跨机 RPC</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：都叫 Kitex Client 了，是不是真的会发网络请求？</span>
+                不会。这是最容易被名字误导的地方。</div>
+                <div class="essence"><span class="t">💡 本质：<code>loop_gen</code> 生成的是"假装是 RPC 客户端、实际是函数直调"的适配层</span>
+                看一眼 <span class="fileref">backend/loop_gen/coze/loop/prompt/lomanage/local_promptmanageservice.go</span> 的实现（Day 06/07 会展开讲 <code>loop_gen</code> 是怎么生成的），核心就是：</p>
+<pre><code class="language-go">type LocalPromptManageService struct {
+	impl manage.PromptManageService   // 直接持有 application 实现，没有网络连接
+	mds  endpoint.Middleware
+}
+func (l *LocalPromptManageService) CreatePrompt(ctx context.Context, request *manage.CreatePromptRequest, ...) (*manage.CreatePromptResponse, error) {
+	chain := l.mds(func(ctx context.Context, in, out interface{}) error {
+		resp, err := l.impl.CreatePrompt(ctx, arg.Request)   // 就是普通的 Go 函数调用
+		result.SetSuccess(resp)
+		return nil
+	})
+	// ...
+	return result.GetSuccess(), nil
+}</code></pre>
+                没有 socket、没有序列化传输，<code>impl.CreatePrompt(...)</code> 就是一次普通的内存里的函数调用，只是外层套了一层"看起来和真实 Kitex RPC 调用一模一样"的接口壳子。</div>
+                <div class="baby"><span class="t">🍼 类比：内部快递 vs 同城送信</span>
+                真正的跨机 RPC（比如以后要拆微服务）像是找快递公司送信——要打包、贴地址、路上跑一趟。而"本地调用客户端"更像是在同一栋楼里，把信直接递给隔壁工位的同事——用的是同一个"寄信"流程和模板（接口签名不变），但实际上手一递就到了，没有真正上路。这样设计的好处是：<strong>未来如果要把某个模块拆成独立微服务，只需要把这层"本地客户端"换成"真实网络客户端"，上层调用代码完全不用改</strong>——这正是"面向接口编程"在微服务化路径上的价值。</div>
+                <div class="glossary"><b>为什么模块间调用要经过这层，而不是直接 import？</b> 回顾 Day 01/03 的钩子：<code>prompt</code> 模块要用 <code>foundation</code> 的鉴权能力，如果直接 <code>import</code> foundation 的 application 包，两个模块的代码就会紧密耦合、互相感知内部实现。而通过"看起来像 RPC 客户端"的接口调用，模块之间只依赖 Kitex 生成的<strong>接口类型</strong>（<code>auth.AuthService</code>），彼此的内部实现完全不可见——这就是 <span class="fileref">ARCHITECTURE.md</span> 里"模块间不直接互调"这条不变量在代码层面的真正落地方式。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>APIHandler 是什么？（六大模块 Kitex Service 接口的匿名嵌入拼盘）</li>
+                    <li>bindLocalCallClient 做了什么？（用反射把 application 包成"本地 Kitex 客户端"，塞进包级变量）</li>
+                    <li>invokeAndRender 统一了什么？（绑参数校验 → 调用 → JSON 渲染，用泛型消除重复代码）</li>
+                    <li>为什么叫"本地"调用？（没有网络传输，是普通函数调用，只是接口形态和真 RPC 一致）</li>
+                    <li>这套设计解决了什么问题？（让模块间调用只依赖接口不依赖实现，同时白嫖 Kitex 中间件生态）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟</h3>
+<pre><code class="language-bash"># 1. 看 APIHandler 的拼盘结构
+grep -n "type APIHandler struct" -A 8 backend/api/handler/coze/loop/apis/handler.go
+
+# 2. 看 bindLocalCallClient 在哪些地方被调用（六大模块各自的 NewXxxHandler）
+grep -n "bindLocalCallClient" backend/api/handler/coze/loop/apis/handler.go
+
+# 3. 对比看一个 handler 函数有多短
+sed -n '17,22p' backend/api/handler/coze/loop/apis/prompt_manage_service.go
+
+# 4. 看本地 Kitex 客户端的生成代码
+head -50 backend/loop_gen/coze/loop/prompt/lomanage/local_promptmanageservice.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 06</strong>：今天看到的 <code>PromptManageApplicationImpl</code> 是怎么被 Wire 组装出来的？我们要打开 <code>modules/prompt/application/wire.go</code>，看 DDD 四层（api→application→domain←infra）在真实模块里到底长什么样。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day04.html" style="color:var(--accent-cyan);">&larr; 上一天 · HTTP 网关与路由</a>
+                <a href="coze-loop-day06.html" style="color:var(--accent-green);">下一天 · DDD 分层与 Wire &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

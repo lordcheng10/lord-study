@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 04 · HTTP 网关与路由 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#a5b4fc;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .glossary{border-left:3px solid var(--accent-cyan);background:rgba(6,182,212,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .glossary b{color:var(--accent-cyan)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}
+        .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:8px 10px;font-size:12.5px;border-top:1px solid var(--border-color);align-items:baseline}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:var(--accent-cyan);flex-shrink:0;min-width:150px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">04</div>
+            <h2>Day 04</h2>
+            <p class="version">HTTP 网关与路由 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · Hertz 是什么</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 手写路由 vs 生成路由</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 中间件链是怎么套起来的</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · SessionMW 怎么鉴权</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 跟着一条真实路由走一遍</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 今日小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="coze-loop-day03.html" class="nav-link">&larr; 上一天</a></li>
+            <li><a href="coze-loop-day05.html" class="nav-link" style="color:var(--accent-green);">下一天 · Handler 桥接模式 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 04 / 共 20 天 · 第 1 周 环境与骨架</span>
+            <h1 class="part-title">HTTP 网关与路由</h1>
+            <p class="part-desc">昨天知道了 <code>api.Start(handler)</code> 会启动 HTTP 服务。今天拆开这一层：请求打进来之后，Hertz 框架怎么把它路由到具体的业务函数，中间穿过哪些中间件。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 1 周 环境与骨架（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D1 项目全景</span><span class="sep">→</span>
+                <span class="st">D2 Docker 跑起来</span><span class="sep">→</span>
+                <span class="st">D3 进程启动</span><span class="sep">→</span>
+                <span class="st on">D4 HTTP 网关</span><span class="sep">→</span>
+                <span class="st">D5 Handler 桥接</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>Hertz 是什么</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：Go 里写 HTTP 服务不是有标准库 net/http 吗？</span>
+                标准库能用，但字节内部海量服务对性能和易用性要求更高——需要更快的路由匹配、更方便的中间件机制、和内部 RPC 框架（Kitex）配套的生态。<strong>Hertz</strong> 就是 CloudWeGo 团队为此打造的高性能 HTTP 框架。</div>
+                <div class="essence"><span class="t">💡 本质：Hertz 是 Coze Loop 唯一的 HTTP 入口框架</span>
+                <span class="fileref">backend/api/api.go</span> 的 <code>Start</code> 函数里能看到它的身影：<code>server.Default(...)</code> 创建一个 Hertz 实例，<code>h.Spin()</code> 启动监听。所有 <code>/api/...</code> 路由最终都通过它接收、解析、分发。</p>
+<pre><code class="language-go">func Start(handler *apis.APIHandler) {
+	render.ResetJSONMarshal(js_conv.GetMarshaler())
+	bindConfig := binding.NewBindConfig()
+	bindConfig.UseThirdPartyJSONUnmarshaler(js_conv.GetUnmarshaler())
+
+	h := server.Default(server.WithBindConfig(bindConfig), server.WithMaxRequestBodySize(20*1024*1024))
+	register(h, handler)
+	h.Spin()   // 阻塞式启动监听
+}</code></pre></div>
+                <div class="baby"><span class="t">🍼 类比：小区大门保安亭</span>
+                Hertz 就是小区门口的保安亭：所有想进小区（调用后端）的人（HTTP 请求）都要先在这里登记（路由匹配）、可能要刷门禁卡（中间件鉴权），然后保安才会告诉你"去几号楼几层"（分发给具体 handler）。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>手写路由 vs 生成路由</h1></div>
+            <div class="card">
+                <div class="essence"><span class="t">💡 本质：路由分两路汇合，一路生成一路手写</span>
+                <span class="fileref">backend/api/router.go</span> 的 <code>register</code> 函数只有三行，却揭示了整个路由体系的骨架：</p>
+<pre><code class="language-go">func register(r *server.Hertz, handler *apis.APIHandler) {
+	router.GeneratedRegister(r, handler)   // 路① 由 IDL 生成，占绝大多数
+	customizedRegister(r)                  // 路② 手写，目前只有一个 /ping
+}</code></pre></div>
+                <p><code>GeneratedRegister</code> 实际上就是 <span class="fileref">backend/api/router/coze/loop/apis/coze.loop.apis.go</span> 里的 <code>Register</code> 函数——文件头写得很直白：</p>
+                <div class="glossary"><b><span class="fileref">coze.loop.apis.go</span> 顶部注释原话</b>："This file will register all the routes of the services in the master idl. And it will update automatically when you use the 'update' command for the idl. So <strong>don't modify the contents of the file</strong>, or your code will be deleted when it is updated."——这是本教程反复强调的"生成代码禁止手改"铁律的一个具体案例（Day 07 细讲整套生成流程）。</div>
+                <p>而 <span class="fileref">backend/api/router.go</span> 的 <code>customizedRegister</code> 才是给你自由发挥的地方：</p>
+<pre><code class="language-go">func customizedRegister(r *server.Hertz) {
+	r.GET("/ping", handler.Ping)
+	// your code ...
+}</code></pre>
+                <div class="anno">📌 <b>记忆点</b>：99% 的业务路由都来自 IDL → 生成代码这条链路，手写路由只用于健康检查这类和业务契约无关的旁路端点。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>中间件链是怎么套起来的</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/api/router_gen.go</span> 里，中间件按路由分组一层套一层。最外层是所有请求都会经过的 <code>rootMw</code>：</p>
+<pre><code class="language-go">func rootMw(handler *apis.APIHandler) []app.HandlerFunc {
+	return []app.HandlerFunc{
+		middleware.CtxCacheMW(),                          // 请求级缓存上下文
+		middleware.AccessLogMW(),                          // 访问日志
+		middleware.LocaleMW(),                              // 解析语言 Cookie
+		middleware.PacketAdapterMW(handler.GetTranslater()), // 响应包裹 + 国际化
+	}
+}
+func _apiMw(handler *apis.APIHandler) []app.HandlerFunc {
+	return []app.HandlerFunc{
+		middleware.SessionMW(session.NewSessionService(), louser.NewLocalUserService(handler)),
+	}
+}</code></pre>
+                <p><span class="fileref">coze.loop.apis.go:20-24</span> 能看到分组是怎么嵌套注册的：</p>
+<pre><code class="language-go">root := r.Group("/", rootMw(handler)...)
+{
+	_api := root.Group("/api", _apiMw(handler)...)   // 所有 /api/* 都要过 SessionMW
+	{
+		_auth := _api.Group("/auth", _authMw(handler)...)
+		// ... 每一层 Group 都可以再挂自己的中间件
+	}
+}</code></pre>
+                <div class="essence"><span class="t">💡 本质：Hertz 的 Group 机制 = 路由前缀 + 中间件的"继承"</span>
+                进了 <code>/api</code> 分组的请求，天生带着 <code>rootMw</code> + <code>_apiMw</code> 两层中间件；再往下每一级 <code>Group</code>（比如 <code>/prompt</code>）还可以叠加自己的中间件（<code>_promptMw</code>，目前是空的，留给未来扩展）。这就是为什么"鉴权只挂在 <code>/api</code> 这一层"就能覆盖几乎所有业务接口，而登录、注册两个接口在 <code>SessionMW</code> 内部被特判放行（下一讲会看到）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>SessionMW 怎么鉴权 + LocaleMW 怎么处理语言</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/api/router/coze/loop/apis/middleware/session.go</span> 的核心逻辑：</p>
+<pre><code class="language-go">func SessionMW(ss session.ISessionService, us userservice.Client) app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		path := string(c.Path())
+		if path == "/api/foundation/v1/users/login_by_password" ||
+			path == "/api/foundation/v1/users/register" {
+			c.Next(ctx)   // 登录/注册接口特判放行，不需要已有 session
+			return
+		}
+		sess, err := ss.ValidateSession(ctx, string(c.Cookie(session.SessionKey)))  // 校验 Cookie
+		if err != nil { c.Abort(); return }
+		resp, err := us.GetUserInfo(ctx, &user.GetUserInfoRequest{UserID: ptr.Of(sess.UserID)}) // 查用户信息
+		ctx = session.WithCtxUser(ctx, &session.User{ID: sess.UserID, Name: ..., Email: ...})   // 写回 ctx
+		c.Next(ctx)
+	}
+}</code></pre>
+                <div class="glossary"><b>为什么要在中间件里查一次用户信息？</b> 因为 Cookie 里的 Session 只存了 UserID，业务 handler 常常需要用户名/邮箱等信息——与其让每个业务函数都自己查一遍，SessionMW 统一查好，用 <code>session.WithCtxUser</code> 塞进 <code>context.Context</code>，下游用 <code>session.UserIDInCtx(ctx)</code> 这样的辅助函数直接取。这是"横切关注点在中间件里一次性解决"的典型做法。</div>
+                <p>语言处理则简单得多，<span class="fileref">middleware/locale.go</span>：</p>
+<pre><code class="language-go">func LocaleMW() app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		c.Next(contexts.WithLocale(ctx, parseLocale(c)))   // 从 Cookie 取语言，塞进 ctx
+	}
+}</code></pre>
+                <div class="baby"><span class="t">🍼 类比：门禁卡 + 语言选择器</span>
+                SessionMW 是刷门禁卡（认出你是谁），LocaleMW 是进门前的语言选择器（决定后面所有提示用中文还是英文）。两者都在"进小区大门"这一层统一处理，后面每个房间（业务 handler）就不用重复问一遍。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>跟着一条真实路由走一遍</h1></div>
+            <div class="card">
+                <p>拿"新建 Prompt"这个动作举例，<span class="fileref">coze.loop.apis.go:406-413</span>：</p>
+<pre><code class="language-go">_prompt := _api.Group("/prompt", _promptMw(handler)...)
+_v15 := _prompt.Group("/v1", _v15Mw(handler)...)
+_v15.POST("/prompts", append(_promptsMw(handler), apis.CreatePrompt)...)</code></pre>
+                <p>拼出来的完整路径就是 <code>POST /api/prompt/v1/prompts</code>，一次请求要依次穿过：</p>
+                <div class="walk">
+                    <div class="r"><code>rootMw</code><span>CtxCache → AccessLog → Locale → PacketAdapter</span></div>
+                    <div class="r"><code>_apiMw</code><span>SessionMW：校验 Cookie，把当前用户写进 ctx</span></div>
+                    <div class="r"><code>_promptMw / _v15Mw / _promptsMw</code><span>目前均为空（留给未来扩展的挂载点）</span></div>
+                    <div class="r"><code>apis.CreatePrompt</code><span>真正的业务 handler（Day 05 详细拆开）</span></div>
+                </div>
+                <div class="tip"><strong>怎么自己找到某个前端按钮对应的路由？</strong> 打开 <span class="fileref">idl/thrift/coze/loop/prompt/coze.loop.prompt.manage.thrift</span>，每个接口后面的 <code>(api.post = '/api/prompt/v1/prompts')</code> 注解就是路由的"源头真相"——生成代码只是把这些注解翻译成了 Hertz 的 <code>Group/POST</code> 调用。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Hertz 是什么？（CloudWeGo 的高性能 Go HTTP 框架，Coze Loop 唯一的 HTTP 入口）</li>
+                    <li>路由从哪里来？（99% 由 IDL 生成，<code>router_gen.go</code>/<code>coze.loop.apis.go</code> 禁止手改；少量手写在 <code>router.go</code>）</li>
+                    <li>中间件是怎么分层套用的？（Hertz 的 Group 机制，外层中间件对所有子分组生效）</li>
+                    <li>SessionMW 做了什么？（校验 Cookie → 查用户信息 → 写进 context，登录/注册接口特判放行）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟</h3>
+<pre><code class="language-bash"># 1. 看路由汇合点
+cat backend/api/router.go
+
+# 2. 数一数生成代码里到底有多少条路由
+grep -c "append(.*Mw(handler)" backend/api/router/coze/loop/apis/coze.loop.apis.go
+
+# 3. 定位 CreatePrompt 的完整路由链路
+grep -n "prompt\b" backend/api/router/coze/loop/apis/coze.loop.apis.go | grep -i prompts
+
+# 4. 看 IDL 里的路由注解源头
+grep -n "api.post\|api.get" idl/thrift/coze/loop/prompt/coze.loop.prompt.manage.thrift | head</code></pre>
+                <div class="tip"><strong>明天预告 · Day 05</strong>：<code>apis.CreatePrompt</code> 这个 handler 函数只有一行代码却干了很多事——它怎么把 HTTP 请求"桥接"成一次 Kitex 服务调用？<code>bindLocalCallClient</code> 和 <code>invokeAndRender</code> 这两个函数是今天留下的悬念，明天揭晓。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day03.html" style="color:var(--accent-cyan);">&larr; 上一天 · 进程怎么启动</a>
+                <a href="coze-loop-day05.html" style="color:var(--accent-green);">下一天 · Handler 桥接模式 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

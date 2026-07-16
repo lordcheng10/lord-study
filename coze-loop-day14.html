@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 14 · Trace 观测 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#818cf8;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid #22c55e;background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:#22c55e;display:block;margin-bottom:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0}.qa .q{color:#c084fc;font-weight:600}.qa .a{color:var(--text-secondary)}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .example{border:1px dashed var(--border-color);background:rgba(6,182,212,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#22d3ee;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .mod-map{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+        .mm{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:13px;border-left:3px solid var(--mc,#4f46e5)}
+        .mm h4{font-size:13.5px;margin:0 0 3px;color:var(--mc,#4f46e5);font-family:'SF Mono',monospace}.mm p{font-size:12px;color:var(--text-secondary);margin:5px 0 0}
+        @media(max-width:768px){.mod-map{grid-template-columns:1fr}}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#06b6d4;flex-shrink:0;min-width:210px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .loopd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 12px;font-size:12px;text-align:center}
+        .loopd .n b{display:block;color:#818cf8;font-size:12.5px}.loopd .a{color:#06b6d4;font-weight:800;font-size:16px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">14</div>
+            <h2>Day 14</h2>
+            <p class="version">Trace 观测 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 为什么需要 Trace</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Span 长什么样</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 上报入口：三条路都能进</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Ingestion：Collector 流水线</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 为什么落 ClickHouse 不是 MySQL</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 查询链路：四层往下传</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手 + 预告</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Coze Loop 总目录</a></li>
+            <li><a href="coze-loop-day13.html" class="nav-link">&larr; 上一天 Day 13</a></li>
+            <li><a href="coze-loop-day15.html" class="nav-link" style="color:var(--accent-green);">下一天 · 跨模块组装图 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 14 / 共 20 天 · 第 3 周 数据与评测</span>
+            <h1 class="part-title">Trace 观测：给每一次调用拍一张"体检片"</h1>
+            <p class="part-desc">Day 13 的实验一跑就是几千次模型调用，出了问题怎么排查？答案是<strong>可观测性（Observability）</strong>模块——<span class="fileref">backend/modules/observability</span>。今天走一遍"SDK 上报一条 Span → 落进 ClickHouse → 前端查询展示"的完整链路，这是理解"分布式追踪"最好的实战案例。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 数据与评测（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D11 Dataset</span><span class="sep">→</span>
+                <span class="st">D12 评测集+评估器</span><span class="sep">→</span>
+                <span class="st">D13 实验主链路</span><span class="sep">→</span>
+                <span class="st on">D14 Trace 观测</span><span class="sep">→</span>
+                <span class="st">D15 跨模块组装图</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>为什么需要 Trace</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一次 Agent 回复，背后可能调了 8 次模型 + 3 次工具</span>
+                用户反馈"这次回答很慢/答错了"，你怎么知道慢在哪一步？是模型响应慢，还是检索工具超时，还是中间某次重试？<strong>没有留痕，出了问题只能两眼一抹黑。</strong></div>
+                <div class="essence"><span class="t">💡 本质：Trace = 一次完整请求的"调用树"，Span = 树上的一个节点</span>
+                一次用户请求叫一个 <strong>Trace</strong>（有唯一 TraceID），它由多个 <strong>Span</strong> 组成——每次模型调用、每次工具调用都是一个 Span，Span 之间用 <code>ParentID</code> 连成树。<strong>观测系统要做的事就是：接收海量 Span 上报、存起来、支持按各种条件快速查询、在前端画成一棵树或火焰图。</strong></div>
+                <div class="baby"><span class="t">生活类比：快递的物流轨迹</span>
+                Trace 就像一个快递单号的完整轨迹——"发件揽收→分拨中心A→分拨中心B→派送→签收"。每一条轨迹记录（几点几分在哪个网点）就是一个 Span。你查一个单号（TraceID）能看到它经过的所有网点（Span），一旦哪一段卡了很久，一眼就能定位问题出在哪个环节。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Span 长什么样</h1></div>
+            <div class="card">
+                <p>核心结构在 <span class="fileref">backend/modules/observability/domain/trace/entity/loop_span/span.go:157-182</span>（节选真实字段）：</p>
+<pre><code class="language-go">type Span struct {
+	StartTime      int64  `json:"start_time"` // 微秒
+	SpanID         string `json:"span_id"`
+	ParentID       string `json:"parent_id"`   // 靠这个字段串成一棵树
+	TraceID        string `json:"trace_id"`    // 同一次请求下所有 Span 共享
+	DurationMicros int64  `json:"duration_micros"`
+	SpanType       string `json:"span_type"`   // model / tool / prompt / …
+	Method         string `json:"method"`
+	StatusCode     int32  `json:"status_code"`
+	Input          string `json:"input"`
+	Output         string `json:"output"`
+
+	SystemTagsString map[string]string  `json:"system_tags_string"`  // 系统自动打的标签
+	TagsString       map[string]string  `json:"tags_string"`         // 用户自定义标签
+}</code></pre>
+                <div class="essence"><span class="t">💡 <code>TagsString</code> 系列字段为什么按"类型"拆成好几个 map</span>
+                注意有 <code>TagsString</code> / <code>SystemTagsLong</code> / <code>SystemTagsDouble</code> 等好几个不同类型的 map，而不是一个 <code>map[string]interface{}</code>。这是为了配合 Day 05 会讲的"ClickHouse Map 列"——ClickHouse 对<strong>同构 Map</strong>（值类型统一）的存储和查询效率远高于"什么都能装"的 JSON 列，所以在写入前就按值类型分好桶，牺牲一点点结构灵活性换查询性能。</div>
+                <div class="glossary"><b>SpanType 有哪些</b>：常见的有 <code>model</code>（模型调用）、<code>tool</code>（工具调用）、<code>prompt</code>（Prompt 渲染）、<code>chain</code>/<code>graph</code>（编排节点，呼应之前教程里编排引擎的概念）。前端会根据 <code>SpanType</code> 决定用什么图标、展示什么专属字段（比如模型 Span 展示 token 用量，工具 Span 展示参数）。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>上报入口：三条路都能把 Span 送进来</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/api/handler/coze/loop/apis/observability_open_apiservice.go</span> 定义了三个开放接口：</p>
+<pre><code class="language-bash">POST /v1/loop/traces/ingest                # Coze Loop 自有格式的 SDK 上报
+POST /v1/loop/opentelemetry/v1/traces        # 标准 OpenTelemetry 协议上报
+POST /v1/loop/traces/search                  # OpenAPI 方式查询（给外部系统集成用）</code></pre>
+                <div class="essence"><span class="t">💡 为什么同时支持自有格式和标准 OTel 协议</span>
+                <code>IngestTraces</code> 面向"用 Coze Loop 官方 SDK 埋点"的场景，格式贴合自己的领域模型；<code>OtelIngestTraces</code>（<span class="fileref">observability_open_apiservice.go:38-45</span>）则直接接收业界标准的 OpenTelemetry 协议数据——<strong>这样任何已经用 OTel SDK 埋点的现有系统，都不需要改代码，只要把上报地址指向 Coze Loop 就能接入。</strong>这是"不重新发明轮子、兼容生态标准"的典型设计。</div>
+                <div class="baby"><span class="t">生活类比</span>
+                就像快递柜既支持"官方 App 扫码存件"，也支持"任何第三方快递员用标准电子面单直接投递"——两条路走的是不同的登记方式，但最终都进了同一个柜子（Collector）。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Ingestion：像流水线一样处理海量 Span</h1></div>
+            <div class="card">
+                <p>不管从哪条路进来的 Span，最终都汇入同一套 <strong>Collector 流水线</strong>（<span class="fileref">backend/modules/observability/domain/trace/service/ingestion.go</span>），三段式设计和很多可观测性系统（比如 OpenTelemetry Collector 本身）思路一致：</p>
+                <div class="walk">
+                    <div class="r"><code>Receiver 接收器</code><span>解析不同格式的上报数据（自有格式 / OTel 格式），统一转成内部 Span 结构</span></div>
+                    <div class="r"><code>Processor 处理器</code><span>做清洗、脱敏、采样、限流等中间加工（可插拔链式处理）</span></div>
+                    <div class="r"><code>Exporter 导出器</code><span>把处理完的数据写到最终存储，这里对应 <span class="fileref">clickhouseexporter/</span></span></div>
+                </div>
+<pre><code class="language-go">// ingestion.go: 三种 Factory 拼成一套可插拔流水线
+type IngestionCollectorFactoryImpl struct {
+	receiverFactories  []receiver.Factory
+	processorFactories []processor.Factory
+	exporterFactories  []exporter.Factory
+}</code></pre>
+                <p>真正落库那一步，<span class="fileref">clickhouseexporter/clickhouse_exporter.go:30-51</span>：</p>
+<pre><code class="language-go">func (c *ckExporter) ConsumeTraces(ctx context.Context, td consumer.Traces) error {
+	tracesMap := make(map[loop_span.TTL]loop_span.SpanList)
+	for _, td := range td.TraceData {
+		ttl := td.TenantInfo.TTL          // 按数据保留时长（TTL）分组
+		tracesMap[ttl] = append(tracesMap[ttl], td.SpanList...)
+	}
+	for ttl, spans := range tracesMap {
+		c.traceRepo.InsertSpans(ctx, &repo.InsertTraceParam{Spans: spans, Tenant: td.Tenant, TTL: ttl})
+	}
+	return nil
+}</code></pre>
+                <div class="pitfall"><span class="t">⚠️ 按 TTL 分组写入的原因</span>
+                不同租户/不同套餐可能配置"数据保留 7 天"还是"保留 90 天"，ClickHouse 通常用<strong>不同的表或不同的分区策略</strong>来实现自动过期删除（TTL 是 ClickHouse 的原生特性）。写入前按 TTL 分组，就是为了把数据分别导向该进的那张表/分区，不然没法让 ClickHouse 自动清理过期数据。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>为什么落 ClickHouse，不是 MySQL</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：Trace 数据量有多大？</span>
+                一次实验跑 2000 条数据、每条触发好几次模型/工具调用，一天下来可能是千万级 Span。而且查询模式几乎全是"按时间范围 + 若干标签过滤，聚合统计或分页浏览"——这和 MySQL 擅长的"事务型、按主键点查"完全是两种负载。</div>
+                <div class="essence"><span class="t">💡 本质：OLTP vs OLAP，选对工具比优化错的工具重要</span>
+                MySQL 是 OLTP（在线交易处理）——擅长少量行的读写、强一致性、事务。ClickHouse 是 OLAP（在线分析处理）——列式存储，擅长"扫描海量行、按列聚合过滤"，正好匹配"Trace 检索"这种分析型查询。<strong>Coze Loop 的存储选型策略很清晰：业务实体（用户/数据集/实验元信息）用 MySQL，海量分析型数据（Trace/Span）用 ClickHouse。</strong></div>
+                <div class="baby"><span class="t">生活类比</span>
+                MySQL 像"银行柜台账本"——每一笔存取款都要精确记录、不能出错，但你不会一次查一亿笔交易。ClickHouse 像"超市的销售分析系统"——你不关心某一笔具体交易的每个细节,而是想快速回答"过去一周哪个品类卖得最好"这种要扫描海量记录才能回答的问题。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>查询链路：四层往下传，一层比一层"脏"</h1></div>
+            <div class="card">
+                <p>前端点一下"查询 Trace"，请求要经过四层，<code>ListSpans</code> 这个名字在每一层都出现，但含义逐层下沉：</p>
+                <div class="walk">
+                    <div class="r"><code>application/trace.go:163</code><span><code>TraceApplication.ListSpans</code>——鉴权（<code>CheckWorkspacePermission</code>）、请求校验、DTO→内部请求结构转换</span></div>
+                    <div class="r"><code>domain/trace/service/trace_service.go:1296</code><span><code>TraceServiceImpl.ListSpans</code>——构建过滤条件（<code>SpanEnv</code>/<code>FilterFields</code>），处理业务规则（分页/权限相关的平台过滤）</span></div>
+                    <div class="r"><code>infra/repo/trace.go:205</code><span><code>TraceRepoImpl.ListSpans</code>——根据租户选存储后端（<code>storageProvider.GetTraceStorage</code>），拿到具体的 <code>spanDao</code></span></div>
+                    <div class="r"><code>infra/repo/ck/spans.go</code><span>最底层 DAO——真正拼 ClickHouse SQL、执行查询、把行数据反序列化回 Span 结构</span></div>
+                </div>
+                <div class="essence"><span class="t">💡 为什么要挑一个 <code>storageProvider.GetTraceStorage</code>，而不是直连一个固定的 ClickHouse？</span>
+                这是为多租户、多存储后端预留的抽象——不同工作空间可能配置了不同的 ClickHouse 集群（比如企业版允许自建存储），<code>repo</code> 层通过 <code>StorageProvider</code> 这一层间接寻址，<strong>domain 层完全不知道底层是哪个具体集群</strong>，这正是 AGENTS.md 强调的"domain 定义接口，infra 实现接口，domain 绝不引用 infra"的具体体现——从 <code>ITraceService</code> 到 <code>ITraceRepo</code> 都是接口，实现细节全部封装在 infra。</div>
+                <div class="qa">
+                    <p class="q">👶 小白问：四层都叫 ListSpans，会不会读错层？</p>
+                    <p class="a">👨‍🏫 老师：这正是 DDD 分层的"统一语言"（Ubiquitous Language）思路——同一个业务概念在每一层都用同名方法表达，方便跨层追踪。<strong>读代码时看包路径（<code>application</code> / <code>domain/.../service</code> / <code>infra/repo</code>）比看方法名更重要</strong>，配合 IDE 的"跳转到定义"逐层往下点就不会迷路。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 + 预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Trace 和 Span 的关系是什么？靠哪个字段串成树？</li>
+                    <li>为什么 Trace 有两条上报路径（自有格式 + OTel 标准协议）？</li>
+                    <li>Ingestion 的 Receiver/Processor/Exporter 三段各做什么？</li>
+                    <li>为什么 Span 数据落 ClickHouse 而不是 MySQL？</li>
+                    <li>查询链路的四层分别叫什么，各自的职责边界在哪？</li>
+                </ul>
+                <div class="baby"><span class="t">🎵 记忆口诀</span>
+                「<strong>一次请求一个 Trace、每次调用一个 Span，兼容标准好接入，分析数据进 ClickHouse，四层同名不同职</strong>」——这条链路和 Day 13 的实验消费者流水线是同一种"分层 + 流水线"思维的两种应用。</div>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟（可选）</h3>
+<pre><code class="language-bash"># 1. 看 Span 的完整字段定义
+sed -n '157,190p' backend/modules/observability/domain/trace/entity/loop_span/span.go
+
+# 2. 找到三条上报路由
+grep -n "@router.*ingest\|@router.*opentelemetry" backend/api/handler/coze/loop/apis/observability_open_apiservice.go
+
+# 3. 看 ClickHouse Exporter 怎么按 TTL 分组写入
+sed -n '30,51p' backend/modules/observability/domain/trace/service/collector/exporter/clickhouseexporter/clickhouse_exporter.go
+
+# 4. 沿着 ListSpans 逐层跳转（用 IDE 的"跳转到定义"体验更好）
+grep -rn "func.*ListSpans(ctx" backend/modules/observability/</code></pre>
+                <div class="tip"><strong>明天预告 · Day 15</strong>：这几天我们一个模块一个模块地深入，明天要"退一步"看全局——精读 <code>api/api.go</code> 的 <code>Init</code> 函数，搞清楚 foundation→llm→prompt→data→evaluation↔observability 到底怎么被一行行代码组装起来的，认识 <code>lodataset</code>/<code>lotrace</code> 这类"本地客户端"的设计。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day13.html" style="color:var(--accent-cyan);">&larr; 上一天 Day 13</a>
+                <a href="coze-loop-day15.html" style="color:var(--accent-green);">下一天 · 跨模块组装图 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

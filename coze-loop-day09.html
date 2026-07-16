@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 09 · Prompt 读路径纵切 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#a5b4fc;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid var(--accent-green);background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:var(--accent-green);display:block;margin-bottom:4px}
+        .glossary{border-left:3px solid var(--accent-cyan);background:rgba(6,182,212,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .glossary b{color:var(--accent-cyan)}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)}
+        .anno b{color:var(--accent-orange)}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .chain{display:flex;flex-direction:column;gap:0;margin:14px 0}
+        .chain .cs{background:var(--bg-secondary);border:1px solid var(--border-color);border-left:4px solid var(--cc,#4f46e5);border-radius:8px;padding:11px 14px;position:relative}
+        .chain .cs h4{margin:0 0 3px;font-size:13.5px;color:var(--cc,#4f46e5);font-family:'SF Mono',monospace}
+        .chain .cs p{margin:0;font-size:12px;color:var(--text-secondary)}
+        .chain .arrow{text-align:center;font-size:16px;color:var(--text-muted);padding:2px 0}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">09</div>
+            <h2>Day 09</h2>
+            <p class="version">Prompt 读路径纵切 · 6 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 6 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 纵切一条完整链路</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Handler 层：入口与校验</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · Application 层：用户与权限</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · Domain 层：业务规则校验</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · Infra 层：事务写 MySQL</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · Entity：贯穿全链路的数据形态</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 今日小结 + 动手</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 20 天总目录</a></li>
+            <li><a href="coze-loop-day08.html" class="nav-link">&larr; 上一天</a></li>
+            <li><a href="coze-loop-day10.html" class="nav-link" style="color:var(--accent-green);">下一天 · Prompt 调试与 LLM Runtime &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 09 / 共 20 天 · 第 2 周 分层与契约</span>
+            <h1 class="part-title">Prompt 读路径纵切</h1>
+            <p class="part-desc">前 8 天分别拆开了路由、Handler、DDD 分层、IDL、Foundation 这些"横切面"。今天换个角度——跟着<strong>"新建一个 Prompt"</strong>这一件事，从最外层的 HTTP 请求一路纵向切到 MySQL 落库，把散落的知识点串成一条完整的因果链。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 2 周 分层与契约（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D7 IDL 契约</span><span class="sep">→</span>
+                <span class="st">D8 Foundation</span><span class="sep">→</span>
+                <span class="st on">D9 Prompt 读路径</span><span class="sep">→</span>
+                <span class="st">D10 调试与 LLM</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>纵切一条完整链路</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 为什么要"纵切"，不是"横切"？</span>
+                前 8 天每天讲一个"层"（路由层、Handler 层、DDD 分层……），像切蛋糕的横截面，你知道每一层长什么样，但可能没体会到"一个请求真实穿过所有层"是什么感觉。今天反过来，固定一件事（<code>POST /api/prompt/v1/prompts</code> 创建 Prompt），纵向切一刀，看请求怎么从上到下走完全程。</div>
+                <div class="essence"><span class="t">💡 完整链路总览</span>
+                <code>Handler(prompt_manage_service.go) → invokeAndRender → Application(manage.go CreatePrompt) → Domain Service(manage.go CreatePrompt) → Repo(infra/repo/manage.go) → MySQL 事务</code>——这条链路你在 Day 04-06 已经分段学过，今天把它拼成一整条。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Handler 层：入口与校验</h1></div>
+            <div class="card">
+                <p>回顾 Day 05，<span class="fileref">backend/api/handler/coze/loop/apis/prompt_manage_service.go</span> 里的 <code>CreatePrompt</code> 只有几行——真正的活儿都在 <code>invokeAndRender</code> 里完成，它会：①反序列化 HTTP Body 成 <code>CreatePromptRequest</code>；② 调用 Day 05 讲的"本地 Kitex 客户端" <code>local_promptmanageservice.go</code>；③ 把返回值序列化成 HTTP 响应。</p>
+                <div class="chain">
+                    <div class="cs" style="--cc:#4f46e5"><h4>1. Hertz Handler</h4><p>解析 HTTP → <code>CreatePromptRequest</code> 结构体（字段由 Day 07 IDL 生成）</p></div>
+                    <div class="arrow">↓</div>
+                    <div class="cs" style="--cc:#06b6d4"><h4>2. 本地 Kitex 客户端</h4><p>进程内直接函数调用（非网络 RPC），跳到 application 层</p></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>Application 层：用户与权限</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/modules/prompt/application/manage.go</span> 第 111 行开始的 <code>CreatePrompt</code>，是这条链路里"胶水代码最集中"的一层——它自己不做核心业务判断，而是负责把周边的用户/权限/审核串起来：</p>
+<pre><code class="language-go">func (app *PromptManageApplicationImpl) CreatePrompt(ctx context.Context, request *manage.CreatePromptRequest) (r *manage.CreatePromptResponse, err error) {
+	// 用户：从 ctx 取当前登录用户（Day 08 讲的 Session→User）
+	userID, ok := session.UserIDInCtx(ctx)
+	if !ok || lo.IsEmpty(userID) {
+		return r, errorx.NewByCode(prompterr.CommonInvalidParamCode, errorx.WithExtraMsg("User not found"))
+	}
+
+	// 权限：调用 Foundation 检查"这个用户在这个空间下能不能创建 Prompt"（Day 08 讲的三要素）
+	err = app.authRPCProvider.CheckSpacePermission(ctx, request.GetWorkspaceID(), consts.ActionWorkspaceCreateLoopPrompt)
+	if err != nil {
+		return r, err
+	}
+	// ... 组装 DTO，填充默认值 ...
+	promptDO := convertor.PromptDTO2DO(promptDTO)   // DTO → DO 转换
+
+	// 审核：调用内容安全审核
+	err = app.auditRPCProvider.AuditPrompt(ctx, promptDO)
+	if err != nil { return r, err }
+
+	// 真正创建：转交给 domain service
+	promptID, err = app.promptService.CreatePrompt(ctx, promptDO)
+	// ...
+}</code></pre>
+                <div class="glossary"><b>DTO vs DO</b>：<code>manage.CreatePromptRequest</code> 是 DTO（Data Transfer Object，接口层的数据形状，由 IDL 生成），<code>entity.Prompt</code> 是 DO（Domain Object，领域层的数据形状）。<code>convertor.PromptDTO2DO</code> 这一步转换，正是 Day 06 讲的"依赖方向"在数据层面的体现——领域层不认识、也不依赖接口层的数据结构。</div>
+                <div class="anno"><b>看到了吗</b>：这一层调用了 <code>authRPCProvider</code>（Day 08 的 Foundation 鉴权）和 <code>auditRPCProvider</code>（内容审核），但完全没有碰 MySQL——它是"业务用例的编排者"，不是"业务规则的实现者"。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>Domain 层：业务规则校验</h1></div>
+            <div class="card">
+                <p>继续往下，<span class="fileref">backend/modules/prompt/domain/service/manage.go</span> 第 338 行的 <code>PromptServiceImpl.CreatePrompt</code> 才是真正的"业务规则守门员"：</p>
+<pre><code class="language-go">func (p *PromptServiceImpl) CreatePrompt(ctx context.Context, promptDO *entity.Prompt) (promptID int64, err error) {
+	if promptDO == nil {
+		return 0, errorx.New("promptDO is empty")
+	}
+	// 业务规则：SpaceID 必须有效
+	if promptDO.SpaceID <= 0 {
+		return 0, errorx.New("spaceID is invalid: %d", promptDO.SpaceID)
+	}
+	// 业务规则：PromptKey 不能为空（它是 Prompt 的唯一业务标识）
+	if promptDO.PromptKey == "" {
+		return 0, errorx.New("promptKey is empty")
+	}
+	if promptDO.PromptBasic == nil {
+		return 0, errorx.New("promptBasic is empty")
+	}
+
+	// 解析并校验 snippet（Prompt 模板里可复用的片段）
+	err = p.parseAndValidateSnippets(ctx, promptDO)
+	if err != nil { return 0, err }
+
+	// 通过 repo 接口落库——注意 domain 只认 repo.IManageRepo 这个接口
+	promptID, err = p.manageRepo.CreatePrompt(ctx, promptDO)
+	return promptID, err
+}</code></pre>
+                <div class="essence"><span class="t">💡 为什么 Application 层的校验和 Domain 层的校验不一样？</span>
+                Application 层校验的是"这个请求有没有权限、有没有过审"——跟"谁在问"有关；Domain 层校验的是"这个 Prompt 本身是不是一个合法的 Prompt"（SpaceID 有效、PromptKey 非空）——跟"是什么"有关，与谁调用它无关。这正是 Day 06 讲的 DDD 分层的价值：把"谁能做"和"这件事本身合不合法"彻底分开，Domain 层的代码可以脱离 HTTP、脱离权限系统单独写单元测试。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>Infra 层：事务写 MySQL</h1></div>
+            <div class="card">
+                <p>最后一跳，<span class="fileref">backend/modules/prompt/infra/repo/manage.go</span> 里的 <code>ManageRepoImpl.CreatePrompt</code> 实现了 domain 定义的 <code>IManageRepo</code> 接口（Day 06 讲过的依赖倒置），真正把数据写进 MySQL：</p>
+<pre><code class="language-go">func (d *ManageRepoImpl) CreatePrompt(ctx context.Context, promptDO *entity.Prompt) (promptID int64, err error) {
+	promptID, err = d.idgen.GenID(ctx)     // 分布式 ID 生成器，不用数据库自增
+	// ... 如果有草稿也生成 draftID ...
+
+	return promptID, d.db.Transaction(ctx, func(tx *gorm.DB) error {   // 开事务：多张表要"全成功或全失败"
+		opt := db.WithTransaction(tx)
+
+		basicPO := convertor.PromptDO2BasicPO(promptDO)   // DO → PO（Persistent Object，数据库表结构）
+		basicPO.ID = promptID
+		err = d.promptBasicDAO.Create(ctx, basicPO, opt)  // 写 prompt_basic 表
+		if err != nil { return err }
+
+		if promptDO.PromptDraft != nil {
+			draftPO := convertor.PromptDO2DraftPO(promptDO)
+			draftPO.ID = draftID
+			draftPO.PromptID = promptID
+			err = d.promptDraftDAO.Create(ctx, draftPO, opt)  // 写 prompt_draft 表
+			if err != nil { return err }
+		}
+		// ... 如果有 snippet 还会写 relation 表 ...
+		return nil
+	})
+}</code></pre>
+                <div class="glossary"><b>DO → PO 又是一次转换</b>：<code>entity.Prompt</code>（DO）到这里又转成 <code>basicPO</code>（PO），对应 GORM 模型（<span class="fileref">infra/repo/mysql/gorm_gen/model/</span>）。全链路走过了 <strong>DTO → DO → PO</strong> 三种数据形状，每一层只认识自己这一层的形状，这就是分层架构"宁可多写一次 convertor，也不让上下层数据结构互相污染"的代价与好处。</div>
+                <div class="pitfall"><span class="t">⚠️ 坑：为什么要开事务？</span>
+                创建一个 Prompt 往往同时要写 <code>prompt_basic</code>（基本信息）和 <code>prompt_draft</code>（草稿内容）两张表，如果第一条成功、第二条失败，就会出现"有 Prompt 但没有草稿内容"的脏数据。<code>d.db.Transaction(ctx, func(tx *gorm.DB) error {...})</code> 保证这一组写入全部成功才提交，任何一步出错就整体回滚。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>Entity：贯穿全链路的数据形态</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/modules/prompt/domain/entity/prompt.go</span> 定义的 <code>Prompt</code> 结构体，是 Domain 层和 Infra 层之间传递的"通用语言"：</p>
+<pre><code class="language-go">type Prompt struct {
+	ID           int64         `json:"id"`
+	SpaceID      int64         `json:"space_id"`
+	PromptKey    string        `json:"prompt_key"`
+	PromptBasic  *PromptBasic  `json:"prompt_basic,omitempty"`   // 名称/描述/创建人等基础信息
+	PromptDraft  *PromptDraft  `json:"prompt_draft,omitempty"`   // 未提交的草稿内容
+	PromptCommit *PromptCommit `json:"prompt_commit,omitempty"`  // 已提交的版本内容
+}</code></pre>
+                <div class="baby"><span class="t">🍼 类比：Git 的工作区和提交历史</span>
+                <code>PromptDraft</code> 像 Git 的"工作区"（还没 commit，随时可能改动），<code>PromptCommit</code> 像"某一次 commit"（有版本号 <code>Version</code>、有提交说明 <code>Description</code>，不可再变）。这也解释了为什么创建 Prompt 时通常只填 <code>PromptDraft</code>——正式"发布"一个版本（生成 <code>PromptCommit</code>）是后续单独的动作，超出了今天的范围。</div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>CreatePrompt 完整链路的 5 个环节是什么？（Handler → Application → Domain Service → Repo → MySQL）</li>
+                    <li>Application 层和 Domain 层的校验分别管什么？（前者管"谁能做"，后者管"是否合法"）</li>
+                    <li>数据形状经过了几次转换？（DTO → DO → PO，各层各自的语言）</li>
+                    <li>为什么创建 Prompt 要开事务？（多表写入要保证原子性）</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟</h3>
+<pre><code class="language-bash"># 1. 顺着调用链搜索，验证今天讲的每一跳都是真的
+grep -n "func.*CreatePrompt" backend/modules/prompt/application/manage.go
+grep -n "func.*CreatePrompt" backend/modules/prompt/domain/service/manage.go
+grep -n "func.*CreatePrompt" backend/modules/prompt/infra/repo/manage.go
+
+# 2. 看 entity.Prompt 的完整定义
+sed -n '1,40p' backend/modules/prompt/domain/entity/prompt.go
+
+# 3. 看事务写入涉及了哪几张表（DAO）
+grep -n "DAO.Create" backend/modules/prompt/infra/repo/manage.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 10</strong>：Prompt 建好之后，用户还会在页面上"调试"它——输入变量、点击运行、看模型返回的结果。这背后是 <code>debug.go</code>/<code>execute.go</code> 加上 <code>llm</code> 模块的 Runtime，最终通过 Eino 框架把请求发给火山方舟等真正的大模型。明天专门拆开这条"调试执行链路"。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day08.html" style="color:var(--accent-cyan);">&larr; 上一天 · Foundation</a>
+                <a href="coze-loop-day10.html" style="color:var(--accent-green);">下一天 · Prompt 调试与 LLM Runtime &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

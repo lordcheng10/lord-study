@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 18 · IDL 端到端 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#818cf8;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid #22c55e;background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:#22c55e;display:block;margin-bottom:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0}.qa .q{color:#c084fc;font-weight:600}.qa .a{color:var(--text-secondary)}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .example{border:1px dashed var(--border-color);background:rgba(6,182,212,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#22d3ee;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .mod-map{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+        .mm{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:13px;border-left:3px solid var(--mc,#4f46e5)}
+        .mm h4{font-size:13.5px;margin:0 0 3px;color:var(--mc,#4f46e5);font-family:'SF Mono',monospace}.mm p{font-size:12px;color:var(--text-secondary);margin:5px 0 0}
+        @media(max-width:768px){.mod-map{grid-template-columns:1fr}}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#06b6d4;flex-shrink:0;min-width:190px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">18</div>
+            <h2>Day 18</h2>
+            <p class="version">IDL 端到端 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 换个心智模型看代码</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · 一个真实的 thrift 字段</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 变成了什么样的 Go 结构体</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 又变成了什么样的 TS 接口</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · 三份代码，一张对照表</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 真正改一个字段要跑哪些命令</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手 + 预告</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Coze Loop 总目录</a></li>
+            <li><a href="coze-loop-day17.html" class="nav-link">&larr; 上一天 Day 17</a></li>
+            <li><a href="coze-loop-day19.html" class="nav-link" style="color:var(--accent-green);">下一天 · 动手改一处小功能 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 18 / 共 20 天 · 第 4 周 前端与工程收官</span>
+            <h1 class="part-title">IDL 端到端：一个字段的三生三世</h1>
+            <p class="part-desc">这几天反复出现"从 IDL 生成代码"这句话，今天彻底拆开看：一个 Thrift 字段是怎么<strong>同时</strong>变成后端的 Go 结构体（<span class="fileref">backend/kitex_gen/</span>）和前端的 TypeScript 接口（<span class="fileref">frontend/packages/loop-base/api-schema/</span>）的。这是理解"前后端如何在一个大仓库里保持契约一致"的关键一天。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 4 周 前端与工程收官（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D16 前端壳与路由</span><span class="sep">→</span>
+                <span class="st">D17 前端分层</span><span class="sep">→</span>
+                <span class="st on">D18 IDL 端到端</span><span class="sep">→</span>
+                <span class="st">D19 动手改功能</span><span class="sep">→</span>
+                <span class="st">D20 收官串讲</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>换个心智模型看代码：谁是"源"，谁是"生成物"</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：Go 后端和 TypeScript 前端，语言都不一样，怎么保证"数据结构长得一样"？</span>
+                如果后端改了一个字段名，前端却没跟着改，轻则页面报错，重则数据错位却没有任何报错——这种"契约不一致"的 bug 排查起来最痛苦，因为编译器完全不知道两边约定的是同一份数据。</div>
+                <div class="essence"><span class="t">💡 本质：Thrift IDL 是唯一的"源"，Go 和 TS 代码都是"生成物"</span>
+                <span class="fileref">idl/thrift/</span> 目录才是这个仓库里"数据结构"和"接口"真正的定义地——不是 Go 代码,也不是 TS 代码。<strong>你永远应该先改 <code>.thrift</code> 文件，再跑生成脚本，让 Go 和 TS 的代码自动保持同步</strong>，而不是分别手写两份"看起来一样"的定义。</div>
+                <div class="baby"><span class="t">生活类比：图纸和成品</span>
+                Thrift 文件是"建筑图纸"，Go 结构体和 TS 接口是"按图纸盖出来的两栋楼"（一栋用 Go 材料盖、一栋用 TS 材料盖）。<strong>图纸改了，两栋楼都要重新按新图纸施工；反过来，你不会直接去其中一栋楼里砸墙改布局——那样另一栋楼就跟图纸不一致了。</strong></div>
+                <div class="glossary"><b>为什么叫 IDL</b>：Interface Definition Language（接口定义语言）——一种独立于任何编程语言的、用来描述数据结构和服务接口的格式。Thrift 是 Apache 的一种 IDL 实现（Facebook 开源），除此之外还有 Protocol Buffers（gRPC 用的那种）等类似方案。</div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>一个真实的 thrift 字段：Prompt 结构体</h1></div>
+            <div class="card">
+                <p><span class="fileref">idl/thrift/coze/loop/prompt/domain/prompt.thrift:3-24</span> 的真实内容：</p>
+<pre><code class="language-bash">struct Prompt {
+    1: optional i64 id (api.js_conv="true", go.tag='json:"id"')
+    2: optional i64 workspace_id (api.js_conv="true", go.tag='json:"workspace_id"')
+    3: optional string prompt_key
+    4: optional PromptBasic prompt_basic
+    5: optional PromptDraft prompt_draft
+    6: optional PromptCommit prompt_commit
+}
+
+struct PromptBasic {
+    1: optional string display_name
+    2: optional string description
+    3: optional string latest_version
+    6: optional i64 created_at (api.js_conv="true", go.tag='json:"created_at"')
+    9: optional PromptType prompt_type
+    10: optional SecurityLevel security_level
+}</code></pre>
+                <div class="essence"><span class="t">💡 每个字段的几个组成部分</span>
+                <code>1:</code> 是字段编号（Thrift 靠编号而不是名字做二进制序列化，<strong>字段编号一旦发布不能随便改/复用</strong>，这也是 <span class="fileref">ARCHITECTURE.md</span> 强调"向前兼容"的原因之一）；<code>optional</code> 表示可选；<code>i64</code>/<code>string</code> 是类型；括号里的 <code>(api.js_conv="true", go.tag=...)</code> 是<strong>注解（annotation）</strong>——专门给代码生成器看的"额外提示"，不影响 Thrift 协议本身。</div>
+                <div class="pitfall"><span class="t">⚠️ <code>api.js_conv="true"</code> 是本节最重要的一个注解，L04 会揭晓它的作用</span>
+                先记住：<code>id</code>、<code>workspace_id</code>、<code>created_at</code> 这几个 <code>i64</code> 字段都带了这个注解，而 <code>prompt_key</code>（string）没带。这不是随便加的——继续往下看就知道为什么。</div>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>变成了什么样的 Go 结构体</h1></div>
+            <div class="card">
+                <p>对应的生成代码在 <span class="fileref">backend/kitex_gen/coze/loop/prompt/domain/prompt/prompt.go:125-132</span>：</p>
+<pre><code class="language-go">type Prompt struct {
+	ID           *int64        `thrift:"id,1,optional" frugal:"1,optional,i64" json:"id" form:"id" query:"id"`
+	WorkspaceID  *int64        `thrift:"workspace_id,2,optional" frugal:"2,optional,i64" json:"workspace_id" form:"workspace_id" query:"workspace_id"`
+	PromptKey    *string       `thrift:"prompt_key,3,optional" frugal:"3,optional,string" form:"prompt_key" json:"prompt_key,omitempty" query:"prompt_key"`
+	PromptBasic  *PromptBasic  `thrift:"prompt_basic,4,optional" ...`
+	PromptDraft  *PromptDraft  `thrift:"prompt_draft,5,optional" ...`
+	PromptCommit *PromptCommit `thrift:"prompt_commit,6,optional" ...`
+}</code></pre>
+                <div class="essence"><span class="t">💡 三个映射规律，一眼就能看出来</span>
+                ① <code>optional i64 id</code> → <code>ID *int64</code>——<strong>optional 字段变成 Go 指针类型</strong>（用 nil 表示"没设置"，这和 Day 11 学的"用指针区分零值和未设置"是同一个道理）；② 字段编号 <code>1</code> 出现在生成的 <code>thrift:"id,1,optional"</code> tag 里，序列化/反序列化靠它而不是字段名；③ 字段名从 thrift 的 <code>snake_case</code>（<code>workspace_id</code>）变成了 Go 惯用的 <code>PascalCase</code>（<code>WorkspaceID</code>），但 <code>json</code> tag 保留了原始的 <code>snake_case</code>，保证和外部 JSON 交互时字段名不变。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>又变成了什么样的 TS 接口——揭晓 <code>js_conv</code> 之谜</h1></div>
+            <div class="card">
+                <p>对应生成代码在 <span class="fileref">frontend/packages/loop-base/api-schema/src/api/idl/prompt/domain/prompt.ts:3-21</span>：</p>
+<pre><code class="language-typescript">export interface Prompt {
+  id?: string,              // 注意：thrift 里是 i64，这里却是 string！
+  workspace_id?: string,    // 同样是 i64 → string
+  prompt_key?: string,      // thrift 本来就是 string，符合预期
+  prompt_basic?: PromptBasic,
+  prompt_draft?: PromptDraft,
+  prompt_commit?: PromptCommit,
+}
+export interface PromptBasic {
+  display_name?: string,
+  created_at?: string,      // 又是 i64 → string
+  prompt_type?: PromptType,
+}</code></pre>
+                <div class="pitfall"><span class="t">⚠️ 谜底：<code>api.js_conv="true"</code> 就是为了解决 JS 的大数字精度问题</span>
+                JavaScript 的 <code>number</code> 类型是双精度浮点数，安全整数范围只有 ±2^53，而 Thrift 的 <code>i64</code> 能表示到 ±2^63——一个正常的 ID（比如 <code>7378985812345678901</code>）如果直接转成 JS number，<strong>后几位精度会丢失，变成一个错误的数字</strong>。<code>api.js_conv="true"</code> 这个注解告诉代码生成器："这个 i64 字段传到前端时序列化成字符串，前端类型也生成成 <code>string</code>，绕开精度问题"。<strong>回头看 L02，没标注解的 <code>prompt_key</code> 本来就是 string，不受影响，所以不需要这个注解。</strong></div>
+                <div class="baby"><span class="t">一句话记住</span>
+                <strong>看到接口里 ID 字段是 string 类型不要奇怪——这几乎总是 <code>i64</code> 加了 <code>js_conv</code> 注解的产物，不是"设计成字符串"，而是"绕开 JS 数字精度陷阱"的工程手段。</strong>这是从真实大厂项目里学到的一个非常值得记住的细节。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>三份代码，一张对照表</h1></div>
+            <div class="card">
+                <table>
+                    <thead><tr><th>Thrift 源（<code>prompt.thrift</code>）</th><th>Go 生成（<code>kitex_gen/.../prompt.go</code>）</th><th>TS 生成（<code>api-schema/.../prompt.ts</code>）</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>1: optional i64 id (api.js_conv="true")</code></td><td><code>ID *int64</code></td><td><code>id?: string</code></td></tr>
+                        <tr><td><code>3: optional string prompt_key</code></td><td><code>PromptKey *string</code></td><td><code>prompt_key?: string</code></td></tr>
+                        <tr><td><code>4: optional PromptBasic prompt_basic</code></td><td><code>PromptBasic *PromptBasic</code></td><td><code>prompt_basic?: PromptBasic</code></td></tr>
+                        <tr><td>字段编号 <code>1 2 3 4...</code></td><td><code>thrift:"xxx,N,optional"</code> tag</td><td>（TS 不需要编号，编译期类型检查够用）</td></tr>
+                        <tr><td><code>optional</code></td><td>Go 指针类型 <code>*T</code></td><td>TS 可选属性 <code>?:</code></td></tr>
+                    </tbody>
+                </table>
+                <div class="essence"><span class="t">💡 <code>optional</code> 在三种语言里分别用什么机制表达"可能没有"</span>
+                这是个很好的"同一个概念，不同语言用最natural的方式表达"的例子：Thrift 用关键字 <code>optional</code>，Go 没有"可选"语法所以用指针 <code>nil</code> 代替，TypeScript 有原生的可选属性语法 <code>?:</code>。<strong>代码生成器的职责就是把 IDL 的抽象概念，翻译成每种目标语言里最惯用（idiomatic）的写法</strong>，而不是简单粗暴地都翻译成一种通用形式。</div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>真正改一个字段，要跑哪些命令</h1></div>
+            <div class="card">
+                <p>按 <span class="fileref">docs/guidance/idl-codegen-guide.md</span> 的真实流程（只展示命令，不要求你现在真的跑）：</p>
+<pre><code class="language-bash"># 1. 改 idl/thrift/ 下对应的 .thrift 文件（比如给 PromptBasic 加个新字段）
+
+# 2. 后端代码生成（在 backend/ 目录下）
+bash script/cloudwego/kitex_tool.sh   # Kitex (RPC) 代码生成 → backend/kitex_gen/
+bash script/cloudwego/hertz_tool.sh   # Hertz (HTTP) 代码生成 → backend/api/router_gen.go
+bash script/cloudwego/code_gen.sh     # 通用代码生成
+
+# 3. 前端类型生成（在 frontend/ 目录下）
+rush update-api                       # → frontend/packages/loop-base/api-schema/
+
+# 4. 如果新增了服务接口，重新生成依赖注入代码
+cd backend/modules/<domain>/application && wire
+
+# 5. 如果涉及数据库 schema 变更，还要跑 GORM 模型生成 + 手写 SQL 迁移</code></pre>
+                <div class="pitfall"><span class="t">⚠️ 绝对不能手改的文件</span>
+                <span class="fileref">backend/kitex_gen/</span>、<span class="fileref">backend/loop_gen/</span>、<span class="fileref">backend/api/router_gen.go</span>、所有 <span class="fileref">wire_gen.go</span>、<span class="fileref">frontend/packages/loop-base/api-schema/</span> 下的生成文件——<strong>这些文件顶部通常都带 "Code generated ... DO NOT EDIT" 注释</strong>（Day 15 见过 <code>lodataset</code> 的例子）。手改它们的后果：下次任何人跑一次生成脚本，你的改动会被无声覆盖，而且这个 bug 极难定位（"我明明改过这个文件，怎么又变回去了"）。</div>
+                <div class="qa">
+                    <p class="q">👶 小白问：CI 会检查这些吗？</p>
+                    <p class="a">👨‍🏫 老师：会。<span class="fileref">.github/workflows/idl.yaml</span> 专门在 IDL 变更时触发检查，<span class="fileref">.github/workflows/mysql-schema-check.yaml</span> 检查数据库 schema 变更的两处 SQL 目录（docker-compose 和 helm-chart）是否保持一致——Day 20 会完整过一遍所有 CI 工作流。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 + 预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>为什么 Thrift IDL 是"源"，Go/TS 代码是"生成物"？改需求应该先改哪个？</li>
+                    <li>Thrift 的 <code>optional</code> 分别在 Go 和 TS 里怎么表达？</li>
+                    <li>为什么 <code>id</code> 字段在 TS 里是 <code>string</code> 而不是 <code>number</code>？</li>
+                    <li>改一个字段，后端要跑哪几个脚本，前端要跑哪个命令？</li>
+                    <li>哪些文件/目录绝对不能手改，为什么？</li>
+                </ul>
+                <div class="baby"><span class="t">🎵 记忆口诀</span>
+                「<strong>Thrift 是图纸，两栋楼各自施工，optional 各显神通,大数字转字符串防精度坑，生成文件绝不手改</strong>」——理解了这条链路，你已经具备了在这个仓库里"正确修改一个接口字段"的完整认知。</div>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟（可选）</h3>
+<pre><code class="language-bash"># 1. 对照读三份代码，感受同一个字段在三种语言里的样子
+sed -n '3,24p' idl/thrift/coze/loop/prompt/domain/prompt.thrift
+sed -n '125,132p' backend/kitex_gen/coze/loop/prompt/domain/prompt/prompt.go
+sed -n '3,10p' frontend/packages/loop-base/api-schema/src/api/idl/prompt/domain/prompt.ts
+
+# 2. 找出所有带 js_conv 注解的字段，猜猜它们在 thrift 里是什么类型
+grep -rn "js_conv" idl/thrift/coze/loop/prompt/ | head -10
+
+# 3. 完整看一遍代码生成指南
+cat docs/guidance/idl-codegen-guide.md
+
+# 4. 找到所有"生成文件禁止手改"的提示
+grep -rn "DO NOT EDIT" backend/loop_gen/coze/loop/data/lodataset/*.go | head -3</code></pre>
+                <div class="tip"><strong>明天预告 · Day 19</strong>：光看不练不算学会——明天我们真的动手设计一次"改一处小功能"的方案：以理解/扩展 <code>ListPrompt</code> 的筛选条件为例，走一遍"该改哪一层、不该碰哪里、怎么保证不破坏现有接口"的完整决策过程。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day17.html" style="color:var(--accent-cyan);">&larr; 上一天 Day 17</a>
+                <a href="coze-loop-day19.html" style="color:var(--accent-green);">下一天 · 动手改一处小功能 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

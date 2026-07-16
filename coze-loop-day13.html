@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day 13 · 实验主链路 — Coze Loop 源码学习</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <style>
+        .ask{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .ask .t{font-weight:700;color:#f59e0b;display:block;margin-bottom:4px}
+        .essence{border-left:3px solid #4f46e5;background:rgba(79,70,229,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .essence .t{font-weight:700;color:#818cf8;display:block;margin-bottom:4px}
+        .baby{border-left:3px solid #22c55e;background:rgba(34,197,94,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .baby .t{font-weight:700;color:#22c55e;display:block;margin-bottom:4px}
+        .qa{border-left:3px solid #a855f7;background:rgba(168,85,247,.06);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .qa p{margin:5px 0}.qa .q{color:#c084fc;font-weight:600}.qa .a{color:var(--text-secondary)}
+        .pitfall{border-left:3px solid #ef4444;background:rgba(239,68,68,.07);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px}
+        .pitfall .t{font-weight:700;color:#f87171;display:block;margin-bottom:4px}
+        .fileref{display:inline-block;font-size:11px;background:rgba(79,70,229,.12);color:#a5b4fc;border:1px solid rgba(79,70,229,.35);border-radius:5px;padding:1px 7px;font-family:ui-monospace,monospace}
+        .example{border:1px dashed var(--border-color);background:rgba(6,182,212,.05);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px}
+        .example .t{font-weight:700;color:#22d3ee;display:block;margin-bottom:6px}
+        .example code{background:var(--bg-secondary);padding:1px 5px;border-radius:4px}
+        .journey{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;margin:6px 0 16px}
+        .journey .jt{font-size:11px;color:var(--text-muted);margin-bottom:8px;letter-spacing:.04em}
+        .journey .steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .journey .st{font-size:11.5px;padding:5px 10px;border-radius:20px;background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-muted);white-space:nowrap}
+        .journey .st.on{background:linear-gradient(135deg,#4f46e5,#06b6d4);color:#fff;border-color:transparent;font-weight:700}
+        .journey .sep{color:var(--text-muted);font-size:12px}
+        .svgbox{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+        .svgbox .cap{font-size:12px;color:var(--text-muted);text-align:center;margin-top:8px}
+        .anno{font-size:12px;color:var(--text-muted);margin:2px 0 12px;padding-left:12px;border-left:2px solid var(--border-color)} .anno b{color:var(--accent-orange)}
+        .mod-map{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+        .mm{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:13px;border-left:3px solid var(--mc,#4f46e5)}
+        .mm h4{font-size:13.5px;margin:0 0 3px;color:var(--mc,#4f46e5);font-family:'SF Mono',monospace}.mm p{font-size:12px;color:var(--text-secondary);margin:5px 0 0}
+        @media(max-width:768px){.mod-map{grid-template-columns:1fr}}
+        .walk{margin:10px 0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden}
+        .walk .r{display:flex;gap:10px;padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border-color)}
+        .walk .r:first-child{border-top:none}
+        .walk .r code{color:#06b6d4;flex-shrink:0;min-width:210px;font-size:11.5px}
+        .walk .r span{color:var(--text-secondary)}
+        .loopd{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:12px 4px}
+        .loopd .n{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:9px;padding:10px 12px;font-size:12px;text-align:center}
+        .loopd .n b{display:block;color:#818cf8;font-size:12.5px}.loopd .a{color:#06b6d4;font-weight:800;font-size:16px}
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">13</div>
+            <h2>Day 13</h2>
+            <p class="version">实验主链路 · 7 讲</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">本日 7 讲</li>
+            <li><a href="#l01" class="nav-link active" data-section="l01">L01 · 实验：三件套的组装线</a></li>
+            <li><a href="#l02" class="nav-link" data-section="l02">L02 · Experiment 实体拆解</a></li>
+            <li><a href="#l03" class="nav-link" data-section="l03">L03 · 创建到提交两步走</a></li>
+            <li><a href="#l04" class="nav-link" data-section="l04">L04 · 为什么要用 RocketMQ</a></li>
+            <li><a href="#l05" class="nav-link" data-section="l05">L05 · consumer.go 与六个消费者</a></li>
+            <li><a href="#l06" class="nav-link" data-section="l06">L06 · 一条数据的完整旅程</a></li>
+            <li><a href="#l07" class="nav-link" data-section="l07">L07 · 小结 + 动手 + 预告</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="coze-loop-tutorial.html" class="nav-link" style="color:var(--accent-cyan);">&larr; Coze Loop 总目录</a></li>
+            <li><a href="coze-loop-day12.html" class="nav-link">&larr; 上一天 Day 12</a></li>
+            <li><a href="coze-loop-day14.html" class="nav-link" style="color:var(--accent-green);">下一天 · Trace 观测 &rarr;</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">Day 13 / 共 20 天 · 第 3 周 数据与评测</span>
+            <h1 class="part-title">实验主链路：把题库、被测对象、裁判拧到一起</h1>
+            <p class="part-desc">评测集（题库）和评估器（裁判）都齐了，今天看谁把它们组装成一次可执行的"实验"（Experiment）——<span class="fileref">backend/modules/evaluation/application/experiment_app.go</span> 是应用层入口，真正一条条跑数据靠 <span class="fileref">backend/cmd/consumer.go</span> 启动的一串 RocketMQ 消费者。这是本仓库"异步任务"设计的最典型样本。</p>
+        </div>
+
+        <div class="journey">
+            <div class="jt">📍 你在整门课的位置 · 第 3 周 数据与评测（共 4 周 · 20 天）</div>
+            <div class="steps">
+                <span class="st">D11 Dataset</span><span class="sep">→</span>
+                <span class="st">D12 评测集+评估器</span><span class="sep">→</span>
+                <span class="st on">D13 实验主链路</span><span class="sep">→</span>
+                <span class="st">D14 Trace 观测</span><span class="sep">→</span>
+                <span class="st">D15 跨模块组装图</span>
+            </div>
+        </div>
+
+        <section id="l01" class="section">
+            <div class="section-header"><span class="section-number">L01</span><h1>实验：把三件套拧成一次可执行的任务</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：光有题库和裁判还不能自动跑起来</span>
+                你需要指定"用哪份题库（EvalSet）"、"测哪个对象（Target，可以是一个 Prompt、一个 Agent）"、"用哪几个裁判打分（Evaluators）"，然后让系统把题库里每一条数据都喂给被测对象、再喂给每个裁判，最后汇总出一份报告。这整个过程就是一次<strong>实验（Experiment）</strong>。</div>
+                <div class="essence"><span class="t">💡 本质：实验是一张"三元组的执行计划"</span>
+                <code>Experiment</code> 本身不产生新的评测能力，它只是把 Day 11/12 学到的三样东西"引用"起来，再加一层调度、重试、聚合统计的能力。</div>
+                <div class="baby"><span class="t">生活类比：一次"模拟考"</span>
+                评测集是"试卷"，被测对象是"考生"，评估器是"改卷老师"。实验就是"组织一场模拟考"这件事本身——发卷子、监考、收卷、送去改、汇总分数出成绩单。<strong>组织考试本身也是个需要调度的活儿：几百个考生同时考、改卷老师可能改得慢，得有个监考系统盯着进度。</strong></div>
+                <div class="svgbox">
+                    <svg viewBox="0 0 640 160" width="100%" style="max-width:640px;display:block;margin:0 auto" font-family="system-ui,sans-serif" font-size="12">
+                        <rect x="20" y="20" width="170" height="50" rx="8" fill="rgba(79,70,229,.15)" stroke="#818cf8"/><text x="105" y="50" fill="#a5b4fc" text-anchor="middle">EvalSet 题库</text>
+                        <rect x="235" y="20" width="170" height="50" rx="8" fill="rgba(6,182,212,.15)" stroke="#22d3ee"/><text x="320" y="50" fill="#67e8f9" text-anchor="middle">Target 被测对象</text>
+                        <rect x="450" y="20" width="170" height="50" rx="8" fill="rgba(245,158,11,.15)" stroke="#fbbf24"/><text x="535" y="50" fill="#fcd34d" text-anchor="middle">Evaluators 裁判组</text>
+                        <path d="M320 70 L320 100" stroke="#94a3b8" stroke-width="2" marker-end="url(#a1)"/>
+                        <path d="M105 70 L300 100" stroke="#94a3b8" stroke-width="2" marker-end="url(#a1)"/>
+                        <path d="M535 70 L340 100" stroke="#94a3b8" stroke-width="2" marker-end="url(#a1)"/>
+                        <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 Z" fill="#94a3b8"/></marker></defs>
+                        <rect x="220" y="105" width="200" height="40" rx="8" fill="rgba(34,197,94,.18)" stroke="#4ade80"/><text x="320" y="130" fill="#86efac" text-anchor="middle" font-weight="700">Experiment 实验</text>
+                    </svg>
+                    <div class="cap">Experiment 是引用三者、驱动执行的"胶水层"，不重新定义它们</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="l02" class="section">
+            <div class="section-header"><span class="section-number">L02</span><h1>Experiment 实体拆解</h1></div>
+            <div class="card">
+                <p><span class="fileref">backend/modules/evaluation/domain/entity/expt.go:150-198</span> 的真实字段：</p>
+<pre><code class="language-go">type Experiment struct {
+	ID          int64
+	SpaceID     int64
+	Name        string
+
+	EvalSetVersionID    int64                       // 引用哪个版本的题库
+	EvalSetID           int64
+	TargetType          EvalTargetType              // 被测对象类型：Prompt / Agent / …
+	TargetVersionID     int64
+	EvaluatorVersionRef []*ExptEvaluatorVersionRef  // 引用哪几个评估器版本（可以是多个裁判）
+	EvalConf            *EvaluationConfiguration    // 打分权重等配置
+
+	Status        ExptStatus  // Pending / Processing / Success / Failed / Terminated …
+	LatestRunID   int64       // 支持"重跑"，每次跑生成一个 RunID
+
+	TriggerType string      // manual / openapi / schedule —— 谁触发的
+	Stats           *ExptStats           // 实时统计：跑了多少、成功多少
+	AggregateResult *ExptAggregateResult // 最终聚合分数
+}</code></pre>
+                <div class="essence"><span class="t">💡 全部"引用 ID"，不复制数据</span>
+                注意 <code>EvalSetVersionID</code>、<code>TargetVersionID</code>、<code>EvaluatorVersionRef</code> 全是 ID 引用，不是把题库/裁判的内容拷贝一份进实验表——这正是 Day 11/12 强调"版本号不可变"的价值：<strong>实验只要存一个版本号，就能保证下次重新查询时数据不会变，不需要靠"复制一份快照"来防止篡改。</strong></div>
+                <table>
+                    <thead><tr><th>状态</th><th>含义</th><th>是否终态</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>Pending</code></td><td>已创建，排队等待调度</td><td>否</td></tr>
+                        <tr><td><code>Processing</code></td><td>正在跑</td><td>否</td></tr>
+                        <tr><td><code>Terminating</code> / <code>Draining</code></td><td>正在停止中（<span class="fileref">expt_run.go:75</span> 判定为"停止中"）</td><td>否</td></tr>
+                        <tr><td><code>Success</code> / <code>Failed</code> / <code>Terminated</code> / <code>SystemTerminated</code></td><td>跑完了（<span class="fileref">expt_run.go:79</span> 判定为"终态"）</td><td>是</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="l03" class="section">
+            <div class="section-header"><span class="section-number">L03</span><h1>创建到提交：两个接口两步走</h1></div>
+            <div class="card">
+                <p><span class="fileref">experiment_app.go:125</span> 的 <code>CreateExperiment</code> 和 <span class="fileref">experiment_app.go:467</span> 的 <code>SubmitExperiment</code> 分工明确：</p>
+                <div class="walk">
+                    <div class="r"><code>CreateExperiment</code><span>只做"登记"：解析评估器版本 ID 列表、去重、组装 Experiment 记录，状态是 Pending，<strong>不真正开始跑数据</strong></span></div>
+                    <div class="r"><code>SubmitExperiment</code><span>做校验（评估器不能重复、条目数不超过 100）+ 鉴权，内部再调 CreateExperiment 逻辑，然后<strong>真正投递调度事件，让实验开始跑</strong></span></div>
+                </div>
+                <div class="baby"><span class="t">为什么要拆两步？</span>
+                这和 Day 12 讲的 Run/Debug 拆分是同一种思路——"先攒草稿、再正式提交"在这个仓库里反复出现（数据集有草稿/版本、评估器有草稿/提交、实验有创建/提交）。<strong>好处是用户可以先配置好参数存个草稿，检查无误后再点击"开始运行"，避免误触发一次昂贵的批量调用。</strong></div>
+                <div class="pitfall"><span class="t">⚠️ <code>SubmitExperiment</code> 里的硬编码上限</span>
+                <span class="fileref">experiment_app.go:472-474</span>：<code>if len(req.ItemIds) > 100 { return error }</code>——这是防止用户一次性点"只跑这些条目"选了过多数据导致单次请求过大/调度压力过大的保护性上限。读源码时留意这类"看似随意的数字"，它们通常是真实压测/事故后加上的安全阀。</div>
+            </div>
+        </section>
+
+        <section id="l04" class="section">
+            <div class="section-header"><span class="section-number">L04</span><h1>为什么实验要用 RocketMQ，而不是直接同步跑</h1></div>
+            <div class="card">
+                <div class="ask"><span class="t">🤔 痛点：一次实验可能要跑几千条数据 × 好几个裁判</span>
+                假设题库有 2000 条数据，配了 3 个评估器——那就是 2000 次"调被测对象"+最多 6000 次"调评估器打分"。每次调用可能是一次大模型请求，动辄几百毫秒到几秒。<strong>如果同步跑完再返回，一次 HTTP 请求要扛住几十分钟——网关、浏览器都受不了。</strong></div>
+                <div class="essence"><span class="t">💡 本质：把"大批量、慢、可能失败重试"的活拆成消息，交给后台慢慢消化</span>
+                <code>SubmitExperiment</code> 只是往 RocketMQ 扔一条"实验调度"消息就立刻返回；真正"跑一条数据"、"跑完一条后算聚合分"、"实验该结束了"分别对应不同的消费者，各自独立、可以水平扩容、可以单独重试失败的那一条，不会因为第 1999 条失败就让前 1998 条也白跑。</div>
+                <div class="baby"><span class="t">生活类比：流水线 而不是 一个人从头做到尾</span>
+                想象工厂加工 2000 个零件：不是一个工人从原料到成品全程盯着（那样任何一步出错都要重新等），而是分成"下料工位""打磨工位""质检工位"，零件在工位间流转，每个工位专心做自己的事、出错了只重做那一个零件。RocketMQ 就是这些工位之间传递零件的"传送带"。</div>
+                <div class="glossary"><b>为什么是 RocketMQ 而不是 Redis 队列/内存 channel？</b> RocketMQ 提供了"消息持久化"（服务重启不丢消息）、"消费失败自动重试"、"多消费者组水平扩容"这些内存队列做不到（或做起来很脆弱）的能力，这正是"跑几千次可能失败的外部调用"这种场景最需要的。</div>
+            </div>
+        </section>
+
+        <section id="l05" class="section">
+            <div class="section-header"><span class="section-number">L05</span><h1>consumer.go 与六个消费者：谁负责哪一步</h1></div>
+            <div class="card">
+                <p>服务入口 <span class="fileref">backend/cmd/consumer.go</span> 启动一个独立进程，专门跑消息消费者（和 HTTP 服务是两个不同的可执行程序）：</p>
+<pre><code class="language-go">func MustInitConsumerWorkers(
+	cfactory conf.IConfigLoaderFactory,
+	mqFactory mq.IFactory,
+	experimentApplication exptapp.IExperimentApplication,
+	datasetApplication dataapp.IJobRunMsgHandler,   // 记得 Day 11 的 Job？消费者就是它的下游
+	...
+) []mq.IConsumerWorker {
+	workers, err := evalconsumer.NewConsumerWorkers(loader, experimentApplication, publisher)
+	res = append(res, workers...)
+	workers, err = dataconsumer.NewConsumerWorkers(cfactory, datasetApplication)  // Day 11 的数据导入导出也在这里消费
+	...
+}</code></pre>
+                <p>真正的六个实验消费者在 <span class="fileref">backend/modules/evaluation/infra/mq/rocket/consumer/consumer.go:25-32</span>：</p>
+                <div class="mod-map">
+                    <div class="mm" style="--mc:#4f46e5"><h4>ExptSchedulerEventConsumer</h4><p>接到"开始跑实验"的调度事件，把题库条目拆分成一条条子任务再发出去。</p></div>
+                    <div class="mm" style="--mc:#06b6d4"><h4>ExptRecordEvalEventConsumer</h4><p>真正"跑一条数据"：调被测对象拿结果，再调评估器打分，写入结果表。</p></div>
+                    <div class="mm" style="--mc:#f59e0b"><h4>ExptAggrCalculateEventConsumer</h4><p>某条/若干条跑完后，重新计算实验的聚合统计（平均分、通过率等）。</p></div>
+                    <div class="mm" style="--mc:#22c55e"><h4>ExptTurnResultFilterEventConsumer</h4><p>维护结果的筛选加速索引，方便前端"按分数筛选"能快速查询。</p></div>
+                    <div class="mm" style="--mc:#ec4899"><h4>ExptExportEventConsumer</h4><p>把实验结果导出成 CSV，异步生成下载文件（大文件同理不能同步等）。</p></div>
+                    <div class="mm" style="--mc:#a855f7"><h4>ExptLifecycleEventConsumer</h4><p>处理实验生命周期事件（开始/结束/终止），还负责失败时的 webhook 重试通知。</p></div>
+                </div>
+                <div class="qa">
+                    <p class="q">👶 小白问：这六个是不是一个套着一个链式调用？</p>
+                    <p class="a">👨‍🏫 老师：对，是一条<strong>事件驱动的流水线</strong>：Scheduler 拆任务 → 发消息 → RecordEval 消费一条条任务 → 每条跑完发"该更新统计了"的事件 → AggrCalculate 消费更新统计 → 全部跑完触发 Lifecycle 事件收尾。<strong>每个消费者只关心"收到什么消息、该干什么活、干完发什么新消息"，彼此不直接调用对方的函数</strong>，这正是消息驱动架构和"直接函数调用"最大的区别。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="l06" class="section">
+            <div class="section-header"><span class="section-number">L06</span><h1>一条数据的完整旅程（动态视角）</h1></div>
+            <div class="card">
+                <div class="baby"><span class="t">把自己想象成题库里的第 1 条数据</span>
+                跟着下面这条线走一遍，比记住六个消费者的名字更重要：</div>
+                <div class="loopd">
+                    <span class="n"><b>用户点提交</b></span><span class="a">→</span>
+                    <span class="n"><b>Scheduler 拆任务</b></span><span class="a">→</span>
+                    <span class="n"><b>RecordEval 调 Target</b></span><span class="a">→</span>
+                    <span class="n"><b>RecordEval 调 Evaluator</b></span><span class="a">→</span>
+                    <span class="n"><b>写 ExptTurnResult</b></span><span class="a">→</span>
+                    <span class="n"><b>AggrCalculate 更新统计</b></span><span class="a">→</span>
+                    <span class="n"><b>全部完成→Lifecycle 收尾</b></span>
+                </div>
+                <p>落库的核心结果表是 <code>ExptTurnResult</code>（<span class="fileref">domain/entity/expt_result.go:292-306</span>），一条记录对应"一条数据在一次实验里的评测结果"：</p>
+<pre><code class="language-go">type ExptTurnResult struct {
+	ExptID           int64
+	ExptRunID        int64      // 支持重跑，每次跑对应不同 RunID
+	ItemID           int64
+	TurnID           int64      // 多轮对话场景下，第几轮
+	Status           int32
+	TargetResultID   int64                    // 被测对象这一条的回答
+	EvaluatorResults *EvaluatorResults         // 每个评估器给的分数
+	WeightedScore    *float64                 // 加权后的最终分（指针：nil=未算，非 nil=已算）
+}</code></pre>
+                <div class="essence"><span class="t">💡 <code>*float64</code> 而不是 <code>float64</code> 的深意</span>
+                <code>WeightedScore</code> 用指针类型是为了区分"分数是 0"和"还没算出分数"两种情况——如果用普通 <code>float64</code>，初始值默认就是 0，你没法区分"真的打了 0 分"还是"压根还没跑完"。<strong>这是 Go 里一个常见但容易被忽视的坑：需要"三态"语义（有值A/有值B/无值）时，裸值类型天然只能表示两态，得用指针或额外的状态字段。</strong></div>
+            </div>
+        </section>
+
+        <section id="l07" class="section">
+            <div class="section-header"><span class="section-number">L07</span><h1>今日小结 + 动手 + 预告</h1></div>
+            <div class="card highlight-card">
+                <h3>🧠 今天你应该能回答</h3>
+                <ul>
+                    <li>Experiment 实体本身存的是数据还是"引用关系"？为什么？</li>
+                    <li>CreateExperiment 和 SubmitExperiment 各自做什么，为什么要拆开？</li>
+                    <li>为什么实验要用 RocketMQ 而不是同步循环跑完？</li>
+                    <li>六个消费者分别负责实验生命周期的哪一段？</li>
+                    <li><code>WeightedScore</code> 为什么用指针类型？</li>
+                </ul>
+                <div class="baby"><span class="t">🎵 记忆口诀</span>
+                「<strong>三件套引用不复制、创建提交两步走、大批量慢活走异步、六个消费者接力跑</strong>」——这是本仓库"异步任务"设计的最完整样本，Day 14 的 Trace 上报、Day 11 的数据导入都是这个思路的简化版。</div>
+            </div>
+            <div class="card">
+                <h3>✋ 动手 5 分钟（可选）</h3>
+<pre><code class="language-bash"># 1. 看实验状态机的完整枚举
+grep -n "ExptStatus_" backend/modules/evaluation/domain/entity/expt.go
+
+# 2. 看六个消费者是怎么注册的
+sed -n '19,33p' backend/modules/evaluation/infra/mq/rocket/consumer/consumer.go
+
+# 3. 找到独立的消费者进程入口
+cat backend/cmd/consumer.go
+
+# 4. 看结果表的真实字段
+grep -n "type ExptTurnResult struct" -A20 backend/modules/evaluation/domain/entity/expt_result.go</code></pre>
+                <div class="tip"><strong>明天预告 · Day 14</strong>：实验跑的时候，被测对象和评估器内部到底发生了什么？我们需要"看得见"每一次模型调用——今天认识 Trace/Span 可观测性模块，看 SDK 上报的一条 Span 怎么流进 ClickHouse，又怎么被前端查出来画成火焰图。</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:24px;">
+                <a href="coze-loop-day12.html" style="color:var(--accent-cyan);">&larr; 上一天 Day 12</a>
+                <a href="coze-loop-day14.html" style="color:var(--accent-green);">下一天 · Trace 观测 &rarr;</a>
+            </div>
+        </section>
+    </main>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            hljs.highlightAll();
+            const links = document.querySelectorAll('.nav-link[data-section]');
+            const sections = document.querySelectorAll('section[id]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-40% 0px -55% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>

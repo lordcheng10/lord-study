@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coze Loop 源码学习 · 20 天总目录（AI Agent 开发运维平台）</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .content { max-width: 1180px; }
+        /* 分层架构动画 */
+        .arch-anim { position:relative; display:flex; flex-direction:column; gap:9px; padding:18px; margin:10px 0 4px;
+            background:radial-gradient(120% 120% at 50% 0%, rgba(79,70,229,.08), transparent 70%); border-radius:14px; }
+        .arch-row { position:relative; border:1px solid var(--lc,var(--border-color)); border-radius:11px; padding:12px 16px;
+            background:var(--bg-card); overflow:hidden; transition:transform .25s,box-shadow .25s; }
+        .arch-row:hover { transform:translateY(-3px); box-shadow:0 10px 26px rgba(0,0,0,.35); }
+        .arch-row::before { content:''; position:absolute; inset:0;
+            background:linear-gradient(90deg,transparent,var(--glow,rgba(79,70,229,.12)),transparent);
+            transform:translateX(-100%); animation:sweep 4.5s linear infinite; animation-delay:var(--d,0s); }
+        @keyframes sweep { 0%{transform:translateX(-100%)} 60%,100%{transform:translateX(100%)} }
+        .arch-row .lbl { font-size:11px; font-weight:800; letter-spacing:.06em; color:var(--lc); margin-bottom:7px; position:relative; }
+        .arch-row .boxes { display:flex; gap:7px; flex-wrap:wrap; position:relative; }
+        .arch-row .b { flex:1; min-width:110px; text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color);
+            border-radius:7px; padding:8px 9px; font-size:12px; color:var(--text-secondary); }
+        .arch-row .b strong { display:block; color:var(--text-primary); font-size:12.5px; margin-bottom:2px; }
+        .LA{--lc:#4f46e5;--glow:rgba(79,70,229,.16)} .LB{--lc:#06b6d4;--glow:rgba(6,182,212,.16)}
+        .LC{--lc:#8b5cf6;--glow:rgba(139,92,246,.14)} .LD{--lc:#22c55e;--glow:rgba(34,197,94,.12)}
+        .flow-dot { position:absolute; left:50%; width:10px; height:10px; margin-left:-5px; border-radius:50%; background:#fff;
+            box-shadow:0 0 10px 3px rgba(79,70,229,.85); animation:fall 3.6s cubic-bezier(.6,0,.4,1) infinite; z-index:3; opacity:0; }
+        @keyframes fall { 0%{top:6%;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{top:94%;opacity:0} }
+        /* 6 模块地图 */
+        .mod6{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+        .m6{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:10px;padding:13px;border-left:3px solid var(--mc,#4f46e5)}
+        .m6 h4{font-size:13.5px;margin:0 0 3px;color:var(--mc,#4f46e5);font-family:'SF Mono',monospace}
+        .m6 p{font-size:12px;color:var(--text-secondary);margin:5px 0 0}
+        @media(max-width:768px){.mod6{grid-template-columns:1fr 1fr}}
+        @media(max-width:520px){.mod6{grid-template-columns:1fr}}
+        .week-bar { display:flex; align-items:center; gap:12px; margin:36px 0 14px; padding-left:2px; }
+        .week-bar .wk { width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+        .week-bar h2 { font-size:17px; font-weight:700; margin:0; } .week-bar span { font-size:12px; color:var(--text-muted); }
+        .day-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+        .day-card { display:flex; flex-direction:column; gap:8px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:18px; text-decoration:none; transition:transform .2s,border-color .2s,box-shadow .2s; }
+        .day-card:hover { transform:translateY(-4px); border-color:rgba(79,70,229,.45); box-shadow:0 12px 34px rgba(79,70,229,.12); }
+        .day-card .top { display:flex; align-items:center; gap:10px; }
+        .day-card .num { width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;font-family:'SF Mono',monospace; }
+        .day-card h3 { font-size:15px; font-weight:700; color:var(--text-primary); margin:0; line-height:1.35; }
+        .day-card p { font-size:12.5px; color:var(--text-secondary); margin:0; line-height:1.6; flex:1; }
+        .day-card .foot { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+        .day-card .mins { font-size:11px; color:var(--text-muted); }
+        .day-card .go { font-size:12px; font-weight:600; color:#06b6d4; }
+        .day-card.soon { opacity:.55; cursor:default; }
+        .day-card.soon:hover { transform:none; border-color:var(--border-color); box-shadow:none; }
+        .day-card.soon .go { color:var(--text-muted); }
+        .badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; background:rgba(34,197,94,.12); color:var(--accent-green); }
+    </style>
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">CL</div>
+            <h2>Coze Loop</h2>
+            <p class="version">AI Agent 开发运维平台 · 20 天源码学习</p>
+        </div>
+        <ul class="nav-list">
+            <li class="nav-group-title">总目录</li>
+            <li><a href="#intro" class="nav-link active">开篇 · 这是个什么平台</a></li>
+            <li><a href="#arch" class="nav-link">6 模块架构总图</a></li>
+            <li><a href="#how" class="nav-link">怎么用这份教程</a></li>
+            <li class="nav-group-title">第 1 周 · 项目全景与部署</li>
+            <li><a href="#week1" class="nav-link">Day 01 - 05</a></li>
+            <li class="nav-group-title">第 2 周 · 分层与契约</li>
+            <li><a href="#week2" class="nav-link">Day 06 - 10</a></li>
+            <li class="nav-group-title">第 3 周 · 评测与观测</li>
+            <li><a href="#week3" class="nav-link">Day 11 - 15</a></li>
+            <li class="nav-group-title">第 4 周 · 前端与收官</li>
+            <li><a href="#week4" class="nav-link">Day 16 - 20</a></li>
+            <li class="nav-group-title">导航</li>
+            <li><a href="index.html" class="nav-link" style="color:var(--accent-cyan);">&larr; 返回博客首页</a></li>
+        </ul>
+    </nav>
+    <button class="sidebar-toggle" id="sidebarToggle">&#9776;</button>
+
+    <main class="content" id="content">
+        <div class="part-header">
+            <span class="part-label">源码深度学习 · 零基础友好</span>
+            <h1 class="part-title">Coze Loop 源码学习</h1>
+            <p class="part-desc">20 天 · 每天 30 分钟 · 逐层读懂字节跳动开源的 AI Agent <strong>开发运维（DevOps）平台</strong> Coze Loop——Prompt 工程、评测（Evaluation）、可观测性（Observability）三大能力，全部从真实源码讲起。</p>
+        </div>
+
+        <section id="intro" class="section">
+            <div class="section-header"><span class="section-number">00</span><h1>开篇 · 这是个什么平台</h1></div>
+            <div class="card">
+                <p><strong>Coze Loop</strong> 不是"搭 Agent 的地方"，而是"<strong>让 Agent 变得更好用、更靠谱</strong>"的工程化平台。如果说 <strong>Coze Studio</strong> 是"画布 + 搭建 Agent"的地方，<strong>Coze Loop</strong> 就是"给 Agent 做体检、调优、上线后持续监控"的地方——两者定位完全不同，经常被新人搞混。</p>
+                <div class="card highlight-card" style="margin:14px 0;">
+                    <p style="margin:0;font-size:15px;">🎯 一句话：Coze Loop 帮你把"写 Prompt / 跑评测 / 看 Trace 排障"这三件 AI 应用开发中最花时间的事，做成一套<strong>全生命周期管理</strong>的平台——从"随手改改 Prompt"到"上线后每一次调用都能追溯"。</p>
+                </div>
+                <p>它有<strong>三大核心能力</strong>，对应 6 个后端业务模块：</p>
+                <div class="feature-grid">
+                    <div class="feature-item"><div class="feature-icon">✍️</div><h4>Prompt 开发</h4><p>Prompt 的创建、版本管理、在线调试，边改边看模型真实反馈。</p></div>
+                    <div class="feature-item"><div class="feature-icon">📊</div><h4>Evaluation 评测</h4><p>用数据集 + 评估器批量跑实验，量化"这版 Prompt/Agent 到底好不好"。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🔍</div><h4>Observability 观测</h4><p>基于 Trace 的全链路追踪，上线后每一次调用都能回放排查。</p></div>
+                    <div class="feature-item"><div class="feature-icon">🧱</div><h4>Foundation 地基</h4><p>用户、空间、鉴权——所有业务模块的统一身份与权限底座。</p></div>
+                </div>
+                <div class="info-box"><strong>零基础也别怕</strong>：前 5 天完全不假设你懂 DDD/Hertz/Kitex/Thrift。我们从"这是什么、怎么跑起来"讲起，一步步拆到路由、Handler、分层架构，再纵切一条完整业务链路，最后进入评测和观测这些更"平台特色"的能力。</div>
+            </div>
+        </section>
+
+        <section id="arch" class="section">
+            <div class="section-header"><span class="section-number">01</span><h1>6 模块架构总图（动起来看）</h1></div>
+            <div class="card">
+                <p>Coze Loop 后端遵循 <strong>DDD（领域驱动设计）分层</strong>，业务被拆成 6 个独立模块，外面统一套一层网关。下图那颗<strong>发光小球</strong>模拟"一次 HTTP 请求从网关落到具体业务模块"的路径：</p>
+                <div class="arch-anim">
+                    <div class="flow-dot"></div>
+                    <div class="arch-row LA" style="--d:0s"><div class="lbl">网关层 &nbsp;·&nbsp; backend/api/（Hertz）</div><div class="boxes">
+                        <div class="b"><strong>router_gen.go</strong>IDL 生成的路由</div>
+                        <div class="b"><strong>middleware</strong>Session / Locale</div>
+                        <div class="b"><strong>handler.go</strong>Handler 桥接层</div>
+                        <div class="b"><strong>本地 Kitex 客户端</strong>进程内转发</div>
+                    </div></div>
+                    <div class="arch-row LB" style="--d:.6s"><div class="lbl">业务模块层 &nbsp;·&nbsp; backend/modules/</div><div class="boxes">
+                        <div class="b"><strong>prompt</strong>提示词开发</div>
+                        <div class="b"><strong>evaluation</strong>评测实验</div>
+                        <div class="b"><strong>data</strong>数据集</div>
+                        <div class="b"><strong>observability</strong>Trace 观测</div>
+                    </div></div>
+                    <div class="arch-row LC" style="--d:1.2s"><div class="lbl">地基模块 &nbsp;·&nbsp; foundation / llm</div><div class="boxes">
+                        <div class="b"><strong>foundation</strong>用户/空间/鉴权</div>
+                        <div class="b"><strong>llm</strong>多模型协议适配</div>
+                        <div class="b"><strong>Eino</strong>LLM 调用框架</div>
+                        <div class="b"><strong>Wire</strong>依赖注入组装</div>
+                    </div></div>
+                    <div class="arch-row LD" style="--d:1.8s"><div class="lbl">基础设施 &nbsp;·&nbsp; infra/</div><div class="boxes">
+                        <div class="b"><strong>MySQL</strong>业务数据</div>
+                        <div class="b"><strong>Redis</strong>缓存/限流</div>
+                        <div class="b"><strong>ClickHouse</strong>Trace 存储</div>
+                        <div class="b"><strong>MinIO / RocketMQ</strong>文件/消息</div>
+                    </div></div>
+                </div>
+                <p>6 个业务模块各自的职责边界（后面 20 天会逐一拆开）：</p>
+                <div class="mod6">
+                    <div class="m6" style="--mc:#4f46e5"><h4>prompt</h4><p>Prompt 创建、版本、调试——Day 05/09/10 的主角。</p></div>
+                    <div class="m6" style="--mc:#06b6d4"><h4>evaluation</h4><p>评测集、评估器、实验——Day 12/13 的主角。</p></div>
+                    <div class="m6" style="--mc:#8b5cf6"><h4>data</h4><p>数据集管理，评测的"原材料"——Day 11 的主角。</p></div>
+                    <div class="m6" style="--mc:#f59e0b"><h4>observability</h4><p>Trace 全链路追踪与查询——Day 14 的主角。</p></div>
+                    <div class="m6" style="--mc:#22c55e"><h4>foundation</h4><p>用户/空间/鉴权，全平台地基——Day 08 的主角。</p></div>
+                    <div class="m6" style="--mc:#ec4899"><h4>llm</h4><p>基于 Eino 的多模型协议适配——Day 10 的主角。</p></div>
+                </div>
+                <div class="tip"><strong>为什么拆成 6 个模块？</strong> 每个模块内部还会再分 <code>application / domain / infra</code> 三层（Day 06 细讲），模块之间不直接互调，而是通过"本地 Kitex 客户端"（Day 05）互相访问，这样每个模块可以独立开发、独立测试，边界清晰。</div>
+            </div>
+        </section>
+
+        <section id="how" class="section">
+            <div class="section-header"><span class="section-number">02</span><h1>怎么用这份教程</h1></div>
+            <div class="feature-grid">
+                <div class="feature-item"><div class="feature-icon">⏱️</div><h4>每天 30 分钟</h4><p>一天一个独立页面，跟着"今日小结 + 动手 5 分钟"收尾再关。</p></div>
+                <div class="feature-item"><div class="feature-icon">👶</div><h4>零基础友好</h4><p>不假设你懂 DDD/Hertz/Kitex/Thrift，每个术语首次出现都有大白话解释。</p></div>
+                <div class="feature-item"><div class="feature-icon">📍</div><h4>真实路径引用</h4><p>关键代码标 <code>文件路径</code>，可在真源码里跳转对照。</p></div>
+            </div>
+            <div class="tip"><strong>一条主线</strong>：整份教程围绕"<strong>从项目全景，到跑通一条完整业务链路，再到评测/观测这些平台特色能力</strong>"展开——第 1 周建立心智并本地跑起来，第 2 周纵向切开一条 Prompt 请求的完整生命周期，第 3 周进入评测与可观测性，第 4 周补齐前端视角并收官串讲。</div>
+        </section>
+
+        <!-- W1 -->
+        <div class="week-bar" id="week1"><div class="wk" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">W1</div><h2>第 1 周 · 项目全景与部署</h2><span>它是什么、怎么跑起来、进程如何启动</span></div>
+        <div class="day-grid">
+            <a class="day-card" href="coze-loop-day01.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">01</div><h3>项目全景：它是什么</h3></div><p>Coze Loop = AI Agent 开发运维平台，和 Coze Studio 的区别，6 大模块与目录结构。</p><div class="foot"><span class="mins">≈30 min · 已就绪 <span class="badge">NEW</span></span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day02.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">02</div><h3>Docker 跑起来</h3></div><p>docker-compose 一键部署，配火山方舟模型，MySQL/Redis/ClickHouse/MinIO/RocketMQ 全家桶。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day03.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">03</div><h3>进程怎么启动</h3></div><p>main.go：newComponent → api.Init → consumer → api.Start，基础设施组件的组装顺序。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day04.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">04</div><h3>HTTP 网关与路由</h3></div><p>Hertz 框架、router_gen.go 自动生成的路由、Session/Locale 中间件链。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day05.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#4f46e5,#06b6d4);">05</div><h3>Handler 桥接模式</h3></div><p>APIHandler、invokeAndRender、"本地 Kitex 客户端"——进程内调用而非网络 RPC。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+        </div>
+
+        <!-- W2 -->
+        <div class="week-bar" id="week2"><div class="wk" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">W2</div><h2>第 2 周 · 分层与契约</h2><span>DDD 分层、IDL 契约、纵切一条完整请求链路</span></div>
+        <div class="day-grid">
+            <a class="day-card" href="coze-loop-day06.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">06</div><h3>DDD 分层与 Wire</h3></div><p>application/domain/infra 三层、依赖方向、wire.go 自动装配依赖注入。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day07.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">07</div><h3>IDL 契约入门</h3></div><p>契约先行、idl/thrift 目录地图、kitex_gen vs loop_gen、thrift→Go→TS 三步生成。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day08.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">08</div><h3>Foundation：用户/空间/鉴权</h3></div><p>为什么每个业务模块都先过这一层，用户/权限/工作空间三件套。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day09.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">09</div><h3>Prompt 读路径纵切</h3></div><p>CreatePrompt 从 Handler 到 MySQL 事务写入的完整纵切面，DTO→DO→PO 数据形状演变。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day10.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);">10</div><h3>Prompt 调试与 LLM Runtime</h3></div><p>调试执行链路、llm 模块 Runtime、Eino 多协议适配、model_config.yaml。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+        </div>
+
+        <!-- W3 -->
+        <div class="week-bar" id="week3"><div class="wk" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">W3</div><h2>第 3 周 · 评测与观测</h2><span>数据集、评估器、实验主链路、Trace 全链路观测</span></div>
+        <div class="day-grid">
+            <a class="day-card" href="coze-loop-day11.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">11</div><h3>Dataset 数据集</h3></div><p>评测的"原材料"从哪来：数据集的结构、Schema、导入与版本管理。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day12.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">12</div><h3>评测集与评估器</h3></div><p>评测集怎么组织、评估器（Evaluator）怎么给结果打分，内置与自定义评估器。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day13.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">13</div><h3>实验主链路</h3></div><p>一次评测实验（Experiment）从提交到出结果的完整调度与执行链路。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day14.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">14</div><h3>Trace 观测</h3></div><p>observability 模块、Span 与 Trace 数据模型、ClickHouse 存储与查询。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day15.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#8b5cf6,#22c55e);">15</div><h3>跨模块组装</h3></div><p>Prompt、Evaluation、Data、Observability 如何通过本地客户端互相协作完成一次评测。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+        </div>
+
+        <!-- W4 -->
+        <div class="week-bar" id="week4"><div class="wk" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">W4</div><h2>第 4 周 · 前端与收官</h2><span>前端分层视角、IDL 端到端、动手改一处功能</span></div>
+        <div class="day-grid">
+            <a class="day-card" href="coze-loop-day16.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">16</div><h3>前端壳与路由</h3></div><p>frontend 目录结构、Rush.js monorepo、页面壳层与路由怎么组织。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day17.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">17</div><h3>前端分层一页通</h3></div><p>Adapter 模式、loop-pages/loop-adapter 等分层包，一页看懂前端架构。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day18.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">18</div><h3>IDL 端到端</h3></div><p>从改一个 .thrift 文件，到前后端类型同步生效的完整端到端流程演练。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day19.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">19</div><h3>改一处小功能</h3></div><p>动手实战：跟着教程真实修改一处后端小功能，走完开发到验证的完整流程。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+            <a class="day-card" href="coze-loop-day20.html"><div class="top"><div class="num" style="background:linear-gradient(135deg,#22c55e,#f59e0b);">20</div><h3>收官串讲</h3></div><p>20 天全局回顾、架构设计哲学、继续深入源码的学习路线建议。</p><div class="foot"><span class="mins">≈30 min · 已就绪</span><span class="go">开始学 &rarr;</span></div></a>
+        </div>
+
+        <div class="card highlight-card" style="margin-top:40px; text-align:center;">
+            <p style="margin:0;">✅ <strong>全部 20 天已就绪</strong>。建议按顺序学。准备好了就从 <a href="coze-loop-day01.html">Day 01 · 项目全景</a> 开始。</p>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const links = document.querySelectorAll('.nav-link[href^="#"]');
+            const sections = document.querySelectorAll('section[id], div[id^="week"]');
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.getElementById('sidebar');
+            if (toggleBtn && sidebar) toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+            const setActive = (id) => links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + id));
+            const observer = new IntersectionObserver((entries) => { entries.forEach(e => { if (e.isIntersecting) setActive(e.target.id); }); }, { rootMargin: '-30% 0px -60% 0px' });
+            sections.forEach(s => observer.observe(s));
+        });
+    </script>
+</body>
+</html>
