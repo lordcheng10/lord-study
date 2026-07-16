@@ -161,11 +161,11 @@ open http://localhost:8082</code></pre>
         <li>成功后地址栏会变成类似 <code>/console/enterprise/personal/space/一长串数字/pe/prompts</code></li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/01-login.png" alt="登录页标注">
-      <p class="shot-cap">图：登录页。红框①邮箱 ②密码 ③注册 ④登录 —— 新手第一次请点「注册」。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3→4</strong>：填邮箱 → 填密码 → 点「注册」（新手第一次）→「登录」给以后用。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/02-login-filled.png" alt="已填写">
-      <p class="shot-cap">图：填好后点「注册」。若提示邮箱已存在，改邮箱或改用「登录」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：确认已填好 → 点「注册」。若提示邮箱已存在，改邮箱或改用「登录」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/03-home-prompts.png" alt="进入首页">
-      <p class="shot-cap">图：注册成功后的 Prompt 开发首页。左侧是导航，右侧是主工作区。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong> 认首页：侧栏 → 主工作区 → 右上角创建入口。</p>
       <div class="verify">✅ 验收：能看到左侧导航和「Prompt 开发」空列表 / 欢迎插画，不再停留在登录页。</div>
     </div>
   </section>
@@ -188,7 +188,7 @@ open http://localhost:8082</code></pre>
         <tr><td>标签管理</td><td>人工标注用的标签体系</td><td>P06</td></tr>
       </table>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/04-sidebar.png" alt="侧栏标注">
-      <p class="shot-cap">图：侧栏模块位置。从上到下依次对应 Prompt → 评测 → 观测 → 标签。</p>
+      <p class="shot-cap">图：侧栏按 <strong>1→7</strong> 从上到下认模块（Prompt → Playground → 评测集 → 评估器 → 实验 → Trace → 标签）。</p>
       <div class="verify">✅ 验收：你能用手指指出「评测集」「Trace」分别在哪一行。</div>
     </div>
   </section>
@@ -207,9 +207,9 @@ open http://localhost:8082</code></pre>
         <li>点「账户设置」会弹出大窗口，左侧可切换「账户设置 / API 授权」</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/05-user-menu.png" alt="用户菜单">
-      <p class="shot-cap">图：左下角头像 → 弹出「账户设置 / 退出登录」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：点头像 → 选「账户设置 / 退出登录」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/00-setup/06-account-modal.png" alt="账户弹窗">
-      <p class="shot-cap">图：账户设置弹窗。左侧可切到「API 授权」创建 PAT（见 P07）。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：看账户弹窗 → 左侧可切「API 授权」（PAT 见 P07）。</p>
       <div class="verify">✅ 验收：能打开账户设置弹窗，再按 Esc 或点右上角 × 关闭。</div>
     </div>
   </section>
@@ -251,7 +251,7 @@ open http://localhost:8082</code></pre>
         <li>若是空账号，中间会显示「暂无 Prompt」和插画</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/01-list-empty.png" alt="空列表">
-      <p class="shot-cap">图：空列表。右上角红框是「创建 Prompt」——下一步要点它。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：确认在 Prompt 开发 → 点右上角「创建 Prompt」。</p>
       <div class="verify">✅ 验收：面包屑显示「Prompt 工程 / Prompt 开发」。</div>
     </div>
   </section>
@@ -276,13 +276,13 @@ open http://localhost:8082</code></pre>
         <li>点右下角 <strong>确认</strong></li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/02-create-menu.png" alt="创建菜单">
-      <p class="shot-cap">图：创建按钮下拉 → 选「空白 Prompt」。</p>
+      <p class="shot-cap">图：按顺序点「空白 Prompt」（图上数字 <strong>1</strong>）。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/03-create-dialog.png" alt="创建弹窗">
-      <p class="shot-cap">图：创建弹窗。Key 格式错了会红字提示，按规则改即可。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：填写 Key/名称 → 点「确认」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/04-create-filled.png" alt="填好确认">
-      <p class="shot-cap">图：填好后点「确认」，进入开发页。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：填 Key → 填名称 → 点「确认」进入开发页。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/05-develop.png" alt="三栏布局">
-      <p class="shot-cap">图：开发页三栏——左模板 / 中模型参数 / 右预览调试。先认清布局再填内容。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong> 认三栏：左模板 / 中模型 / 右预览调试。</p>
       <div class="verify">✅ 验收：顶部出现 Prompt 名称，中间有「请选择模型」，右侧有「运行」按钮（可能暂时灰掉）。</div>
       <div class="pitfall"><span class="t">Key 报错？</span>
       必须以英文字母开头；不能有空格或中文。例如 <code>1abc</code>、<code>我的prompt</code> 都不行。
@@ -305,7 +305,7 @@ open http://localhost:8082</code></pre>
         <li>也可以用变量写法：<code>{{user_name}}</code>（后面再在变量区赋值）</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/06-edit-template.png" alt="编辑模板">
-      <p class="shot-cap">图：System / User 写在左栏。红框标出两处输入位置。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：写 System → 写 User → 可继续添加消息。</p>
       <div class="verify">✅ 验收：System 框不再是灰色占位符「请输入内容…」，而是你的真实文字。</div>
     </div>
   </section>
@@ -327,11 +327,11 @@ open http://localhost:8082</code></pre>
         <li>等待 2～10 秒，右栏应出现助手回复，并显示耗时与 Tokens</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/10-model-dropdown.png" alt="模型下拉">
-      <p class="shot-cap">图：下拉列表里出现 Claude Sonnet —— 说明 P00 的 yaml 已生效。</p>
+      <p class="shot-cap">图：按数字 <strong>1</strong> 在下拉里选 Claude Sonnet（说明 P00 的 yaml 已生效）。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/10-model-selected.png" alt="选好模型">
-      <p class="shot-cap">图：①已选模型 ②参数 ③右下角「运行」。若运行是灰的，检查是否已选模型、消息是否为空。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：确认模型 → 看参数 → 点「运行」。运行是灰的就检查是否已选模型、消息是否为空。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/11-debug-result.png" alt="调试成功">
-      <p class="shot-cap">图：成功示例——助手回复「你好，小明！…」，并显示耗时约 3s、Tokens。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：看回复 → 看耗时/Tokens → 满意后再提交新版。</p>
       <div class="verify">✅ 验收：右栏能看到中文问候回复，而不是报错红框或一直转圈。</div>
       <div class="pitfall"><span class="t">报错对照</span>
       <code>temperature and top_p cannot both be specified</code> → 回到 yaml 删掉其中一个参数后 restart app。<br>
@@ -356,9 +356,9 @@ open http://localhost:8082</code></pre>
         <li>点确认 / 提交</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/07-submit-version.png" alt="提交弹窗">
-      <p class="shot-cap">图：提交版本弹窗——填版本号后确认。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：填版本号 → 确认提交。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/12-version-done.png" alt="提交完成">
-      <p class="shot-cap">图：提交后状态变化；可用「版本记录」查看历史。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认顶部版本状态已变化；可用「版本记录」查看历史。</p>
       <div class="verify">✅ 验收：顶部「修改未提交」提示消失或版本记录里出现新版本。</div>
     </div>
   </section>
@@ -378,11 +378,11 @@ open http://localhost:8082</code></pre>
         <li>满意后可用顶部 <strong>快捷创建</strong> 存成正式 Prompt（可选）</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/08-playground.png" alt="Playground">
-      <p class="shot-cap">图：Playground 布局与开发页类似，但默认不落库。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：进 Playground → 选 Claude → 点「运行」。默认不落库。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/13-playground-result.png" alt="Playground 结果">
-      <p class="shot-cap">图：成功回复示例——「我是 Claude，由 Anthropic 开发…」。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：看 Playground 成功回复。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/01-prompt/09-list-with-item.png" alt="列表面板">
-      <p class="shot-cap">图：回到 Prompt 开发列表，能看到已创建的条目；「调用记录」可跳 Trace。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：确认列表有新 Prompt → 可进详情/调用记录（跳 Trace）。</p>
       <div class="verify">✅ 验收：Playground 也能跑出模型回复；列表里至少有 1 条 Prompt。</div>
     </div>
   </section>
@@ -426,7 +426,7 @@ LESSONS += [
         <li>注意按钮文案是 <strong>新建评测集</strong>（不是「创建」）</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/01-list.png" alt="评测集列表">
-      <p class="shot-cap">图：侧栏点「评测集」，右上角点「新建评测集」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：侧栏点「评测集」 → 右上角「新建评测集」。</p>
       <div class="verify">✅ 验收：面包屑为「评测 / 评测集」。</div>
     </div>
   </section>
@@ -444,9 +444,9 @@ LESSONS += [
         <li><strong>描述</strong>（可选）：写清楚这张表用来测什么</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/02-create.png" alt="新建页全貌">
-      <p class="shot-cap">图：新建页结构——上半基本信息，下半列配置，右下角「创建」。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：填名称/描述 → 配置列 → 点「创建」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/03-named.png" alt="名称">
-      <p class="shot-cap">图：名称是必填项，空着点创建会被拦住。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：名称必填，空着点创建会被拦住。</p>
       <div class="verify">✅ 验收：名称框有内容，字数计数在限制内。</div>
     </div>
   </section>
@@ -470,7 +470,7 @@ LESSONS += [
         <li>新手第一张表：先用默认两列，不要改名</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/04-schema.png" alt="列配置">
-      <p class="shot-cap">图：红框标出默认两列。先理解再改，避免实验阶段对不上字段。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：看默认两列 → 需要时再「添加列」。先理解再改名。</p>
       <div class="verify">✅ 验收：你能说清 input 和 reference_output 各干什么。</div>
     </div>
   </section>
@@ -488,7 +488,7 @@ LESSONS += [
         <li>成功后进入评测集详情：可添加数据、看关联实验、提交版本</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/05-detail.png" alt="详情页">
-      <p class="shot-cap">图：详情页。右上常见「添加数据」「新建实验」「版本记录」等按钮。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：确认进入详情 → 再用右上「添加数据 / 新建实验」。</p>
       <div class="verify">✅ 验收：地址栏变成 <code>.../evaluation/datasets/一串数字</code>。</div>
     </div>
   </section>
@@ -512,9 +512,9 @@ LESSONS += [
         <li>回到表格，应能看到新行</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/05-add-data.png" alt="添加数据">
-      <p class="shot-cap">图：添加数据时的侧栏 / 弹层（界面可能随版本略有差异）。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：在右侧抽屉填一行数据（界面可能略有差异）。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/02-dataset/07-item-list.png" alt="数据列表">
-      <p class="shot-cap">图：保存后数据出现在列表中。可再点「提交新版本」固化数据集版本。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认数据出现在表里。可再「提交新版本」固化。</p>
       <div class="verify">✅ 验收：表格里至少 1 行；后续建实验时能选到这个评测集。</div>
       <div class="pitfall"><span class="t">找不到「添加数据」？</span>
       确认你在<strong>详情页</strong>而不是列表页；列表页只有「新建评测集」。
@@ -556,7 +556,7 @@ LESSONS += [
         <li>右上角有新建入口</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/01-list.png" alt="评估器列表">
-      <p class="shot-cap">图：评估器入口。先分清「自建」和「预置」两个页签。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：侧栏点「评估器」 → 右上角「新建」。先分清自建/预置页签。</p>
       <div class="verify">✅ 验收：面包屑为「评测 / 评估器」。</div>
     </div>
   </section>
@@ -575,7 +575,7 @@ LESSONS += [
         <li>新手建议：先看懂预置长什么样，再回去建自己的</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/02-builtin.png" alt="预置">
-      <p class="shot-cap">图：预置评估器卡片墙。适合学习「评估器长什么样」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：切到「预置」 → 浏览卡片学习评估器长什么样。</p>
       <div class="verify">✅ 验收：你能打开至少一张预置评估器详情。</div>
     </div>
   </section>
@@ -596,11 +596,11 @@ LESSONS += [
         <li>保存 / 创建；可再点调试用样例试跑</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/04-create-menu.png" alt="新建菜单">
-      <p class="shot-cap">图：新建时选择 LLM 或 Code。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：新建时选择 LLM 或 Code。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/05-create-llm.png" alt="LLM 创建页">
-      <p class="shot-cap">图：LLM 评估器编辑页（字段随版本可能略有不同）。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：在 LLM 评估器编辑页填写配置（字段可能略有不同）。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/07-llm-configured.png" alt="已选 Claude">
-      <p class="shot-cap">图：评判模型同样选 Claude。评估器也依赖 function_call 能力，yaml 里请打开。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：评判模型选 Claude（yaml 需打开 function_call）。</p>
       <div class="verify">✅ 验收：自建列表里出现你的评估器；模型下拉不是空的。</div>
       <div class="pitfall"><span class="t">评估器调试失败</span>
       与 P01 相同：检查 Key、temperature/top_p 冲突、消息是否为空。
@@ -621,7 +621,7 @@ LESSONS += [
         <li>适合：精确匹配、格式检查；不适合：开放性语义打分（那用 LLM）</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/03-evaluator/06-create-code.png" alt="Code 评估器">
-      <p class="shot-cap">图：Code 评估器页面。本地有 Python/JS FaaS 容器执行代码。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：在 Code 评估器页写规则（本地 FaaS 执行）。</p>
       <div class="verify">✅ 验收：你知道 LLM 与 Code 评估器分别适合什么场景。</div>
     </div>
   </section>
@@ -661,9 +661,9 @@ LESSONS += [
         <li>进入五步向导页，先看顶部进度条</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/01-list.png" alt="实验列表">
-      <p class="shot-cap">图：实验列表入口。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：侧栏点「实验」 → 右上角「新建实验」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/02-wizard.png" alt="向导">
-      <p class="shot-cap">图：五步向导首页。红框标出进度条和第一步表单区。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：看五步进度条 → 填步骤1基本信息。</p>
       <div class="verify">✅ 验收：能看到步骤条（基本信息 → 评测集 → …）。</div>
     </div>
   </section>
@@ -681,7 +681,7 @@ LESSONS += [
         <li>点右下角 <strong>下一步</strong></li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/03-basic.png" alt="基本信息">
-      <p class="shot-cap">图：填名称后点「下一步」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：填写实验名称 → 点「下一步」。</p>
       <div class="verify">✅ 验收：进度条高亮移到第 2 步。</div>
     </div>
   </section>
@@ -700,9 +700,9 @@ LESSONS += [
         <li>点 <strong>下一步</strong></li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/04-dataset-step.png" alt="选评测集">
-      <p class="shot-cap">图：步骤2 选择评测集。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：选择评测集（必选）。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/04b-dataset-picked.png" alt="已选中">
-      <p class="shot-cap">图：选中后的状态。看不到评测集？回 P02 确认已创建成功。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认已选中。看不到？回 P02 确认已创建。</p>
       <div class="verify">✅ 验收：评测集名称显示在表单中，不是「请选择」。</div>
     </div>
   </section>
@@ -721,9 +721,9 @@ LESSONS += [
         <li>每步点 <strong>下一步</strong></li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/05-target-step.png" alt="评测对象">
-      <p class="shot-cap">图：步骤3 评测对象。选 Prompt 才会真正调用 Claude。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：选评测对象（Prompt）或跳过；选 Prompt 才会调 Claude。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/06-evaluator-step.png" alt="评估器">
-      <p class="shot-cap">图：步骤4 评估器。可多选；没有也可先进入确认页。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：选评估器或跳过；可多选。</p>
       <div class="verify">✅ 验收：到达确认页（步骤5）。</div>
     </div>
   </section>
@@ -742,7 +742,7 @@ LESSONS += [
         <li>进实验详情：表格看每行输出；Chart 看汇总</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/04-experiment/07-confirm.png" alt="确认启动">
-      <p class="shot-cap">图：最后确认页。点启动后去喝口水，行数多会跑一会儿。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：核对配置 → 点「启动实验」。行数多会跑一会儿。</p>
       <div class="verify">✅ 验收：实验列表出现新记录；详情里能看到行级结果或状态。</div>
       <div class="pitfall"><span class="t">启动按钮点不了 / 失败</span>
       评测集为空；Prompt 未提交版本；模型 Key 无效；评估器配置不完整。先回 P01 确认调试能跑通。
@@ -782,7 +782,7 @@ LESSONS += [
         <li>若提示「暂无数据」：先去 P01 再点一次「运行」，然后回到这里刷新</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/05-trace/01-list.png" alt="Trace 列表">
-      <p class="shot-cap">图：Trace 页。先检查顶部过滤器，不要只盯着空状态插画。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：进 Trace → 调过滤器 → 点某行看详情。</p>
       <div class="verify">✅ 验收：页面标题为 Trace。</div>
     </div>
   </section>
@@ -801,7 +801,7 @@ LESSONS += [
         <li>点刷新；列表应出现行</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/05-trace/02-toolbar.png" alt="工具条">
-      <p class="shot-cap">图：顶部筛选工具条——时间、Span 类型、数据源都要会调。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：改时间范围 / Span 类型 / 数据源（选 Prompt）。</p>
       <div class="verify">✅ 验收：列表出现至少一行，而不是「暂无数据」。</div>
     </div>
   </section>
@@ -820,7 +820,7 @@ LESSONS += [
         <li>右侧看状态 Success、耗时、Tokens</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/05-trace/04-detail.png" alt="Trace 详情">
-      <p class="shot-cap">图：成功 Trace 详情。红框①调用树 ②输入输出 ③元信息。这是确认「Claude 真的被调用了」的铁证。</p>
+      <p class="shot-cap">图：按 <strong>1→2→3</strong>：看调用树 → Input/Output → 状态/耗时。确认 Claude 被调用。</p>
       <div class="verify">✅ 验收：你能指出 Claude Sonnet 节点，并读出一句 Output 文本。</div>
       <div class="pitfall"><span class="t">仍没有数据</span>
       确认 P01 运行成功；过滤器选 Prompt；时间范围够大；点刷新。
@@ -860,7 +860,7 @@ LESSONS += [
         <li>进入标签列表页</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/06-tag/01-list.png" alt="标签列表">
-      <p class="shot-cap">图：标签管理入口与新建按钮。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：点「标签管理」 → 点「新建标签」。</p>
       <div class="verify">✅ 验收：面包屑含「标签」。</div>
     </div>
   </section>
@@ -879,9 +879,9 @@ LESSONS += [
         <li>点确认创建</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/06-tag/02-create.png" alt="创建表单">
-      <p class="shot-cap">图：创建标签表单。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：填写标签信息。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/06-tag/03-filled.png" alt="填好">
-      <p class="shot-cap">图：填好后提交。字段名因版本可能不同，以红框区域为准跟着填。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认信息后提交（字段名以图上标注为准）。</p>
       <div class="verify">✅ 验收：提交无报错，回到列表。</div>
     </div>
   </section>
@@ -898,7 +898,7 @@ LESSONS += [
         <li>之后在实验详情做人工标注时，即可选用这些标签</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/06-tag/04-result.png" alt="创建结果">
-      <p class="shot-cap">图：列表中出现新标签。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认列表出现新标签。</p>
       <div class="verify">✅ 验收：列表至少有 1 个你认识的标签名。</div>
     </div>
   </section>
@@ -935,9 +935,9 @@ LESSONS += [
         <li>在菜单点 <strong>账户设置</strong>（注意是「账户」）</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/00-usermenu.png" alt="用户菜单">
-      <p class="shot-cap">图：①头像 ②账户设置。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：点头像 → 点「账户设置」。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/01-account.png" alt="账户弹窗">
-      <p class="shot-cap">图：账户弹窗左侧可切换「账户设置 / API 授权」。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：看账户设置 → 切到「API 授权」。</p>
       <div class="verify">✅ 验收：弹出「账户」大窗口。</div>
     </div>
   </section>
@@ -955,7 +955,7 @@ LESSONS += [
         <li>若为空，会提示去添加</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/02-pat-tab.png" alt="API 授权">
-      <p class="shot-cap">图：API 授权页。红框标出「添加新令牌」按钮。</p>
+      <p class="shot-cap">图：按 <strong>1→2</strong>：看个人访问令牌区 → 点「添加新令牌」。</p>
       <div class="verify">✅ 验收：能看到「添加新令牌」按钮。</div>
     </div>
   </section>
@@ -976,11 +976,11 @@ LESSONS += [
         <li>存到本地密码管理器；不要发到群里、不要提交 Git</li>
       </ol>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/03-create.png" alt="创建表单">
-      <p class="shot-cap">图：创建令牌表单。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：填写令牌名称 / 过期时间。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/04-filled.png" alt="已填写">
-      <p class="shot-cap">图：填好名称等信息。</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：确认信息后生成。</p>
       <img class="shot" src="assets/coze-loop-practice/marked/07-pat/05-created.png" alt="明文只一次">
-      <p class="shot-cap">图：创建成功弹窗。黄字警告「只显示一次」——现在就复制！</p>
+      <p class="shot-cap">图：数字 <strong>1</strong>：明文只显示一次——立刻复制！</p>
       <div class="verify">✅ 验收：令牌列表出现新条目；你已把明文存到安全位置。</div>
       <div class="pitfall"><span class="t">忘记复制怎么办？</span>
       无法再查看明文。只能删除旧令牌，再新建一个。
@@ -1068,7 +1068,7 @@ def page(L: dict, idx: int) -> str:
       <div class="done"><b>学完怎样算过关：</b>{done_when}</div>
     </div>
   </section>
-  <div class="warn-box">图上的<strong>红色编号框</strong>标出你要点的位置。每一大步都写了<strong>目的</strong>（为什么做）和<strong>作用</strong>（做完得到什么）。请按「目标 → 步骤文字 → 对照截图」顺序做；做完看每步绿色验收。</div>
+  <div class="warn-box">图上<strong>红色圆圈数字 1、2、3…</strong>表示本步操作顺序，请严格按数字从小到大点。数字旁短文是该步要点。做完看每步绿色验收；先读本课目标再动手。</div>
 {L["body"]}
   <div class="nav-buttons" style="margin-top:40px">
     {prev_btn}
