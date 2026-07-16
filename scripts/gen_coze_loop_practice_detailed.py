@@ -13,6 +13,16 @@ CSS = """
 .step-hdr h2{margin:0;font-size:18px}
 .why{background:rgba(6,182,212,.07);border-left:3px solid #22d3ee;border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;font-size:13px;color:var(--text-secondary);line-height:1.75}
 .why b{color:#67e8f9}
+.purpose{background:rgba(6,182,212,.07);border-left:3px solid #22d3ee;border-radius:0 8px 8px 0;padding:12px 14px;margin:10px 0 14px;font-size:13px;color:var(--text-secondary);line-height:1.8}
+.purpose p{margin:0 0 8px}
+.purpose p:last-child{margin:0}
+.purpose b{color:#67e8f9}
+.goal-box{background:linear-gradient(135deg,rgba(6,182,212,.10),rgba(79,70,229,.10));border:1px solid rgba(6,182,212,.35);border-radius:12px;padding:16px 18px;margin:0 0 18px}
+.goal-box .gt{font-size:14px;font-weight:800;color:#67e8f9;margin:0 0 10px;letter-spacing:.02em}
+.goal-box ul{margin:0;padding-left:20px;font-size:13.5px;color:var(--text-secondary);line-height:1.85}
+.goal-box li{margin:4px 0}
+.goal-box .done{margin-top:12px;padding-top:10px;border-top:1px dashed rgba(6,182,212,.35);font-size:13px;color:var(--text-secondary);line-height:1.75}
+.goal-box .done b{color:#4ade80}
 .shot{display:block;width:100%;max-width:960px;border-radius:10px;border:1px solid var(--border-color);margin:14px 0 4px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
 .shot-cap{font-size:12.5px;color:var(--text-muted);margin:0 0 16px;line-height:1.6}
 .verify{font-size:13px;color:var(--accent-green);margin-top:12px;padding:10px 12px;background:rgba(34,197,94,.06);border-radius:8px;border-left:3px solid var(--accent-green);line-height:1.7}
@@ -37,7 +47,15 @@ LESSONS = [
         "title": "环境启动 · 注册登录 · 侧栏导览",
         "mins": "25 min",
         "desc": "把本地服务跑起来、注册账号、认识侧栏。后面所有课都依赖本课。",
+        "goals": [
+            "在本机用 Docker 把 Coze Loop 整套服务启动起来，浏览器能打开工作台。",
+            "配置好 Claude 模型 Key，使后续 Prompt / 实验能真正调用大模型。",
+            "完成邮箱注册登录，进入 Personal Space。",
+            "认识左侧导航各模块对应什么能力，并找到账户设置入口。",
+        ],
+        "done_when": "打开 <code>http://localhost:8082</code> 已登录；Prompt 开发页「模型配置」下拉能看到 Claude；你能指出评测集 / Trace / 标签分别在侧栏哪一行。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#prep", "0 前置条件"),
             ("#s1", "1 启动服务"),
             ("#s2", "2 配置 Claude 模型"),
@@ -49,6 +67,10 @@ LESSONS = [
   <section id="prep" class="section">
     <div class="step-hdr"><div class="badge">0</div><h2>前置条件（先核对再动手）</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>动手前先确认电脑和环境具备条件，避免启动到一半才发现缺 Docker、内存不够或没有 API Key。</p>
+        <p><b>作用：</b>把「能不能开课」变成一张清单；清单过关后，后面步骤才有意义，否则会反复踩坑。</p>
+      </div>
       <table class="ctable">
         <tr><th>项</th><th>你需要准备什么</th></tr>
         <tr><td>电脑</td><td>已安装 <strong>Docker Desktop</strong>，并处于 Running（菜单栏有鲸鱼图标）</td></tr>
@@ -64,7 +86,10 @@ LESSONS = [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>启动本地 Coze Loop</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>用 Docker Compose 拉起前端、后端和 MySQL / Redis / ClickHouse / RocketMQ 等中间件。浏览器入口是 <span class="fileref">http://localhost:8082</span>。</div>
+      <div class="purpose">
+        <p><b>目的：</b>把 Coze Loop 的前端、后端和依赖中间件（MySQL / Redis / ClickHouse / RocketMQ 等）一次性拉起来，得到可访问的本地网站。</p>
+        <p><b>作用：</b>启动成功后，你就有了「教室」——浏览器入口是 <span class="fileref">http://localhost:8082</span>。没有这一步，后面所有界面操作都无从谈起。</p>
+      </div>
       <p class="subh">1.1 打开终端，进入仓库根目录</p>
 <pre><code class="language-bash"># 路径换成你自己 clone 的位置
 cd /path/to/coze-loop
@@ -91,7 +116,10 @@ open http://localhost:8082</code></pre>
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>配置 Claude 模型（必做）</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>告诉后端「用哪家大模型、Key 是什么」。界面上只能<strong>选择</strong>已配置好的模型，不能在网页里粘贴 Key。</div>
+      <div class="purpose">
+        <p><b>目的：</b>告诉后端「用哪家大模型、API Key 是什么」。开源版<strong>没有</strong>网页版模型管理，只能改配置文件。</p>
+        <p><b>作用：</b>配置并重启后，Prompt 调试页 / 评估器里会出现可选的 Claude。界面上只能<strong>选择</strong>模型，不能粘贴 Key；本课不配好，后面「运行」必失败。</p>
+      </div>
       <ol class="steps-ol">
         <li>用编辑器打开文件：<code>release/deployment/docker-compose/conf/model_config.yaml</code></li>
         <li>可参考同目录 <code>model_config_example/claude.yaml</code> 整份复制后改</li>
@@ -121,7 +149,10 @@ open http://localhost:8082</code></pre>
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>注册并登录</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>开源版用邮箱自建账号；注册成功后自动进入 Personal Space。</div>
+      <div class="purpose">
+        <p><b>目的：</b>在开源版里自建一个邮箱账号，并登录进入自己的工作空间（Personal Space）。</p>
+        <p><b>作用：</b>登录后平台才知道「你是谁」，你创建的 Prompt、评测集、实验都会挂在这个空间下；未登录只能停在登录页。</p>
+      </div>
       <ol class="steps-ol">
         <li>浏览器打开 <span class="fileref">http://localhost:8082</span>，若未登录会跳到 <code>/auth/login</code></li>
         <li>在「请输入邮箱」框填一个邮箱（本地演示可用任意格式，如 <code>demo@example.com</code>）</li>
@@ -142,7 +173,10 @@ open http://localhost:8082</code></pre>
   <section id="s4" class="section">
     <div class="step-hdr"><div class="badge">4</div><h2>认识左侧导航（地图）</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>后面每一课都从侧栏进模块。先认门，再学操作。</div>
+      <div class="purpose">
+        <p><b>目的：</b>建立「产品地图」——知道每个侧栏入口对应哪一类工作，避免后面找不到模块。</p>
+        <p><b>作用：</b>后面 P01～P07 都从侧栏进门。认清地图后，你不会在「评测 / 观测 / 标签」之间迷路。</p>
+      </div>
       <table class="ctable">
         <tr><th>侧栏文字</th><th>你能做什么</th><th>对应课</th></tr>
         <tr><td>Prompt 开发</td><td>创建 / 编辑 / 调试 / 提交版本</td><td>P01</td></tr>
@@ -162,7 +196,10 @@ open http://localhost:8082</code></pre>
   <section id="s5" class="section">
     <div class="step-hdr"><div class="badge">5</div><h2>账户菜单与设置入口</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>找「账户设置 / API 授权 / 退出登录」。PAT 在 P07 细讲。</div>
+      <div class="purpose">
+        <p><b>目的：</b>找到个人账户相关入口：改资料、开 API 令牌、退出登录。</p>
+        <p><b>作用：</b>账户菜单是 P07（创建 PAT）的必经之路；也会用到「退出登录」换账号。文案是「账户」不是「账号」，按字面找即可。</p>
+      </div>
       <ol class="steps-ol">
         <li>看侧栏<strong>最底部</strong>：有你的头像 / 用户名</li>
         <li>用鼠标<strong>点一下</strong>头像区域，弹出菜单</li>
@@ -184,7 +221,15 @@ open http://localhost:8082</code></pre>
         "title": "Prompt 开发 · Claude 调试 · Playground",
         "mins": "35 min",
         "desc": "从零创建一个 Prompt，选 Claude 跑通调试，提交版本，再到 Playground 试跑。",
+        "goals": [
+            "从零创建一条可保存的 Prompt，进入三栏开发调试页。",
+            "写好 System / User 模板，选择 Claude，成功跑通一次调试。",
+            "把满意的草稿提交成版本，便于实验引用和回滚。",
+            "会用 Playground 做不落库的快速试跑，并区分它与「Prompt 开发」的差异。",
+        ],
+        "done_when": "列表里至少有 1 条 Prompt；调试页右栏出现模型中文回复与 Tokens；版本记录里有版本号；Playground 也能跑出回复。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开列表"),
             ("#s2", "2 创建 Prompt"),
             ("#s3", "3 写模板"),
@@ -196,7 +241,10 @@ open http://localhost:8082</code></pre>
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开 Prompt 开发列表</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>进入 Prompt 的「家」。所有 Prompt 都在这里创建和管理。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入 Prompt 的「家」——所有正式 Prompt 都在这里创建、编辑、管理。</p>
+        <p><b>作用：</b>这是后续创建、调试、提交版本的统一入口。认准这个页面，才不会误跑到 Playground 或其它模块。</p>
+      </div>
       <ol class="steps-ol">
         <li>确认已登录（P00 完成）</li>
         <li>左侧侧栏点 <strong>Prompt 开发</strong>（第一项，通常默认就在这里）</li>
@@ -211,7 +259,10 @@ open http://localhost:8082</code></pre>
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>创建空白 Prompt</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>新建一个可保存的 Prompt 草稿，并进入三栏调试页。</div>
+      <div class="purpose">
+        <p><b>目的：</b>新建一条可落库的 Prompt 草稿（有 Key、名称），并进入三栏调试工作台。</p>
+        <p><b>作用：</b>创建成功后，平台会分配一个 Prompt 实体；你才能写模板、挂模型、保存版本。Key 是程序引用用的「身份证」，名称给人看。</p>
+      </div>
       <ol class="steps-ol">
         <li>点右上角蓝色按钮 <strong>+ 创建 Prompt</strong></li>
         <li>弹出菜单里选 <strong>空白 Prompt</strong>（不要点空白处关掉菜单）</li>
@@ -242,7 +293,10 @@ open http://localhost:8082</code></pre>
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>写 System / User 消息模板</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>告诉模型「你是谁、用户说什么」。空内容直接运行会被 Claude 拒绝（400）。</div>
+      <div class="purpose">
+        <p><b>目的：</b>用自然语言规定模型的角色、任务，以及用户侧输入长什么样。</p>
+        <p><b>作用：</b>模板就是发给大模型的「剧本」。空内容直接运行会被 Claude 拒绝（400）；写好后，每次点「运行」都会按这套内容（或变量替换后）去调用模型。</p>
+      </div>
       <ol class="steps-ol">
         <li>在左栏找到标着 <strong>System</strong> 的输入框</li>
         <li>点进去，输入例如：<code>你是礼貌助手。请用一句中文问候用户。</code></li>
@@ -259,7 +313,10 @@ open http://localhost:8082</code></pre>
   <section id="s4" class="section">
     <div class="step-hdr"><div class="badge">4</div><h2>选择 Claude 并点击运行</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>把后端已配置的 Claude 挂到当前 Prompt，真正调用一次大模型。</div>
+      <div class="purpose">
+        <p><b>目的：</b>把 P00 已配置好的 Claude 挂到当前 Prompt，并发起一次真实 API 调用，验证模板是否可用。</p>
+        <p><b>作用：</b>这是本课的「通电时刻」：右栏会显示模型回复、耗时、Tokens。成功说明模型链路通了；失败则要回头查 Key / 参数 / 空消息等问题。</p>
+      </div>
       <ol class="steps-ol">
         <li>看中间栏 <strong>模型配置</strong></li>
         <li>点「请选择模型」下拉</li>
@@ -287,7 +344,10 @@ open http://localhost:8082</code></pre>
   <section id="s5" class="section">
     <div class="step-hdr"><div class="badge">5</div><h2>提交新版本</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>把当前草稿固化成可回滚的版本，方便实验引用、对比历史。</div>
+      <div class="purpose">
+        <p><b>目的：</b>把当前调试满意的草稿，固化成一个带版本号的快照。</p>
+        <p><b>作用：</b>版本可回滚、可对比、可被实验精确引用（例如永远用 <code>0.0.1</code>）。只改草稿不提交，别人/实验可能拿到的仍是旧内容或不稳定草稿。</p>
+      </div>
       <ol class="steps-ol">
         <li>确认调试结果满意</li>
         <li>点顶部右侧紫色/蓝色按钮 <strong>提交新版</strong></li>
@@ -306,7 +366,10 @@ open http://localhost:8082</code></pre>
   <section id="s6" class="section">
     <div class="step-hdr"><div class="badge">6</div><h2>用 Playground 快速试跑</h2></div>
     <div class="card">
-      <div class="why"><b>这一步做什么？</b>Playground 像草稿纸：不必先创建正式 Prompt，也能选 Claude 试效果。</div>
+      <div class="purpose">
+        <p><b>目的：</b>在不创建正式 Prompt 的情况下，快速试一段提示词 / 模型效果（像草稿纸）。</p>
+        <p><b>作用：</b>降低试错成本：想法不定型时先用 Playground；满意后再「快捷创建」落成正式 Prompt。和「Prompt 开发」能力相近，但默认不强调版本管理。</p>
+      </div>
       <ol class="steps-ol">
         <li>侧栏点 <strong>Playground</strong></li>
         <li>左栏写 System（例：<code>用一句话介绍你自己：你是 Anthropic 的 Claude。</code>）</li>
@@ -335,7 +398,14 @@ LESSONS += [
         "title": "评测集：建表 · 列配置 · 添加数据",
         "mins": "25 min",
         "desc": "建一张评测数据表（input / 参考答案），为后面的实验准备弹药。",
+        "goals": [
+            "理解评测集 = 考试卷：每一行是一道输入题，可带参考答案。",
+            "新建一张评测集，看懂默认列 input / reference_output 的含义。",
+            "至少添加 1～3 行真实数据，使后续实验有内容可跑。",
+        ],
+        "done_when": "评测集列表里有你的表；详情页表格至少 1 行数据；你能说清两列各自干什么。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开评测集"),
             ("#s2", "2 新建并填信息"),
             ("#s3", "3 看懂列配置"),
@@ -346,7 +416,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开评测集列表</h2></div>
     <div class="card">
-      <div class="why"><b>评测集是什么？</b>一张「考试卷」：每一行是一道题（输入）和可选的参考答案。实验会按行跑模型再打分。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入「考试卷」管理页，找到创建评测集的入口。</p>
+        <p><b>作用：</b>评测集是实验（P04）的必选原料。没有评测集，实验向导选不出数据，整条评测链路走不通。</p>
+      </div>
       <ol class="steps-ol">
         <li>左侧侧栏找到分组 <strong>评测</strong></li>
         <li>点 <strong>评测集</strong></li>
@@ -361,6 +434,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>填写名称与描述</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>给这张评测表起一个人和机器都能认的名字，并可选写清用途。</p>
+        <p><b>作用：</b>名称会出现在列表和实验向导的下拉里。起得清楚（如「问候评测集」），后面选数据时不会选错表。</p>
+      </div>
       <ol class="steps-ol">
         <li>点 <strong>新建评测集</strong> 进入表单页</li>
         <li><strong>名称</strong>（必填）：例如 <code>问候评测集</code>，最多约 50 字</li>
@@ -377,7 +454,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>看懂默认列（Schema）</h2></div>
     <div class="card">
-      <div class="why"><b>为什么要配列？</b>列 = 字段。后面评估器 / 实验都按列名取数。名字起错了，后面映射会对不上。</div>
+      <div class="purpose">
+        <p><b>目的：</b>理解评测集的「表头」——每一列代表什么字段、后面实验如何取数。</p>
+        <p><b>作用：</b>列名是评估器 / 字段映射的钥匙。默认 <code>input</code> 喂给模型，<code>reference_output</code> 当参考答案；名字乱改会导致映射对不上。</p>
+      </div>
       <ol class="steps-ol">
         <li>默认已有两列：
           <ul>
@@ -398,6 +478,10 @@ LESSONS += [
   <section id="s4" class="section">
     <div class="step-hdr"><div class="badge">4</div><h2>点「创建」进入详情</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>把表单里的 Schema 真正保存成平台上的一张评测集，并进入可加数据的详情页。</p>
+        <p><b>作用：</b>创建前只是草稿表单；创建后才有 ID，才能「添加数据」「新建实验」「提交版本」。地址栏会出现数据集 ID。</p>
+      </div>
       <ol class="steps-ol">
         <li>检查名称和列无误</li>
         <li>点页面右下角蓝色 <strong>创建</strong></li>
@@ -412,7 +496,10 @@ LESSONS += [
   <section id="s5" class="section">
     <div class="step-hdr"><div class="badge">5</div><h2>添加至少一行数据</h2></div>
     <div class="card">
-      <div class="why"><b>没有数据行，实验就是空跑。</b>至少加 1～3 行，方便后面验证。</div>
+      <div class="purpose">
+        <p><b>目的：</b>往评测集里写入真实「考题」行，让实验有东西可跑。</p>
+        <p><b>作用：</b>空表启动实验等于空跑。至少 1～3 行后，实验才能产出行级结果；也可再「提交新版本」固化数据快照。</p>
+      </div>
       <ol class="steps-ol">
         <li>在详情页点 <strong>添加数据</strong>（或「手动添加」类按钮）</li>
         <li>在弹出的抽屉 / 表单里：
@@ -442,7 +529,14 @@ LESSONS += [
         "title": "评估器：预置 · LLM · Code",
         "mins": "25 min",
         "desc": "学会看预置评估器，并创建 LLM / Code 两类自建评估器。",
+        "goals": [
+            "理解评估器 = 自动阅卷老师，知道预置 / 自建的区别。",
+            "创建（或配置）一个挂上 Claude 的 LLM 评估器。",
+            "认识 Code 评估器适用场景：规则可复现、不消耗 LLM。",
+        ],
+        "done_when": "自建列表里有你的评估器（或你能打开预置详情）；能说出 LLM 与 Code 各适合什么题型。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开评估器"),
             ("#s2", "2 浏览预置"),
             ("#s3", "3 创建 LLM 评估器"),
@@ -452,7 +546,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开评估器列表</h2></div>
     <div class="card">
-      <div class="why"><b>评估器是什么？</b>自动阅卷老师。可以是大模型打分（LLM），也可以是你写的规则代码（Code）。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入自动阅卷工具的管理页，分清「自建」和「预置」。</p>
+        <p><b>作用：</b>评估器在实验（P04）里给每行输出打分。先找到入口，才谈得上创建 LLM / Code 评估器。</p>
+      </div>
       <ol class="steps-ol">
         <li>侧栏点 <strong>评估器</strong></li>
         <li>顶部通常有页签：<strong>自建</strong> / <strong>预置</strong></li>
@@ -467,6 +564,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>浏览预置评估器</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>先看官方模板长什么样，学习「评估维度 / 评判 Prompt」的常见写法。</p>
+        <p><b>作用：</b>预置可直接用或复制改造成自建，减少从零写评判规则的成本；也帮你建立「什么叫好的评估器」的直觉。</p>
+      </div>
       <ol class="steps-ol">
         <li>点页签 <strong>预置</strong>（或「内置」）</li>
         <li>浏览卡片：常见如准确性、相关性等模板</li>
@@ -482,7 +583,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>创建 LLM 评估器并挂上 Claude</h2></div>
     <div class="card">
-      <div class="why"><b>LLM 评估器</b>：让 Claude 当裁判，对「模型输出 vs 参考答案」打分或给评语。</div>
+      <div class="purpose">
+        <p><b>目的：</b>创建一个「让大模型当裁判」的评估器，用于开放性语义打分（礼貌度、相关性等）。</p>
+        <p><b>作用：</b>实验跑完后，LLM 评估器会对每行「模型输出 vs 参考答案」给分或评语。它同样依赖 P00 的 Claude 配置（含 function_call）。</p>
+      </div>
       <ol class="steps-ol">
         <li>回到「自建」页签，点 <strong>新建 / 创建</strong></li>
         <li>选择 <strong>LLM</strong>（或「大模型评估器」）</li>
@@ -507,7 +611,10 @@ LESSONS += [
   <section id="s4" class="section">
     <div class="step-hdr"><div class="badge">4</div><h2>认识 Code 评估器</h2></div>
     <div class="card">
-      <div class="why"><b>Code 评估器</b>：用 Python/JS 写确定性规则（相等、包含、正则）。不消耗 LLM，结果可复现。</div>
+      <div class="purpose">
+        <p><b>目的：</b>了解「用代码写规则」的评估方式，知道它和 LLM 评估器怎么分工。</p>
+        <p><b>作用：</b>Code 评估器跑确定性规则（相等、包含、正则），不花 LLM 费用、结果可复现；适合格式/精确匹配。开放性语义题仍优先 LLM。</p>
+      </div>
       <ol class="steps-ol">
         <li>新建 → 选 <strong>Code</strong></li>
         <li>进入代码编辑页，按模板写规则</li>
@@ -526,7 +633,14 @@ LESSONS += [
         "title": "实验：五步向导从创建到启动",
         "mins": "30 min",
         "desc": "跟着向导把「评测集 +（可选）Prompt +（可选）评估器」组装成一次实验。",
+        "goals": [
+            "理解实验 = 一次完整考试：评测集逐行跑对象，再用评估器打分。",
+            "走完五步向导：基本信息 → 评测集 → 对象 → 评估器 → 确认启动。",
+            "启动后能在列表/详情看到运行状态或行级结果。",
+        ],
+        "done_when": "实验列表出现新记录；详情里能看到行级输出或明确状态；你知道哪一步是必选（评测集）、哪一步可跳过。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开实验"),
             ("#s2", "2 基本信息"),
             ("#s3", "3 选评测集"),
@@ -537,7 +651,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开实验并点新建</h2></div>
     <div class="card">
-      <div class="why"><b>实验是什么？</b>一次完整考试：用评测集的每一行，调用评测对象（如 Prompt），再用评估器打分。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入「考试场」列表，并打开创建实验的五步向导。</p>
+        <p><b>作用：</b>实验把前面的评测集、Prompt、评估器组装成一次可重复的批量评测任务。本步只负责进门并认识进度条。</p>
+      </div>
       <ol class="steps-ol">
         <li>侧栏点 <strong>实验</strong></li>
         <li>点右上角 <strong>新建 / 创建实验</strong></li>
@@ -554,6 +671,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>步骤1：基本信息</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>给这次实验起名，方便在列表里识别（谁跑的、测什么）。</p>
+        <p><b>作用：</b>名称会出现在实验列表与详情标题。起名清晰（如「问候实验-Claude」）方便以后对比多次实验。</p>
+      </div>
       <ol class="steps-ol">
         <li>填写<strong>实验名称</strong>，例如 <code>问候实验-Claude</code></li>
         <li>描述可选</li>
@@ -568,6 +689,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>步骤2：选择评测集（必选）</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>指定这次考试用哪张「试卷」（P02 建的评测集）。</p>
+        <p><b>作用：</b>评测集是实验的必选项。选中后，系统会按该表的每一行去调用评测对象；空表或选错表会导致结果无意义。</p>
+      </div>
       <ol class="steps-ol">
         <li>在下拉 / 列表中选择你在 P02 创建的评测集</li>
         <li>若有版本，选择最新版本</li>
@@ -585,7 +710,10 @@ LESSONS += [
   <section id="s4" class="section">
     <div class="step-hdr"><div class="badge">4</div><h2>步骤3～4：评测对象与评估器（可跳过）</h2></div>
     <div class="card">
-      <div class="why"><b>可跳过？</b>可以。只想先跑通流程：对象选你的 Prompt；评估器可暂不绑，之后人工看结果。</div>
+      <div class="purpose">
+        <p><b>目的：</b>指定「谁来答题」（评测对象，如 Prompt）以及「谁来阅卷」（评估器）。</p>
+        <p><b>作用：</b>选 Prompt 才会真正调用 Claude 生成输出；绑评估器才会自动打分。两者都可跳过以先跑通流程，但跳过则缺少对应能力（无模型输出或无自动分）。</p>
+      </div>
       <ol class="steps-ol">
         <li><strong>步骤3 评测对象</strong>：选择 Prompt（P01 创建的），或按界面提示跳过</li>
         <li>若选 Prompt，通常还要选版本</li>
@@ -603,6 +731,10 @@ LESSONS += [
   <section id="s5" class="section">
     <div class="step-hdr"><div class="badge">5</div><h2>步骤5：确认并启动</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>最后核对配置无误后，真正提交并启动这次批量评测任务。</p>
+        <p><b>作用：</b>启动后平台按行执行：调对象 →（可选）评估 → 写结果。你可在详情看每行输出与汇总图表；这是「评测闭环」的终点。</p>
+      </div>
       <ol class="steps-ol">
         <li>核对：名称、评测集、对象、评估器</li>
         <li>点 <strong>启动实验 / 创建 / 提交</strong>（按钮文案因版本可能不同）</li>
@@ -625,7 +757,14 @@ LESSONS += [
         "title": "观测 Trace：找到 Claude 调用链",
         "mins": "20 min",
         "desc": "在 Trace 里找到 Prompt 调试产生的调用，看清耗时、Token 和输入输出。",
+        "goals": [
+            "理解 Trace = 每次调用的黑匣子（链路、耗时、输入输出）。",
+            "会调整过滤器（尤其数据源选 Prompt），避免「明明跑过却没数据」。",
+            "打开详情，在调用树里定位到 Claude Sonnet 节点。",
+        ],
+        "done_when": "列表至少一行 Trace；详情里能指出 Claude 节点，并读出一句 Output。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开 Trace"),
             ("#s2", "2 调过滤器"),
             ("#s3", "3 看详情"),
@@ -634,7 +773,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开 Trace</h2></div>
     <div class="card">
-      <div class="why"><b>Trace 是什么？</b>每次 Prompt 运行的「黑匣子」：谁调用了谁、花了多久、输入输出是什么。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入可观测性页面，准备查看 Prompt / 实验产生的调用记录。</p>
+        <p><b>作用：</b>Trace 用来排查「调用了谁、花了多久、输入输出是什么」。比只看调试页气泡更完整，是确认 Claude 真被调用的证据库。</p>
+      </div>
       <ol class="steps-ol">
         <li>侧栏点 <strong>Trace</strong></li>
         <li>若提示「暂无数据」：先去 P01 再点一次「运行」，然后回到这里刷新</li>
@@ -648,7 +790,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>把数据源切到 Prompt</h2></div>
     <div class="card">
-      <div class="why"><b>为什么空？</b>默认若选「SDK 上报」，界面调试产生的 span 可能看不到。要改成 <strong>Prompt</strong> 或放宽条件。</div>
+      <div class="purpose">
+        <p><b>目的：</b>把筛选条件调到能看到「界面调试」产生的 span，而不是只看 SDK 上报。</p>
+        <p><b>作用：</b>过滤器选错（如默认 SDK）会显示「暂无数据」，让人误以为没调用成功。切到 Prompt / 放宽时间后，真实调用才会出现在列表。</p>
+      </div>
       <ol class="steps-ol">
         <li>看顶部工具条：时间范围、Span 类型、数据源 / 平台</li>
         <li>时间选「过去 3 天」或更大</li>
@@ -664,6 +809,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>点开详情：看到 Claude Sonnet</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>深入一条 Trace，读懂调用树与 Input / Output，验证模型链路。</p>
+        <p><b>作用：</b>详情是排障与复盘的主战场：能确认是否打到 Claude、耗时与 Token 是否异常、输入输出是否符合预期。</p>
+      </div>
       <ol class="steps-ol">
         <li>点列表中某一行</li>
         <li>左侧看调用树：常见 <code>PromptExecutor</code> → <code>Claude Sonnet</code></li>
@@ -686,7 +835,14 @@ LESSONS += [
         "title": "标签管理：为人工标注做准备",
         "mins": "15 min",
         "desc": "创建标签，供实验详情里人工打标使用。",
+        "goals": [
+            "理解标签 = 人工阅卷时的贴纸，与自动评估器互补。",
+            "在标签管理里新建至少一个标签。",
+            "知道之后在实验详情做人工标注时可选用这些标签。",
+        ],
+        "done_when": "标签列表里出现你创建的名称；你能说清标签和评估器的分工。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开标签"),
             ("#s2", "2 新建标签"),
             ("#s3", "3 确认列表"),
@@ -695,7 +851,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开标签管理</h2></div>
     <div class="card">
-      <div class="why"><b>标签干什么？</b>人工阅卷时的「贴纸」：例如「有幻觉」「语气生硬」。和自动评估器互补。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入标签体系管理页，为人工标注准备「贴纸库」。</p>
+        <p><b>作用：</b>自动评估器覆盖不了的主观问题（幻觉、语气等）靠人工打标。标签要先在这里建好，实验详情里才能选用。</p>
+      </div>
       <ol class="steps-ol">
         <li>侧栏点 <strong>标签管理</strong></li>
         <li>进入标签列表页</li>
@@ -709,6 +868,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>新建一个标签</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>创建一条可用的标签定义（名称、取值等），加入空间的标签库。</p>
+        <p><b>作用：</b>创建成功后，团队在人工阅卷时有统一词汇，便于统计「有多少条被标了某类问题」。</p>
+      </div>
       <ol class="steps-ol">
         <li>点 <strong>新建 / 创建标签</strong></li>
         <li>填写标签名称，例如 <code>质量标签</code></li>
@@ -726,6 +889,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>在列表确认创建成功</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>确认标签已落库，可被后续人工标注流程使用。</p>
+        <p><b>作用：</b>列表可见 = 创建成功。本课到此闭环；真正「贴到某条结果上」通常在实验详情完成。</p>
+      </div>
       <ol class="steps-ol">
         <li>在列表搜索或直接浏览，找到刚建的标签</li>
         <li>之后在实验详情做人工标注时，即可选用这些标签</li>
@@ -743,7 +910,14 @@ LESSONS += [
         "title": "账户设置与 OpenAPI PAT",
         "mins": "15 min",
         "desc": "创建个人访问令牌，给脚本 / SDK 调 Loop OpenAPI 用。",
+        "goals": [
+            "分清 PAT（访问 Loop 平台 API）与 Claude Key（访问 Anthropic）不是同一个东西。",
+            "从账户设置进入 API 授权，创建个人访问令牌。",
+            "学会立刻复制并安全保存明文（只显示一次）。",
+        ],
+        "done_when": "令牌列表出现新条目；明文已存到安全位置；你能说清 PAT 用来调 Loop，不是调 Claude。",
         "nav_steps": [
+            ("#goal", "本课目标"),
             ("#s1", "1 打开账户设置"),
             ("#s2", "2 进入 API 授权"),
             ("#s3", "3 创建并保存令牌"),
@@ -752,7 +926,10 @@ LESSONS += [
   <section id="s1" class="section">
     <div class="step-hdr"><div class="badge">1</div><h2>打开「账户设置」</h2></div>
     <div class="card">
-      <div class="why"><b>PAT ≠ 模型 Key。</b>PAT 是访问 <strong>Coze Loop 平台 API</strong> 的通行证；Claude Key 是访问 Anthropic 的。两个别混。</div>
+      <div class="purpose">
+        <p><b>目的：</b>进入个人账户弹窗，为创建平台 API 令牌找到正确入口。</p>
+        <p><b>作用：</b>PAT 与 Claude Key 完全不同：PAT 证明「你有权调用 Coze Loop OpenAPI」；Claude Key 证明「你有权调用 Anthropic」。别混用。</p>
+      </div>
       <ol class="steps-ol">
         <li>点侧栏<strong>左下角头像</strong></li>
         <li>在菜单点 <strong>账户设置</strong>（注意是「账户」）</li>
@@ -768,6 +945,10 @@ LESSONS += [
   <section id="s2" class="section">
     <div class="step-hdr"><div class="badge">2</div><h2>切换到「API 授权」</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>从账户弹窗切到「个人访问令牌」管理页。</p>
+        <p><b>作用：</b>这里集中管理 PAT 的创建、列表与吊销。脚本 / SDK 调 Loop OpenAPI 时，会把 PAT 放在请求头里做鉴权。</p>
+      </div>
       <ol class="steps-ol">
         <li>左侧点 <strong>API 授权</strong></li>
         <li>看到「个人访问令牌」区域</li>
@@ -782,6 +963,10 @@ LESSONS += [
   <section id="s3" class="section">
     <div class="step-hdr"><div class="badge">3</div><h2>创建令牌并立刻复制</h2></div>
     <div class="card">
+      <div class="purpose">
+        <p><b>目的：</b>生成一枚新的 PAT，并在明文只显示一次时把它存好。</p>
+        <p><b>作用：</b>有了 PAT，你才能用 curl / SDK / 自动化脚本操作 Loop（建评测、拉 Trace 等），而不必每次在浏览器点。泄露等同于账号权限外泄，务必保密。</p>
+      </div>
       <ol class="steps-ol">
         <li>点 <strong>添加新令牌</strong></li>
         <li>填写名称，例如 <code>教程演示Token</code></li>
@@ -849,6 +1034,10 @@ def page(L: dict, idx: int) -> str:
         if nxt
         else '<a href="coze-loop-practice-tutorial.html" class="nav-btn next"><span class="nav-btn-label">完成</span><span class="nav-btn-title">回到总目录</span></a>'
     )
+    goal_lis = "\n".join(f"        <li>{g}</li>" for g in L.get("goals", []))
+    if not goal_lis:
+        goal_lis = "        <li>（本课目标待补充）</li>"
+    done_when = L.get("done_when", "完成本课全部绿色验收项。")
     return f'''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -870,7 +1059,16 @@ def page(L: dict, idx: int) -> str:
     <h1 class="part-title">{L["logo"]} · {L["title"]}</h1>
     <p class="part-desc">{L["desc"]} 截图红框为操作重点。上级：<a href="coze-loop-practice-tutorial.html">总目录</a>。</p>
   </div>
-  <div class="warn-box">图上的<strong>红色编号框</strong>标出你要点的位置。请按「文字步骤 → 对照截图」顺序做；做完看每步绿色验收。</div>
+  <section id="goal" class="section">
+    <div class="goal-box">
+      <p class="gt">🎯 本课目标（先读再动手）</p>
+      <ul>
+{goal_lis}
+      </ul>
+      <div class="done"><b>学完怎样算过关：</b>{done_when}</div>
+    </div>
+  </section>
+  <div class="warn-box">图上的<strong>红色编号框</strong>标出你要点的位置。每一大步都写了<strong>目的</strong>（为什么做）和<strong>作用</strong>（做完得到什么）。请按「目标 → 步骤文字 → 对照截图」顺序做；做完看每步绿色验收。</div>
 {L["body"]}
   <div class="nav-buttons" style="margin-top:40px">
     {prev_btn}
